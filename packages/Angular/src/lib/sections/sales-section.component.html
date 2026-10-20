@@ -42,33 +42,25 @@
         <!-- ═════════════════════════ DASHBOARD ═════════════════════════ -->
         <div class="wrap wrap--dashboard" [hidden]="Page !== 'dashboard'">
           <!--
-            The period selector. Markup shape is the board's pipeline switcher (role="tablist" of pill
-            buttons with aria-selected), so the two surfaces stay one vocabulary rather than two
-            controls that do the same job and look different.
-
-            It bounds the Won tile, the stack's Closed segment and win rate — and nothing else. The
-            basis line beside it names the fiscal year start in force, because a period control whose
-            boundaries are invisible is the defect this whole feature exists to fix.
+            The filter bar (bc-aidp-next-golive#350): one component, shared with the Board (#351), reading
+            the section's selection. Every figure below reads it; the queries apply it. Refresh and New
+            deal stay in the page header, where every Sales page has them.
           -->
           <div class="sechead">
             <h2>Dashboard</h2>
-            <div class="period">
-              <div class="period__pills" role="tablist" aria-label="Reporting period">
-                @for (option of PeriodOptions; track option.Key) {
-                  <button
-                    type="button"
-                    role="tab"
-                    class="period__pill"
-                    [class.period__pill--on]="option.Key === Period"
-                    [attr.aria-selected]="option.Key === Period"
-                    (click)="SetPeriod(option.Key)">
-                    {{ option.Label }}
-                  </button>
-                }
-              </div>
-              <span class="period__basis">{{ FiscalBasisLabel }}</span>
-            </div>
           </div>
+          @if (Page === 'dashboard') {
+            <ng-container *ngTemplateOutlet="filterBar"></ng-container>
+          }
+
+          @if (PeriodError) {
+            <!-- A failed period or filter change says why and offers the same read again (bizapps-sales#371). -->
+            <ng-container *ngTemplateOutlet="partFailed; context: {
+              heading: 'The figures for ' + PeriodLabel.toLowerCase() + ' could not be loaded.',
+              reason: PeriodError,
+              retry: 'period'
+            }"></ng-container>
+          }
 
           @if (RosterError) {
             <!-- Kept on the dashboard, not in Message: navigating clears Message, and without the reason
@@ -81,172 +73,187 @@
           } @else if (LoadError) {
             <ng-container *ngTemplateOutlet="loadFailed"></ng-container>
           } @else {
+            <!-- Five tiles, every one bounded by the period and listing its deals below when clicked. -->
             <div class="kpis">
               @for (kpi of Kpis; track kpi.Label) {
-                <button type="button" class="kpi" (click)="kpi.Filter && SetInspect(kpi.Filter)"
-                        [class.kpi--on]="kpi.Filter === InspectFilter">
+                <button type="button" class="kpi" (click)="SetInspect(kpi.Filter)" [title]="kpi.Tooltip"
+                        [class.is-selected]="IsSelected(kpi.Filter)" [attr.aria-pressed]="IsSelected(kpi.Filter)">
                   <div class="l">{{ kpi.Label }}</div>
-                  <div class="v" [class.warn]="kpi.Tone === 'warn'" [class.err]="kpi.Tone === 'err'">{{ kpi.Value }}</div>
+                  <div class="v" [class.warn]="kpi.Tone === 'warn'" [class.err]="kpi.Tone === 'err'" [attr.data-testid]="'sales-kpi-' + kpi.Filter">{{ kpi.Value }}</div>
                   <div class="f">{{ kpi.Footnote }}</div>
+                  @if (kpi.Footnote2) {
+                    <div class="f">{{ kpi.Footnote2 }}</div>
+                  }
                 </button>
               }
             </div>
-
-            <div class="card">
-              <div class="ch">
-                Forecast stack
-                <span class="r" title="Each open deal is counted once, in its highest forecast category: Commit, then Best Case, then the rest of the pipeline.">{{ StackClosedNote }}</span>
-              </div>
-              <div class="stack-pad">
-                @if (Stack.Total <= 0) {
-                  <div class="empty">No amounts to stack yet.</div>
-                } @else {
-                  <div class="stack" role="img" [attr.aria-label]="'Forecast stack totaling ' + Money(Stack.Total)">
-                    @if (Stack.Closed > 0) {
-                      <span class="stack__seg stack__seg--closed" [style.width]="StackPct(Stack.Closed)"
-                            (click)="SetInspect('won')" title="Won">{{ Money(Stack.Closed) }}</span>
-                    }
-                    @if (Stack.Commit > 0) {
-                      <span class="stack__seg stack__seg--commit" [style.width]="StackPct(Stack.Commit)"
-                            (click)="SetInspect('commit')" title="Commit">{{ Money(Stack.Commit) }}</span>
-                    }
-                    @if (Stack.BestOnly > 0) {
-                      <span class="stack__seg stack__seg--best" [style.width]="StackPct(Stack.BestOnly)"
-                            (click)="SetInspect('best')" title="Best Case only">{{ Money(Stack.BestOnly) }}</span>
-                    }
-                    @if (Stack.PipeOnly > 0) {
-                      <span class="stack__seg stack__seg--pipe" [style.width]="StackPct(Stack.PipeOnly)"
-                            (click)="SetInspect('pipe')" title="Pipeline remainder">{{ Money(Stack.PipeOnly) }}</span>
-                    }
-                  </div>
-                  <div class="legend">
-                    <span><i class="swatch swatch--closed"></i>Won {{ Money(Stack.Closed) }}</span>
-                    <span><i class="swatch swatch--commit"></i>Commit {{ Money(Stack.Commit) }}</span>
-                    <span><i class="swatch swatch--best"></i>Best Case only {{ Money(Stack.BestOnly) }}</span>
-                    <span><i class="swatch swatch--pipe"></i>Remainder {{ Money(Stack.PipeOnly) }}</span>
-                    <span class="muted">Weighted open {{ Money(Weighted) }}</span>
-                  </div>
-                }
-              </div>
-            </div>
+            @if (WinRateError && !(PeriodLoading || DetailLoading)) {
+              <ng-container *ngTemplateOutlet="partFailed; context: { heading: 'The win rate could not be loaded.', reason: WinRateError, retry: 'all' }"></ng-container>
+            }
 
             <div class="dash-split">
               <div class="card">
-                <div class="ch">Stage mix <span class="r">open deals · current stage</span></div>
+                <div class="ch">
+                  Forecast
+                  <span class="r">{{ StackNote }}</span>
+                </div>
+                <div class="stack-pad">
+                  @if (Stack.Total <= 0) {
+                    <div class="empty">No deals to show for this period.</div>
+                  } @else {
+                    <!-- Each segment lists its deals below; the clicked one carries the selected style. -->
+                    <div class="stack" role="group" [attr.aria-label]="'Forecast totaling ' + Money(Stack.Total) + '. Choose a segment to list its deals.'">
+                      @if (Stack.Closed > 0) {
+                        <button type="button" class="stack__seg stack__seg--closed" [style.width]="StackPct(Stack.Closed)"
+                                [class.is-selected]="IsSelected('won')" [attr.aria-pressed]="IsSelected('won')" [attr.aria-label]="'Won ' + Money(Stack.Closed)"
+                                (click)="SetInspect('won')" title="Won: deals won in the period, by the day they closed.">{{ Money(Stack.Closed) }}</button>
+                      }
+                      @if (Stack.Commit > 0) {
+                        <button type="button" class="stack__seg stack__seg--commit" [style.width]="StackPct(Stack.Commit)"
+                                [class.is-selected]="IsSelected('commit')" [attr.aria-pressed]="IsSelected('commit')" [attr.aria-label]="'Commit ' + Money(Stack.Commit)"
+                                (click)="SetInspect('commit')" title="Commit: open deals in a Commit forecast category, expected to close in the period.">{{ Money(Stack.Commit) }}</button>
+                      }
+                      @if (Stack.BestOnly > 0) {
+                        <button type="button" class="stack__seg stack__seg--best" [style.width]="StackPct(Stack.BestOnly)"
+                                [class.is-selected]="IsSelected('best')" [attr.aria-pressed]="IsSelected('best')" [attr.aria-label]="'Best case ' + Money(Stack.BestOnly)"
+                                (click)="SetInspect('best')" title="Best case: not counting deals already in Commit.">{{ Money(Stack.BestOnly) }}</button>
+                      }
+                      @if (Stack.PipeOnly > 0) {
+                        <button type="button" class="stack__seg stack__seg--pipe" [style.width]="StackPct(Stack.PipeOnly)"
+                                [class.is-selected]="IsSelected('remainder')" [attr.aria-pressed]="IsSelected('remainder')" [attr.aria-label]="'Pipeline ' + Money(Stack.PipeOnly)"
+                                (click)="SetInspect('remainder')" title="Pipeline: open deals not in Commit or Best case.">{{ Money(Stack.PipeOnly) }}</button>
+                      }
+                    </div>
+                    <div class="legend">
+                      <span title="Deals won in the period, by the day they closed."><i class="swatch swatch--closed"></i>Won {{ Money(Stack.Closed) }}</span>
+                      <span title="Open deals in a Commit forecast category, expected to close in the period."><i class="swatch swatch--commit"></i>Commit {{ Money(Stack.Commit) }}</span>
+                      <span title="Not counting deals already in Commit."><i class="swatch swatch--best"></i>Best case {{ Money(Stack.BestOnly) }}</span>
+                      <span title="Open deals not in Commit or Best case."><i class="swatch swatch--pipe"></i>Pipeline {{ Money(Stack.PipeOnly) }}</span>
+                    </div>
+                  }
+                  @if (NoCloseDateCount && Period !== 'alltime') {
+                    <button type="button" class="linklike stack__undated" data-testid="sales-forecast-undated"
+                            [class.is-selected]="IsSelected('nodate')" [attr.aria-pressed]="IsSelected('nodate')" (click)="SetInspect('nodate')"
+                            title="Open deals with no expected close date cannot be placed in a period, so the forecast leaves them out.">
+                      {{ NoCloseDateCount }} open {{ NoCloseDateCount === 1 ? 'deal has' : 'deals have' }} no close date
+                    </button>
+                  }
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="ch">Open deals by stage</div>
                 <div class="funnel-pad">
+                  @if (LookupsError) {
+                    <!-- The stage names and pipeline tabs come from the lookups; the counts below do not. -->
+                    <p class="part-note" role="status">Pipeline names could not be loaded: {{ LookupsError }}</p>
+                  }
+                  <!-- One pipeline at a time: each numbers its own stages, and two may share a stage name.
+                       One pipeline picked in the filter bar shows it with no tabs. -->
+                  @if (FunnelPipelineOptions.length > 1) {
+                    <div class="period__pills funnel__tabs" role="tablist" aria-label="Pipeline">
+                      @for (pipeline of FunnelPipelineOptions; track pipeline.ID) {
+                        <button
+                          type="button"
+                          role="tab"
+                          class="period__pill"
+                          [class.period__pill--on]="pipeline.ID === ActiveFunnelPipelineID"
+                          [attr.aria-selected]="pipeline.ID === ActiveFunnelPipelineID"
+                          (click)="SelectFunnelPipeline(pipeline.ID)">
+                          {{ pipeline.Name }}
+                        </button>
+                      }
+                    </div>
+                  }
                   @if (!Funnel.length) {
-                    <div class="empty">No open deals in a stage.</div>
+                    <div class="empty">No open deals in a stage for this period.</div>
                   } @else {
                     <div class="funnel">
-                      @for (col of Funnel; track col.Label) {
-                        <div class="funnel__col">
-                          <div class="funnel__plot">
-                            <div class="funnel__bar" [style.height]="FunnelHeight(col.Count)">
+                      @for (col of Funnel; track col.Key) {
+                        <button type="button" class="funnel__col" (click)="SetInspect('stage', StageArg(col))"
+                                [class.is-selected]="IsSelected('stage', StageArg(col))" [attr.aria-pressed]="IsSelected('stage', StageArg(col))"
+                                [attr.aria-label]="col.Label + ': ' + col.Count + ' open deals'">
+                          <span class="funnel__plot">
+                            <span class="funnel__bar" [style.height]="FunnelHeight(col.Count)">
                               <span class="funnel__n">{{ col.Count }}</span>
-                            </div>
-                          </div>
-                          <div class="funnel__lab" [title]="col.Label">{{ col.Label }}</div>
-                        </div>
+                            </span>
+                          </span>
+                          <span class="funnel__lab" [title]="col.Label">{{ col.Label }}</span>
+                        </button>
                       }
                     </div>
                   }
                 </div>
               </div>
-              <div class="card">
-                <div class="ch">Needs a person <span class="r">click one to list its deals below</span></div>
-                <div class="queues">
-                  <button type="button" class="queue" (click)="SetInspect('slipped')">
-                    <span class="qico"><i class="fa-solid fa-calendar-xmark" aria-hidden="true"></i></span>
-                    <span class="qbody" title="Open deals whose expected close date is before today"><b>Close date slipped</b><span class="muted">Open deals past their expected close date</span></span>
-                    <span class="qcount">{{ SlippedDeals.length }}</span>
-                  </button>
-                  <button type="button" class="queue" (click)="SetInspect('noowner')">
-                    <span class="qico"><i class="fa-solid fa-user-slash" aria-hidden="true"></i></span>
-                    <span class="qbody" title="Open deals where no employee on the deal team holds the owner role. A person who is not an employee in that role does not count as the owner"><b>No owner</b><span class="muted">Open deals with no employee in the owner role</span></span>
-                    <span class="qcount">{{ SilentCount }}</span>
-                  </button>
-                  <button type="button" class="queue" (click)="SetInspect('commit')">
-                    <span class="qico"><i class="fa-solid fa-flag" aria-hidden="true"></i></span>
-                    <span class="qbody" title="Every open deal in a Commit forecast category, whatever period is selected above"><b>Commit (open)</b><span class="muted">Open deals marked for commit</span></span>
-                    <span class="qcount">{{ CommitCount }}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div class="card">
-              <div class="ch">Close-date buckets <span class="r">open deals</span></div>
-              <div class="buckets">
-                @for (b of Buckets; track b.Key) {
-                  <button type="button" class="bucket" [class.bucket--warn]="b.Tone === 'warn'"
-                          [class.bucket--on]="InspectFilter === b.Key" (click)="SetInspect(b.Key)">
-                    <div class="l">{{ b.Label }}</div>
-                    <div class="v">{{ Money(b.Amount) }}</div>
-                    <div class="f">{{ b.Count }} {{ b.Count === 1 ? 'deal' : 'deals' }}</div>
-                  </button>
-                }
-              </div>
             </div>
 
             <div class="dash-split">
               <div class="card">
-                <div class="ch">Commit by owner <span class="r" title="Amount of open deals in a Commit forecast category, grouped by deal owner">open commit amount</span></div>
-                <div class="barlist">
-                  @if (!Owners.length) {
-                    <div class="empty">No commit deals.</div>
-                  } @else {
-                    @for (o of Owners; track o.Name) {
-                      <div class="barrow">
-                        <b>{{ o.Name }}</b>
-                        <div class="track"><div class="fill" [style.width]="OwnerPct(o.Amount)"></div></div>
-                        <span class="num">{{ Money(o.Amount) }}</span>
-                      </div>
-                    }
+                <div class="ch">Needs attention <span class="r">today, whatever the period</span></div>
+                <div class="queues">
+                  @for (row of Attention; track row.Key) {
+                    <button type="button" class="queue" (click)="SetInspect(row.Key)"
+                            [class.is-selected]="IsSelected(row.Key)" [attr.aria-pressed]="IsSelected(row.Key)">
+                      <span class="qico"><i class="fa-solid {{ row.Icon }}" aria-hidden="true"></i></span>
+                      <span class="qbody" [title]="row.Tooltip"><b>{{ row.Label }}</b><span class="muted">{{ row.Note }}</span></span>
+                      <span class="qcount">{{ row.Count ?? '—' }}</span>
+                    </button>
                   }
                 </div>
               </div>
-              <!--
-                Win rate is period-bound, so like the Won tile it shows PENDING rather than the
-                previous period's rate while a period change is in flight — the header beside it has
-                already moved to the new window. It is also pending while the section's own read of it
-                is still out: the tiles above no longer wait for it.
-              -->
+
               <div class="card">
-                <div class="ch">Win rate <span class="r">closed deals · count and value · {{ WindowLabel }}</span></div>
-                <div class="winrate">
-                  <div class="kpi">
-                    <div class="l">By count</div>
-                    <div class="v" data-testid="sales-winrate-count">{{ PeriodLoading || DetailLoading ? '…' : Pct(WinRateByCount) }}</div>
-                    <div class="f">{{ PeriodLoading || DetailLoading ? 'counting…' : WinWonCount + ' won / ' + WinClosedCount + ' closed' }}</div>
-                  </div>
-                  <div class="kpi">
-                    <div class="l">By value</div>
-                    <div class="v">{{ PeriodLoading || DetailLoading ? '…' : Pct(WinRateByValue) }}</div>
-                    <div class="f" title="Amount won divided by the amount of all deals closed in the period, won or lost">won amount ÷ closed amount</div>
-                  </div>
+                <div class="ch">Expected to close <span class="r" title="Next 7 days, Rest of month and Later hold the open deals expected to close in that span and in the selected period. No date lists every open deal with no expected close date.">open deals</span></div>
+                <div class="buckets">
+                  @for (b of Buckets; track b.Key) {
+                    <button type="button" class="bucket" (click)="SetInspect(b.Key)"
+                            [class.is-selected]="IsSelected(b.Key)" [attr.aria-pressed]="IsSelected(b.Key)">
+                      <div class="l">{{ b.Label }}</div>
+                      <div class="v">{{ Money(b.Amount) }}</div>
+                      <div class="f">{{ b.Count }} {{ b.Count === 1 ? 'deal' : 'deals' }}</div>
+                    </button>
+                  }
                 </div>
               </div>
             </div>
 
             <div class="card">
-              <div class="ch">
-                Inspect
-                <span class="r">{{ InspectLabel }} · {{ InspectCount ?? '—' }} shown</span>
+              <div class="ch">Commit by deal owner <span class="r" title="Open deals in a Commit forecast category expected to close in the period, by deal owner">{{ PeriodPhrase }}</span></div>
+              <div class="barlist">
+                @if (!Owners.length) {
+                  <div class="empty">No Commit deals for this period.</div>
+                } @else {
+                  @for (o of Owners; track o.Key) {
+                    <button type="button" class="barrow" (click)="SetInspect('owner', o.Key)"
+                            [class.is-selected]="IsSelected('owner', o.Key)" [attr.aria-pressed]="IsSelected('owner', o.Key)">
+                      <b>{{ o.Name }}</b>
+                      <span class="track"><span class="fill" [style.width]="OwnerPct(o.Amount)"></span></span>
+                      <span class="num">{{ Money(o.Amount) }}</span>
+                    </button>
+                  }
+                }
               </div>
-              @if (InspectFilter !== 'closing') {
-                <div class="filter-bar">
-                  <span class="muted">{{ InspectLabel }}</span>
-                  <button type="button" class="linklike" (click)="SetInspect('closing')">Clear</button>
-                </div>
-              }
+            </div>
+
+            <div class="card">
+              <div class="ch">Deals</div>
+              <div class="filter-bar">
+                <span class="filterbar__chip filterbar__chip--active" data-testid="sales-inspect-chip">{{ InspectChip }}</span>
+                @if (InspectFilter !== 'closing') {
+                  <button type="button" class="linklike" data-testid="sales-inspect-clear" (click)="SetInspect('closing')">Clear</button>
+                }
+              </div>
               <div class="mjs-viewer-host">
                 @if (DetailLoading) {
                   <mj-loading></mj-loading>
+                } @else if (ViewError) {
+                  <ng-container *ngTemplateOutlet="partFailed; context: { heading: 'The deal list could not be loaded.', reason: ViewError, retry: 'all' }"></ng-container>
                 } @else if (DealEntityInfo) {
                   <mj-entity-viewer
                     [Entity]="DealEntityInfo"
                     [ViewEntity]="InspectView"
                     (RecordOpened)="OnInspectOpened($event)"
+                    (OpenRelatedRecordRequested)="OpenRelatedRecord($event)"
                     (CreateRecordRequested)="StartPrimary()">
                   </mj-entity-viewer>
                 } @else {
@@ -257,23 +264,40 @@
           }
         </div>
 
+        <!--
+          The filter bar, mounted only on the page that shows it, so one copy is in the page at a time.
+          The selection is the section's, so moving between pages keeps it (bc-aidp-next-golive#351).
+        -->
+        <ng-template #filterBar>
+          <mjs-sales-filter-bar
+            [State]="FilterBarState"
+            (PeriodChange)="SetPeriod($event)"
+            (CustomRangeChange)="SetCustomRange($event.Start, $event.End)"
+            (FilterToggled)="ToggleFilter($event.Kind, $event.ID)"
+            (FilterCleared)="ClearFilter($event)"
+            (MyDealsToggled)="ToggleMyDeals()"></mjs-sales-filter-bar>
+        </ng-template>
+
         <!-- ═════════════════════════ ALL DEALS ═════════════════════════ -->
         <div class="wrap wrap--list" [hidden]="Page !== 'list'">
           <div class="sechead">
             <h2>All deals</h2>
-            <span class="r">Every deal, with the same columns as Inspect — grid, cards, or timeline</span>
+            <span class="r">Every deal, with the same columns as the dashboard's deal list — grid, cards, or timeline</span>
           </div>
 
           @if (Loading || DetailLoading) {
             <mj-loading></mj-loading>
           } @else if (LoadError) {
             <ng-container *ngTemplateOutlet="loadFailed"></ng-container>
+          } @else if (ViewError) {
+            <ng-container *ngTemplateOutlet="partFailed; context: { heading: 'The deal list could not be loaded.', reason: ViewError, retry: 'all' }"></ng-container>
           } @else if (DealEntityInfo) {
             <div class="mjs-viewer-host mjs-viewer-host--page">
               <mj-entity-viewer
                 [Entity]="DealEntityInfo"
                 [ViewEntity]="AllDealsView"
                 (RecordOpened)="OnAllDealsOpened($event)"
+                (OpenRelatedRecordRequested)="OpenRelatedRecord($event)"
                 (CreateRecordRequested)="StartPrimary()">
               </mj-entity-viewer>
             </div>
@@ -289,34 +313,71 @@
         <div class="wrap wrap--board" [hidden]="Page !== 'board'">
           <div class="sechead">
             <h2>Board</h2>
-            <span class="muted" data-testid="sales-board-scope">Open deals, and deals closed {{ BoardClosedLabel }}</span>
+            <span class="muted" data-testid="sales-board-scope">{{ BoardScope }}</span>
           </div>
+          @if (Page === 'board') {
+            <ng-container *ngTemplateOutlet="filterBar"></ng-container>
+          }
 
           @if (Loading || DetailLoading) {
             <mj-loading></mj-loading>
           } @else if (LoadError) {
             <ng-container *ngTemplateOutlet="loadFailed"></ng-container>
+          } @else if (RosterError) {
+            <!-- The columns are built from the deal list, so with no list nothing in them is true. The
+                 dashboard survives a roster failure; the board cannot, and must not draw empty $0
+                 columns that read as "no deals". -->
+            <ng-container *ngTemplateOutlet="loadFailed; context: { $implicit: RosterError }"></ng-container>
+          } @else if (LookupsError) {
+            <!-- The columns ARE the stages, so without them there is no board to draw. -->
+            <ng-container *ngTemplateOutlet="partFailed; context: { heading: 'The pipelines and stages could not be loaded.', reason: LookupsError, retry: 'all' }"></ng-container>
+          } @else if (PeriodError) {
+            <!-- The cards for this selection did not load; the last selection's would be wrong under it. -->
+            <ng-container *ngTemplateOutlet="partFailed; context: { heading: 'The deals for this selection could not be loaded.', reason: PeriodError, retry: 'period' }"></ng-container>
           } @else if (Page === 'board') {
             <mjs-deal-board
-              [Deals]="Deals"
+              [Deals]="BoardDeals"
               [Pipelines]="Pipelines"
               [Stages]="Stages"
               [DealStatusTypes]="DealStatusTypes"
+              [StageEnteredOn]="StageEnteredOn"
+              [CompanyIDs]="Filters.CompanyIDs"
+              [PipelineIDs]="Filters.PipelineIDs"
+              [SelectedPipelineID]="BoardPipelineID"
+              (SelectedPipelineIDChange)="OnBoardPipeline($event)"
               (DealOpened)="OpenDeal($event)"
-              (StageMoved)="Refresh()"></mjs-deal-board>
+              (StageMoved)="Refresh(true)"></mjs-deal-board>
           }
         </div>
 
         <!-- A load that stopped part-way (bizapps-sales#195). Shown in place of each page's content rather
              than beside it, because nothing that page would draw is known to be current. -->
-        <ng-template #loadFailed>
+        <!-- The reason is `LoadError` unless the caller passes one (the board passes `RosterError`). -->
+        <ng-template #loadFailed let-reason>
           <div class="load-failed" role="alert" data-testid="sales-load-failed">
             <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
             <div class="load-failed__body">
               <b>The deals could not be loaded.</b>
-              <span class="load-failed__reason">{{ LoadError }}</span>
+              <span class="load-failed__reason">{{ reason ?? LoadError }}</span>
             </div>
             <button type="button" mjButton variant="outline" data-testid="sales-load-retry" (click)="Refresh()">
+              <i class="fa-solid fa-arrow-rotate-right" aria-hidden="true"></i> Retry
+            </button>
+          </div>
+        </ng-template>
+
+        <!-- One part of the page that did not load (bizapps-sales#371). Shown where that part goes, so
+             the figures that did load stay on screen. `retry` is 'period' for a period change, which
+             re-reads only that period; anything else reloads the section. -->
+        <ng-template #partFailed let-heading="heading" let-reason="reason" let-retry="retry">
+          <div class="load-failed load-failed--part" role="alert" data-testid="sales-part-failed">
+            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+            <div class="load-failed__body">
+              <b>{{ heading }}</b>
+              <span class="load-failed__reason">{{ reason }}</span>
+            </div>
+            <button type="button" mjButton variant="outline" data-testid="sales-part-retry"
+                    (click)="retry === 'period' ? RetryPeriod() : Refresh()">
               <i class="fa-solid fa-arrow-rotate-right" aria-hidden="true"></i> Retry
             </button>
           </div>

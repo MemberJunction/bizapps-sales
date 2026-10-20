@@ -1630,11 +1630,16 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * stage where it was, so this resolves to the stage the deal is already in and nothing fires.
              */
             const undone = await this.closeEventBeingUndone(deal.ID, provider, user);
-            const landingStage = input.StageID ?? undone?.FromStageID ?? null;
-            const stageMoves =
-                !!landingStage && landingStage.toLowerCase() !== (deal.PipelineStageID ?? '').toLowerCase();
+            const landing = this.reopenLanding(input.StageID ?? null, undone, deal.PipelineStageID ?? null);
+            const landingStage = landing.StageID;
+            const stageMoves = landing.StageMoves;
             if (landingStage) {
                 deal.PipelineStageID = landingStage;
+            } else if (landing.ClearsStage) {
+                deal.PipelineStageID = null;
+                // The stageless deal took the closing stage's category at the close, and the event keeps
+                // no prior one. "Closed" on an open deal is wrong in every case, so it is cleared.
+                deal.ForecastCategoryTypeID = null;
             }
 
             /**
@@ -1645,13 +1650,11 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * The category is only taken when the stage actually moves; a deal that stays where it is
              * keeps the category it has.
              */
-            if (undone && undone.ProbabilityAtTransition !== null) {
-                deal.Probability = undone.ProbabilityAtTransition;
-            }
+            deal.Probability = this.reopenProbability(undone, deal.Probability ?? null);
             if (stageMoves && landingStage) {
-                const landing = await readStage(landingStage, provider, user);
-                if (landing?.ForecastCategoryTypeID) {
-                    deal.ForecastCategoryTypeID = landing.ForecastCategoryTypeID;
+                const landingRow = await readStage(landingStage, provider, user);
+                if (landingRow?.ForecastCategoryTypeID) {
+                    deal.ForecastCategoryTypeID = landingRow.ForecastCategoryTypeID;
                 }
             }
             // The close stamps describe a close that is no longer in effect; clearing them keeps every
@@ -1866,6 +1869,43 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             FromStageID: row.FromStageID ? String(row.FromStageID) : null,
             ProbabilityAtTransition: row.ProbabilityAtTransition ?? null,
         };
+    }
+
+    /**
+     * Where a reopened deal lands: the stage the caller named, else the stage the close event left.
+     *
+     * A close event whose `FromStageID` is NULL records a deal that had NO stage before the close; the
+     * close moved it into the outcome's stage. That is told apart from "no close event found" (`undone`
+     * null), and the reopen clears the stage so the deal goes back to "No stage set" rather than staying
+     * open in the closing stage.
+     */
+    private reopenLanding(
+        requestedStageID: string | null,
+        undone: { FromStageID: string | null } | null,
+        currentStageID: string | null,
+    ): { StageID: string | null; StageMoves: boolean; ClearsStage: boolean } {
+        const stageID = requestedStageID ?? undone?.FromStageID ?? null;
+        if (stageID) {
+            return {
+                StageID: stageID,
+                StageMoves: stageID.toLowerCase() !== (currentStageID ?? '').toLowerCase(),
+                ClearsStage: false,
+            };
+        }
+        const clears = !!undone && !!currentStageID;
+        return { StageID: null, StageMoves: clears, ClearsStage: clears };
+    }
+
+    /**
+     * The probability a reopened deal takes: the close event's pre-close stamp, NULL included, so a deal
+     * that had no probability before the close goes back to none rather than keeping the close's 100 or
+     * 0 (#275). With no close event found there is nothing to restore, and the deal keeps what it has.
+     */
+    private reopenProbability(
+        undone: { ProbabilityAtTransition: number | null } | null,
+        currentProbability: number | null,
+    ): number | null {
+        return undone ? undone.ProbabilityAtTransition : currentProbability;
     }
 
     /** The default landing status — chosen by the `IsOpen` FLAG, never by a status name. */

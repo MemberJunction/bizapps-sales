@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { DealEntityServer } from '../DealEntityServer.js';
 
 /**
- * A CUSTOMER OR CONTACT THE DATABASE NO LONGER HOLDS IS REFUSED BY NAME.
+ * A CUSTOMER OR CONTACT THE DATABASE DOES NOT HOLD IS REFUSED, AND THE MESSAGE SAYS WHICH CASE IT IS.
+ *
+ * An Organization or Person with no Sales Account / Sales Contact row is "not set up" (the Deals panel
+ * on their forms pre-fills their own ID); a party whose parent is gone too was a stale pick. The ID goes
+ * to the log, not the message.
  *
  * A picker read before a data reload can offer IDs that were since replaced. Saved onto a deal with no
  * order yet, such an ID reached the embedded order's bill-to first and failed there on
@@ -15,7 +19,11 @@ const LIVE_ACCOUNT = 'bbbbbbbb-0000-4000-8000-000000000001';
 const GONE_ACCOUNT = 'bbbbbbbb-0000-4000-8000-00000000dead';
 const LIVE_CONTACT = 'cccccccc-0000-4000-8000-000000000001';
 const GONE_CONTACT = 'cccccccc-0000-4000-8000-00000000dead';
+/** An Organization and a Person with no Sales Account / Sales Contact row. */
+const ORG_ONLY = 'dddddddd-0000-4000-8000-000000000001';
+const PERSON_ONLY = 'eeeeeeee-0000-4000-8000-000000000001';
 const EXISTING = new Set([LIVE_ACCOUNT, LIVE_CONTACT]);
+const PARENTS = new Set([LIVE_ACCOUNT, LIVE_CONTACT, ORG_ONLY, PERSON_ONLY]);
 
 type ViewParams = { EntityName: string; ExtraFilter: string };
 type ViewResult = { Success: boolean; Results: { ID: string }[]; ErrorMessage?: string };
@@ -31,18 +39,21 @@ function deal(opts: {
     contactID?: string | null;
     dirty?: string[];
     failReads?: boolean;
+    failParentReads?: boolean;
 }): Harness {
     const instance = Object.create(DealEntityServer.prototype) as Harness;
     const calls: ViewParams[] = [];
     const dirty = new Set(opts.dirty ?? []);
     const runViews = async (params: ViewParams[]): Promise<ViewResult[]> => {
         calls.push(...params);
-        return params.map(({ ExtraFilter }) => {
-            if (opts.failReads) {
+        return params.map(({ EntityName, ExtraFilter }) => {
+            const parent = EntityName.startsWith('MJ_BizApps_Common');
+            if (parent ? opts.failParentReads : opts.failReads) {
                 return { Success: false, Results: [], ErrorMessage: 'timeout' };
             }
             const id = /ID = '([^']+)'/.exec(ExtraFilter)?.[1] ?? '';
-            return { Success: true, Results: EXISTING.has(id) ? [{ ID: id }] : [] };
+            const found = (parent ? PARENTS : EXISTING).has(id);
+            return { Success: true, Results: found ? [{ ID: id }] : [] };
         });
     };
     for (const [k, v] of Object.entries({
@@ -59,13 +70,34 @@ function deal(opts: {
     return instance;
 }
 
-describe('a deal save naming a customer or contact that no longer exists', () => {
-    it('refuses a new deal whose customer is gone, naming it', async () => {
+describe('a deal save naming a customer or contact that is missing', () => {
+    it('refuses a new deal whose customer is gone, without showing its ID', async () => {
         const refusal = await deal({ saved: false, accountID: GONE_ACCOUNT }).missingPartyRefusal();
 
-        expect(refusal).toContain('customer');
-        expect(refusal).toContain(GONE_ACCOUNT);
-        expect(refusal).toContain('nothing was saved');
+        expect(refusal).toContain('customer no longer exists');
+        expect(refusal).toContain('Pick it again');
+        expect(refusal).toContain('Nothing was saved');
+        expect(refusal).not.toContain(GONE_ACCOUNT);
+    });
+
+    it('says an organization is not set up as a sales customer, rather than asking to pick it again', async () => {
+        const refusal = await deal({ saved: false, accountID: ORG_ONLY }).missingPartyRefusal();
+
+        expect(refusal).toContain('not set up as a sales customer');
+        expect(refusal).not.toContain('Pick it again');
+        expect(refusal).not.toContain(ORG_ONLY);
+    });
+
+    it('says a person is not set up as a sales contact', async () => {
+        const refusal = await deal({ saved: false, accountID: LIVE_ACCOUNT, contactID: PERSON_ONLY }).missingPartyRefusal();
+
+        expect(refusal).toContain('not set up as a sales contact');
+        expect(refusal).not.toContain('customer');
+    });
+
+    it('falls back to the stale-pick wording when the parent read fails', async () => {
+        const refusal = await deal({ saved: false, accountID: ORG_ONLY, failParentReads: true }).missingPartyRefusal();
+        expect(refusal).toContain('customer no longer exists');
     });
 
     it('refuses a changed primary contact that is gone', async () => {
@@ -79,8 +111,8 @@ describe('a deal save naming a customer or contact that no longer exists', () =>
     it('names both when both are gone', async () => {
         const refusal = await deal({ saved: false, accountID: GONE_ACCOUNT, contactID: GONE_CONTACT }).missingPartyRefusal();
 
-        expect(refusal).toContain(GONE_ACCOUNT);
-        expect(refusal).toContain(GONE_CONTACT);
+        expect(refusal).toContain('customer no longer exists');
+        expect(refusal).toContain('primary contact no longer exists');
     });
 
     it('lets a customer and contact that exist through', async () => {
@@ -103,7 +135,7 @@ describe('a deal save naming a customer or contact that no longer exists', () =>
     it('refuses a malformed id without putting it in a filter', async () => {
         const d = deal({ saved: false, accountID: "x' OR 1=1 --" });
 
-        expect(await d.missingPartyRefusal()).toContain('customer');
+        expect(await d.missingPartyRefusal()).toContain('customer no longer exists');
         expect(d.ViewCalls).toHaveLength(0);
     });
 

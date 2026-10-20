@@ -19,9 +19,9 @@ export class mjBizAppsSalesSalesContactFormComponent extends BaseFormComponent {
             { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
             { sectionKey: 'mJBizAppsSalesDealsBillingContactID', sectionName: 'Deals (Billing Contact)', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDealsPrimaryContactID', sectionName: 'Deals (Primary Contact)', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesDealContactRoles', sectionName: 'Deal Contact Roles', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesSalesAccountsDefaultPrimaryContactID', sectionName: 'Accounts With This Default Primary Contact', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesSalesAccountsDefaultBillingContactID', sectionName: 'Accounts With This Default Billing Contact', isExpanded: false }
+            { sectionKey: 'mJBizAppsSalesDealContactRoles', sectionName: 'Buying roles', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesSalesAccountsDefaultPrimaryContactID', sectionName: 'Accounts (default primary contact)', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesSalesAccountsDefaultBillingContactID', sectionName: 'Accounts (default billing contact)', isExpanded: false }
         ]);
     }
 }

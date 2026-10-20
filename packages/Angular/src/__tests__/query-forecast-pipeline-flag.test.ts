@@ -15,10 +15,14 @@ const sqlOf = (name: string): string =>
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/--.*$/gm, '');
 
-/** The `{% else %}` of the `{% if PipelineID %}` branch: what an unfiltered run applies. */
+/**
+ * What an unfiltered run applies: the `{% else %}` of the `{% if PipelineID %}` branch, or, where the
+ * query also takes a `PipelineIDs` list, the `{% if not PipelineID and not PipelineIDs %}` block.
+ */
 function unfilteredPipelineBranch(sql: string): string {
-    const match = /\{%\s*if PipelineID\s*%\}(?:(?!\{%\s*endif)[\s\S])*?\{%\s*else\s*%\}([\s\S]*?)\{%\s*endif\s*%\}/.exec(sql);
-    return match?.[1] ?? '';
+    const elseBranch = /\{%\s*if PipelineID\s*%\}(?:(?!\{%\s*endif)[\s\S])*?\{%\s*else\s*%\}([\s\S]*?)\{%\s*endif\s*%\}/.exec(sql);
+    const noPipelineBlock = /\{%\s*if not PipelineID and not PipelineIDs\s*%\}([\s\S]*?)\{%\s*endif\s*%\}/.exec(sql);
+    return elseBranch?.[1] ?? noPipelineBlock?.[1] ?? '';
 }
 
 const FORECAST_QUERIES = [

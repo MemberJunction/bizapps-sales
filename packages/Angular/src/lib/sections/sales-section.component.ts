@@ -40,20 +40,29 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit, inject } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey, LogError, Metadata, type EntityInfo } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseResourceComponent, NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
-import { EntityViewerModule, type RecordOpenedEvent } from '@memberjunction/ng-entity-viewer';
+import { EntityViewerModule, type RecordOpenedEvent, type ViewRelatedRecordNavigation } from '@memberjunction/ng-entity-viewer';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import {
     DealInListWhere,
     DealPipelineViewWith,
-    DealWonInPeriodWhere,
+    InspectCriteriaWhere,
     LoadDealPipelineViewTemplate,
+    RelatedRecordTarget,
+    type InspectTables,
 } from '../pages/deal-views';
+import {
+    DEFAULT_SALES_URL_STATE,
+    ParseSalesUrlState,
+    SalesUrlParams,
+    SameSalesUrlState,
+    type SalesUrlState,
+} from './sales-url-state';
 import type { ResourceData } from '@memberjunction/core-entities';
 import {
     MJButtonDirective,
@@ -76,7 +85,7 @@ import {
     type SalesPrimaryAction,
 } from '../nav/sales-nav.model';
 import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
-import { DealBoardComponent, DEFAULT_DISPLAY_CURRENCY } from '../board/deal-board.component';
+import { DealBoardComponent, DEFAULT_DISPLAY_CURRENCY, StageIdleFor } from '../board/deal-board.component';
 import {
     DealWorkspaceService,
     SECTION_LOOKUP_KEYS,
@@ -84,6 +93,7 @@ import {
     type DealRosterRow,
 } from '../workspace/deal-workspace.service';
 import type {
+    DealLookup,
     DealStatusLookup,
     DealWorkspaceLookups,
     PipelineLookup,
@@ -92,15 +102,16 @@ import type {
 import {
     CloseBuckets,
     ClosingSoon,
+    BookSlippedCount,
     FilterInspect,
-    ForecastSlices,
     InForecast,
     TileSummary,
     OwnerCoverage,
     StageFunnel,
+    FunnelPipelines,
     BusinessToday,
-    WeightedOpen,
     type CloseBucket,
+    type FunnelPipeline,
     type FunnelStage,
     type InspectKey,
     type OwnerBar,
@@ -110,12 +121,26 @@ import {
     DescribeFiscalBasis,
     FormatWindow,
     PERIOD_OPTIONS,
-    PeriodParameters,
     ResolvePeriod,
     type FiscalYearStartResolution,
     type PeriodKey,
     type PeriodWindow,
 } from '../pages/dashboard-period';
+import {
+    CleanIDs,
+    HasFilters,
+    HasID,
+    NO_FILTERS,
+    PipelineOptionsFor,
+    PipelinesWithinCompanies,
+    SameFilters,
+    SortedOptions,
+    ToggleID,
+    type DashboardFilters,
+    type FilterOption,
+} from '../pages/dashboard-filters';
+import { PipelineCompanies, PipelineLabel } from '../data/company-pipelines';
+import { MJSSalesFilterBarComponent, type FilterKind, type SalesFilterBarState } from './sales-filter-bar.component';
 
 /**
  * The account entity, for opening a customer as its own Explorer tab.
@@ -127,14 +152,50 @@ import {
 const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 const E_DEAL_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
+const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
+const E_FORECAST_CATEGORY_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
+const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
 
-/** One KPI tile. `Tone` drives colour only — no behaviour hangs off it. */
+/** The defaults a null URL field stands for. */
+const DEFAULT_PERIOD: PeriodKey = 'quarter';
+const DEFAULT_INSPECT: InspectKey = 'closing';
+
+/** An entity's schema and base view from metadata, or null when it is not loaded. */
+function tableOf(entityName: string): { SchemaName: string; BaseView: string } | null {
+    return new Metadata().Entities.find((e) => e.Name === entityName) ?? null;
+}
+
+/** A thrown value as the sentence a reader is shown. */
+function reasonOf(e: unknown): string {
+    return e instanceof Error ? e.message : String(e);
+}
+
+/** "1 deal" / "3 deals". */
+function deals(n: number): string {
+    return `${n} ${n === 1 ? 'deal' : 'deals'}`;
+}
+
+/** One headline tile. `Tone` drives colour only — no behaviour hangs off it. */
 interface SalesKpi {
     Label: string;
     Value: string;
     Footnote: string;
+    /** A second footnote line, when the tile has two facts to qualify it. */
+    Footnote2?: string;
+    /** One sentence saying what the figure counts. */
+    Tooltip: string;
     Tone?: 'warn' | 'err';
-    Filter?: InspectKey;
+    Filter: InspectKey;
+}
+
+/** One Needs attention row. */
+interface AttentionRow {
+    Key: InspectKey;
+    Icon: string;
+    Label: string;
+    Note: string;
+    Tooltip: string;
+    Count: number | null;
 }
 
 @Component({
@@ -150,6 +211,7 @@ interface SalesKpi {
         MJLeftNavComponent,
         MJLeftNavContentComponent,
         MJButtonDirective,
+        MJSSalesFilterBarComponent,
         DealBoardComponent,
         EntityViewerModule,
     ],
@@ -160,6 +222,24 @@ interface SalesKpi {
 export class MJSSalesSectionComponent implements OnInit {
     /** Which top-level section this mount represents. One today; see the nav model. */
     @Input() Section = 'deals';
+
+    /**
+     * The state the tab's URL names (bizapps-sales#371). Set by the resource from the query params on
+     * mount and on back/forward. Each field that differs from what the section shows is applied; an
+     * echo of the section's own write therefore changes nothing.
+     */
+    @Input() public set UrlState(state: SalesUrlState | null) {
+        this.urlState = state ?? DEFAULT_SALES_URL_STATE;
+        if (this.initialized) {
+            this.applyUrlState(this.urlState);
+        }
+    }
+    /** The section's page, period, filters, deal list or Board choice changed; the resource writes the URL. */
+    @Output() public readonly UrlStateChange = new EventEmitter<SalesUrlState>();
+    private urlState: SalesUrlState = DEFAULT_SALES_URL_STATE;
+    private initialized = false;
+    /** One URL write per burst of changes (a company change also clears the pipeline). */
+    private urlEmitQueued = false;
 
     private readonly service = inject(DealWorkspaceService);
     private readonly cdr = inject(ChangeDetectorRef);
@@ -179,15 +259,23 @@ export class MJSSalesSectionComponent implements OnInit {
     public DetailLoading = true;
     /**
      * Every open deal, and the closed deals closed since the start of the current fiscal quarter
-     * (bizapps-sales#209). The BOARD renders from this, so a pipeline flagged out of the forecast stays
-     * viewable. The dashboard reads only its open deals; won figures come from the summary query.
+     * (bizapps-sales#209), whatever the filter bar holds. The filter lists' choices (owners, product
+     * companies) and the rail's badge read this, so picking one owner does not hide the others from the
+     * list.
      */
     public Deals: DealRosterRow[] = [];
     /**
-     * What the dashboard's current-book figures read: `Deals` minus open deals in pipelines flagged
-     * out of the forecast. See `InForecast`.
+     * The deals in the filter bar's scope (bc-aidp-next-golive#351): every open deal, and the closed
+     * deals closed in the selected period, narrowed by the four lists in `Sales: Deal Roster` itself.
+     * The BOARD renders these. With no filter and the default period this is `Deals`, so no second read
+     * is made.
      */
-    private forecastDeals: DealRosterRow[] = [];
+    public BoardDeals: DealRosterRow[] = [];
+    /**
+     * The rows the dashboard's grouped cards read (stage, owner, dates, attention): `BoardDeals`, less
+     * open deals in pipelines flagged out of the forecast unless the Pipeline filter names them.
+     */
+    private dashboardDeals: DealRosterRow[] = [];
     /** Set when a row could not be opened. Shown verbatim. The roster's refusal is `RosterError`. */
     public Message = '';
     /**
@@ -196,89 +284,203 @@ export class MJSSalesSectionComponent implements OnInit {
      */
     public RosterError: string | null = null;
     /**
+     * Why one of the reads the dashboard's figures do not need failed, or null (bizapps-sales#371). Each
+     * is shown only where it is used, so a failed win rate no longer replaces figures that loaded.
+     *
+     * `LookupsError` is the pipelines, stages, statuses and companies: the Board, the stage tabs and the
+     * filter lists. `WinRateError` is the Win rate tile. `ViewError` is the grids' saved view.
+     */
+    public LookupsError: string | null = null;
+    public WinRateError: string | null = null;
+    public ViewError: string | null = null;
+    /** Why the last period or filter change failed, or null. Shown under the filter bar with a Retry. */
+    public PeriodError: string | null = null;
+    /**
      * Why the last `Refresh()` could not finish, or null. While set, every page shows this with a
      * Retry button in place of its content (bizapps-sales#195).
-     *
-     * Separate from `RosterError`, which the dashboard survives with its tiles marked unavailable: this
-     * one means the load as a whole stopped, so nothing below it is known to be current.
      */
     public LoadError: string | null = null;
-    /** Identifies the newest `Refresh()`, so a slower superseded one cannot clear its spinner or error. */
+    /** Identifies the newest `Refresh()`, so a slower superseded one cannot apply its replies, clear its spinner or set its error. */
     private refreshToken = 0;
-    /** Which slice the inspect grid is showing. Default is closing-soonest (the DB-oracle spec). */
-    public InspectFilter: InspectKey = 'closing';
+    /** Identifies the newest deal list request, so a slower superseded one cannot replace the grid. */
+    private inspectToken = 0;
+    /** Which figure the deal list is showing. Default is closing in the next 30 days. */
+    public InspectFilter: InspectKey = DEFAULT_INSPECT;
+    /** The list's argument: the stage for `stage`, the owner for `owner`. */
+    public InspectArg: string | null = null;
     /**
      * The dashboard's reporting period, and what it resolves to.
      *
-     * ── WHAT IT DOES AND DOES NOT TOUCH (golive#232) ────────────────────────────────────────────
+     * ── WHAT IT BOUNDS (bc-aidp-next-golive#350) ─────────────────────────────────────────────────
      *
-     * It bounds exactly three things: the **Won** tile, the **Closed** segment of the forecast stack,
-     * and the **win rate**. Open pipeline, open deals, past expected close, stage mix, close buckets
-     * and commit by owner are the CURRENT BOOK and stay unwindowed — they answer "what is in front of
-     * us now", which a period cannot narrow without changing the question.
+     * Every figure that answers "how are we doing this period" or "what is coming": Won (on the day a
+     * win closed), the Commit, Open pipeline and Weighted tiles, the forecast, Open deals by stage,
+     * Commit by deal owner and the dated Expected to close buckets (on the day each open deal is
+     * expected to close), and the win rate. Needs attention and the "No date" bucket are about the
+     * open book today and ignore it.
      *
      * Defaults to the current fiscal quarter, reckoned from accounting's configured fiscal year start
      * (see `DealWorkspaceService.LoadFiscalYearStart`), not from the calendar.
      */
-    public Period: PeriodKey = 'quarter';
-    public readonly PeriodOptions = PERIOD_OPTIONS;
+    public Period: PeriodKey = DEFAULT_PERIOD;
+    /** The custom range's two days, `YYYY-MM-DD`, read only while `Period` is `custom`. */
+    public CustomStart: string | null = null;
+    public CustomEnd: string | null = null;
+    /** The filter bar's lists. Every list empty is "All". */
+    public Filters: DashboardFilters = NO_FILTERS;
     /**
-     * Where the fiscal year start came from. Starts at the calendar default with `pending` -- NOT
-     * with `no-accounting`.
-     *
-     * The selector and its basis line sit in `.sechead`, which renders OUTSIDE the dashboard's
-     * loading guard, so whatever this holds is on screen from the first paint. Seeding it with
-     * `no-accounting` made that line read "calendar year (BizApps Accounting not installed)" on
-     * every load of a host where accounting IS installed, and left that claim standing permanently
-     * if the read never resolved. `pending` is a state the template can still describe, and it is
-     * the true one until {@link DealWorkspaceService.LoadFiscalYearStart} answers.
+     * Where the fiscal year start came from. Starts at the calendar default with `pending` -- NOT with
+     * `no-accounting`, which would assert "accounting not installed" on every load of a host where it
+     * is, until `LoadFiscalYearStart` answers.
      */
     public FiscalStart: FiscalYearStartResolution = { Start: CALENDAR_YEAR_START, Basis: 'pending' };
     /**
-     * A period change is in flight. The figures it bounds are stale until it lands, and the pill and
-     * the footnote have ALREADY moved -- so the template shows those three as pending rather than
-     * letting a reader take last period's Won count for this period's.
+     * A period or filter change is in flight. The figures are stale until it lands and the controls
+     * have ALREADY moved, so every figure shows as pending rather than letting a reader take the last
+     * selection's numbers for this one's.
      */
     public PeriodLoading = false;
-    /** Identifies the newest period request, so a slower superseded one cannot apply late. */
+    /** Identifies the newest period or filter request, so a slower superseded one cannot apply late. */
     private periodToken = 0;
     public WinRateByCount: number | null = null;
     public WinRateByValue: number | null = null;
     public WinClosedCount = 0;
     public WinWonCount = 0;
+    /**
+     * The win rate query did not run. The tile then shows "figures unavailable", as the others do,
+     * rather than "0 won / 0 closed", which reads as nothing having closed.
+     */
+    public WinRateUnavailable = false;
     public DealEntityInfo: EntityInfo | null = null;
     public InspectView: MJUserViewEntityExtended | null = null;
     public AllDealsView: MJUserViewEntityExtended | null = null;
     /**
-     * The shared pipeline view, read once per `Refresh()`. Both grids, and every inspect slice click,
-     * take a copy of it instead of reading it again (bizapps-sales#261). Null when the Deals entity is
-     * not in metadata.
+     * The shared pipeline view, read once per `Refresh()`. Both grids, and every deal list click, take a
+     * copy of it instead of reading it again (bizapps-sales#261). Null when the Deals entity is not in
+     * metadata.
      */
     private pipelineView: MJUserViewEntityExtended | null = null;
 
-
     /**
-     * The four tile figures, from `Sales: Dashboard Summary`.
+     * The headline figures, from `Sales: Dashboard Summary`.
      *
      * NULL means the QUERY DID NOT RUN, which the template renders differently from a database with
-     * no deals: the query aggregates, so it returns a row of zeroes over an empty table. Collapsing
-     * those two states would show a confident set of zeroes when the truth is that nothing was read.
+     * no deals: the query aggregates, so it returns a row of zeroes over an empty table.
      */
     private summary: DealDashboardSummary | null = null;
 
     /**
-     * Pipelines, stages and statuses the BOARD renders from.
-     *
-     * Public because they are `@Input()`s on the board; held here rather than fetched by the board so the
-     * two pages read one roster and one lookup set, and cannot disagree about what exists.
+     * Pipelines, stages, statuses and companies. Public because the first three are `@Input()`s on the
+     * board; held here so the two pages read one roster and one lookup set.
      */
     public Pipelines: PipelineLookup[] = [];
     public Stages: StageLookup[] = [];
     public DealStatusTypes: DealStatusLookup[] = [];
+    private companies: DealLookup[] = [];
+    /** The day each open deal entered its stage, for the idle flag (bizapps-sales#450). */
+    public StageEnteredOn: ReadonlyMap<string, string> = new Map();
+    /**
+     * The board's pipeline tab, null for the first. Held here rather than on the board, which is rebuilt
+     * on every reload and page switch. Which pipelines it may be is the filter bar's (#351).
+     */
+    public BoardPipelineID: string | null = null;
 
     public async ngOnInit(): Promise<void> {
-        this.Page = DefaultPageFor(this.Section);
+        // The URL's state is in place BEFORE the first load, so the period and filters it names are read.
+        const url = this.urlState;
+        this.Page = this.pageOrDefault(url.Page);
+        this.Period = url.Period ?? DEFAULT_PERIOD;
+        this.CustomStart = url.PeriodStart;
+        this.CustomEnd = url.PeriodEnd;
+        this.Filters = this.filtersOf(url);
+        this.InspectFilter = url.Inspect ?? DEFAULT_INSPECT;
+        this.InspectArg = url.InspectArg;
+        this.BoardPipelineID = url.Pipeline;
+        this.initialized = true;
         await this.Refresh();
+    }
+
+    // ── URL state ──────────────────────────────────────────────────────────────
+
+    /** What the URL should say now. Defaults are null or empty, so they stay out of the address. */
+    public get CurrentUrlState(): SalesUrlState {
+        const custom = this.Period === 'custom';
+        return {
+            Page: this.Page === DefaultPageFor(this.Section) ? null : this.Page || null,
+            Period: this.Period === DEFAULT_PERIOD ? null : this.Period,
+            PeriodStart: custom ? this.CustomStart : null,
+            PeriodEnd: custom ? this.CustomEnd : null,
+            Companies: [...this.Filters.CompanyIDs],
+            ProductCompanies: [...this.Filters.ProductCompanyIDs],
+            Owners: [...this.Filters.OwnerEmployeeIDs],
+            Pipelines: [...this.Filters.PipelineIDs],
+            Inspect: this.InspectFilter === DEFAULT_INSPECT ? null : this.InspectFilter,
+            InspectArg: this.InspectArg,
+            Pipeline: this.BoardPipelineID,
+        };
+    }
+
+    private filtersOf(url: SalesUrlState): DashboardFilters {
+        return {
+            CompanyIDs: url.Companies,
+            ProductCompanyIDs: url.ProductCompanies,
+            OwnerEmployeeIDs: url.Owners,
+            PipelineIDs: url.Pipelines,
+        };
+    }
+
+    private pageOrDefault(page: string | null): string {
+        return page && SubPagesFor(this.Section).some((p) => p.Id === page) ? page : DefaultPageFor(this.Section);
+    }
+
+    /** Applies a URL (back/forward, or a link opened into a mounted tab). Writes nothing back. */
+    private applyUrlState(url: SalesUrlState): void {
+        if (SameSalesUrlState(url, this.CurrentUrlState)) {
+            return;
+        }
+        this.Page = this.pageOrDefault(url.Page);
+        this.BoardPipelineID = url.Pipeline;
+        const inspect = url.Inspect ?? DEFAULT_INSPECT;
+        const inspectChanged = inspect !== this.InspectFilter || url.InspectArg !== this.InspectArg;
+        this.InspectFilter = inspect;
+        this.InspectArg = url.InspectArg;
+        const filters = this.filtersOf(url);
+        const filtersChanged = !SameFilters(filters, this.Filters);
+        const period = url.Period ?? DEFAULT_PERIOD;
+        const periodChanged = period !== this.Period || url.PeriodStart !== this.CustomStart || url.PeriodEnd !== this.CustomEnd;
+        this.Filters = filters;
+        this.Period = period;
+        this.CustomStart = url.PeriodStart;
+        this.CustomEnd = url.PeriodEnd;
+        if (filtersChanged || periodChanged) {
+            // The figures re-read also re-reads the Board's deals and re-filters the deal list.
+            void this.reloadFigures();
+        } else if (inspectChanged) {
+            void this.refreshInspectView().then(() => this.cdr.detectChanges());
+        }
+        this.cdr.detectChanges();
+    }
+
+    /** Tells the resource the state changed, once per burst, and only when the URL would change. */
+    private emitUrlState(): void {
+        if (this.urlEmitQueued) {
+            return;
+        }
+        this.urlEmitQueued = true;
+        void Promise.resolve().then(() => {
+            this.urlEmitQueued = false;
+            const state = this.CurrentUrlState;
+            if (!SameSalesUrlState(state, this.urlState)) {
+                this.urlState = state;
+                this.UrlStateChange.emit(state);
+            }
+        });
+    }
+
+    /** The Board's pipeline tab changed. */
+    public OnBoardPipeline(pipelineID: string | null): void {
+        this.BoardPipelineID = pipelineID;
+        this.emitUrlState();
     }
 
     // ── Chrome ─────────────────────────────────────────────────────────────────
@@ -303,6 +505,7 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Page = item.id;
         this.Message = '';
         this.cdr.detectChanges();
+        this.emitUrlState();
     }
 
     /** The header's primary verb. Opens a new Explorer record tab — never an in-rail workspace. */
@@ -317,24 +520,26 @@ export class MJSSalesSectionComponent implements OnInit {
      *
      * ── WHY THE SPINNER IS CLEARED IN `finally` (bizapps-sales#195) ──────────────────────────────
      *
-     * The data provider THROWS on a transport failure — a gateway 504, a timeout, a dropped
-     * connection — rather than returning `Success: false`. Any one of the reads below can therefore
-     * reject, and `Loading = false` used to sit after all of them: one failed request left the page on
-     * its spinner for good, with the rejection unhandled because `ngOnInit` awaits this uncaught.
-     * Clearing it in `finally` covers every exit, including ones added later; the failure is shown as
-     * `LoadError` with a Retry instead. `DetailLoading` is cleared there for the same reason.
+     * The data provider THROWS on a transport failure rather than returning `Success: false`, so any
+     * read below can reject. Clearing the spinners in `finally` covers every exit; the failure is shown
+     * as `LoadError` with a Retry instead.
+     *
+     * `quiet` re-reads without the spinners, so the pages stay mounted and show their current data
+     * until the new data lands. The board uses it after a drag.
      */
-    public async Refresh(): Promise<void> {
+    public async Refresh(quiet = false): Promise<void> {
         const token = ++this.refreshToken;
-        this.Loading = true;
-        this.DetailLoading = true;
+        if (!quiet) {
+            this.Loading = true;
+            this.DetailLoading = true;
+        }
         this.LoadError = null;
         this.cdr.detectChanges();
         try {
             await this.load(token);
         } catch (e) {
             if (token === this.refreshToken) {
-                this.LoadError = e instanceof Error ? e.message : String(e);
+                this.LoadError = reasonOf(e);
                 LogError(`Sales: the section failed to load - ${this.LoadError}`);
             }
         } finally {
@@ -348,114 +553,135 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** The reads behind `Refresh()`. Throws on any failure the reads themselves do not absorb. */
     private async load(token: number): Promise<void> {
-        /**
-         * THE BUSINESS ZONE IS LOADED BEFORE ANYTHING ASKS WHAT DAY IT IS (bc-aidp-next-golive#168).
-         *
-         * `this.Window` reads `BusinessToday()`, and so do the inspect filter and the close buckets.
-         * The engine fails open to UTC when it has not been configured, which is silently the old
-         * behaviour — so the call has to happen before the first read rather than be left to MJ's
-         * startup sequence, which is the only other thing that would have done it. `Config(false)` is
-         * idempotent and a no-op after the first call, so a refresh costs nothing.
-         */
+        // The business zone is loaded before anything asks what day it is (bc-aidp-next-golive#168):
+        // the engine fails open to UTC when it has not been configured, silently the old behaviour.
         await BusinessTimeZoneEngine.Instance.Config(false);
 
-        /**
-         * THE FISCAL START IS READ BEFORE THE WINDOWED QUERIES, NOT ALONGSIDE THEM.
-         *
-         * It is what the window is computed FROM, so firing it in the same `Promise.all` would send
-         * the summary and win-rate queries a window derived from whatever `FiscalStart` still held —
-         * on first load, the calendar default. The figures would be right for a January year and
-         * quietly wrong for every other deployment, and they would settle to the correct values on
-         * the next refresh, which is the hardest kind of wrong number to notice.
-         */
+        // The fiscal start is read BEFORE the windowed queries: it is what the window is computed from.
         this.FiscalStart = await this.service.LoadFiscalYearStart();
         const window = this.Window;
+        const filters = this.Filters;
+        const figures = this.figuresKey();
         this.DealEntityInfo = new Metadata().Entities.find((e) => e.Name === E_DEAL) ?? null;
-
-        const period = this.Period;
+        this.MyEmployeeID = this.readMyEmployeeID();
 
         /**
-         * EVERY READ STARTS NOW; THE DASHBOARD WAITS ONLY FOR ITS OWN TWO (bizapps-sales#261).
-         *
-         * The tiles, the stack and the current-book cards read the roster and the summary and nothing
-         * else, so they show as soon as those two land. The rest is already in flight and fills in
-         * behind them. The no-op `catch` only stops a fast failure there from being reported as
-         * unhandled while the first two are still awaited; `loadDetail` still awaits it and throws.
+         * EVERY READ STARTS NOW; THE DASHBOARD WAITS ONLY FOR ITS OWN (bizapps-sales#261). Each detail
+         * read settles to a value or its own reason (bizapps-sales#371), shown only where it is used.
          */
-        const detail = Promise.all([
-            // Only the lists the BOARD and the status pill read. Accounts and contacts are the deal
-            // workspace's pickers and grow with the customer base, so they are not loaded here.
-            this.service.LoadLookups(SECTION_LOOKUP_KEYS),
-            // The window reaches win rate through parameters the query ALREADY declared -- it filters
-            // on ActualCloseDate, the same dimension the Won tile now uses, so the two cannot drift.
-            this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
-            // The grids' saved view, read once for both grids.
-            this.DealEntityInfo ? LoadDealPipelineViewTemplate(this.DealEntityInfo) : Promise.resolve(null),
-        ]);
-        detail.catch(() => undefined);
+        const detail: DetailReads = {
+            Lookups: settle(this.service.LoadLookups(SECTION_LOOKUP_KEYS)),
+            WinRate: settle(this.service.LoadWinRate(window, filters)),
+            View: settle(this.DealEntityInfo ? LoadDealPipelineViewTemplate(this.DealEntityInfo) : Promise.resolve(null)),
+            StageEntries: settle(this.service.LoadStageEntries()),
+        };
 
-        const [roster, summary] = await Promise.all([
-            this.loadRoster(this.BoardClosedWindow.Start),
-            // The four headline figures, reduced in SQL. See LoadDashboardSummary for why.
-            this.service.LoadDashboardSummary(window),
+        const [roster, summary, scoped] = await Promise.all([
+            this.loadRoster(() => this.readScope(this.BoardClosedWindow, NO_FILTERS)),
+            this.service.LoadDashboardSummary(window, filters),
+            // The filter bar's deals. On the default period with no filter, the first read serves.
+            this.readsOwnScope(window, filters) ? this.loadRoster(() => this.readScope(window, filters)) : Promise.resolve(null),
         ]);
+        if (token !== this.refreshToken) {
+            return;
+        }
         this.Deals = roster ?? [];
-        this.forecastDeals = InForecast(this.Deals);
-        this.summary = TileSummary(summary, this.RosterError);
-        if (roster && !roster.length) {
-            // Not an error — a first-run database has no deals. The template distinguishes the two.
-            this.Message = '';
+        // A period or filter picked while this was out has already read its own figures; these are stale.
+        if (figures === this.figuresKey()) {
+            this.applyScopedRows(scoped ?? this.Deals, filters);
+            this.summary = TileSummary(summary, this.RosterError);
         }
-        if (token === this.refreshToken) {
-            this.Loading = false;
-            this.cdr.detectChanges();
-        }
+        this.Message = '';
+        this.Loading = false;
+        this.cdr.detectChanges();
 
-        await this.loadDetail(detail, period);
+        await this.loadDetail(detail, figures, token);
     }
 
-    /** The second half of `load()`: what the board, the win rate and the grids read. */
-    private async loadDetail(
-        detail: Promise<[DealWorkspaceLookups, Record<string, unknown>[], MJUserViewEntityExtended | null]>,
-        period: PeriodKey,
-    ): Promise<void> {
-        const [lookups, winRate, pipelineView] = await detail;
-        this.Pipelines = lookups.Pipelines;
-        this.Stages = lookups.Stages;
-        this.DealStatusTypes = lookups.DealStatusTypes;
-        // A period picked while this was out has already read its own win rate; this one is stale.
-        if (period === this.Period) {
-            this.applyWinRate(winRate);
+    /** The second half of `load()`: what the board, the win rate and the grids read. Never throws. */
+    private async loadDetail(detail: DetailReads, figures: string, token: number): Promise<void> {
+        const [lookups, winRate, pipelineView, entries] = await Promise.all([
+            detail.Lookups, detail.WinRate, detail.View, detail.StageEntries,
+        ]);
+        if (token !== this.refreshToken) {
+            return;
         }
-        this.pipelineView = pipelineView;
-        // Copies of the view already read; neither goes back to the server.
+        this.LookupsError = lookups.Error;
+        const lists = lookups.Value;
+        this.Pipelines = lists?.Pipelines ?? [];
+        this.Stages = lists?.Stages ?? [];
+        this.DealStatusTypes = lists?.DealStatusTypes ?? [];
+        this.companies = lists?.Companies ?? [];
+        if (figures === this.figuresKey()) {
+            this.WinRateError = winRate.Error;
+            this.applyWinRate(winRate.Error ? null : winRate.Value);
+        }
+        this.ViewError = pipelineView.Error;
+        // Without the history no deal is flagged idle; the failure is logged below rather than shown.
+        this.StageEnteredOn = entries.Value ?? new Map();
+        this.pipelineView = pipelineView.Value;
+        this.cdr.detectChanges();
         await Promise.all([this.refreshInspectView(), this.refreshAllDealsView()]);
+        for (const failed of [lookups.Error, winRate.Error, pipelineView.Error, entries.Error]) {
+            if (failed) {
+                LogError(`Sales: part of the section failed to load - ${failed}`);
+            }
+        }
     }
 
     /**
-     * The roster, or null when it could not be read, with the reason kept in `RosterError`.
+     * A roster read, or null when it could not be read, with the reason kept in `RosterError`.
      *
      * `LoadRoster` throws when the query definition is older than the app (bizapps-sales#137) or the
-     * query fails. Left to escape, that rejects `Refresh()` with `Loading` still set, and the page spins
-     * forever.
+     * query fails. Left to escape, that rejects `Refresh()` with `Loading` still set.
      */
-    private async loadRoster(closedSince: string | null): Promise<DealRosterRow[] | null> {
+    private async loadRoster(read: () => Promise<DealRosterRow[]>): Promise<DealRosterRow[] | null> {
         try {
-            const roster = await this.service.LoadRoster(closedSince);
+            const roster = await read();
             this.RosterError = null;
             return roster;
         } catch (e) {
-            this.RosterError = e instanceof Error ? e.message : String(e);
+            this.RosterError = reasonOf(e);
             LogError(this.RosterError);
             return null;
         }
     }
 
     /**
-     * Opens a deal as an Explorer record tab.
-     *
-     * `OpenEntityRecord` is the orders/contracts pattern. The custom deal form (close-lock + stale
-     * amount) is what that tab renders. A missing ID is not a click we can honour.
+     * True when the filter bar's deals need a read of their own: a filter is set, or the period's closed
+     * deals are not the current quarter's that the first read carries.
+     */
+    private readsOwnScope(window: PeriodWindow, filters: DashboardFilters): boolean {
+        const first = this.BoardClosedWindow;
+        return HasFilters(filters) || window.Start !== first.Start || window.End !== first.End;
+    }
+
+    /**
+     * The filter bar's deals: every open deal, and those closed in the period, narrowed by the lists
+     * (bc-aidp-next-golive#351). The period bounds only the closed rows: the Board shows every open deal.
+     */
+    private readScope(window: PeriodWindow, filters: DashboardFilters): Promise<DealRosterRow[]> {
+        return this.service.LoadRoster(window.Start, filters, window.End);
+    }
+
+    /**
+     * The filter bar's deals land. The Board shows them all; the dashboard's grouped cards leave out open
+     * deals in pipelines flagged out of the forecast, as `Sales: Dashboard Summary` does, unless the
+     * Pipeline filter names pipelines, which includes them there too.
+     */
+    private applyScopedRows(rows: readonly DealRosterRow[], filters: DashboardFilters): void {
+        this.BoardDeals = [...rows];
+        this.dashboardDeals = filters.PipelineIDs.length ? [...rows] : InForecast(rows);
+    }
+
+    /** Identifies the period and filters a set of figures was read for. */
+    private figuresKey(): string {
+        return JSON.stringify([this.Period, this.CustomStart, this.CustomEnd, this.Filters]);
+    }
+
+    /**
+     * Opens a deal as an Explorer record tab. The custom deal form (close-lock + stale amount) is what
+     * that tab renders. A missing ID is not a click we can honour.
      */
     public OpenDeal(row: DealRosterRow): void {
         if (!row.ID) {
@@ -465,14 +691,8 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     /**
-     * Opens the CUSTOMER behind a deal as its own Explorer tab.
-     *
-     * `stopPropagation` is load-bearing, not defensive: this cell sits inside a row whose click handler
-     * opens the deal. Without it a click here would do BOTH.
-     *
-     * A row with no account is not a failure. `AccountID` is nullable by design (an early-stage
-     * opportunity legitimately has no account yet), so the affordance simply is not offered — see the
-     * template's `@if`.
+     * Opens the CUSTOMER behind a deal as its own Explorer tab. `stopPropagation` is load-bearing: the
+     * cell sits inside a row whose click opens the deal.
      */
     public OpenCustomer(row: DealRosterRow, event: Event): void {
         event.stopPropagation();
@@ -486,99 +706,104 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** The resolved bounds of the selected period. Recomputed rather than cached — it is arithmetic. */
     public get Window(): PeriodWindow {
-        return ResolvePeriod(this.Period, this.FiscalStart.Start, BusinessToday());
+        return ResolvePeriod(this.Period, this.FiscalStart.Start, BusinessToday(), { Start: this.CustomStart, End: this.CustomEnd });
     }
 
     /**
-     * The closed deals the board shows: those closed in the current fiscal quarter, whatever period the
-     * dashboard has selected (bizapps-sales#209). Fixed, so the board does not move when the period
-     * selector does, and bounded, so the section's first load does not grow with deal history.
+     * The closed deals the first roster read carries: those closed in the current fiscal quarter, both
+     * ends bounded (bizapps-sales#209). On the default period this is also what the Board shows, so the
+     * Board's header and its cards agree; another period reads its own (bc-aidp-next-golive#351).
      */
     public get BoardClosedWindow(): PeriodWindow {
         return ResolvePeriod('quarter', this.FiscalStart.Start, BusinessToday());
     }
 
-    /** "from 1 Jul 2026" — the board's closed-deal bound, for its header. */
-    public get BoardClosedLabel(): string {
-        return FormatWindow({ ...this.BoardClosedWindow, End: null });
+    /** What the Board's columns hold, for its header: open deals, and the period's closed ones. */
+    public get BoardScope(): string {
+        const window = this.Window;
+        if (window.Start === null && window.End === null) {
+            return 'Open deals, and every closed deal';
+        }
+        return `Open deals, and deals closed ${FormatWindow(window)}`;
     }
 
-    /** "1 Jul 2026 – 30 Sep 2026" — the bounds spelled out, for a footnote. */
+    /** "Jul 1, 2026 – Sep 30, 2026" — the bounds spelled out. */
     public get WindowLabel(): string {
         return FormatWindow(this.Window);
     }
 
-    /**
-     * How the fiscal year start was arrived at, in one line.
-     *
-     * Rendered beside the selector because a period control whose boundaries are invisible is the
-     * same defect golive#232 was filed about: a figure that looks settled while meaning something
-     * other than what a reader assumes. If this host fell back to the calendar year, the reader
-     * should learn that here rather than by reconciling a total by hand.
-     */
-    public get FiscalBasisLabel(): string {
-        return DescribeFiscalBasis(this.FiscalStart);
+    /** The period in a sentence: "this quarter", "all time", or the dates of a custom range. */
+    public get PeriodPhrase(): string {
+        if (this.Period === 'alltime') return 'all time';
+        if (this.Period === 'custom') return this.WindowLabel;
+        return this.Window.Label.toLowerCase();
     }
 
     /**
-     * Change the reporting period and re-read ONLY what the period bounds.
-     *
-     * The roster is deliberately not refetched. It is not period-bound — the board, the stage mix,
-     * the close buckets and commit-by-owner all read that same array and must not move when a
-     * dashboard control changes — and re-fetching it would also blank those surfaces mid-interaction
-     * for no gain. The stack's Closed segment is the summary's `WonAmount`, re-read here with the tile
-     * (bizapps-sales#209).
+     * How the fiscal year start was arrived at, as the Period dropdown's tooltip. A period control whose
+     * boundaries are invisible is a figure that looks settled while meaning something else, so the
+     * basis stays one hover away.
      */
-    public async SetPeriod(key: PeriodKey): Promise<void> {
-        if (key === this.Period) {
+    public get PeriodTooltip(): string {
+        const basis = DescribeFiscalBasis(this.FiscalStart);
+        return `${basis.charAt(0).toUpperCase()}${basis.slice(1)}. ${this.WindowLabel}.`;
+    }
+
+    /** The Period dropdown changed. An unknown value is ignored. */
+    public async SetPeriod(key: string): Promise<void> {
+        const option = PERIOD_OPTIONS.find((o) => o.Key === key);
+        if (!option || (option.Key === this.Period && !this.PeriodError)) {
             return;
         }
-        this.Period = key;
-        /**
-         * EVERY RESPONSE IS CHECKED AGAINST THE SELECTION THAT IS CURRENT WHEN IT LANDS.
-         *
-         * Two clicks in quick succession put two pairs of queries in flight, and nothing orders the
-         * responses. Without this token the slower one wins whenever it finishes last, leaving the
-         * Won tile and the win rate showing All-time figures under a pill and a footnote that both
-         * say "last quarter" -- and staying that way, because `Refresh()` is the only thing that
-         * would correct it and a period change does not call it. A superseded reply is discarded
-         * rather than applied late.
-         */
+        this.Period = option.Key;
+        this.emitUrlState();
+        await this.reloadFigures();
+    }
+
+    /** A custom range's date picker changed. Empty is no bound on that side. */
+    public async SetCustomRange(start: string, end: string): Promise<void> {
+        this.CustomStart = start || null;
+        this.CustomEnd = end || null;
+        this.emitUrlState();
+        await this.reloadFigures();
+    }
+
+    /** Reads the current figures again after a failure (bizapps-sales#371). */
+    public RetryPeriod(): Promise<void> {
+        return this.reloadFigures();
+    }
+
+    /**
+     * Re-reads what the period and the filters bound: the summary, the win rate and the filter bar's
+     * deals, which the Board and the grouped cards read. Then re-filters the deal list.
+     *
+     * EVERY RESPONSE IS CHECKED AGAINST THE SELECTION THAT IS CURRENT WHEN IT LANDS. Two changes in
+     * quick succession put two sets of reads in flight and nothing orders the replies; a superseded
+     * one is discarded rather than applied late.
+     */
+    private async reloadFigures(): Promise<void> {
         const token = ++this.periodToken;
         this.PeriodLoading = true;
+        this.PeriodError = null;
         this.cdr.detectChanges();
         try {
             const window = this.Window;
-            const [summary, winRate] = await Promise.all([
-                this.service.LoadDashboardSummary(window),
-                this.service.RunNamedQuery('Sales: Win Rate by Count and Value', PeriodParameters(window)),
+            const filters = this.Filters;
+            const [summary, winRate, scoped] = await Promise.all([
+                this.service.LoadDashboardSummary(window, filters),
+                this.service.LoadWinRate(window, filters),
+                this.readsOwnScope(window, filters) ? this.readScope(window, filters) : Promise.resolve(null),
             ]);
             if (token !== this.periodToken) {
                 return;
             }
+            this.applyScopedRows(scoped ?? this.Deals, filters);
             this.summary = TileSummary(summary, this.RosterError);
+            this.WinRateError = null;
             this.applyWinRate(winRate);
-            // The Won slice is period-bound, so a narrowing period changes which deals Inspect should
-            // be listing. Refreshing the view keeps the grid showing the set the tile just counted.
-            if (this.InspectFilter === 'won') {
-                await this.refreshInspectView();
-            }
+            await this.refreshInspectView();
         } catch (e) {
-            /**
-             * A THROW USED TO ESCAPE AS AN UNHANDLED REJECTION, with `Period` already flipped -- so
-             * the pills showed the new period, the figures were the old one's, and the early
-             * `key === this.Period` return above meant clicking the same pill again would not retry.
-             * Clearing the summary makes the failure visible (`Kpis` renders em-dashes and "figures
-             * unavailable") instead of presenting stale numbers under a new label.
-             */
-            if (token === this.periodToken) {
-                this.summary = null;
-                this.WinRateByCount = null;
-                this.WinRateByValue = null;
-                this.WinClosedCount = 0;
-                this.WinWonCount = 0;
-                LogError(`Sales: reporting period '${key}' failed to load - ${e instanceof Error ? e.message : String(e)}`);
-            }
+            this.failFigures(token, e);
         } finally {
             if (token === this.periodToken) {
                 this.PeriodLoading = false;
@@ -587,197 +812,291 @@ export class MJSSalesSectionComponent implements OnInit {
         }
     }
 
-    // ── Dashboard ──────────────────────────────────────────────────────────────
+    /**
+     * A failed period or filter change clears the figures, so the tiles read "figures unavailable"
+     * rather than presenting the last selection's numbers under the new one, and says why beside a Retry.
+     */
+    private failFigures(token: number, e: unknown): void {
+        if (token !== this.periodToken) {
+            return;
+        }
+        this.summary = null;
+        this.applyWinRate(null);
+        this.PeriodError = reasonOf(e);
+        LogError(`Sales: the dashboard figures for ${this.PeriodPhrase} failed to load - ${this.PeriodError}`);
+    }
+
+    /** The selected period's label, for the failure line. */
+    public get PeriodLabel(): string {
+        return this.Window.Label;
+    }
+
+    // ── Filter bar ─────────────────────────────────────────────────────────────
+
+    /** Selling companies: the companies that own a pipeline. */
+    public get CompanyOptions(): FilterOption[] {
+        return SortedOptions(PipelineCompanies(this.Pipelines).map((c) => ({ ID: c.CompanyID, Name: c.CompanyName ?? 'Unnamed company' })));
+    }
+
+    /** Product companies: those on any loaded deal's lines, and any already selected. */
+    public get ProductCompanyOptions(): FilterOption[] {
+        const ids = CleanIDs([...this.Deals.flatMap((d) => d.ProductCompanyIDs), ...this.Filters.ProductCompanyIDs]);
+        return SortedOptions(ids.map((id) => ({ ID: id, Name: this.companyName(id) })));
+    }
+
+    /** Deal owners: those on any loaded deal, and any already selected. */
+    public get OwnerOptions(): FilterOption[] {
+        const named = this.Deals.filter((d) => d.OwnerEmployeeID).map((d) => ({ ID: d.OwnerEmployeeID!, Name: d.OwnerEmployee || 'Unnamed owner' }));
+        const selected = this.Filters.OwnerEmployeeIDs.map((id) => ({ ID: id, Name: id === this.MyEmployeeID ? 'Me' : 'Selected owner' }));
+        return SortedOptions([...named, ...selected]);
+    }
+
+    /** Pipelines of the selected selling companies, or every pipeline when none is selected. */
+    public get PipelineOptions(): FilterOption[] {
+        const several = PipelineCompanies(this.Pipelines).length > 1 && !this.Filters.CompanyIDs.length;
+        return PipelineOptionsFor(this.Pipelines, this.Filters.CompanyIDs)
+            .map((p) => ({ ID: p.ID, Name: several ? PipelineLabel(p) : p.Name }));
+    }
+
+    private companyName(id: string): string {
+        return this.companies.find((c) => HasID([c.ID], id))?.Name
+            ?? PipelineCompanies(this.Pipelines).find((c) => HasID([c.CompanyID], id))?.CompanyName
+            ?? 'Unnamed company';
+    }
+
+    /** The signed-in user's employee record, or null: "My deals" is hidden without one. Read on load. */
+    public MyEmployeeID: string | null = null;
+
+    /** `User.EmployeeID` of the signed-in user. Null with no provider yet, or a user linked to no employee. */
+    private readMyEmployeeID(): string | null {
+        try {
+            const id = new Metadata().CurrentUser?.EmployeeID;
+            return id === null || id === undefined || String(id) === '' ? null : String(id);
+        } catch {
+            return null;
+        }
+    }
+
+    /** True when "My deals" is exactly the owner filter. */
+    private get myDealsOn(): boolean {
+        const me = this.MyEmployeeID;
+        return !!me && this.Filters.OwnerEmployeeIDs.length === 1 && HasID(this.Filters.OwnerEmployeeIDs, me);
+    }
+
+    /** What the filter bar shows, on whichever page renders it. */
+    public get FilterBarState(): SalesFilterBarState {
+        return {
+            Period: this.Period,
+            CustomStart: this.CustomStart,
+            CustomEnd: this.CustomEnd,
+            WindowLabel: this.WindowLabel,
+            PeriodTooltip: this.PeriodTooltip,
+            Filters: this.Filters,
+            Options: {
+                CompanyIDs: this.CompanyOptions,
+                ProductCompanyIDs: this.ProductCompanyOptions,
+                PipelineIDs: this.PipelineOptions,
+                OwnerEmployeeIDs: this.OwnerOptions,
+            },
+            MyEmployeeID: this.MyEmployeeID,
+            NoLinesLeftOut: this.NoLinesLeftOut,
+        };
+    }
+
+    /** A checkbox in a filter list changed. */
+    public ToggleFilter(kind: FilterKind, id: string): void {
+        this.setFilters({ ...this.Filters, [kind]: ToggleID(this.Filters[kind], id) });
+    }
+
+    /** A filter list's Clear. */
+    public ClearFilter(kind: FilterKind): void {
+        this.setFilters({ ...this.Filters, [kind]: [] });
+    }
+
+    /** "My deals": the owner filter becomes the signed-in user alone, or back to every owner. */
+    public ToggleMyDeals(): void {
+        const me = this.MyEmployeeID;
+        if (me) {
+            this.setFilters({ ...this.Filters, OwnerEmployeeIDs: this.myDealsOn ? [] : [me] });
+        }
+    }
+
+    /** Applies new filters: a selected pipeline outside the selected companies is dropped. */
+    private setFilters(next: DashboardFilters): void {
+        const filters = { ...next, PipelineIDs: PipelinesWithinCompanies(next.PipelineIDs, this.Pipelines, next.CompanyIDs) };
+        if (SameFilters(filters, this.Filters)) {
+            return;
+        }
+        this.Filters = filters;
+        this.emitUrlState();
+        void this.reloadFigures();
+    }
 
     /**
-     * The KPI strip.
+     * How many deals a Product company filter leaves out because their order has no lines yet. Shown in
+     * the filter chip, so the drop in the figures is explained.
+     */
+    public get NoLinesLeftOut(): number {
+        return this.Filters.ProductCompanyIDs.length ? (this.summary?.NoLinesDealCount ?? 0) : 0;
+    }
+
+    // ── Dashboard ──────────────────────────────────────────────────────────────
+
+    /** Money for a tile, or pending while a period or filter change is in flight. */
+    private tileMoney(value: number): string {
+        return this.PeriodLoading ? '…' : this.money(value);
+    }
+
+    /**
+     * The five headline tiles, every one bounded by the period and clickable (bc-aidp-next-golive#350).
      *
-     * Every count branches on a `DealStatusType` FLAG resolved through `DealStatusTypeID` — never on the
-     * status name. That is the vocabulary rule, and it is also the only version that survives somebody
-     * renaming "Won" to "Signed".
+     * Each comes from `Sales: Dashboard Summary` or `Sales: Win Rate by Count and Value`, and each
+     * lists its deals with the same predicate (`InspectCriteriaWhere`), so a tile and its list agree.
      */
     public get Kpis(): SalesKpi[] {
         const s = this.summary;
         if (!s) {
-            // The query did not run. Say so rather than rendering four zeroes, which would read as a
-            // quiet, confident 'you have no pipeline'.
-            return [
-                { Label: 'Open pipeline', Value: '—', Footnote: 'figures unavailable', Tone: 'warn' },
-                { Label: 'Open deals', Value: '—', Footnote: 'figures unavailable' },
-                { Label: 'Past expected close', Value: '—', Footnote: 'figures unavailable' },
-                { Label: 'Won', Value: '—', Footnote: 'figures unavailable' },
-            ];
+            // The query did not run. Say so rather than rendering zeroes, which would read as a quiet,
+            // confident "you have no pipeline".
+            return KPI_SHELLS.map((k) => ({ ...k, Value: '—', Footnote: 'figures unavailable' }));
         }
+        return [this.wonTile(s), this.commitTile(s), this.pipelineTile(s), this.weightedTile(s), this.winRateTile()];
+    }
 
-        /**
-         * HOW MUCH OF THAT TOTAL NOBODY PRICED.
-         *
-         * The tile is the most-read number on the page and it was the least qualified: a sum of stored
-         * `Deal.Amount` values presented as one authoritative figure, with the provenance flag sitting
-         * unread on every row that fed it. On the data in the host database every deal carries
-         * `AmountIsComputed = 0`, so the tile was reporting entirely hand-typed money as pipeline value.
-         * The footnote now says so.
-         */
-        /**
-         * ── EXPRESSED FROM THE SUMMARY, NOT FROM A LOCAL THAT NO LONGER EXISTS ──────────────────────
-         *
-         * The board branch computed this by filtering an `open` array and dividing by `open.length`.
-         * Neither survives the merge: the dashboard branch replaced that whole block with one summary
-         * QUERY, so `open` and `openValue` are gone and this code would not have compiled. Auto-merge
-         * kept the consumer and dropped the producer — the failure mode worth naming, because the file
-         * still looked plausible.
-         *
-         * It resolves better than it started. `DealDashboardSummary` already carries
-         * `OpenPricedAmount` / `OpenStatedAmount` / `OpenNoAmountCount`, computed in SQL over every open
-         * deal rather than over whatever the roster page happened to load — so the footnote is now exact
-         * where the hand-filtered version was limited to the rows on screen. It also reports MONEY rather
-         * than a deal count, which is the question a reader of a money tile is actually asking.
-         */
+    private wonTile(s: DealDashboardSummary): SalesKpi {
+        return {
+            ...KPI_SHELLS[0],
+            Value: this.tileMoney(s.WonAmount),
+            Footnote: this.PeriodLoading ? 'counting…' : `${deals(s.WonCount)} won · ${this.PeriodPhrase}`,
+        };
+    }
+
+    private commitTile(s: DealDashboardSummary): SalesKpi {
+        return { ...KPI_SHELLS[1], Value: this.tileMoney(s.CommitAmount), Footnote: this.PeriodLoading ? 'counting…' : `${s.CommitCount} Commit ${s.CommitCount === 1 ? 'deal' : 'deals'}` };
+    }
+
+    /**
+     * Open pipeline, with its deal count and how much of it was typed by hand rather than priced: the
+     * most-read number on the page is a sum of stored amounts, and a reader should know when nobody
+     * priced them.
+     */
+    private pipelineTile(s: DealDashboardSummary): SalesKpi {
+        const pipelineCount = s.OpenCount - (s.OpenOmittedCount ?? 0);
         const statedNote = s.OpenStatedAmount === 0
             ? ''
             : s.OpenPricedAmount === 0
-                ? ' · all stated, none priced'
-                : ` · ${this.money(s.OpenStatedAmount)} stated`;
-
-        return [
-            {
-                Label: 'Open pipeline',
-                Value: this.money(s.OpenAmount),
-                // Dashboard's summary figures, with the board branch's provenance suffix. Both halves
-                // are kept: the currency-correct total, and the caveat about who produced it.
-                Footnote: `across ${s.OpenCount} open ${s.OpenCount === 1 ? 'deal' : 'deals'}${statedNote}`,
-                Filter: 'pipe',
-            },
-            {
-                Label: 'Open deals',
-                Value: String(s.OpenCount),
-                Footnote: `of ${s.TotalCount} total`,
-                Filter: 'pipe',
-            },
-            {
-                Label: 'Past expected close',
-                Value: String(s.PastExpectedCloseCount),
-                Footnote: 'still open, close date gone',
-                Tone: s.PastExpectedCloseCount ? 'warn' : undefined,
-                Filter: 'slipped',
-            },
-            {
-                Label: 'Won',
-                /**
-                 * PENDING WHILE THE PERIOD IS CHANGING, because `Period` flips synchronously on the
-                 * click and the footnote below moves with it, while `s.WonCount` is still the figure
-                 * the PREVIOUS period returned. Rendering it would put last period's count under this
-                 * period's dates for the length of a round trip — a tile that looks settled while
-                 * meaning something else, which is the defect golive#232 was filed about.
-                 */
-                Value: this.PeriodLoading ? '…' : String(s.WonCount),
-                /**
-                 * THE FOOTNOTE NAMES THE PERIOD, because the tile's value no longer speaks for itself.
-                 *
-                 * It read "closed won to date" while the three tiles beside it described the current
-                 * book, which is the mismatch golive#232 reported. Now that the figure is windowed,
-                 * saying WHICH window is what stops the same confusion arriving from the other
-                 * direction — a reader seeing a smaller number and assuming deals went missing.
-                 */
-                Footnote: this.PeriodLoading
-                    ? `counting ${this.Period === 'alltime' ? 'all time' : this.WindowLabel}…`
-                    : this.Period === 'alltime'
-                        ? 'closed won · all time'
-                        : `closed won · ${this.Window.Label.toLowerCase()} (${this.WindowLabel})`,
-                Filter: 'won',
-            },
-        ];
+                ? ' · all entered by hand'
+                : ` · ${this.money(s.OpenStatedAmount)} entered by hand`;
+        return {
+            ...KPI_SHELLS[2],
+            Value: this.tileMoney(s.OpenAmount),
+            Footnote: this.PeriodLoading ? 'counting…' : `${pipelineCount} open ${pipelineCount === 1 ? 'deal' : 'deals'}${statedNote}`,
+            // Every open deal in the period, Omitted ones included; the money leaves those out, so say how many.
+            Footnote2: s.OpenOmittedCount && !this.PeriodLoading ? `${s.OpenCount} total · ${s.OpenOmittedCount} excluded from the forecast` : undefined,
+        };
     }
 
-    /**
-     * Open deals whose expected close date has already passed.
-     *
-     * READS THE FLAG THE ROSTER QUERY ALREADY APPLIED. `Sales: Deal Roster` computes
-     * `IsPastExpectedClose` against the business day from `fnBusinessToday()` (golive#168 -- it was the
-     * UTC day, which made a deal due today read as past due from 6 PM Central, 7 PM in daylight time),
-     * so the comparison happens on the server against the server's clock.
-     *
-     * That is a real improvement over what this replaced, not just a relocation. The old version built
-     * a UTC date string here with `getUTC*` getters specifically to avoid the boundary moving a day
-     * for anyone west of Greenwich -- a correct workaround for a problem the browser should never have
-     * been asked to solve. Now the client's clock is not involved at all.
-     *
-     * The COUNT on the tile comes from the summary query rather than from this list, so the badge and
-     * the tile cannot disagree about how many there are while the roster is still loading.
-     */
-    public get SlippedDeals(): DealRosterRow[] {
-        return this.forecastDeals.filter((d) => d.IsPastExpectedClose === true);
+    private weightedTile(s: DealDashboardSummary): SalesKpi {
+        return { ...KPI_SHELLS[3], Value: this.tileMoney(s.WeightedAmount), Footnote: 'each deal at its probability' };
     }
+
+    /** By value, with the counts in the footnote. Pending while its own read is still out. */
+    private winRateTile(): SalesKpi {
+        const pending = this.PeriodLoading || this.DetailLoading;
+        return {
+            ...KPI_SHELLS[4],
+            Value: pending ? '…' : this.Pct(this.WinRateByValue),
+            Footnote: pending ? 'counting…' : this.WinRateUnavailable ? 'figures unavailable' : `${this.WinWonCount} won / ${this.WinClosedCount} closed`,
+        };
+    }
+
+    /** True when the deal list is showing `key` (and `arg`, for a figure that takes one). */
+    public IsSelected(key: InspectKey, arg: string | null = null): boolean {
+        return this.InspectFilter === key && (arg === null || (this.InspectArg ?? '').toLowerCase() === arg.toLowerCase());
+    }
+
     public get Badges(): SalesNavBadges {
-        // The summary's count when it ran, the list's length otherwise -- so the badge still says
-        // something true if the query failed but the roster loaded.
-        return { Slipped: this.summary?.PastExpectedCloseCount ?? this.SlippedDeals.length };
+        // The whole book's count, whatever the filter bar holds: the badge is outside the dashboard.
+        return { Slipped: BookSlippedCount(this.Deals, this.summary?.PastExpectedCloseCount, HasFilters(this.Filters)) };
     }
 
-    /**
-     * The handful of deals worth showing on a dashboard — soonest expected close first.
-     *
-     * IT SORTS, rather than trusting the roster query's `ORDER BY` to still be
-     * `ExpectedCloseDate ASC` when someone changes it for a different reason. Correct output either way
-     * today; the difference is that the comment above is now enforced by the code beneath it instead of
-     * by a clause two files away. `slice()` first, so the copy is small and `sort()` never mutates the
-     * shared `Deals` array — an in-place sort here would silently reorder the board.
-     *
-     * The dates are DATE strings in UTC (`YYYY-MM-DD`), so lexical comparison IS chronological. No
-     * `new Date()` involved, which is what keeps this free of the local-midnight drift `SlippedDeals`
-     * has to work around.
-     */
+    /** The default list: open deals expected to close in the next 30 days, soonest first. */
     public get ClosingSoon(): DealRosterRow[] {
-        return ClosingSoon(this.forecastDeals, 8);
+        return ClosingSoon(this.dashboardDeals, BusinessToday());
     }
 
     /**
-     * The roster rows behind the selected inspect slice. Empty for `won`: the roster holds only this
-     * quarter's closed deals, so that slice is filtered on the server instead (see
-     * `refreshInspectView`).
+     * The roster rows behind the selected figure. Empty for `won` and `closed`: the dashboard's rows are
+     * open deals, so those two are listed from the server alone (see `inspectWhere`).
      */
     public get InspectRows(): DealRosterRow[] {
-        if (this.InspectFilter === 'won') {
+        if (this.InspectFilter === 'won' || this.InspectFilter === 'closed') {
             return [];
         }
-        return FilterInspect(this.forecastDeals, this.InspectFilter, BusinessToday());
+        return FilterInspect(this.dashboardDeals, this.InspectFilter, BusinessToday(), this.Window, this.InspectArg, this.IdleIDs);
     }
 
-    /** How many deals the inspect grid lists. For `won`, the Won tile's count, which the grid matches. */
+    /** How many deals the list shows: the figure's own count where the query reports one. */
     public get InspectCount(): number | null {
-        return this.InspectFilter === 'won' ? (this.summary?.WonCount ?? null) : this.InspectRows.length;
-    }
-
-    public get InspectLabel(): string {
+        const s = this.summary;
         switch (this.InspectFilter) {
-            case 'closing':
-                return 'Open deals closing soonest';
-            case 'commit':
-                return 'Open deals marked for commit';
-            case 'best':
-                return 'Open best-case deals, including commit';
-            case 'pipe':
-                return 'Open pipeline';
-            case 'slipped':
-                return 'Open deals past their expected close date';
-            case 'noowner':
-                return 'Open deals with no owner';
-            case 'won':
-                return this.Period === 'alltime' ? 'Won deals · all time' : `Won deals closed ${this.WindowLabel}`;
-            case 'week':
-                return 'Expected close in the next 7 days';
-            case 'month':
-                return 'Expected close later this month';
-            case 'later':
-                return 'Later, or no close date';
-            default:
-                return '';
+            case 'won': return s?.WonCount ?? null;
+            case 'closed': return this.WinRateUnavailable ? null : this.WinClosedCount;
+            case 'commit': return s?.CommitCount ?? null;
+            case 'slipped': return s?.PastExpectedCloseCount ?? null;
+            case 'noowner': return s?.NoOwnerCount ?? null;
+            case 'nodate': return s?.NoCloseDateCount ?? null;
+            default: return this.InspectRows.length;
         }
     }
 
-    public SetInspect(key: InspectKey): void {
+    /** What the deal list is showing, in the words of the figure that was clicked. */
+    public get InspectLabel(): string {
+        switch (this.InspectFilter) {
+            case 'closing': return 'Closing in the next 30 days';
+            case 'commit': return 'Commit deals';
+            case 'best': return 'Best case deals, not counting Commit';
+            case 'pipe': return 'Open pipeline';
+            case 'weighted': return 'Deals in the weighted pipeline';
+            case 'remainder': return 'Pipeline deals, not in Commit or Best case';
+            case 'slipped': return 'Open deals past their expected close date';
+            case 'noowner': return 'Open deals with no owner';
+            case 'nodate': return 'Open deals with no expected close date';
+            case 'idle': return 'Open deals idle past their stage limit';
+            case 'won': return 'Won deals';
+            case 'closed': return 'Closed deals, won and lost';
+            case 'week': return 'Expected to close in the next 7 days';
+            case 'month': return 'Expected to close later this month';
+            case 'later': return 'Expected to close after this month';
+            case 'stage': return `Open deals in ${this.stageName(this.InspectArg)}`;
+            case 'owner': return `Commit deals owned by ${this.ownerName(this.InspectArg)}`;
+            default: return '';
+        }
+    }
+
+    /** "Showing Commit deals · 12", with the period when the figure is bounded by one. */
+    public get InspectChip(): string {
+        const count = this.InspectCount;
+        const counted = count === null ? '' : ` · ${count}`;
+        return `Showing ${this.InspectLabel.charAt(0).toLowerCase()}${this.InspectLabel.slice(1)}${counted}`;
+    }
+
+    private stageName(arg: string | null): string {
+        if (!arg || arg.startsWith('unstaged')) return 'no stage';
+        return this.Stages.find((s) => HasID([s.ID], arg))?.Name ?? 'the chosen stage';
+    }
+
+    private ownerName(arg: string | null): string {
+        if (!arg || arg === 'none') return 'no one';
+        return this.Owners.find((o) => o.Key === arg.toLowerCase())?.Name ?? 'the chosen owner';
+    }
+
+    /** Selects the figure the deal list shows. */
+    public SetInspect(key: InspectKey, arg: string | null = null): void {
         this.InspectFilter = key;
+        this.InspectArg = key === 'stage' || key === 'owner' ? arg : null;
         void this.refreshInspectView().then(() => this.cdr.detectChanges());
+        this.emitUrlState();
     }
 
     public OnInspectOpened(event: RecordOpenedEvent): void {
@@ -788,53 +1107,102 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private async refreshInspectView(): Promise<void> {
-        this.InspectView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView, this.inspectWhere()) : null;
+        const token = ++this.inspectToken;
+        try {
+            const view = this.pipelineView
+                ? await DealPipelineViewWith(this.pipelineView, this.inspectWhere())
+                : null;
+            // Two clicks in quick succession: only the latest one's view is shown.
+            if (token === this.inspectToken) {
+                this.InspectView = view;
+            }
+        } catch (e) {
+            if (token === this.inspectToken) {
+                this.ViewError = reasonOf(e);
+            }
+        }
     }
 
     /**
-     * The inspect grid's filter. `won` is the Won tile's own predicate on the Deals view, so the grid
-     * lists every won deal in the period, not only those in the roster (bizapps-sales#209). Every other
-     * slice is a list of roster IDs.
+     * The deal list's filter (bizapps-sales#449, bc-aidp-next-golive#350): the clicked figure's own
+     * criteria with the period and the filter bar, the same predicate the query used to count it, so
+     * the list holds the deals the figure counted. `idle` is worked out from stage history in the
+     * browser, so it is a list of at most the open deals' IDs.
      */
     private inspectWhere(): string {
-        if (this.InspectFilter !== 'won') {
-            return DealInListWhere(this.InspectRows.map((d) => d.ID));
+        const key = this.InspectFilter;
+        if (key === 'idle') {
+            return DealInListWhere([...this.IdleIDs]);
         }
-        const statusEntity = new Metadata().Entities.find((e) => e.Name === E_DEAL_STATUS_TYPE);
-        return statusEntity ? DealWonInPeriodWhere(statusEntity, this.Window) : '1 = 0';
+        const tables = this.inspectTables(key === 'won' || key === 'closed');
+        if (!tables) {
+            // Without the type tables a won or closed list cannot be expressed; the open ones fall back
+            // to the roster's IDs, which the filter bar has already narrowed.
+            return key === 'won' || key === 'closed' ? '1 = 0' : DealInListWhere(this.InspectRows.map((d) => d.ID));
+        }
+        return InspectCriteriaWhere(key, tables, BusinessToday(), { Window: this.Window, Filters: this.Filters, Arg: this.InspectArg });
     }
 
+    /**
+     * The tables the criteria read, or null when one it needs is missing from metadata. `closedOnly`:
+     * the Won and closed lists read only the status flags, so they need only the status table — the
+     * Won list must not fall back to matching nothing because an unrelated table is missing.
+     */
+    private inspectTables(closedOnly: boolean): InspectTables | null {
+        const status = tableOf(E_DEAL_STATUS_TYPE);
+        const pipeline = closedOnly ? status : tableOf(E_PIPELINE);
+        const forecast = closedOnly ? status : tableOf(E_FORECAST_CATEGORY_TYPE);
+        return status && pipeline && forecast ? { Status: status, Pipeline: pipeline, Forecast: forecast, OrderLine: tableOf(E_ORDER_LINE) } : null;
+    }
+
+    /**
+     * All deals takes the saved view's sort: open deals first (no ClosedAt), then soonest expected close
+     * (bizapps-sales#371).
+     */
     private async refreshAllDealsView(): Promise<void> {
-        this.AllDealsView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView) : null;
+        try {
+            this.AllDealsView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView) : null;
+        } catch (e) {
+            this.ViewError = reasonOf(e);
+        }
     }
 
     public OnAllDealsOpened(event: RecordOpenedEvent): void {
         this.OnInspectOpened(event);
     }
 
-    /**
-     * The forecast stack. `Closed` is bounded by the selected period; the open segments never are.
-     *
-     * `Closed` is the summary query's `WonAmount`, the amounts of the deals the Won tile counts. The
-     * roster no longer carries every won deal (bizapps-sales#209), so the open segments come from the
-     * roster and the closed one from SQL. While the summary is unavailable, so is `Closed`: 0, beside
-     * the tiles' "figures unavailable".
-     *
-     * `Total` is therefore the sum of two different questions — what landed in the window, and what is
-     * open right now — which is exactly what the card's header tells the reader. See
-     * {@link ForecastSlices} for why it is built this way rather than windowing all four.
-     */
-    public get Stack(): { Closed: number; Commit: number; BestOnly: number; PipeOnly: number; Total: number } {
-        const s = { ...ForecastSlices(this.forecastDeals, this.Window), Closed: this.summary?.WonAmount ?? 0 };
-        const Total = s.Closed + s.Commit + s.BestOnly + s.PipeOnly;
-        return { ...s, Total };
+    /** A linked cell (Customer, Stage, Owner...) in either grid: opens that record as an Explorer tab. */
+    public OpenRelatedRecord(nav: ViewRelatedRecordNavigation): void {
+        const target = RelatedRecordTarget(nav);
+        if (target) {
+            this.nav.OpenEntityRecord(target.EntityName, target.Key);
+        }
     }
 
-    /** What the stack's Closed segment is bounded by, for the card header. */
-    public get StackClosedNote(): string {
+    /**
+     * The forecast: Won in the period, then the open pipeline deals expected to close in it, each in its
+     * highest category. Every segment is a column of `Sales: Dashboard Summary`, so the Commit segment
+     * is the Commit tile's figure. While the summary is unavailable, every segment is 0.
+     */
+    public get Stack(): { Closed: number; Commit: number; BestOnly: number; PipeOnly: number; Total: number } {
+        const s = this.summary;
+        const Closed = s?.WonAmount ?? 0;
+        const Commit = s?.CommitAmount ?? 0;
+        const BestOnly = s?.BestCaseOnlyAmount ?? 0;
+        const PipeOnly = s?.PipelineOnlyAmount ?? 0;
+        return { Closed, Commit, BestOnly, PipeOnly, Total: Closed + Commit + BestOnly + PipeOnly };
+    }
+
+    /** "Deals expected to close this quarter, by forecast category". */
+    public get StackNote(): string {
         return this.Period === 'alltime'
-            ? 'Closed is all time · open segments are the current book'
-            : `Closed is ${this.Window.Label.toLowerCase()} · open segments are the current book`;
+            ? 'Every deal, by forecast category'
+            : `Deals expected to close ${this.Period === 'custom' ? this.WindowLabel : this.PeriodPhrase}, by forecast category`;
+    }
+
+    /** Open deals with no expected close date: outside every bounded period, so counted here. */
+    public get NoCloseDateCount(): number {
+        return this.summary?.NoCloseDateCount ?? 0;
     }
 
     public StackPct(part: number): string {
@@ -843,8 +1211,46 @@ export class MJSSalesSectionComponent implements OnInit {
         return `${Math.max(2, Math.round((part / t) * 100))}%`;
     }
 
+    /**
+     * The pipeline Open deals by stage shows. Null until a reader picks one, which means the first of
+     * {@link FunnelPipelineOptions}.
+     */
+    public FunnelPipelineID: string | null = null;
+
+    /**
+     * The pipelines the stage card can show. One selected in the filter bar: that one, with no tabs.
+     * Several: those. None: every pipeline with open deals.
+     */
+    public get FunnelPipelineOptions(): FunnelPipeline[] {
+        const withDeals = FunnelPipelines(this.dashboardDeals, this.Pipelines);
+        const selected = this.Filters.PipelineIDs;
+        if (!selected.length) {
+            return withDeals;
+        }
+        return selected.map((id) => withDeals.find((p) => HasID([p.ID], id))
+            ?? { ID: id, Name: this.Pipelines.find((p) => HasID([p.ID], id))?.Name ?? 'Pipeline' });
+    }
+
+    /** The picked pipeline while it is offered, otherwise the first one that is. */
+    public get ActiveFunnelPipelineID(): string | null {
+        const options = this.FunnelPipelineOptions;
+        const picked = options.find((p) => HasID([p.ID], this.FunnelPipelineID));
+        return (picked ?? options[0])?.ID ?? null;
+    }
+
+    public SelectFunnelPipeline(id: string): void {
+        this.FunnelPipelineID = id;
+        this.cdr.detectChanges();
+    }
+
     public get Funnel(): FunnelStage[] {
-        return StageFunnel(this.forecastDeals);
+        const pipelineID = this.ActiveFunnelPipelineID;
+        return pipelineID ? StageFunnel(this.dashboardDeals, pipelineID, this.Window) : [];
+    }
+
+    /** A stage column's deal list argument. "No stage" carries its pipeline, since it has no stage ID. */
+    public StageArg(col: FunnelStage): string {
+        return col.Key === 'unstaged' ? `unstaged:${this.ActiveFunnelPipelineID ?? ''}` : col.Key;
     }
 
     public FunnelHeight(count: number): string {
@@ -852,12 +1258,14 @@ export class MJSSalesSectionComponent implements OnInit {
         return `${Math.max(8, Math.round((count / max) * 100))}%`;
     }
 
+    /** Expected to close: the dated buckets follow the period; No date lists every undated open deal. */
     public get Buckets(): CloseBucket[] {
-        return CloseBuckets(this.forecastDeals, BusinessToday());
+        return CloseBuckets(this.dashboardDeals, BusinessToday(), this.Window);
     }
 
+    /** Commit by deal owner, for the period. */
     public get Owners(): OwnerBar[] {
-        return OwnerCoverage(this.forecastDeals);
+        return OwnerCoverage(this.dashboardDeals, this.Window);
     }
 
     public OwnerPct(amount: number): string {
@@ -865,35 +1273,47 @@ export class MJSSalesSectionComponent implements OnInit {
         return `${Math.round((amount / max) * 100)}%`; // money-grep-allow: ratio of two stored amounts rendered as a bar width percentage — the result is a CSS length, not a money figure
     }
 
-    public get Weighted(): number {
-        return WeightedOpen(this.forecastDeals);
+    /**
+     * Open deals that have sat in their stage longer than the stage's limit (bizapps-sales#450), from
+     * the stage history the Board reads. Lower-cased IDs.
+     */
+    public get IdleIDs(): ReadonlySet<string> {
+        const today = BusinessToday();
+        const limits = new Map(this.Stages.map((s) => [s.ID.toLowerCase(), s.RottingDays]));
+        const ids = new Set<string>();
+        for (const d of this.dashboardDeals) {
+            const id = d.ID.toLowerCase();
+            if (StageIdleFor(d, limits.get(String(d.PipelineStageID ?? '').toLowerCase()), this.StageEnteredOn.get(id), today)) {
+                ids.add(id);
+            }
+        }
+        return ids;
     }
 
-    public get SilentCount(): number {
-        // Last-activity from Common is not on the roster yet. Unowned + slipped + stuck-less
-        // "needs a person" queues that we CAN answer without inventing a second activity query.
-        return this.forecastDeals.filter((d) => d.IsOpen && !d.OwnerEmployee).length;
+    /**
+     * Needs attention: open deals that need a person, today. The filter bar narrows them; the period
+     * does not, because a slipped or ownerless deal needs attention whatever period is being read.
+     */
+    public get Attention(): AttentionRow[] {
+        const s = this.summary;
+        return [
+            { Key: 'slipped', Icon: 'fa-calendar-xmark', Label: 'Past close date', Note: 'Open deals past their expected close date', Tooltip: 'Open deals whose expected close date is before today', Count: s?.PastExpectedCloseCount ?? null },
+            { Key: 'noowner', Icon: 'fa-user-slash', Label: 'No owner', Note: 'Open deals with no employee in the owner role', Tooltip: 'Open deals where no employee on the deal team holds the owner role. A person who is not an employee in that role does not count as the owner', Count: s?.NoOwnerCount ?? null },
+            { Key: 'nodate', Icon: 'fa-calendar', Label: 'No close date', Note: 'Open deals with no expected close date', Tooltip: 'Open deals that cannot be placed in any period until someone sets an expected close date', Count: s?.NoCloseDateCount ?? null },
+            { Key: 'idle', Icon: 'fa-hourglass-half', Label: 'Idle past stage limit', Note: 'Open deals in their stage longer than it allows', Tooltip: 'Open deals that have sat in their current stage longer than the stage\'s day limit', Count: this.DetailLoading ? null : this.IdleIDs.size },
+        ];
     }
 
-    public get CommitCount(): number {
-        return this.forecastDeals.filter((d) => d.IsOpen && d.IncludeInCommit).length;
-    }
-
-    public ForecastPill(row: DealRosterRow): string {
-        if (row.IsWon) return 'closed';
-        if (row.IncludeInCommit) return 'commit';
-        if (row.IncludeInBestCase) return 'best';
-        return 'pipe';
-    }
-
-    public ForecastLabel(row: DealRosterRow): string {
-        if (row.IsWon) return 'Closed';
-        if (row.IncludeInCommit) return 'Commit';
-        if (row.IncludeInBestCase) return 'Best Case';
-        return row.ForecastCategoryType || 'Pipeline';
-    }
-
-    private applyWinRate(rows: Record<string, unknown>[]): void {
+    /** Null means the query did not run: every figure is cleared and the tile says so. */
+    private applyWinRate(rows: Record<string, unknown>[] | null): void {
+        this.WinRateUnavailable = rows === null;
+        if (rows === null) {
+            this.WinClosedCount = 0;
+            this.WinWonCount = 0;
+            this.WinRateByCount = null;
+            this.WinRateByValue = null;
+            return;
+        }
         const num = (v: unknown): number => {
             const n = Number(v);
             return Number.isFinite(n) ? n : 0;
@@ -916,24 +1336,13 @@ export class MJSSalesSectionComponent implements OnInit {
 
     // ── Display helpers ────────────────────────────────────────────────────────
 
-
     /**
-     * A whole-currency figure. Formatting only — it neither derives nor rounds a stored value; the
-     * number displayed is whatever came back, shown without decimals.
+     * A whole-currency figure. Formatting only — it neither derives nor rounds a stored value.
+     *
+     * COERCE BEFORE FORMATTING, because `toLocaleString` fails SILENTLY on a string: a value arriving as
+     * "27480.0000" would render as `27480.0000` with no symbol and no error.
      */
     private money(value: number | string | null | undefined): string {
-        /**
-         * COERCE BEFORE FORMATTING, because `toLocaleString` fails SILENTLY on a string.
-         *
-         * `String.prototype.toLocaleString` exists and ignores the options object entirely, so a value
-         * arriving as "27480.0000" renders as `27480.0000` -- no symbol, no separators, no error, and
-         * nothing in the output saying formatting did not happen. It looks like a styling bug rather
-         * than a type one, which is why it would survive review.
-         *
-         * Measured: this provider returns numbers today. The coercion is here because the cast that
-         * guaranteed it was an assertion, and because the browser reaches these figures over a
-         * transport this has not been tested against.
-         */
         const n = Number(value);
         if (!Number.isFinite(n)) {
             // Never render NaN as money. An em dash is the same "no figure" the roster already uses.
@@ -967,15 +1376,44 @@ export class MJSSalesSectionComponent implements OnInit {
         return 'muted';
     }
 
-    /** True when this deal's expected close has passed and it is still open. */
-    public IsSlipped(row: DealRosterRow): boolean {
-        return this.SlippedDeals.some((d) => d.ID === row.ID);
-    }
-
     public Pct(value: number | null): string {
         if (value === null || !Number.isFinite(value)) return '—';
         return `${Math.round(value * 100)}%`;
     }
+}
+
+/**
+ * The five tiles' fixed parts: label, what they count, and the figure they list. Every tile is bounded
+ * by the period (bc-aidp-next-golive#350).
+ */
+const KPI_SHELLS: readonly Omit<SalesKpi, 'Value' | 'Footnote'>[] = [
+    { Label: 'Won', Tooltip: 'Deals won in the period, by the day they closed.', Filter: 'won' },
+    { Label: 'Commit', Tooltip: 'Open deals in a Commit forecast category, expected to close in the period.', Filter: 'commit' },
+    { Label: 'Open pipeline', Tooltip: 'Open deals expected to close in the period, not counting deals left out of the forecast.', Filter: 'pipe' },
+    { Label: 'Weighted pipeline', Tooltip: 'The open pipeline with each deal counted at its probability of closing.', Filter: 'weighted' },
+    { Label: 'Win rate', Tooltip: 'Share of closed deal value that was won, over deals closed in the period.', Filter: 'closed' },
+];
+
+/** A read that settled: its value, or why it failed. */
+interface Settled<T> {
+    Value: T | null;
+    Error: string | null;
+}
+
+/** Resolves to the value or the reason; never rejects. */
+function settle<T>(read: Promise<T>): Promise<Settled<T>> {
+    return read.then(
+        (Value) => ({ Value, Error: null }),
+        (e: unknown) => ({ Value: null, Error: reasonOf(e) }),
+    );
+}
+
+/** The reads `load()` starts for the board, the win rate and the grids. */
+interface DetailReads {
+    Lookups: Promise<Settled<DealWorkspaceLookups>>;
+    WinRate: Promise<Settled<Record<string, unknown>[] | null>>;
+    View: Promise<Settled<MJUserViewEntityExtended | null>>;
+    StageEntries: Promise<Settled<Map<string, string>>>;
 }
 
 /**
@@ -990,15 +1428,39 @@ export class MJSSalesSectionComponent implements OnInit {
     selector: 'mjs-deals-resource',
     standalone: true,
     imports: [MJSSalesSectionComponent],
-    template: `<mjs-sales-section Section="deals"></mjs-sales-section>`,
+    template: `<mjs-sales-section Section="deals" [UrlState]="UrlState" (UrlStateChange)="OnUrlStateChange($event)"></mjs-sales-section>`,
 })
 export class SalesDealsSectionResource extends BaseResourceComponent implements OnInit {
+    /**
+     * The tab's query params as section state (bizapps-sales#371): read on mount, replaced on
+     * back/forward or a link opened into this tab, and written when the section changes.
+     */
+    public UrlState: SalesUrlState | null = null;
+
     public ngOnInit(): void {
+        // Before the base class subscribes: its first delivery may arrive synchronously, and the
+        // section reads this on its own init.
+        this.UrlState = this.parseUrl(this.GetQueryParams());
         super.ngOnInit();
         // Required of every BaseResourceComponent: Explorer waits on this before it stops showing a
         // loading state, so omitting it leaves the tab spinning forever. The section loads its own data
         // asynchronously underneath — this reports that the RESOURCE mounted, not that data arrived.
         this.NotifyLoadComplete();
+    }
+
+    /** Back/forward, or a deep link into a mounted tab. The section applies only what differs. */
+    protected override OnQueryParamsChanged(params: Record<string, string>, _source: 'popstate' | 'deeplink'): void {
+        this.UrlState = this.parseUrl(params);
+        this.RefreshView();
+    }
+
+    /** The section moved; record it in the URL so a reload or a shared link comes back to it. */
+    public OnUrlStateChange(state: SalesUrlState): void {
+        this.UpdateQueryParams(SalesUrlParams(state));
+    }
+
+    private parseUrl(params: Record<string, string>): SalesUrlState {
+        return ParseSalesUrlState(params, SubPagesFor('deals').map((p) => p.Id));
     }
 
     public override async GetResourceDisplayName(_d: ResourceData): Promise<string> {

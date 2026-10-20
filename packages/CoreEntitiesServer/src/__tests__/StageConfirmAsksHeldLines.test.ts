@@ -32,6 +32,8 @@ function harness(status = 'Quoted', user: object | null = { ID: 'rep' }): { deal
     const fields: Record<string, unknown> = {
         _orderStatusWarnings: [],
         OrderID_Object: order,
+        // A booking stamps the close date onto the order; the entity getter needs metadata this harness lacks.
+        ActualCloseDate: null,
         ContextCurrentUser: user,
         ProviderToUse: {
             BeginEntityTransaction: async () => ({ Commit: async () => undefined, Rollback: async () => undefined }),

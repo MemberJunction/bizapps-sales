@@ -8,7 +8,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { AfterViewInit, ChangeDetectorRef, Component, DestroyRef, DoCheck, ElementRef, ViewEncapsulation, inject } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, DestroyRef, DoCheck, ElementRef, OnDestroy, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey, Metadata, RunView } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
@@ -26,6 +26,8 @@ import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { DealRelatedLinks, DealRelatedLinksKey } from './deal-related-links';
 import { DealCloseDay } from './deal-close-day';
 import { IsFieldReadable } from './field-readable';
+import { WeightedAmount } from './deal-weighted-amount';
+import { FormatDealMoney, RefreshDealCurrencyCodes } from './deal-money';
 
 
 /**
@@ -61,9 +63,14 @@ export function ShouldPlaceCursorInName(state: {
 }
 const COLLAPSE_SETTING = 'mj.identityHeader.collapsed.deal';
 
-function money(n: number | null | undefined): string {
-    if (n == null || !Number.isFinite(Number(n))) return '—';
-    return Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+/** The part of the deal form the hero listens to; see `MJSDealHeroPanel.dealStateSource`. */
+interface DealStateSource {
+    DealStateRefreshed?: { subscribe(next: () => void): { unsubscribe(): void } };
+}
+
+/** Whole units in the deal's currency: the header is the one place on the form without cents. See deal-money.ts. */
+function money(n: number | null | undefined, currencyID: string | null | undefined): string {
+    return FormatDealMoney(n, currencyID, 'whole') || '—';
 }
 
 @RegisterClassEx(BaseFormPanel, {
@@ -112,7 +119,7 @@ function money(n: number | null | undefined): string {
                         }
                         @if (IsLocked) {
                             <span class="mjs-deal-hero__chip" data-tone="warning">
-                                <i class="fa-solid fa-lock"></i> Locked
+                                <i class="fa-solid fa-lock"></i> Closed
                             </span>
                         }
                     </div>
@@ -244,9 +251,13 @@ function money(n: number | null | undefined): string {
                         }
                     </div>
                 }
-                @if (LockNotice) { <div class="mjs-flag">{{ LockNotice }}</div> }
-                @if (StaleAmountNotice) { <div class="mjs-flag">{{ StaleAmountNotice }}</div> }
             }
+            <!-- OUTSIDE the collapsed region (#371 item 2). Collapsed is a persisted per-user
+                 setting, and these say why the form will refuse an edit or why the amount is out of
+                 date; hiding them with the briefing left a rep who had collapsed the header once
+                 with no warning at all. -->
+            @if (Record.IsSaved && LockNotice) { <div class="mjs-flag">{{ LockNotice }}</div> }
+            @if (Record.IsSaved && StaleAmountNotice) { <div class="mjs-flag">{{ StaleAmountNotice }}</div> }
         </div>
     `,
     styles: [`
@@ -402,6 +413,7 @@ function money(n: number | null | undefined): string {
             margin-top: var(--mj-space-2);
         }
         .mjs-deal-hero--collapsed { padding: 12px 20px; gap: 0; margin-bottom: var(--mj-space-3); }
+        .mjs-deal-hero--collapsed > .mjs-flag { margin-top: var(--mj-space-3); }
         .mjs-deal-hero--collapsed .mjs-deal-hero__avatar { width: 42px; height: 42px; border-radius: var(--mj-radius-md, 10px); font-size: 1.05rem; }
         .mjs-deal-hero--collapsed .mjs-deal-hero__name { font-size: 1.15rem; }
         @media (max-width: 720px) {
@@ -410,7 +422,7 @@ function money(n: number | null | undefined): string {
         }
     `],
 })
-export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements AfterViewInit, DoCheck {
+export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements AfterViewInit, DoCheck, OnDestroy {
     private readonly cdr = inject(ChangeDetectorRef);
     private readonly host = inject(ElementRef<HTMLElement>);
     private readonly destroyRef = inject(DestroyRef);
@@ -460,6 +472,9 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         // Subscribed before the first await, while the panel is certainly alive: registering the
         // teardown on a panel destroyed during that await would throw and leave the subscription open.
         this.refreshNoticesAfterEverySave();
+        this.dealStateSubscription = this.dealStateSource()?.DealStateRefreshed?.subscribe(() => {
+            void this.refreshNotices();
+        });
         await this.refreshNotices();
         /**
          * The business zone, for a legacy `ClosedAt`-only row's close day ({@link CloseStatValue},
@@ -494,6 +509,20 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         if (!saved) return;
         const subscription = saved.subscribe(() => { void this.refreshNotices(); });
         this.destroyRef.onDestroy(() => subscription.unsubscribe());
+    }
+
+    /**
+     * The deal form's signal that a save it did not run changed the deal (#271): the products panel
+     * saves the deal to refresh its amount, which raises no refresh here. Read structurally, as the
+     * other panels read `IsLocked`, so this file does not import the form.
+     */
+    private dealStateSource(): DealStateSource | undefined {
+        return this.FormComponent as unknown as DealStateSource | undefined;
+    }
+    private dealStateSubscription?: { unsubscribe(): void };
+
+    public ngOnDestroy(): void {
+        this.dealStateSubscription?.unsubscribe();
     }
 
     /**
@@ -664,12 +693,9 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         return IsFieldReadable(this.Record?.EntityInfo, fieldName, provider?.CurrentUser);
     }
 
-    public get AmountText(): string { return money(this.Record?.Amount); }
+    public get AmountText(): string { return money(this.Record?.Amount, this.Record?.CurrencyID); }
     public get WeightedText(): string {
-        const a = Number(this.Record?.Amount);
-        const p = Number(this.Record?.Probability);
-        if (!Number.isFinite(a) || !Number.isFinite(p)) return '—';
-        return money(a * p / 100);
+        return money(WeightedAmount(this.Record?.Amount, this.Record?.Probability), this.Record?.CurrencyID);
     }
     public get StatusTone(): 'success' | 'warning' | 'muted' {
         const s = this.StatusName.toLowerCase();
@@ -723,6 +749,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     }
 
     private async refreshNotices(): Promise<void> {
+        await RefreshDealCurrencyCodes();
         await this.resolveLock();
         await this.resolveReversals();
         await this.resolveStale();

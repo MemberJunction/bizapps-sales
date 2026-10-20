@@ -52,6 +52,7 @@ import {
 import { createHash } from 'node:crypto';
 
 import { RegisterClass, UUIDsEqual } from '@memberjunction/global';
+import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 // ORDERS' OWN RULE, imported rather than restated. `CanTransition` is the same function
 // `OrderEntityServer.passesStatusTransition()` consults, so a refusal here and a refusal there cannot
 // disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
@@ -123,14 +124,21 @@ const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 const SALES_ACCOUNT_ENTITY = 'MJ_BizApps_Sales: Sales Accounts';
 const SALES_CONTACT_ENTITY = 'MJ_BizApps_Sales: Sales Contacts';
+const ORGANIZATION_ENTITY = 'MJ_BizApps_Common: Organizations';
+const PERSON_ENTITY = 'MJ_BizApps_Common: People';
 const GUID_SHAPE = /^[0-9a-fA-F-]{36}$/;
 
 /** A party this save writes onto the deal, checked for existence before anything is written. */
 interface PartyCheck {
     EntityName: string;
+    /** The Common entity the sales row extends (IsA): its ID is the party's ID. */
+    ParentEntityName: string;
     ID: string;
     Label: 'customer' | 'primary contact';
 }
+
+/** Why a supplied party was refused: the sales row is missing but its parent exists, or neither does. */
+type MissingParty = PartyCheck & { NotSetUp: boolean };
 
 /**
  * Accounting's two currency entities — READ, never written, and never assumed present.
@@ -178,9 +186,10 @@ interface OrderTotalRow {
     TotalGross: number | null;
 }
 
-/** The one column the stage lookup selects for the order rule. */
+/** What the stage lookup selects for the order rule: the status it names, and the stage's own status. */
 interface StageOrderStatusRow {
     OrderStatusOnEntry: string | null;
+    DealStatusTypeID: string | null;
 }
 
 /**
@@ -218,6 +227,12 @@ interface StageDefaultsPlan {
      * write path agree with the reader.
      */
     DealStatusTypeID: string | null;
+}
+
+/** One row's dirty-tracking baseline, captured before `super.Save()`. See `captureSavedState`. */
+interface SavedStateSnapshot {
+    Row: BaseEntity;
+    OldValues: { Name: string; OldValue: unknown }[];
 }
 
 interface StageOrderPlan {
@@ -379,6 +394,19 @@ export class DealEntityServer extends DealEntity {
         try {
             return await this.saveDeclared(options);
         } finally {
+            /**
+             * A SAVE THAT DID NOT COMMIT GIVES THE CALLER THEIR STATUS BACK, on every exit.
+             *
+             * The status was reverted so the close lock and `super.Save()` would not write it. When the
+             * save then fails (`super.Save()` returning false, or a throw rolled back in
+             * `saveWithinScope`), nothing was written, and a clean status would make the retry skip the
+             * close and report success. Here rather than at each `return false`, like the clears below.
+             * A transition that fails AFTER the commit keeps today's behaviour: the row moved, so the
+             * object is resynced to it rather than re-dirtied.
+             */
+            if (!this._committed && this._revertedStatusTarget) {
+                this.Set('DealStatusTypeID', this._revertedStatusTarget);
+            }
             this._declaredTransition = null;
             this._revertedStatusTarget = null;
         }
@@ -392,6 +420,7 @@ export class DealEntityServer extends DealEntity {
         this._orderJustProvisioned = false;
         this._lockedAtSave = false;
         this._lastStageEventID = null;
+        this._committed = false;
 
         /**
          * THE STATUS FIELD DRIVES THE CLOSE AND THE REOPEN (bc-aidp-next-golive#205).
@@ -597,6 +626,14 @@ export class DealEntityServer extends DealEntity {
          */
         if (!this._lockedAtSave && !(await this.isBornClosedWithoutOrder())) {
             this.provisionEmbeddedOrder();
+        }
+
+        /**
+         * After provisioning, for the same reason as the currency default: it reads the order the deal
+         * now has, and it may not refuse a save.
+         */
+        if (!this._lockedAtSave) {
+            await this.moveDraftOrderDateToToday();
         }
 
         /**
@@ -1070,7 +1107,8 @@ export class DealEntityServer extends DealEntity {
             // the fast path and land NULL again -- the exact gap this closes, through the one door left open.
             !work.needsStatusDefault
         ) {
-            return super.Save(options);
+            this._committed = await super.Save(options);
+            return this._committed;
         }
 
         const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
@@ -1083,6 +1121,7 @@ export class DealEntityServer extends DealEntity {
         }
 
         const scope = await provider.BeginEntityTransaction();
+        let snapshot: SavedStateSnapshot[] = [];
         try {
             if (work.assignNumber) {
                 this.DealNumber = await getNextDealNumber(
@@ -1113,9 +1152,11 @@ export class DealEntityServer extends DealEntity {
             }
             await this.applyOrderWork(work.orderBillTo, work.stageOrder);
 
+            snapshot = this.captureSavedState();
             const saved = await super.Save(options);
             if (!saved) {
                 await scope.Rollback();
+                this.restoreSavedState(snapshot);
                 /**
                  * ── THE NUMBER GOES BACK TOO, OR THE DEAL BECOMES UNSAVEABLE ────────────────────────
                  *
@@ -1148,6 +1189,7 @@ export class DealEntityServer extends DealEntity {
             }
 
             await scope.Commit();
+            this._committed = true;
             return true;
         } catch (err) {
             LogError(`DealEntityServer.saveWithinScope failed for deal ${this.ID}: ${err}`);
@@ -1158,6 +1200,9 @@ export class DealEntityServer extends DealEntity {
                 rolledBack = false;
                 LogError(`Failed to roll back after a failed deal save: ${rollbackErr}`);
             }
+            // `super.Save()` may have marked the deal, its order and their rows clean before the step
+            // that threw. The database rolled back; this puts the dirty state back so a retry writes them.
+            this.restoreSavedState(snapshot);
             /**
              * ── THE SAME COMPENSATION AS THE `!saved` BRANCH, AND FOR THE SAME REASON ──────────────
              *
@@ -1198,6 +1243,39 @@ export class DealEntityServer extends DealEntity {
                     : `This deal could not be saved AND the rollback failed, so the row may be ` +
                       `partly written. Check it before retrying: ${err}`,
             );
+        }
+    }
+
+    /**
+     * The dirty-tracking baseline of every row this save may write that is ALREADY on disk: the deal,
+     * its team and payment schedule, its order and the order's lines.
+     *
+     * `super.Save()` leaves each of them clean. When a later step in the same transaction throws, the
+     * database rolls back but the objects stay clean, so a retry saves nothing and reports success.
+     * Restoring the captured `OldValue`s (`EntityField.RestoreOldValue`, the call MJ's own graph rollback
+     * uses) makes the retry see the same changes again.
+     *
+     * Rows that were NEW before this save are left out: MJ 6.1.5 has no public way to mark a record
+     * unsaved again, so a create rolled back here still reads as saved.
+     */
+    private captureSavedState(): SavedStateSnapshot[] {
+        const order = this.OrderID_Object;
+        const rows: BaseEntity[] = [
+            this,
+            ...(this.Team?.Items ?? []),
+            ...(this.PaymentSchedule?.Items ?? []),
+            ...(order ? [order, ...(order.Lines?.Items ?? [])] : []),
+        ];
+        return rows
+            .filter((row) => row.IsSaved)
+            .map((row) => ({ Row: row, OldValues: row.Fields.map((f) => ({ Name: f.Name, OldValue: f.OldValue })) }));
+    }
+
+    private restoreSavedState(snapshot: SavedStateSnapshot[]): void {
+        for (const { Row, OldValues } of snapshot) {
+            for (const { Name, OldValue } of OldValues) {
+                Row.GetFieldByName(Name)?.RestoreOldValue(OldValue);
+            }
         }
     }
 
@@ -1562,6 +1640,16 @@ export class DealEntityServer extends DealEntity {
             // other direction closes deals nobody asked to close.
             if (status.Success && flags && flags.LocksDeal !== true) {
                 derivableStatusID = stageStatusID;
+            } else if (!(await this.closesIntoLockingStage())) {
+                /**
+                 * ── AND AN OPEN DEAL TAKES NONE OF A CLOSING STAGE'S FIGURES ───────────────────────
+                 *
+                 * Withholding only the status still left the deal Open at the stage's 0% or 100% and in
+                 * its "Closed" forecast category, so the forecast counted it as decided. A closing
+                 * stage's probability and category describe a decided deal; they belong to the close,
+                 * which sets its own. The deal keeps the figures it had.
+                 */
+                return null;
             }
         }
 
@@ -1756,7 +1844,13 @@ export class DealEntityServer extends DealEntity {
         if (!stageID) {
             return null;
         }
-        if (this.IsSaved && !this._orderJustProvisioned) {
+        /**
+         * A declared close asks even when the stage did not move. A deal already sitting in its closing
+         * stage no longer had that stage's order status applied on entry (see below), so the close is the
+         * one save left to apply it.
+         */
+        const closing = this._declaredTransition?.Kind === 'Close';
+        if (this.IsSaved && !this._orderJustProvisioned && !closing) {
             const previous = this.GetFieldByName('PipelineStageID')?.OldValue as string | null | undefined;
             if (previous && String(previous).toLowerCase() === String(stageID).toLowerCase()) {
                 return null;   // the stage did not move; the order is not this save's business
@@ -1781,7 +1875,7 @@ export class DealEntityServer extends DealEntity {
                 EntityName: STAGE_ENTITY,
                 ExtraFilter: `ID = '${stageID}'`,
                 ResultType: 'simple',
-                Fields: ['OrderStatusOnEntry'],
+                Fields: ['OrderStatusOnEntry', 'DealStatusTypeID'],
             },
             this.ContextCurrentUser,
         );
@@ -1795,11 +1889,43 @@ export class DealEntityServer extends DealEntity {
             return null;
         }
 
-        const target = (result.Results ?? [])[0]?.OrderStatusOnEntry;
+        const row = (result.Results ?? [])[0];
+        const target = row?.OrderStatusOnEntry;
         if (!target) {
             return null;   // this stage says nothing about the order. The common case.
         }
+
+        /**
+         * ── A CLOSING STAGE'S ORDER STATUS IS THE CLOSE'S TO APPLY ────────────────────────────────
+         *
+         * The losing stage names `Voided` and the winning one `Quoted`. Applied on a plain move, an
+         * open deal parked in the losing stage had its order voided while nothing closed it. Only a
+         * save that closes the deal into the stage applies it; an unreadable status counts as locking.
+         */
+        if (row.DealStatusTypeID) {
+            const flags = await this.readStatusLockFlags(row.DealStatusTypeID);
+            if (flags.LocksDeal && !(await this.closesIntoLockingStage())) {
+                return null;
+            }
+        }
         return { StageID: stageID, Target: target as OrderStatus };
+    }
+
+    /**
+     * Does this save close the deal into the stage it is entering? A declared close does, and so does a
+     * create whose own status locks (an importer bringing a deal that is already closed). Every other
+     * save that enters a stage whose status locks leaves the deal open, so it takes none of that stage's
+     * figures.
+     */
+    private async closesIntoLockingStage(): Promise<boolean> {
+        if (this._declaredTransition?.Kind === 'Close') {
+            return true;
+        }
+        if (this.IsSaved || !this.DealStatusTypeID) {
+            return false;
+        }
+        const flags = await this.readStatusLockFlags(this.DealStatusTypeID);
+        return flags.Read && flags.LocksDeal;
     }
 
 
@@ -1813,9 +1939,10 @@ export class DealEntityServer extends DealEntity {
      * declares, so a reopen that lands on the stage the deal is ALREADY in never consulted the
      * recovery at all.
      *
-     * That is not a hypothetical corner. `save-deal.SD35` makes it ordinary: a plain save or a board
-     * drag into the losing stage leaves the deal OPEN -- `planStageDefaults` refuses to derive a
-     * locking status -- while `applyStageOrderStatus` voids the order on entry. Closing Lost then
+     * That is not a hypothetical corner. A plain save or a board drag into the losing
+     * stage used to leave the deal OPEN -- `planStageDefaults` refuses to derive a locking status -- while
+     * `applyStageOrderStatus` voided the order on entry, and deals parked that way still exist. A plain
+     * move no longer voids the order (`planStageOrderStatus`), but closing Lost from there
      * derives that same stage, so nothing moves and the close event records
      * `FromStageID === ToStageID`. The reopen restores the stage the deal is already in, the gate
      * returns null, and the deal comes back OPEN pointing at a `Voided` order with `Issues` empty.
@@ -1932,6 +2059,7 @@ export class DealEntityServer extends DealEntity {
                 return;
             }
             order.Status = plan.Target;
+            this.stampBookingDate(plan.Target);
             return;
         }
         await this.applyStageOrderStatusToSavedOrder(order, plan);
@@ -2008,8 +2136,10 @@ export class DealEntityServer extends DealEntity {
 
         const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
         const scope = await provider.BeginEntityTransaction();
+        const orderDate = order.OrderDate;
         try {
             order.Status = plan.Target;
+            this.stampBookingDate(plan.Target);
             if (await order.Save()) {
                 await scope.Commit();
                 return;
@@ -2024,6 +2154,7 @@ export class DealEntityServer extends DealEntity {
             // Put the in-memory value back, or the deal's save graph will try to write the status the
             // database has just refused and take the whole save down with it.
             order.Status = from;
+            order.OrderDate = orderDate;
             this._orderStatusWarnings.push(
                 `The deal moved stage, but its order stayed ${from}: the move to ${plan.Target} was legal ` +
                 `but did not complete (${err instanceof Error ? err.message : String(err)}). The stage change was kept.`,
@@ -2186,6 +2317,73 @@ export class DealEntityServer extends DealEntity {
         }
     }
 
+
+    /**
+     * A move that BOOKS the order takes the deal's close date as the order date.
+     *
+     * Orders reads `OrderDate` as the purchase day for every subscription line without its own start,
+     * and freezes the header once the order is booked. The date was the day the deal was created, so a
+     * deal won months later booked its subscriptions from that day. `ActualCloseDate` is the business
+     * day the close stamped; nothing is written when the deal carries none.
+     */
+    private stampBookingDate(target: OrderStatus): void {
+        const order = this.OrderID_Object;
+        if (order && IsBooked(target) && this.ActualCloseDate) {
+            order.OrderDate = this.ActualCloseDate;
+        }
+    }
+
+    /**
+     * A DRAFT order's date follows the business day, so new lines default their term start to today,
+     * are priced as of today, and a later booking does not start from the day the deal was created.
+     *
+     * Only Draft: a quoted order's prices are as of the quote day, and moving its date could change
+     * prices a customer was already shown. The order is read only when it is not already in memory, and
+     * loaded only when its date has to move. A failure leaves the date as it was; it never refuses the
+     * save.
+     */
+    private async moveDraftOrderDateToToday(): Promise<void> {
+        if (!this.OrderID || this._orderJustProvisioned) {
+            return;
+        }
+        try {
+            await BusinessTimeZoneEngine.Instance.Config(
+                false, this.ContextCurrentUser, this.ProviderToUse as unknown as IMetadataProvider,
+            );
+            const today = BusinessTimeZoneEngine.Instance.Today(this.CompanyID ?? undefined);
+            const order = this.OrderID_Object ?? (await this.staleDraftOrder(today));
+            // Orders' status is its fixed lifecycle (CK_OrderHeader_Status), not a sales type table.
+            if (!order || order.Status !== 'Draft') { // vocabulary-grep-allow: orders' fixed lifecycle
+                return;
+            }
+            const day = ToCalendarDay(order.OrderDate);
+            if (day && day < today) {
+                order.OrderDate = FromCalendarDay(today);
+            }
+        } catch (err) {
+            LogError(`DealEntityServer: the draft order's date could not be moved to today: ${err}`);
+        }
+    }
+
+    /** The deal's order, loaded only when the row on disk is a Draft dated before `today`. */
+    private async staleDraftOrder(today: string) {
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await view.RunView<{ Status: string; OrderDate: Date | string | null }>(
+            {
+                EntityName: ORDER_HEADER_ENTITY,
+                ExtraFilter: `ID = '${this.OrderID}'`,
+                ResultType: 'simple',
+                Fields: ['Status', 'OrderDate'],
+            },
+            this.ContextCurrentUser,
+        );
+        const row = result.Success ? (result.Results ?? [])[0] : undefined;
+        const day = row ? ToCalendarDay(row.OrderDate) : null;
+        if (!row || row.Status !== 'Draft' || !day || day >= today) { // vocabulary-grep-allow: orders' fixed lifecycle
+            return null;
+        }
+        return this.OrderID_LoadObject();
+    }
 
     /**
      * Re-establishes `Deal.Amount` from the order, as a CACHE with honest provenance.
@@ -2437,9 +2635,12 @@ export class DealEntityServer extends DealEntity {
     private _lockedAtSave = false;
     /**
      * The status the caller asked for, held while the field is reverted to its persisted value so the
-     * close lock can do its real job. `refuseSave` puts it back; see the note there for why.
+     * close lock can do its real job. `refuseSave` puts it back, and so does `Save()` for any save that
+     * did not commit; see the notes there for why.
      */
     private _revertedStatusTarget: string | null = null;
+    /** Whether this save reached its commit. `Save()` restores the reverted status when it did not. */
+    private _committed = false;
 
     /**
      * The fields that stay editable on a locked deal — read from the SHARED rule, not redeclared.
@@ -2628,10 +2829,12 @@ export class DealEntityServer extends DealEntity {
      *
      * Two things differ from `refuseSave` and both matter:
      *
-     * 1. IT DOES NOT PUT THE STATUS BACK. `refuseSave` restores the caller's target because nothing
-     *    was written and a retry must still carry it. Here the row has already moved (or been rolled
-     *    back) and `Load()` has resynced this object to it -- re-dirtying a field to a value the
-     *    database just rejected would invite the same failure on the next save.
+     * 1. IT DOES NOT PUT THE STATUS BACK ITSELF. `refuseSave` restores the caller's target because
+     *    nothing was written and a retry must still carry it. After a failed transition the row has
+     *    already moved and `Load()` has resynced this object to it -- re-dirtying a field to a value
+     *    the database just rejected would invite the same failure on the next save. When the save was
+     *    rolled back instead, nothing reloads, and `Save()`'s `finally` restores the status because the
+     *    save never committed.
      * 2. IT CARRIES THE OPERATION'S ISSUES. `CloseDealOperation` returns a structured `Issues` array
      *    which was being joined into a `LogError` and dropped. Those sentences are the only thing
      *    that says WHY the close refused, and they are what the user needs.
@@ -2895,7 +3098,7 @@ export class DealEntityServer extends DealEntity {
 
         const malformed = checks.filter((c) => !GUID_SHAPE.test(c.ID));
         if (malformed.length) {
-            return this.missingPartyMessage(malformed);
+            return this.missingPartyMessage(malformed.map((c) => ({ ...c, NotSetUp: false })));
         }
 
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
@@ -2921,22 +3124,70 @@ export class DealEntityServer extends DealEntity {
             return null;
         }
 
-        return this.missingPartyMessage(missing);
+        return this.missingPartyMessage(await this.classifyMissingParties(missing));
     }
 
-    private missingPartyMessage(missing: PartyCheck[]): string {
-        const named = missing.map((c) => `${c.Label} (${c.ID})`).join(' and ');
-        const verb = missing.length > 1 ? 'do' : 'does';
-        return `The selected ${named} ${verb} not exist, so nothing was saved. Select it again from the list, then save.`;
+    /**
+     * Tells the two cases apart, because they need different actions from the rep. A Sales Account or
+     * Sales Contact shares its Organization's or Person's ID (IsA), so the deal panels on those forms
+     * pre-fill the record's own ID; when that record was never set up for sales, there is nothing to
+     * pick again. A party whose parent is gone too was a stale pick. Only runs on the refusal path, and
+     * a failed read falls back to the stale-pick wording.
+     */
+    private async classifyMissingParties(missing: PartyCheck[]): Promise<MissingParty[]> {
+        const provider = this.ProviderToUse as unknown as IRunViewProvider;
+        const parents = await provider.RunViews(
+            missing.map((c) => ({
+                EntityName: c.ParentEntityName,
+                ExtraFilter: `ID = '${c.ID}'`,
+                ResultType: 'simple' as const,
+                Fields: ['ID'],
+            })),
+            this.ContextCurrentUser,
+        );
+        return missing.map((c, i) => {
+            const parent = parents[i];
+            return { ...c, NotSetUp: !!parent?.Success && (parent.Results ?? []).length > 0 };
+        });
+    }
+
+    /** The rep-facing refusal. The IDs go to the log only: they mean nothing to a rep. */
+    private missingPartyMessage(missing: MissingParty[]): string {
+        LogError(
+            `DealEntityServer.missingPartyRefusal: ${missing
+                .map((c) => `${c.Label} ${c.ID} ${c.NotSetUp ? 'has no sales row' : 'does not exist'}`)
+                .join('; ')}`,
+        );
+        const sentences = missing.map((c) => {
+            if (!c.NotSetUp) {
+                return `The selected ${c.Label} no longer exists. Pick it again from the list.`;
+            }
+            return c.Label === 'customer'
+                ? 'The selected customer is not set up as a sales customer. Add the organization as a ' +
+                      'sales account first, or pick another customer.'
+                : 'The selected primary contact is not set up as a sales contact. Add the person as a ' +
+                      'sales contact first, or pick another contact.';
+        });
+        return `Nothing was saved. ${sentences.join(' ')}`;
     }
 
     private suppliedParties(): PartyCheck[] {
         const checks: PartyCheck[] = [];
         if (this.AccountID && this.callerSuppliedValue('AccountID', this.AccountID)) {
-            checks.push({ EntityName: SALES_ACCOUNT_ENTITY, ID: this.AccountID, Label: 'customer' });
+            checks.push({
+                EntityName: SALES_ACCOUNT_ENTITY,
+                ParentEntityName: ORGANIZATION_ENTITY,
+                ID: this.AccountID,
+                Label: 'customer',
+            });
         }
         if (this.PrimaryContactID && this.callerSuppliedValue('PrimaryContactID', this.PrimaryContactID)) {
-            checks.push({ EntityName: SALES_CONTACT_ENTITY, ID: this.PrimaryContactID, Label: 'primary contact' });
+            checks.push({
+                EntityName: SALES_CONTACT_ENTITY,
+                ParentEntityName: PERSON_ENTITY,
+                ID: this.PrimaryContactID,
+                Label: 'primary contact',
+            });
         }
         return checks;
     }
@@ -3162,7 +3413,7 @@ export class DealEntityServer extends DealEntity {
 
         this._ownerStampWarnings.push(
             'The owner is set from the deal team, so the value supplied with this save was replaced by '
-            + 'the deal\'s Owner / AE. Change the Owner role on the Internal team panel to change it.',
+            + 'the person in the deal\'s Owner role. Change the Owner role on the Internal team panel to change it.',
         );
     }
 

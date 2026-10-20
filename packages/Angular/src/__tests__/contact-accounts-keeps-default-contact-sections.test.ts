@@ -17,8 +17,8 @@ import { MJS_ENTITIES } from '../lib/data/entity-names';
  *
  * A form panel that names a `relatedEntity` without a join field claims every relationship to that
  * entity, and the form then drops its own sections for them. The Accounts panel on the Sales Contact
- * form once named Sales Accounts, which hid "Accounts With This Default Primary Contact" and
- * "Accounts With This Default Billing Contact": the two sections #435 renamed. This runs MJ's own
+ * form once named Sales Accounts, which hid "Accounts (default primary contact)" and
+ * "Accounts (default billing contact)": the two sections #435 asked to rename. This runs MJ's own
  * resolver over the registered panel and the contact's relationships to Sales Accounts.
  */
 const ACCOUNT_ID = 'a0000000-0000-4000-8000-000000000001';
