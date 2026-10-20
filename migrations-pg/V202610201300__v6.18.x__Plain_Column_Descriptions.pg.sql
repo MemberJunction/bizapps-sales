@@ -1,5 +1,5 @@
 -- =============================================================================================
--- PostgreSQL counterpart of V202610180710__v6.18.x__Plain_Column_Descriptions.sql
+-- PostgreSQL counterpart of V202610201300__v6.18.x__Plain_Column_Descriptions.sql
 -- =============================================================================================
 -- Same descriptions, same order as the T-SQL file; see its header for why they changed.
 --

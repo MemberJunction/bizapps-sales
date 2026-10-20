@@ -520,15 +520,18 @@ GO
 
 
 
+-- EntityField.Description follows the new column descriptions, for the 15 entities whose
+-- columns are described above. Entity-scoped: CodeGen no longer captures this call, and the
+-- schema-wide form would reconcile entities this migration does not touch (CLAUDE.md,
+-- "Migrations — additive only").
+EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', @EntityIDs='79148DE5-7F99-44AC-ACD4-5EE7BA93D354,862535EB-36DD-4434-8B4E-E256363E781F,69B5DBE6-F0A4-4291-9947-0B2B8129F349,F1C22449-8F48-42A8-945C-CBE2EFD9E847,5AC3D14E-A9BA-4667-AF73-5928DAE446BF,27E8D79F-A8E2-4AC1-B208-5A0F11416197,A5BC9EE5-4C4E-408B-BB07-3C718227B616,DF087A57-A6C1-4EDC-9C52-EB784D95287C,4697F309-CD43-42DD-A2B5-2747473E5B98,7E187729-0E0C-4ED6-AE5A-FFD14452BF2A,827FE4A6-F190-4D4C-A042-9A31FD695886,F363D8C9-FBDE-4DF5-99C6-D1543D3BD3B2,D9B2404D-CA19-4339-8E87-CE62B1C30647,15A9B6F8-9566-4A37-8588-2D00E8F1CB9A,530174B2-654E-4E14-BF28-3EF29AC9833D', @IncludedSchemaNames='${flyway:defaultSchema}';
+
 -- =============================================================================
 -- CODEGEN OUTPUT — GENERATED CODE BELOW THIS LINE. DO NOT EDIT BY HAND.
 -- =============================================================================
 
 /* SQL text to update existing entities from schema */
 EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='', @IncludedSchemaNames='${flyway:defaultSchema}';
-
-/* SQL text to update existing entity fields from schema */
-EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', @IncludedSchemaNames='${flyway:defaultSchema}';
 
 /* SQL text to set default column width where needed */
 EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='', @IncludedSchemaNames='${flyway:defaultSchema}';
