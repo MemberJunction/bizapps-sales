@@ -360,7 +360,7 @@ async function resolveFromConsumer(name) {
      * Declaring them at the root would fix the symptom by making a lie true: the root would carry
      * dependencies nothing there imports, and they would drift the day a package stopped importing them.
      * IntegrationTests owns these checks, so its resolution is the one that should matter — but it
-     * declares only two of the nine probed names, so the other consumers follow it. `orders-entities`
+     * does not declare every probed name, so the other consumers follow it. `orders-entities`
      * lives in CoreEntitiesServer, Angular and Entities; anchoring solely at IntegrationTests would
      * resolve two and call the rest absent.
      */
@@ -378,11 +378,12 @@ async function resolveFromConsumer(name) {
 /**
  * Every `@mj-biz-apps/*` package some sales package DECLARES, read from the manifests at run time.
  *
- * This is the line between "not installed on this host" and "resolution is broken". Accounting,
- * contracts and `orders-core-entities-server` are declared NOWHERE in sales — they are optional
- * downstream apps and this runner is documented to run whichever of their bundles a host supports.
- * `common-entities`, `orders-entities` and `tasks-entities` ARE declared, so sales does not build
- * without them and they must always resolve. Computed, not listed, so it cannot drift.
+ * This is the line between "not installed on this host" and "resolution is broken". Every package
+ * this runner loads is declared: the runtime ones by the packages that import them, and accounting,
+ * contracts and `orders-core-entities-server` as devDependencies of IntegrationTests, so a plain
+ * install resolves them with no sibling checkout and the lockfile records which version ran. Whether
+ * their bundles run is still decided by the database (`judgeAppPresence` in scripts/app-presence.mjs). Computed, not listed, so it
+ * cannot drift.
  */
 function declaredDownstream() {
     const out = new Set();
@@ -715,6 +716,9 @@ for (const request of requested) {
      * A check that needs an app its bundle does not require (WT10 and WT14 sit in close-won-tasks but
      * need contracts) names it in `RequiresApp`. Left out like a bundle whose app is not present: listed
      * with the reason, NOT counted as skipped, because nothing chose not to run it.
+     *
+     * Only this runner reads `RequiresApp`. Another driver of the registry reaches the check, so each such
+     * check guards itself as well; `pnpm run test:integration` is the supported runner.
      */
     const leftOut = all.filter((c) => c.RequiresApp && !linkedApps.has(c.RequiresApp));
     const eligible = all.filter((c) => !leftOut.includes(c));

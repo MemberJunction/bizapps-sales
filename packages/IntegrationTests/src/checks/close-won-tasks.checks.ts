@@ -23,6 +23,7 @@ import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '
 import {
     CloseWonTaskService,
     CloseDealOperation,
+    NO_ORDER_ISSUE_PREFIX,
     ResolveTaskTypeColumn,
     type CloseWonTaskInput,
 } from '@mj-biz-apps/sales-core-entities-server';
@@ -68,6 +69,23 @@ function requireTasks(ctx: Ctx): void {
         'bizapps-tasks entities are NOT registered on this host, so these checks cannot prove anything. '
             + 'Run this bundle only against a stack that includes tasks. (Reporting a pass here would be a '
             + 'vacuous one.)',
+    );
+}
+
+/**
+ * Refuses a check that closes onto a contract-creating pipeline when contracts is absent.
+ *
+ * `RequiresApp: 'contracts'` leaves such a check out, but only under the Sales runner
+ * (`test-harnesses/integration.mjs`). Any other driver reaches the check, and the close would then take
+ * the stub contracts seam and fail as if the product were broken. Kept local rather than imported from
+ * `close-won-contract.checks.ts`, because importing that module registers its bundle.
+ */
+function requireContracts(ctx: Ctx): void {
+    Assert(
+        !!ProviderOf(ctx).Entities.find((e) => e.Name === E_CONTRACT),
+        'bizapps-contracts entities are NOT registered on this host, and this check closes onto a '
+            + 'contract-creating pipeline. Run it against a stack that includes contracts, through '
+            + '`pnpm run test:integration`, which leaves it out when contracts is absent.',
     );
 }
 
@@ -736,6 +754,7 @@ export const CloseWonTasksChecks: SalesCheck[] = [
                  * active rows. The check asserts the tasks carry the types CONFIGURED, never which types
                  * they are -- the same discipline as WT1.
                  */
+                requireContracts(ctx);
                 requireTasks(ctx);
 
                 // A closeable deal: open, on a contract-creating pipeline, and carrying its order.
@@ -829,11 +848,14 @@ export const CloseWonTasksChecks: SalesCheck[] = [
                 const contractTasks = await rows(ctx, E_TASK, `TypeID = '${ID_CONTRACT_PROCESSING}'`);
                 Assert(contractTasks.length >= 1, 'a contract-creating policy must also raise the contract task');
 
-                // Fully configured means nothing to complain about.
+                // Fully configured means nothing to complain about. An `info` note is not a complaint:
+                // a contracts release without order links reports the pending link that way on every
+                // won close, and that says nothing about the tasks this check is for.
+                const problems = out!.Issues.filter((i) => i.Severity !== 'info');
                 AssertEqual(
-                    out!.Issues.length,
+                    problems.length,
                     0,
-                    `a fully configured close should report no issues — got ${JSON.stringify(out!.Issues)}`,
+                    `a fully configured close should report no errors or warnings — got ${JSON.stringify(problems)}`,
                 );
             }),
     },
@@ -1002,8 +1024,13 @@ export const CloseWonTasksChecks: SalesCheck[] = [
                  * half that lied: a close that reports "no order" while creating one is worse than a
                  * close that quietly does nothing, since the message sends whoever reads it looking in
                  * the wrong place.
+                 *
+                 * Matched on the task service's own wording, imported so a rewording cannot leave this
+                 * filter matching nothing. A bare "has no order" also matches the pending contract-link
+                 * note ("…has no order links yet"), which a won close reports on any contracts release
+                 * without order links.
                  */
-                const noOrderWarnings = out.Issues.filter((i) => /has no order/i.test(i.Message ?? ''));
+                const noOrderWarnings = out.Issues.filter((i) => (i.Message ?? '').startsWith(NO_ORDER_ISSUE_PREFIX));
                 AssertEqual(
                     noOrderWarnings.length,
                     0,
@@ -1059,6 +1086,7 @@ export const CloseWonTasksChecks: SalesCheck[] = [
                  * Delete `ContractID: deal.ContractID ?? undefined` from the task input literal in
                  * `CloseDealOperation`. This check goes red; WT4 and WT5 stay green.
                  */
+                requireContracts(ctx);
                 requireTasks(ctx);
                 const { dealID, contractID } = await closeWonOnContractPipeline(ctx, { stripOrder: false });
 

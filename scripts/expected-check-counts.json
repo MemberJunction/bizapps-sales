@@ -39,12 +39,12 @@
     "both, because the interesting failure is a bundle that registers 4 and runs 0."
   ],
   "bundles": {
-    "save-deal": { "count": 37, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD41" },
-    "close-deal": { "count": 39, "requires": "orders", "ids": "CD1-CD39" },
+    "save-deal": { "count": 40, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD44" },
+    "close-deal": { "count": 40, "requires": "orders", "ids": "CD1-CD40" },
     "product-picker": { "count": 5, "requires": "orders", "ids": "PP1-PP5" },
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
-    "close-won-contract": { "count": 6, "requires": "contracts", "ids": "CT1, CT4, CT5, CT6, CT7, CT8 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild" },
-    "board-move": { "count": 6, "requires": "orders", "ids": "BD1-BD6" },
+    "close-won-contract": { "count": 8, "requires": "contracts", "ids": "CT1, CT4, CT5, CT6, CT7, CT8, CT9, CT10 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild; CT10 needs contract-order-links and is left out where contracts has none" },
+    "board-move": { "count": 7, "requires": "orders", "ids": "BD1-BD7" },
     "pipeline-copy": { "count": 2, "requires": null, "ids": "PC1-PC2" },
     "$comment_close_won_tasks": [
       "12, AND THE TRANSIENT STATE THAT MADE THIS NUMBER ODD IS NOW RESOLVED -- it resolved exactly here.",
@@ -60,7 +60,7 @@
       "Kept as history rather than deleted, because the next person to face a two-branch count collision",
       "should be able to find the reasoning rather than re-derive it."
     ],
-    "close-won-tasks": { "count": 16, "requires": "tasks", "ids": "WT1-WT16" },
+    "close-won-tasks": { "count": 18, "requires": "tasks", "ids": "WT1-WT18" },
     "activities": { "count": 21, "requires": "common", "ids": "AC1-AC14, AC16, AC18-AC23" },
     "forecast": { "count": 15, "requires": null, "ids": "FS1-FS15" },
     "term-start": { "count": 6, "requires": "orders", "ids": "TS1-TS6 — the term start a deal states for a subscription line (#32). TS1-TS4 are pure rule checks; TS5 reads the catalogue; TS6 round-trips OrderLine.ServicePeriodStart through a deal save." }
@@ -75,6 +75,15 @@
     "orders": "@mj-biz-apps/orders-entities",
     "contracts": "@mj-biz-apps/contracts-entities",
     "tasks": "@mj-biz-apps/tasks-entities",
-    "common": "@mj-biz-apps/common-entities"
+    "common": "@mj-biz-apps/common-entities",
+    "contract-order-links": "@mj-biz-apps/contracts-entities"
+  },
+  "$comment_entities": [
+    "A FEATURE that arrives in a newer release of a sibling, judged by one entity rather than a schema",
+    "(scripts/app-presence.mjs). No bundle requires one; a single check names it in RequiresApp and is",
+    "left out, listed with the reason, on a host whose sibling predates it."
+  ],
+  "entities": {
+    "contract-order-links": "MJ_BizApps_Contracts: Contract Orders"
   }
 }

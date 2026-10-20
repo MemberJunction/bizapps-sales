@@ -28,7 +28,8 @@
  *   board-move           A stage move appends EXACTLY ONE DealStageEvent, stamped with the values the
  *                        deal held on the way OUT — the provenance a board drag owes (D-BD2). Its writer
  *                        shares one transaction with the stage-order writer and the deal counter; see
- *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters
+ *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters.
+ *                        BD7 proves the event it appends then refuses an edit and a delete (#348)
  *   pipeline-copy        Every company gets its own copy of the default pipeline and all of its stages,
  *                        and a second run copies nothing (#327). Needs no sibling app: it saves no deal
  *

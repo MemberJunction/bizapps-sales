@@ -1,5 +1,19 @@
 # @mj-biz-apps/sales-integration-tests
 
+## 6.18.0
+
+### Patch Changes
+
+- Updated dependencies [7041a49]
+- Updated dependencies [769158a]
+- Updated dependencies [6e77e8f]
+- Updated dependencies [0cd81c5]
+- Updated dependencies [20e1899]
+- Updated dependencies [7c5daa9]
+  - @mj-biz-apps/sales-entities@6.18.0
+  - @mj-biz-apps/sales-core-entities-server@6.18.0
+  - @mj-biz-apps/sales-server@6.18.0
+
 ## 6.17.0
 
 ### Patch Changes
