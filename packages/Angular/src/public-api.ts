@@ -127,6 +127,8 @@ export * from './lib/pages/dashboard-inspect';
 // definitions, and a second surface needing "the current fiscal quarter" must reach THIS one rather
 // than reimplement the boundary arithmetic.
 export * from './lib/pages/dashboard-period';
+// The filter bar's rules (bc-aidp-next-golive#350), for the Board when it takes the same filters.
+export * from './lib/pages/dashboard-filters';
 export { DealWorkspaceService } from './lib/workspace/deal-workspace.service';
 export type { DealSaveOutcome, DealRosterRow } from './lib/workspace/deal-workspace.service';
 export * from './lib/workspace/deal-workspace.types';

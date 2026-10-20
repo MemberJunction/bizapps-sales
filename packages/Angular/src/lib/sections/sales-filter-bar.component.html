@@ -1,0 +1,57 @@
+<!--
+  The filter bar (bc-aidp-next-golive#350, #351): period, then the four lists. The fiscal year basis is
+  the Period dropdown's tooltip, because a period whose boundaries are invisible is a figure that looks
+  settled while meaning something else.
+-->
+<div class="filterbar" role="group" aria-label="Sales filters">
+  <label class="filterbar__period" [title]="State.PeriodTooltip">
+    <span class="filterbar__label">Period</span>
+    <select #periodSelect class="filterbar__select" data-testid="sales-period" aria-label="Reporting period"
+            (change)="PeriodChange.emit(periodSelect.value)">
+      @for (option of PeriodOptions; track option.Key) {
+        <option [value]="option.Key" [selected]="option.Key === State.Period">{{ option.Label }}</option>
+      }
+    </select>
+  </label>
+  <span class="muted filterbar__window" data-testid="sales-period-window">{{ State.WindowLabel }}</span>
+  @if (State.Period === 'custom') {
+    <!-- Native date inputs, the control MJ's filter builder uses for a date rule. -->
+    <span class="filterbar__range">
+      <input #rangeFrom type="date" class="filterbar__date" aria-label="From" data-testid="sales-period-from"
+             [value]="State.CustomStart ?? ''" (change)="CustomRangeChange.emit({ Start: rangeFrom.value, End: rangeTo.value })">
+      <span class="muted">to</span>
+      <input #rangeTo type="date" class="filterbar__date" aria-label="To" data-testid="sales-period-to"
+             [value]="State.CustomEnd ?? ''" (change)="CustomRangeChange.emit({ Start: rangeFrom.value, End: rangeTo.value })">
+    </span>
+  }
+  <!-- One list: a popover of checkboxes. Its button says what is picked, "All" for none. -->
+  @for (list of Lists; track list.Kind) {
+    <mj-filter-popover [Label]="ButtonLabel(list)" [ActiveCount]="Count(list.Kind)"
+                       [ShowClearAll]="Count(list.Kind) !== 0" (ClearAllRequested)="FilterCleared.emit(list.Kind)"
+                       [attr.data-testid]="list.TestID">
+      <div class="filterlist" role="group" [attr.aria-label]="list.Label">
+        @if (!State.Options[list.Kind].length) {
+          <span class="muted">Nothing to choose from yet.</span>
+        }
+        @for (option of State.Options[list.Kind]; track option.ID) {
+          <label class="filterlist__item">
+            <input type="checkbox" [checked]="IsPicked(list.Kind, option.ID)" (change)="FilterToggled.emit({ Kind: list.Kind, ID: option.ID })">
+            <span>{{ option.Name }}</span>
+          </label>
+        }
+      </div>
+    </mj-filter-popover>
+  }
+  @if (State.MyEmployeeID) {
+    <button type="button" class="filterbar__mine" data-testid="sales-my-deals"
+            [class.is-selected]="MyDealsOn" [attr.aria-pressed]="MyDealsOn" (click)="MyDealsToggled.emit()">
+      <i class="fa-solid fa-user" aria-hidden="true"></i> My deals
+    </button>
+  }
+  @if (State.NoLinesLeftOut) {
+    <span class="filterbar__chip" data-testid="sales-filter-no-lines"
+          title="A deal matches a product company through the products on its lines. These deals have no products yet.">
+      {{ State.NoLinesLeftOut }} {{ State.NoLinesLeftOut === 1 ? 'deal' : 'deals' }} with no products left out
+    </span>
+  }
+</div>
