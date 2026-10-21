@@ -51,7 +51,11 @@ const DEAL_NAME = `${RUN} deal`;
  * portals the type-ahead's dropdown out of the field.
  */
 async function createFromLookup(page: Page, fieldName: string, name: string): Promise<void> {
-    const input = (await Field(page, fieldName)).locator('.mj-fk-search input').first();
+    // The stock FK search, or the party picker on Account and the contacts (bc-aidp-next-golive#372),
+    // whose create row carries the same `.mj-fk-create-footer` class.
+    const input = (await Field(page, fieldName))
+        .locator('.mj-fk-search input, bizapps-party-field input.mj-combobox-input')
+        .first();
     await expect(input, `lookup ${fieldName} must be editable`).toBeVisible({ timeout: 15_000 });
     await input.click();
     await input.fill('');

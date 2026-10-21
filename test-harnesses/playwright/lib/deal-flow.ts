@@ -14,6 +14,7 @@ import {
     FirstOpenStatus,
     OpenNewDeal,
     OpenSection,
+    FirstSalesAccountName,
     PickLookup,
     RevealInForm,
     PipelineByName,
@@ -58,7 +59,7 @@ export async function ComposeDeal(page: Page, name: string, pipeline?: string): 
      * AFTER the pipeline, never before: choosing a pipeline is what does the clearing.
      */
     await SetStageByID(page, (await FirstOpenStageOf(chosenPipeline.ID)).ID);
-    await PickLookup(page, 'AccountID');
+    await PickLookup(page, 'AccountID', await FirstSalesAccountName());
 
     /**
      * ── THE STATUS, SET EXPLICITLY ──────────────────────────────────────────────────────────────
