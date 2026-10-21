@@ -2,8 +2,8 @@
  * @fileoverview Deal form body — Overview plus organized rail sections.
  *
  * Replaces the generated `details` dump (one accordion of every column) with:
- *   Overview (exec briefing) · Pipeline · Account · Commercial · What's being sold
- *   Motion · Close · Internal team · Buying team · Activity · Stage history · Payment schedule
+ *   Overview (exec briefing) · Pipeline · What's being sold · Payment schedule · Account · Commercial
+ *   Close · Buying team · Internal team · Motion · Activity · Stage history
  *
  * `replacesSectionKey: 'details'` hides the generated field list. `contributionKey` equals each
  * panel's `SectionKey` so left-nav rail items attach. Overview is the only `inclusion: 'Primary'`
@@ -2609,7 +2609,7 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-lines',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-related', sortKey: 68, contributionKey: 'lines' },
+    metadata: { entity: E, slot: 'after-related', sortKey: 89, contributionKey: 'lines' },
 })
 @Component({
     selector: 'mjs-deal-lines-panel',
@@ -2831,7 +2831,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-motion',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 60, contributionKey: 'motion' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 48, contributionKey: 'motion' },
 })
 @Component({
     selector: 'mjs-deal-motion-panel',
@@ -2901,7 +2901,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-close',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 52, contributionKey: 'close' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 60, contributionKey: 'close' },
 })
 @Component({
     selector: 'mjs-deal-close-panel',
@@ -3548,7 +3548,7 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-buying-team',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 48, contributionKey: 'buying-team',
+        entity: E, slot: 'after-related', sortKey: 52, contributionKey: 'buying-team',
         relatedEntity: MJS_ENTITIES.DealContactRole, relatedJoinField: 'DealID',
     },
 })
@@ -3587,7 +3587,7 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-activity',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 88, contributionKey: 'activity',
+        entity: E, slot: 'after-related', sortKey: 46, contributionKey: 'activity',
         relatedEntity: MJS_FOREIGN_ENTITIES.ActivityLink, relatedJoinField: 'RecordID',
     },
 })
@@ -3759,7 +3759,7 @@ export const SCHEDULE_DATE_ORDER = 'CASE WHEN PaymentDate IS NULL THEN 0 ELSE 1 
     key: 'sales:deal-related-payment-schedule',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 42, contributionKey: 'payment-schedule',
+        entity: E, slot: 'after-related', sortKey: 88, contributionKey: 'payment-schedule',
         relatedEntity: MJS_ENTITIES.DealPaymentSchedule, relatedJoinField: 'DealID',
     },
 })
