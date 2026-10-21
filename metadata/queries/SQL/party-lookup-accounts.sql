@@ -4,7 +4,7 @@
 --
 -- Result contract shared by every party lookup query: ID, Name, Detail; parameters Term (required) and
 -- Domain (optional, set by the picker when the term looks like a web address).
--- Prefix matches on indexed base columns only, TOP 20, no view, no count. sqlLikeBegins escapes %, _ and [.
+-- Prefix matches on indexed base columns only, TOP 20, no view, no count. sqlLikeBegins escapes %, _ and [ (and drops a trailing %).
 SELECT TOP 20
     o.ID,
     o.Name,

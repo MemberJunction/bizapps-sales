@@ -4,7 +4,7 @@
  *
  * The fixture is built so a wrong query returns a WRONG ROW rather than no row: a person whose last name
  * only CONTAINS the term (contains vs prefix), a person and an organization with no SalesContact /
- * SalesAccount row (the subtype restriction), and a name that `_` would match as a wildcard (escaping).
+ * SalesAccount row (the subtype restriction), and a name that `%`, `_` or `[a]` would match as a pattern (escaping).
  * Every name carries a per-run token, so seeded data cannot satisfy or spoil an assertion.
  *
  * Needs common's `Person.EmailDomain` and `Organization.WebsiteDomain` columns (common-ng's party lookup
@@ -31,7 +31,7 @@ interface Fixture {
     PersonOnly: string;
     /** LastName contains the token but does not start with it; has a SalesContact. */
     ContainsOnly: string;
-    /** LastName is token + 'axb', which the term token + 'a_b' matches only if `_` is a wildcard. */
+    /** LastName is token + 'axb': the terms token + 'a%b', 'a_b' and '[a]xb' match it only as patterns. */
     Wildcard: string;
     /** Name starts with the token; has a SalesAccount. */
     Account: string;
@@ -126,12 +126,16 @@ export const PartyLookupChecks: NamedCheck[] = [
         const ids = await lookup(ctx, Q_ACCOUNTS, `${f.Token}corp.test`, `${f.Token}corp.test`);
         Assert(ids.includes(f.Account), 'the website domain did not find the account (Organization.WebsiteDomain)');
     }),
-    seedCheck('PL5', "%, _ and ' in a term match literally and never error", async (ctx, f) => {
-        const underscore = await lookup(ctx, Q_CONTACTS, `${f.Token}a_b`);
-        Assert(!underscore.includes(f.Wildcard), "'_' acted as a wildcard; sqlLikeBegins must escape it");
+    /**
+     * Each wildcard sits MID-term: sqlLikeBegins strips a TRAILING '%' before escaping, so `token%`
+     * is a plain prefix search and could never show whether '%' is escaped.
+     */
+    seedCheck('PL5', "%, _, [ and ' in a term match literally and never error", async (ctx, f) => {
+        for (const term of [`${f.Token}a%b`, `${f.Token}a_b`, `${f.Token}[a]xb`]) {
+            const ids = await lookup(ctx, Q_CONTACTS, term);
+            Assert(!ids.includes(f.Wildcard), `'${term}' matched '${f.Token}axb' as a pattern; sqlLikeBegins must escape it`);
+        }
         await lookup(ctx, Q_CONTACTS, `o'${f.Token}`);
-        const percent = await lookup(ctx, Q_ACCOUNTS, `${f.Token}%`);
-        Assert(percent.length === 0, "'%' acted as a wildcard; sqlLikeBegins must escape it");
     }),
 ];
 

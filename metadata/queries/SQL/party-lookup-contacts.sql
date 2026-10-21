@@ -5,7 +5,7 @@
 -- Result contract shared by every party lookup query: ID, Name, Detail; parameters Term (required) and
 -- Domain (optional, set by the picker when the term looks like part of an email address).
 -- Prefix matches on indexed base columns only, TOP 20, no view, no count: this is what keeps it under a
--- second on a party file of a million people. sqlLikeBegins escapes %, _ and [.
+-- second on a party file of a million people. sqlLikeBegins escapes %, _ and [ (and drops a trailing %).
 SELECT TOP 20
     p.ID,
     p.DisplayName AS Name,
