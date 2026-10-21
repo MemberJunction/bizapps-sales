@@ -63,6 +63,9 @@ const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
     'stage-conversion-and-dwell.sql': { tables: ['DealStageEvent', 'Deal', 'Pipeline', 'PipelineStage'], columns: 16 },
     'forecast-history.sql': { tables: ['ForecastSnapshot', 'Company', 'Pipeline', 'Employee'], columns: 15 },
     'win-rate.sql': { tables: ['vwDeals', 'DealStatusType', 'OrderLine'], columns: 13 },
+    // The Deal form's party pickers (bc-aidp-next-golive#372): base tables only, never a view.
+    'party-lookup-contacts.sql': { tables: ['Person', 'SalesContact'], columns: 3 },
+    'party-lookup-accounts.sql': { tables: ['Organization', 'SalesAccount'], columns: 3 },
 };
 
 describe("MJ's SQL parser reads the business-day queries in full", () => {
