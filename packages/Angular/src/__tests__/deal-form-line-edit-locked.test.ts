@@ -39,7 +39,7 @@ function editor(over: { locked: boolean; productID?: string | null; hasOrder?: b
     const e = Object.create(MJSDealLineEditorComponent.prototype) as MJSDealLineEditorComponent;
     e.IsLocked = over.locked;
     Object.defineProperty(e, 'Working', {
-        value: { ProductID: over.productID === undefined ? 'prod-1' : over.productID, GetFieldByName: () => undefined },
+        value: { ProductID: over.productID === undefined ? 'prod-1' : over.productID, Quantity: 1, GetFieldByName: () => undefined },
         configurable: true, writable: true,
     });
     Object.defineProperty(e, 'Deal', {
@@ -53,33 +53,41 @@ function editor(over: { locked: boolean; productID?: string | null; hasOrder?: b
 describe('the deal form declines to open the editor on a closed deal', () => {
     it('does not open on a locked deal', () => {
         const p = panel(true);
-        p.EditLine({ row: { ID: 'line-1' } } as Parameters<MJSDealLinesPanel['EditLine']>[0]);
+        p.EditLine('line-1');
         expect(p.EditorOpen).toBe(false);
         expect(p.EditingLineID).toBeNull();
     });
 
     it('still opens on an open deal, which is the whole point of the control', () => {
         const p = panel(false);
-        p.EditLine({ row: { ID: 'line-1' } } as Parameters<MJSDealLinesPanel['EditLine']>[0]);
+        p.EditLine('line-1');
         expect(p.EditorOpen).toBe(true);
         expect(p.EditingLineID).toBe('line-1');
     });
 
     /**
-     * The grid must STAY rendered while locked — a closed deal still has to show what was sold. If it
-     * were moved inside `@if (!IsLocked)` the defect would look fixed while the panel went blank.
+     * The cards must STAY rendered while locked — a closed deal still has to show what was sold. If
+     * they were moved inside a not-locked block the defect would look fixed while the panel went blank.
      */
-    it('keeps the grid outside the not-locked block', () => {
+    it('renders the cards whether or not the deal is locked, and tells them which', () => {
         const t = TEMPLATE('deal-form.panels.ts');
-        const gate = t.indexOf('@if (!IsLocked) {');
-        const grid = t.indexOf('<mj-explorer-entity-data-grid');
-        const elseArm = t.indexOf('} @else {', gate);
+        const gate = t.indexOf('@if (IsLocked) {');
+        const cards = t.indexOf('<mjs-deal-line-cards', gate);
+        const gateEnd = t.indexOf('}', t.indexOf('{{ LineEditBlockedReason }}', gate));
         expect(gate).toBeGreaterThan(-1);
-        expect(grid, 'the grid must come after the locked/unlocked arms, not inside them')
-            .toBeGreaterThan(elseArm);
+        expect(cards, 'the cards must come after the locked notice, not inside it').toBeGreaterThan(gateEnd);
+        expect(t).toContain('[Locked]="IsLocked"');
     });
 
-    it('says why, where the Add button used to be', () => {
+    it('offers no edit or add control on the cards of a locked deal', () => {
+        const cards = TEMPLATE('deal-line-cards.component.ts');
+        const edit = cards.indexOf('data-testid="line-edit"');
+        const add = cards.indexOf('data-testid="lines-add"');
+        expect(cards.lastIndexOf('@if (!Locked) {', edit), 'edit must sit under a not-locked gate').toBeGreaterThan(-1);
+        expect(cards.lastIndexOf('@if (!Locked) {', add), 'add must sit under a not-locked gate').toBeGreaterThan(-1);
+    });
+
+    it('says why, above the cards', () => {
         expect(TEMPLATE('deal-form.panels.ts')).toContain('{{ LineEditBlockedReason }}');
     });
 });

@@ -1,5 +1,48 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.19.0
+
+### Patch Changes
+
+- 9510fd9: Sales Board and dashboard (#371, #448, #449, #450): page, period, Inspect slice and Board company/pipeline are kept in the URL; Board cards open with Enter or Space, have a "Move to stage" control, move at once on drop and move back with the reason if the save fails, and show an "Idle N days" flag past the stage's Rotting Days; a failed win rate, pipeline list or grid view shows its own error with Retry instead of replacing the page, and a failed period change says why with Retry; forecast stack segments are keyboard buttons; one date format ("Jul 1, 2026"); All deals lists open deals first, then by expected close; grids show "Expected close" and "Closed on" and probability as a percent; Inspect filters by criteria instead of ID lists; a pipeline's Close Won Policy is checked on save.
+- 3717a22: Closing and reopening fixes. A plain save that moves an open deal into a closing stage no longer takes that stage's probability, forecast category or order status, and the deal form and workspace no longer list closing stages. Reopening a deal that was closed with no stage puts it back with no stage. A failed deal save keeps the status and changes the caller asked for, so a retry still closes. A draft order's date follows the business day, and a booked order takes the close date. The Deals panel on organizations and people offers New only for sales customers and contacts, and the refusal for a missing customer or contact says which case it is.
+- Updated dependencies [de98c6f]
+- Updated dependencies [c80645a]
+- Updated dependencies [6c2a165]
+  - @mj-biz-apps/sales-entities@6.19.0
+
+## 6.18.0
+
+### Minor Changes
+
+- 6e77e8f: Order review by trigger support (bc-aidp-next-golive#320 §5). Sales now registers `DealOrderLink` with orders' `RegisterOrderDealLink` seam at bootstrap, answering which deal created an order from `Deal.OrderID`, so orders can let a deal order confirm without review. The seam ships in `@mj-biz-apps/orders-entities` 5.36.0; with an older orders the registration is skipped and logged. A pipeline's `CloseWonPolicy.CloseWonTasks.RaiseOrderReviewTask: false` stops a won deal raising the `ORDER_REVIEW` task; absent or `true` keeps it, so existing installs are unchanged.
+- 20e1899: MemberJunction floor raised to 6.1.6, and a batch of non-UX fixes:
+
+  - Breaking for direct importers of `@mj-biz-apps/sales-ng`: the unmounted `DealWorkspaceComponent` and the validation helpers only it used (`DiscountRefusalIssues`, `ShouldRefuseLineRemoval`, `LineRemovalRefusedIssues`, `UnlinkedLineIssues`, `MergeValidation`) are removed (#291). `IDownstreamSeam` gains `UpdateContractFromDeal` (#278).
+  - Closing a reopened Won deal Won again reuses its contract, refreshing unsigned terms, instead of creating a second one (#278).
+  - Changing a deal's contact or account moves its order's bill-to while the order is Draft or Quoted and still bills the previous party (#319).
+  - Deal stage events refuse updates and deletes on the server, and the API no longer offers them (#348).
+  - Slipped Deals, Stage Conversion and Forecast History count whole business days at both period bounds; Slipped Deals no longer fails on audit rows that are not JSON (#289).
+  - The Deal form's inline-create key workaround is removed now that MJ 6.1.6 sends the written key (#207).
+  - CodeGen no longer writes recurring reconcilers, including the field prune, into migrations (#345).
+
+### Patch Changes
+
+- 7c5daa9: The close-won-tasks checks no longer fail when a won close reports the pending contract-link note: WT10 allows `info` notes, and WT13 finds the no-order warning by its exported wording (`NO_ORDER_ISSUE_PREFIX`) instead of a phrase the note also contains. The coverage gate expects all 18 close-won-tasks checks. The bizapps-tasks peer floor is raised to `^1.7.0` to match `mj-app.json`, and the integration tests declare the accounting, common, contracts and orders server packages the harness and demo seed load (`importSibling` now tries those declarations before scanning for sibling checkouts), so a plain install runs them without sibling checkouts. `.env.example` documents `MJ_BASE_ENCRYPTION_KEY`.
+- Updated dependencies [7041a49]
+- Updated dependencies [769158a]
+- Updated dependencies [0cd81c5]
+- Updated dependencies [20e1899]
+  - @mj-biz-apps/sales-entities@6.18.0
+
+## 6.17.0
+
+### Patch Changes
+
+- Updated dependencies [2018641]
+- Updated dependencies [7b134f9]
+  - @mj-biz-apps/sales-entities@6.17.0
+
 ## 6.16.0
 
 ### Minor Changes

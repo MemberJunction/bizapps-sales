@@ -4,9 +4,9 @@
  * ── WHY THIS FILE EXISTS ────────────────────────────────────────────────────────────────────────
  *
  * Deals became Explorer record tabs: "New deal" is `OpenNewEntityRecord`, a list row is
- * `OpenEntityRecord`, and both render `mjs-deal-form`. `lib/workspace.ts` still drives
- * `mjs-deal-workspace`, which no template has mounted since the Workspace rail was removed, so every
- * spec reaching it failed in setup before any assertion ran. These helpers drive the live form.
+ * `OpenEntityRecord`, and both render `mjs-deal-form`. The old `lib/workspace.ts` drove
+ * `mjs-deal-workspace`, which no template mounted after the Workspace rail was removed, so every spec
+ * reaching it failed in setup before any assertion ran. These helpers drive the live form.
  *
  * ── THE SELECTOR CONVENTIONS ────────────────────────────────────────────────────────────────────
  *

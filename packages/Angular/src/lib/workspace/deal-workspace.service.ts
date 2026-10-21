@@ -1,17 +1,14 @@
 /**
- * @fileoverview All data access for the deal workspace, so the component itself does none.
+ * @fileoverview Data access for the Sales section, the board and the deal line editor: the lookup
+ * lists, the roster, a deal load and save, the product catalogue, the fiscal year start and the
+ * dashboard figures.
  *
- * The workspace component stays presentational: it takes lookups and a `DealEntity`, and asks this
- * service to save it. That split is copied from bizapps-contracts, and the payoff is that the surface can
- * be rendered and reasoned about without a provider behind it.
+ * Named for the deal workspace, the surface it was written for. That component is deleted (#291); the
+ * section, the board and the line editor kept the reads and the save they share with it.
  *
- * WHAT CHANGED WITH RELATED RECORD COLLECTIONS. This service used to build a `DealDraft` — a UI-side
- * model with its own line and instalment arrays — and send it through the `Sales.SaveDeal` remote
- * operation, because the entity a browser held had no child collections to save. It does now, so the
- * service hands out the real entity and its children, and saving is `deal.Save()`. The two places that
- * needed care are both here rather than in the component: LOADING the collections exactly once
- * ({@link DealWorkspaceService.LoadDeal}) and forcing a full write-out on save
- * ({@link DealWorkspaceService.Save}).
+ * A deal's related-record collections save with it: saving is `deal.Save()`. The two places that need
+ * care are both here: LOADING the collections exactly once ({@link DealWorkspaceService.LoadDeal}) and
+ * forcing a full write-out on save ({@link DealWorkspaceService.Save}).
  *
  * @module @mj-biz-apps/sales-ng
  */
@@ -36,15 +33,30 @@ import {
     ProjectValidation,
     type DealWorkspaceValidation,
 } from './deal-workspace.validation';
-import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
+import { BusinessTimeZoneEngine, CalendarDayIn, type CalendarDay } from '@mj-biz-apps/common-entities';
 import { E_ORDERS_PRODUCT, PRODUCT_LOOKUP_FIELDS, ProductFilterFor, type ProductLookup } from '@mj-biz-apps/sales-entities';
 import {
+    CALENDAR_YEAR_START,
     PeriodParameters,
     ResolveFiscalYearStart,
     type FiscalYearStart,
     type FiscalYearStartResolution,
     type PeriodWindow,
 } from '../pages/dashboard-period';
+import { CleanIDs, FilterParameters, NO_FILTERS, type DashboardFilters } from '../pages/dashboard-filters';
+
+/**
+ * A query's parameters: the period's bounds, the filter bar's lists and anything the caller adds, or
+ * undefined when there are none. An unbounded edge and an "All" list are left out, never sent empty.
+ */
+function queryParameters(
+    window: PeriodWindow | undefined,
+    filters: DashboardFilters,
+    extra: Record<string, string> = {},
+): Record<string, string | string[]> | undefined {
+    const parameters: Record<string, string | string[]> = { ...(PeriodParameters(window) ?? {}), ...FilterParameters(filters), ...extra };
+    return Object.keys(parameters).length ? parameters : undefined;
+}
 
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
@@ -54,8 +66,10 @@ const E_FORECAST_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
 const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 const E_EMPLOYEE = 'MJ: Employees';
+const E_COMPANY = 'MJ: Companies';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
+const E_STAGE_EVENT = 'MJ_BizApps_Sales: Deal Stage Events';
 
 /**
  * Accounting's per-company profile — where the FISCAL YEAR START lives.
@@ -66,6 +80,63 @@ const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
  * still guarded on metadata, because sales is built to run standalone.
  */
 const E_ACCOUNTING_COMPANY_PROFILE = 'MJ_BizApps_Accounting: Accounting Company Profiles';
+
+/**
+ * Accounting's currencies, read for their three-letter codes. `Deal.CurrencyID` is a soft reference to
+ * this entity, so the roster carries an ID that only accounting can turn into "USD". Read, never
+ * written, and guarded on metadata like the profile above.
+ */
+const E_ACCOUNTING_CURRENCY = 'MJ_BizApps_Accounting: Currencies';
+
+/**
+ * What a figure is LABELLED as when no deal states a currency, or names one this host cannot resolve.
+ *
+ * A display default, not a fact about the money. It is here as one named constant rather than three
+ * hardcoded 'USD' literals so that the assumption is stated once, in a place a reader meets it.
+ */
+export const DEFAULT_DISPLAY_CURRENCY = 'USD';
+
+/**
+ * The currency code a roster row is shown in: the code `currencyID` names in `codes`, or the display
+ * default when the deal has none or names one this host cannot resolve (accounting not installed, or
+ * not readable by this user). `codes` is keyed by upper-cased ID, since SQL Server returns GUIDs upper
+ * case and the browser may hold either.
+ */
+export function CurrencyCodeFor(currencyID: string | null, codes: ReadonlyMap<string, string>): string {
+    return (currencyID && codes.get(currencyID.toUpperCase())) || DEFAULT_DISPLAY_CURRENCY;
+}
+
+/**
+ * One read of accounting's currency codes, keyed by upper-cased ID: empty when accounting is not
+ * installed, null when the read failed (so a caller can decline to cache it). Never throws.
+ *
+ * A module function so the deal form, whose panels are built without an injection context, reads
+ * codes the same way the roster does. Callers cache; see `DealWorkspaceService.LoadCurrencyCodes`
+ * and `form-panels/deal-money.ts`.
+ */
+export async function ReadCurrencyCodes(): Promise<Map<string, string> | null> {
+    // Everything inside the try, the metadata check included: a label lookup must never take the
+    // roster down with it.
+    try {
+        if (!new Metadata().Entities.some((e) => e.Name === E_ACCOUNTING_CURRENCY)) {
+            return new Map();
+        }
+        const result = await new RunView().RunView<{ ID: string; Code: string }>({
+            EntityName: E_ACCOUNTING_CURRENCY,
+            ResultType: 'simple',
+            Fields: ['ID', 'Code'],
+        });
+        if (result?.Success) {
+            return new Map((result.Results ?? []).map((c) => [String(c.ID).toUpperCase(), String(c.Code).trim()]));
+        }
+        // At status, not error: a rep without accounting permissions is an ordinary deployment.
+        // See LoadFiscalYearStart.
+        LogStatus(`${E_ACCOUNTING_CURRENCY} read failed, showing ${DEFAULT_DISPLAY_CURRENCY} - ${result?.ErrorMessage ?? 'unknown error'}`);
+    } catch (e) {
+        LogStatus(`${E_ACCOUNTING_CURRENCY} read threw, showing ${DEFAULT_DISPLAY_CURRENCY} - ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return null;
+}
 
 /**
  * One row of the deal roster.
@@ -83,13 +154,29 @@ const E_ACCOUNTING_COMPANY_PROFILE = 'MJ_BizApps_Accounting: Accounting Company 
  * reach them; a measure that only exists inside a component getter is reachable by nothing else.
  */
 export interface DealDashboardSummary {
+    /** Open pipeline deals expected to close in the period, summed. The Open pipeline tile. */
     OpenAmount: number;
+    /** Open deals expected to close in the period, Omitted ones included. */
     OpenCount: number;
+    /** Open deals in a forecast category left out of the pipeline (Omitted); counted in `OpenCount` only. */
+    OpenOmittedCount: number;
+    /** The forecast's open segments: each open pipeline deal in the period once, in its highest category. */
+    CommitAmount: number;
+    CommitCount: number;
+    BestCaseOnlyAmount: number;
+    PipelineOnlyAmount: number;
+    /** Amount × Probability over the Open pipeline deals. The Weighted pipeline tile. */
+    WeightedAmount: number;
     TotalCount: number;
+    /** Needs attention: about the open book today, not bounded by the period. */
     PastExpectedCloseCount: number;
+    NoOwnerCount: number;
+    NoCloseDateCount: number;
     WonCount: number;
-    /** The amounts of the deals `WonCount` counts: the forecast stack's Closed segment. */
+    /** The amounts of the deals `WonCount` counts: the forecast's Won segment. */
     WonAmount: number;
+    /** Deals in scope whose order carries no line: what a Product company filter leaves out. */
+    NoLinesDealCount: number;
     /** How much of the open figure the orders engine priced, and how much a person typed. */
     OpenPricedAmount: number;
     OpenStatedAmount: number;
@@ -110,10 +197,8 @@ export interface DealRosterRow {
      * When the deal actually closed. NULL on every open deal, and on a closed one that never recorded
      * it.
      *
-     * Carried so the forecast stack's Closed segment can be bounded by the dashboard's selected period
-     * (golive#232) without re-querying. The roster query has always returned this column; nothing
-     * consumed it until the period selector needed a date that says when a win LANDED rather than when
-     * it was expected to.
+     * Carried so the client-side Won predicate (`WonInPeriod`) can bound a win by the day it LANDED
+     * rather than the day it was expected to. The Won figures themselves come from the summary query.
      */
     ActualCloseDate: string | Date | null;
     /** Virtual name columns that DO resolve on the Deal view. */
@@ -122,6 +207,12 @@ export interface DealRosterRow {
     DealType: string | null;
     DealStatusType: string | null;
     OwnerEmployee: string | null;
+    /** The owner's employee ID: what the Deal owner filter and the Commit by deal owner rows key on. */
+    OwnerEmployeeID: string | null;
+    /** The selling company, `Deal.CompanyID`. */
+    CompanyID: string | null;
+    /** The distinct companies on the deal's order lines; empty for a deal with no lines. */
+    ProductCompanyIDs: string[];
     ForecastCategoryType: string | null;
     /** Kept so anything downstream can branch on the STATUS FLAGS rather than the status name. */
     DealStatusTypeID: string | null;
@@ -153,16 +244,23 @@ export interface DealRosterRow {
      */
     IncludeInCommit: boolean;
     IncludeInBestCase: boolean;
+    /**
+     * `ForecastCategoryType.IncludeInPipeline`; true when the deal has no category. False (Omitted)
+     * leaves an open deal out of the dashboard's pipeline money figures, as the forecast queries do.
+     */
+    IncludeInPipeline: boolean;
     /** Amount × Probability / 100, computed in the roster query. Display only — not a price. */
     WeightedAmount: number | null;
     /** PipelineStage.DisplayOrder, for the funnel. */
     StageOrder: number | null;
-    /**
-     * The currency `Amount` is denominated in. NULL means UNKNOWN, not "the display default" -- it is
-     * unpopulated on every deal today. A consumer must not total a set containing more than one
-     * distinct value; the board refuses to.
-     */
+    /** The currency record `Amount` is denominated in; a soft reference to accounting's Currency. */
     CurrencyID: string | null;
+    /**
+     * `CurrencyID` as a three-letter code ("USD"), for display. Deals created before currencies were
+     * stamped carry no ID and read as the display default. A consumer must not total a set containing
+     * more than one distinct code; the board refuses to.
+     */
+    CurrencyCode: string;
 }
 
 /** Raw roster shape before the account name is joined in. */
@@ -188,8 +286,56 @@ export interface DealSaveOutcome {
 
 /** Row shapes as they come back from RunView with `ResultType: 'simple'`. */
 interface PipelineRow { ID: string; Name: string; Code: string; CompanyID: string; Company: string | null; IsDefault: boolean; DisplayRank: number }
-interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null; DealStatusTypeID: string | null }
+interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null; DealStatusTypeID: string | null; RottingDays: number | null }
 interface NamedRow { ID: string; Name: string }
+/** A stage event, as {@link DealWorkspaceService.LoadStageEntries} reads it. */
+export interface StageEventRow { DealID: string; ToStageID: string | null; ChangedAt: string | Date }
+/** An open deal, as {@link DealWorkspaceService.LoadStageEntries} reads it. */
+export interface StageDealRow { ID: string; PipelineStageID: string | null; __mj_CreatedAt: string | Date }
+
+const sameID = (a: string | null | undefined, b: string | null | undefined): boolean =>
+    !!a && !!b && a.toLowerCase() === b.toLowerCase();
+
+/**
+ * The day each deal entered its current stage, keyed by lower-cased deal ID. `events` are newest
+ * first. See {@link DealWorkspaceService.LoadStageEntries} for the rule.
+ */
+export function StageEntryDays(events: readonly StageEventRow[], deals: readonly StageDealRow[]): Map<string, string> {
+    const newest = new Map<string, StageEventRow>();
+    for (const e of events) {
+        const key = e.DealID.toLowerCase();
+        if (!newest.has(key)) {
+            newest.set(key, e);
+        }
+    }
+    const days = new Map<string, string>();
+    for (const d of deals) {
+        const key = d.ID.toLowerCase();
+        const event = newest.get(key);
+        if (!event) {
+            days.set(key, instantDay(d.__mj_CreatedAt));
+        } else if (sameID(event.ToStageID, d.PipelineStageID)) {
+            days.set(key, instantDay(event.ChangedAt));
+        }
+    }
+    return days;
+}
+
+/**
+ * Whether a successful read returned fewer rows than matched its filter. A row cap reports success
+ * and returns the first N, so `Success` alone cannot tell a short read from a complete one.
+ */
+export function IsTruncatedRead(result: { Results?: readonly unknown[] | null; TotalRowCount?: number | null }): boolean {
+    return result.TotalRowCount != null && (result.Results?.length ?? 0) < result.TotalRowCount;
+}
+
+/**
+ * The business day an instant fell on, `YYYY-MM-DD`. A stage change is a moment, so a zone decides
+ * its day, the same one that decides what day it is now.
+ */
+function instantDay(value: string | Date): string {
+    return CalendarDayIn(value instanceof Date ? value : new Date(value), BusinessTimeZoneEngine.Instance.Zone);
+}
 interface StatusRow extends NamedRow { IsOpen: boolean; IsClosed: boolean; IsWon: boolean; IsLost: boolean; LocksDeal: boolean }
 interface LossReasonRow extends NamedRow { RequiresNotes: boolean }
 export interface ContactRow {
@@ -201,7 +347,7 @@ export interface ContactRow {
 }
 
 /**
- * A contact's label in the workspace's contact lists: "Name (email)", the same text the deal form's
+ * A contact's label in the `Contacts` lookup list: "Name (email)", the same text the deal form's
  * contact picker shows (#254). A native select can only jump to an option by its first letters, so
  * the email cannot be searched here, but it tells two people with the same name apart.
  *
@@ -255,12 +401,13 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
         },
     ),
     Stages: lookupRead<StageRow>(
-        { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID'] },
+        { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID', 'RottingDays'] },
         (rows, into) => {
             into.Stages = rows.map<StageLookup>((s) => ({
                 ID: s.ID, Name: s.Name, PipelineID: s.PipelineID, DisplayOrder: s.DisplayOrder,
                 Probability: s.Probability, ForecastCategoryTypeID: s.ForecastCategoryTypeID,
                 DealStatusTypeID: s.DealStatusTypeID ?? null,
+                RottingDays: s.RottingDays == null ? null : Number(s.RottingDays),
             }));
         },
     ),
@@ -297,8 +444,10 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
     // IsA CHILDREN whose Name lives on the parent and CodeGen generates no lookup join through
     // that edge. So they are loaded here and resolved client-side. This is the reason the
     // customer-context header exists as a lookup rather than a field on the deal.
+    // Filtered on the inherited Organization Status, the one the account form shows; the form hides
+    // SalesAccount.IsActive.
     Accounts: lookupRead<NamedRow>(
-        { EntityName: E_ACCOUNT, ExtraFilter: 'IsActive = 1', OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
+        { EntityName: E_ACCOUNT, ExtraFilter: "Status = 'Active'", OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
         (rows, into) => {
             into.Accounts = rows.map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
         },
@@ -320,6 +469,12 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
             into.Employees = rows.map<DealLookup>((e) => ({ ID: e.ID, Name: e.FirstLast ?? '(unnamed employee)' }));
         },
     ),
+    Companies: lookupRead<NamedRow>(
+        { EntityName: E_COMPANY, OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
+        (rows, into) => {
+            into.Companies = rows.map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+        },
+    ),
     // Loss reasons, for the close panel. `RequiresNotes` travels with them because the panel decides
     // whether LossNotes is mandatory from the FLAG on the chosen row. The close panel cannot demand a
     // reason it has no list to offer, and an empty dropdown fails as a TIMEOUT rather than as a
@@ -332,101 +487,33 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
     ),
 };
 
-/** Every lookup list: what the deal workspace loads. */
-export const ALL_LOOKUP_KEYS = Object.keys(LOOKUP_READS) as LookupKey[];
+/**
+ * Every lookup list: what `LoadLookups` reads when no keys are passed. Companies is the dashboard
+ * filter bar's alone: a deal takes its company from its pipeline, so a deal load does not read it.
+ */
+export const ALL_LOOKUP_KEYS = (Object.keys(LOOKUP_READS) as LookupKey[]).filter((key) => key !== 'Companies');
 
 /**
- * The lists the Sales section reads: the board's columns and the status pill. Accounts, contacts,
- * employees and loss reasons are the deal workspace's pickers, and accounts and contacts grow with the
- * customer base, so the section does not load them.
+ * The lists the Sales section reads: the board's columns, the status pill, and the company names the
+ * dashboard's filter bar labels its choices with. Accounts, contacts, employees and loss reasons were the
+ * deal workspace's pickers, and accounts and contacts grow with the customer base, so the section does
+ * not load them.
  */
-export const SECTION_LOOKUP_KEYS: readonly LookupKey[] = ['Pipelines', 'Stages', 'DealStatusTypes'];
+export const SECTION_LOOKUP_KEYS: readonly LookupKey[] = ['Pipelines', 'Stages', 'DealStatusTypes', 'Companies'];
 /**
- * The collections the workspace edits, named once.
+ * The collections a deal load reads, named once.
  *
  * Passed to `LoadRelatedRecords` so the load is EXPLICIT about what it wants rather than taking
  * "everything declared". A collection added to the entity later should not start being fetched by a
  * surface that does not render it.
  */
 // 'Lines' is NOT here: the deal holds none. Its order's lines arrive with the embedded order.
-const WORKSPACE_COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
+const DEAL_COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
 
 @Injectable({ providedIn: 'root' })
 export class DealWorkspaceService {
     /**
-     * Loads every picker's contents in ONE round trip.
-     *
-     * `RunViews` (plural) rather than nine awaited `RunView` calls — the house rule against querying in
-     * a loop applies just as much to a fixed list of nine as to an unbounded one.
-     */
-    /**
-     * The human-facing NUMBER of a record a close routed to.
-     *
-     * `SalesCloseRoutingResult.RecordID` is an ID; a user needs the number orders or contracts minted.
-     * Soft-resolved by target so the workspace degrades to showing nothing rather than erroring when the
-     * downstream app is not installed — the routing result already explains that case in its own words.
-     *
-     * This is a READ of the downstream record's own value. Nothing is computed here; see the money rule.
-     */
-    public async LookupRoutedRecordNumber(target: string, recordID: string): Promise<string | null> {
-        const map: Record<string, { Entity: string; Field: string }> = {
-            Order: { Entity: 'MJ_BizApps_Orders: Order Headers', Field: 'OrderNumber' },
-            Contract: { Entity: 'MJ_BizApps_Contracts: Contracts', Field: 'ContractNumber' },
-        };
-        const spec = map[target];
-        if (!spec) {
-            return null;
-        }
-        try {
-            const r = await new RunView().RunView<Record<string, unknown>>({
-                EntityName: spec.Entity,
-                ExtraFilter: `ID = '${recordID.replace(/'/g, "''")}'`,
-                ResultType: 'simple',
-                Fields: ['ID', spec.Field],
-            });
-            const row = r?.Success ? (r.Results ?? [])[0] : undefined;
-            const value = row?.[spec.Field];
-            return typeof value === 'string' && value.length ? value : null;
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * Whether a record with this id is in the database: `true`, `false`, or `null` when no read
-     * succeeded.
-     *
-     * Retried because a record just created can be missing from the first read after its save. The
-     * last attempt is trusted: `false` means the id was never written, not that the read was early.
-     * A malformed id is `false` without a read, so it never reaches the filter.
-     */
-    public async RecordExists(entityName: string, id: string, attempts = 3, delayMs = 400): Promise<boolean | null> {
-        if (!/^[0-9a-fA-F-]{36}$/.test(id)) {
-            return false;
-        }
-        let answered = false;
-        for (let attempt = 1; attempt <= attempts; attempt++) {
-            const r = await new RunView().RunView<{ ID: string }>({
-                EntityName: entityName,
-                ExtraFilter: `ID = '${id}'`,
-                ResultType: 'simple',
-                Fields: ['ID'],
-            });
-            if (r?.Success) {
-                if ((r.Results ?? []).length > 0) {
-                    return true;
-                }
-                answered = true;
-            }
-            if (attempt < attempts) {
-                await new Promise((resolve) => setTimeout(resolve, delayMs));
-            }
-        }
-        return answered ? false : null;
-    }
-
-    /**
-     * The named lookup lists, in one `RunViews` batch. Defaults to every list (the deal workspace);
+     * The named lookup lists, in one `RunViews` batch. Defaults to every list;
      * the Sales section passes {@link SECTION_LOOKUP_KEYS}. Lists not asked for stay empty.
      */
     public async LoadLookups(keys: readonly LookupKey[] = ALL_LOOKUP_KEYS): Promise<DealWorkspaceLookups> {
@@ -446,6 +533,46 @@ export class DealWorkspaceService {
             LOOKUP_READS[key].Apply(r?.Success ? (r.Results ?? []) : [], lookups);
         });
         return lookups;
+    }
+
+    /**
+     * The day each OPEN deal entered its current stage, by deal ID (bizapps-sales#450). The Board flags
+     * a card that has sat in its stage past the stage's `RottingDays`.
+     *
+     * One `RunViews` batch: the stage events of open deals, newest first, and the open deals' creation
+     * times. A deal's day is its newest event INTO its current stage; a deal with no event has been in
+     * its stage since it was created (a new deal's first stage records no event). A deal whose newest
+     * event names a different stage is left out rather than guessed.
+     *
+     * "Open" is the status's `IsOpen` FLAG. Throws when either read fails or comes back short, so the caller can say the
+     * flags are unavailable instead of showing none.
+     */
+    public async LoadStageEntries(): Promise<Map<string, string>> {
+        const md = new Metadata();
+        const deal = md.Entities.find((e) => e.Name === E_DEAL);
+        const status = md.Entities.find((e) => e.Name === E_STATUS_TYPE);
+        if (!deal || !status) {
+            return new Map();
+        }
+        const openDeals = `SELECT ID FROM [${deal.SchemaName}].[${deal.BaseView}] WHERE DealStatusTypeID IN `
+            + `(SELECT ID FROM [${status.SchemaName}].[${status.BaseView}] WHERE IsOpen = 1)`;
+        // IgnoreMaxRows: both entities carry a UserViewMaxRows cap, and a capped event read drops a
+        // deal's newest event, so the deal would date from its creation and be flagged as long idle.
+        const [events, deals] = await new RunView().RunViews([
+            { EntityName: E_STAGE_EVENT, ExtraFilter: `DealID IN (${openDeals})`, OrderBy: 'ChangedAt DESC', ResultType: 'simple', Fields: ['DealID', 'ToStageID', 'ChangedAt'], IgnoreMaxRows: true },
+            { EntityName: E_DEAL, ExtraFilter: `ID IN (${openDeals})`, ResultType: 'simple', Fields: ['ID', 'PipelineStageID', '__mj_CreatedAt'], IgnoreMaxRows: true },
+        ]);
+        if (!events?.Success || !deals?.Success) {
+            throw new Error(events?.ErrorMessage || deals?.ErrorMessage || 'The deals\' stage history could not be read.');
+        }
+        // A read that still came back short is unknown history, not old history: flag nothing.
+        if (IsTruncatedRead(events) || IsTruncatedRead(deals)) {
+            throw new Error('The deals\' stage history came back incomplete.');
+        }
+        return StageEntryDays(
+            (events.Results ?? []) as StageEventRow[],
+            (deals.Results ?? []) as StageDealRow[],
+        );
     }
 
     /**
@@ -469,20 +596,33 @@ export class DealWorkspaceService {
      * CustomerName, PipelineStage). Mapping here keeps both audiences served and means renaming a
      * column on either side is a one-file change.
      *
-     * `closedSince` drops closed deals that closed before it; open deals always come back
-     * (bizapps-sales#209). Omitted, every deal comes back.
+     * `closedSince` drops closed deals that closed before it, and `closedUntil` those that closed after
+     * it; open deals always come back (bizapps-sales#209, bc-aidp-next-golive#351). Omitted, every deal
+     * comes back. `filters` narrows the rows by the section's filter bar in the query itself
+     * (bc-aidp-next-golive#350).
      *
      * THROWS WHEN THE QUERY FAILS, rather than returning an empty roster. An empty roster reads as a
      * database with no deals. The likeliest failure once `closedSince` is passed is a host whose query
      * definition predates the parameter, which MJ refuses as an unknown parameter; the section shows the
      * reason instead of an empty dashboard.
      */
-    public async LoadRoster(closedSince?: string | null): Promise<DealRosterRow[]> {
-        const result = await new RunQuery().RunQuery({
-            QueryName: 'Sales: Deal Roster',
-            CategoryPath: 'Sales',
-            ...(closedSince ? { Parameters: { ClosedSince: closedSince } } : {}),
-        });
+    public async LoadRoster(
+        closedSince?: string | null,
+        filters: DashboardFilters = NO_FILTERS,
+        closedUntil: string | null = null,
+    ): Promise<DealRosterRow[]> {
+        const extra: Record<string, string> = {};
+        if (closedSince) extra['ClosedSince'] = closedSince;
+        if (closedUntil) extra['ClosedUntil'] = closedUntil;
+        const parameters = queryParameters(undefined, filters, extra);
+        const [result, codes] = await Promise.all([
+            new RunQuery().RunQuery({
+                QueryName: 'Sales: Deal Roster',
+                CategoryPath: 'Sales',
+                ...(parameters ? { Parameters: parameters } : {}),
+            }),
+            this.LoadCurrencyCodes(),
+        ]);
         if (!result?.Success) {
             throw new Error(`Sales: Deal Roster failed - ${result?.ErrorMessage ?? 'unknown error'}`);
         }
@@ -534,12 +674,16 @@ export class DealWorkspaceService {
             DealType: (d['DealTypeName'] as string | null) ?? null,
             DealStatusType: (d['StatusName'] as string | null) ?? null,
             OwnerEmployee: (d['OwnerName'] as string | null) ?? null,
+            OwnerEmployeeID: (d['OwnerEmployeeID'] as string | null) ?? null,
+            CompanyID: (d['CompanyID'] as string | null) ?? null,
+            ProductCompanyIDs: CleanIDs(String(d['ProductCompanyIDs'] ?? '').split(',')),
             ForecastCategoryType: (d['ForecastCategoryName'] as string | null) ?? null,
             DealStatusTypeID: (d['DealStatusTypeID'] as string | null) ?? null,
             PipelineID: (d['PipelineID'] as string | null) ?? null,
             PipelineStageID: (d['PipelineStageID'] as string | null) ?? null,
             PipelineIncludeInForecast: bool(d['PipelineIncludeInForecast']),
             CurrencyID: (d['CurrencyID'] as string | null) ?? null,
+            CurrencyCode: CurrencyCodeFor((d['CurrencyID'] as string | null) ?? null, codes),
             IsOpen: bool(d['IsOpen']),
             IsWon: bool(d['IsWon']),
             IsLost: bool(d['IsLost']),
@@ -547,27 +691,58 @@ export class DealWorkspaceService {
             IsPastExpectedClose: bool(d['IsPastExpectedClose']),
             IncludeInCommit: bool(d['IncludeInCommit']),
             IncludeInBestCase: bool(d['IncludeInBestCase']),
+            IncludeInPipeline: bool(d['IncludeInPipeline']),
             WeightedAmount: num(d['WeightedAmount']),
             StageOrder: num(d['StageOrder']),
         }));
     }
 
+    /** Accounting's currency codes by upper-cased ID, read once per session. See `LoadCurrencyCodes`. */
+    private currencyCodes: Promise<Map<string, string>> | null = null;
+
     /**
-     * Run a published Sales MJ Query by name. Empty array on failure — the dashboard degrades a
-     * missing chart rather than taking the page down, and says so via the caller's empty state.
+     * Accounting's currency codes, keyed by upper-cased ID. Read once and cached: currencies are a
+     * short reference list that changes rarely.
+     *
+     * Read here rather than joined in `deal-roster.sql`, because sales must load on a host without
+     * accounting, and a join to accounting's table would make the roster query fail there. Empty when
+     * accounting is not installed or the read fails, so every deal reads as the display default; a
+     * failed read is not cached, so the next roster load tries again.
      */
-    public async RunNamedQuery(
-        name: string,
-        parameters?: Record<string, string>,
-    ): Promise<Record<string, unknown>[]> {
+    public LoadCurrencyCodes(): Promise<Map<string, string>> {
+        if (!this.currencyCodes) {
+            this.currencyCodes = this.readCurrencyCodes();
+        }
+        return this.currencyCodes;
+    }
+
+    private async readCurrencyCodes(): Promise<Map<string, string>> {
+        const codes = await ReadCurrencyCodes();
+        if (codes === null) {
+            // A failed read is not cached, so the next roster load tries again.
+            this.currencyCodes = null;
+            return new Map();
+        }
+        return codes;
+    }
+
+    /**
+     * The win rate rows for a period, from `Sales: Win Rate by Count and Value`.
+     *
+     * NULL means the query did not run, as with {@link LoadDashboardSummary}. An empty list means it
+     * ran and nothing closed; the card renders those two differently, so a failure does not read as
+     * "0 won / 0 closed".
+     */
+    public async LoadWinRate(window?: PeriodWindow, filters: DashboardFilters = NO_FILTERS): Promise<Record<string, unknown>[] | null> {
+        const parameters = queryParameters(window, filters);
         const result = await new RunQuery().RunQuery({
-            QueryName: name,
+            QueryName: 'Sales: Win Rate by Count and Value',
             CategoryPath: 'Sales',
             ...(parameters ? { Parameters: parameters } : {}),
         });
         if (!result?.Success) {
-            LogError(`Sales query '${name}' failed - ${result?.ErrorMessage ?? 'unknown error'}`);
-            return [];
+            LogError(`Sales: Win Rate by Count and Value failed - ${result?.ErrorMessage ?? 'unknown error'}`);
+            return null;
         }
         return (result.Results ?? []) as Record<string, unknown>[];
     }
@@ -629,16 +804,8 @@ export class DealWorkspaceService {
         return result?.Success ? (result.Results ?? []) : [];
     }
 
-    /** A blank deal, ready to bind to. Its collections start empty and are never loaded — there is nothing to load. */
-    public async NewDeal(): Promise<DealEntity> {
-        const md = new Metadata();
-        const deal = await md.GetEntityObject<DealEntity>(E_DEAL);
-        deal.NewRecord();
-        return deal;
-    }
-
     /**
-     * Reads an existing deal and everything the workspace shows — header, schedule, roster, and the
+     * Reads an existing deal and its collections — header, schedule, roster, and the
      * lines, which belong to the deal's embedded order rather than to the deal.
      *
      * THIS IS THE ONLY PLACE THE COLLECTIONS ARE LOADED, and that is a data-loss guard rather than a
@@ -659,7 +826,7 @@ export class DealWorkspaceService {
             return null;
         }
 
-        await deal.LoadRelatedRecords(...WORKSPACE_COLLECTIONS);
+        await deal.LoadRelatedRecords(...DEAL_COLLECTIONS);
 
         // A collection only reports IsLoaded once its rows actually arrived, so this catches the silent
         // failure above. An empty deal and an unreadable one must never look the same.
@@ -670,7 +837,7 @@ export class DealWorkspaceService {
         /**
          * THE LINES LIVE ON THE ORDER, so they need a load of their own.
          *
-         * `WORKSPACE_COLLECTIONS` covers the deal's OWN collections; the embedded order is a separate
+         * `DEAL_COLLECTIONS` covers the deal's OWN collections; the embedded order is a separate
          * entity instance and its `Lines` is declared `Load: 'explicit'` just like the deal's are. Nothing
          * populates it lazily, so without this a saved deal with lines opens showing NONE -- and reads as
          * a deal nobody has quoted yet.
@@ -726,10 +893,10 @@ export class DealWorkspaceService {
      * nothing beneath it, which is exactly what the retired `Sales.SaveDeal` operation existed to
      * guarantee.
      *
-     * `IgnoreDirtyState` is deliberate and load-bearing: without it, a child that is loaded and unchanged
-     * contributes no work, which is normally right — but this surface re-sequences `DisplayOrder` from
-     * array position on every add and remove, so a row that merely MOVED is clean by field-comparison and
-     * would keep its old position in the database.
+     * `IgnoreDirtyState` was set for the deal workspace (deleted, #291), which re-sequenced
+     * `DisplayOrder` from array position on every add and remove, so a row that merely MOVED was clean
+     * by field-comparison and would have kept its old position. The board, the remaining caller, changes
+     * only the stage, so for it the flag rewrites unchanged children. Kept until that is measured.
      *
      * A record the server refuses for being invalid is an ORDINARY outcome, reported through `Validation`
      * rather than `ErrorMessage`. Only a transport or database failure produces the latter.
@@ -762,8 +929,8 @@ export class DealWorkspaceService {
                 };
             }
 
-            // The SAME instance now carries the server's IDs, so the surface keeps editing the record it
-            // just created rather than a rebuilt copy — the job `ApplySaveResult` used to do by hand.
+            // The SAME instance now carries the server's IDs, so a caller keeps the record it just
+            // saved rather than a rebuilt copy.
             return {
                 Success: true,
                 DealID: deal.ID,
@@ -854,7 +1021,7 @@ export class DealWorkspaceService {
             });
         } catch (e) {
             LogStatus(`${E_ACCOUNTING_COMPANY_PROFILE} read threw, falling back to the calendar year - ${e instanceof Error ? e.message : String(e)}`);
-            return ResolveFiscalYearStart([]);
+            return { Start: CALENDAR_YEAR_START, Basis: 'unreadable' };
         }
         if (!result?.Success) {
             /**
@@ -867,12 +1034,12 @@ export class DealWorkspaceService {
              * -- which `75-dashboard.spec.ts` fails on via `expectNoConsoleErrors`, and which is
              * exactly the breakage the guard was added to prevent (see {@link LoadProducts}).
              *
-             * A FAILED read is still not an absent app. Reporting it as 'no-profiles' would tell a
-             * reader to go and configure something that may already be configured, so it degrades the
-             * same way an unconfigured host does, and the line below is where it gets diagnosed.
+             * A FAILED read is still not an absent app, nor a host with no profiles. It falls back to
+             * the calendar year as 'unreadable', so the basis line says the start could not be read
+             * rather than telling the reader to configure something that may already be configured.
              */
             LogStatus(`${E_ACCOUNTING_COMPANY_PROFILE} read failed, falling back to the calendar year - ${result?.ErrorMessage ?? 'unknown error'}`);
-            return ResolveFiscalYearStart([]);
+            return { Start: CALENDAR_YEAR_START, Basis: 'unreadable' };
         }
 
         const rows = (result.Results ?? []) as unknown as Record<string, unknown>[];
@@ -886,13 +1053,13 @@ export class DealWorkspaceService {
     }
 
     /**
-     * @param window Bounds the WON tile only. The query applies these inside its `WonCount` CASE
-     * rather than in its `WHERE`, so every other figure it returns still describes the whole book —
-     * see `dashboard-summary.sql`. A null bound is passed as no parameter at all, which is how the
-     * Nunjucks `{% if %}` blocks drop the clause.
+     * @param window Bounds Won on `ActualCloseDate` and the open figures on `ExpectedCloseDate`; the
+     * attention counts are never bounded (see `dashboard-summary.sql`). A null bound is passed as no
+     * parameter at all, which is how the Nunjucks `{% if %}` blocks drop the clause.
+     * @param filters The filter bar's lists, applied by the query to every figure.
      */
-    public async LoadDashboardSummary(window?: PeriodWindow): Promise<DealDashboardSummary | null> {
-        const parameters = PeriodParameters(window);
+    public async LoadDashboardSummary(window?: PeriodWindow, filters: DashboardFilters = NO_FILTERS): Promise<DealDashboardSummary | null> {
+        const parameters = queryParameters(window, filters);
         const result = await new RunQuery().RunQuery({
             QueryName: 'Sales: Dashboard Summary',
             CategoryPath: 'Sales',
@@ -913,10 +1080,19 @@ export class DealWorkspaceService {
         return {
             OpenAmount: num(row['OpenAmount']),
             OpenCount: num(row['OpenCount']),
+            OpenOmittedCount: num(row['OpenOmittedCount']),
+            CommitAmount: num(row['CommitAmount']),
+            CommitCount: num(row['CommitCount']),
+            BestCaseOnlyAmount: num(row['BestCaseOnlyAmount']),
+            PipelineOnlyAmount: num(row['PipelineOnlyAmount']),
+            WeightedAmount: num(row['WeightedAmount']),
             TotalCount: num(row['TotalCount']),
             PastExpectedCloseCount: num(row['PastExpectedCloseCount']),
+            NoOwnerCount: num(row['NoOwnerCount']),
+            NoCloseDateCount: num(row['NoCloseDateCount']),
             WonCount: num(row['WonCount']),
             WonAmount: num(row['WonAmount']),
+            NoLinesDealCount: num(row['NoLinesDealCount']),
             OpenPricedAmount: num(row['OpenPricedAmount']),
             OpenStatedAmount: num(row['OpenStatedAmount']),
             OpenNoAmountCount: num(row['OpenNoAmountCount']),

@@ -9,7 +9,7 @@ decision without its reasoning gets re-litigated by the next person, or silently
 assumes it was an accident.
 
 **IDs.** This file holds `D1`–`D7` (the S1 rulings, no hyphen), `I1`–`I10`, and the prefixed series
-`D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL` and `D-FY`. `D-3`, `D-4` and `D-6` are the master
+`D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL`, `D-FY`, `D-ST` and `D-SE`. `D-3`, `D-4` and `D-6` are the master
 plan's IDs; their rulings here are D2, D5 and "Master plan D-6". `DN-n` and every other `D-n`
 are in [`DECISIONS-NEEDED.md`](../DECISIONS-NEEDED.md), which also lists what is still open. A bare `Dn`
 cited as orders' (`D6/D7`, `D8`, `D53`) is orders' own log.
@@ -159,7 +159,7 @@ the door open — a routing engine can later read the same column rather than re
 ### D4 — Default attribution: the owner role
 
 **Decision:** when no `AttributionPct` is set, by-rep roll-ups attribute to the **owner role** (the
-`DealTeamMember` whose `DealRole.IsOwnerRole = 1`). Encoded in the seeds as `Owner / AE` carrying
+`DealTeamMember` whose `DealRole.IsOwnerRole = 1`). Encoded in the seeds as `Owner` (code `OWNER`) carrying
 `DefaultAttributionPct = 100`. No server logic yet — that lands with S3/S4.
 
 **Why:** it is the **only** default where the sum of by-rep attribution equals total bookings. An equal
@@ -562,9 +562,17 @@ The workspace converts, and that conversion is the kind of thing worth a check o
 
 ---
 
-## D-DL2 — The rep states a discount as a PERCENT only, and never as an amount
+## D-DL2 — A discount is stored as a PERCENT, and the `DiscountAmount` column is never bound
 
-**S-US4 is explicit that no price field is enterable by the rep.** The deal-workspace line grid had an
+> **Revised twice; read to the end.** The original ruling, below, made no price field enterable and
+> took discounts as a percent only. Two later revisions narrow it: a rep holding
+> `MJ.BizApps.Orders.Price.OverrideAny` may type a custom amount on a deal line
+> ([Choosing a price on a deal line](#choosing-a-price-on-a-deal-line-golive270-revised)), and any rep
+> may type a discount in dollars, which is converted to and stored as a percent
+> ([Typing a discount in dollars](#typing-a-discount-in-dollars-revision)). What still holds:
+> `OrderLine.DiscountAmount` is never bound or written, and a discount is stored as a percent.
+
+**As first ruled: S-US4 is explicit that no price field is enterable by the rep.** The deal-workspace line grid had an
 editable `DiscountAmount` currency input beside the percent one — inherited from `DealLine`, where the two
 coexisted deliberately: the order form template speaks in amounts, the pricing engine takes a percent, and
 `DealLine` transcribed both. That reasoning died with the table. The amount input is removed; the percent
@@ -627,6 +635,28 @@ What keeps it controlled is what controls the same amount on the order line:
   are stored where the order shows them after Closed Won. Nothing is copied.
 
 The discount stays percent-only: the `DiscountAmount` reasoning above is unchanged.
+
+### Typing a discount in dollars (revision)
+
+**Revision: the line editor's discount accepts a dollar amount as well as a percent.** This removes the
+cost stated above ("less $500" on a signed form had to be converted by hand). It does not reopen the
+`DiscountAmount` column: the dollars are an entry, never stored.
+
+- **Stored as a percent.** `DiscountAmountToPercent` (`discount-conversion.ts`, the one place a discount
+  is converted) turns the dollars into a percent of the line's list amount, held to 0.01% and to 0–100%,
+  and the editor writes it to `DiscountPct`. From there it is a percent like any other: the same
+  concession reason on a raise, the same approval, the same pricing.
+- **The list amount is orders' figure.** It is read back from orders' `Orders.PriceOrder` answer as net
+  plus discount (`PricedLineListAmount`), the inverse of orders' own list − net derivation. Sales does not
+  multiply quantity by price for it, and a tier's stored extended amount is included.
+- **Precision is shown, not hidden.** A hundredth of a percent can move the booked discount a few cents off
+  the typed amount ($500 off $3,333 records 15.00%, which orders prices as $499.95). The editor shows the
+  derived percent and, when they differ, the figure orders will book.
+- **No ambiguity refusal on a derived percent.** The `(0, 1)` refusal (D-DL1) guards a typed percent that
+  might already be a fraction. A percent computed from dollars has one reading, so $1 off $240 records
+  0.42%.
+- **The dollars hold through a reprice.** A new quantity or product changes the list amount; the editor
+  re-derives the percent from the typed dollars, since the dollars are what the rep stated.
 
 ---
 
@@ -693,23 +723,149 @@ logged at STATUS, not error, because logging it at error level would put a `cons
 dashboard load for those users and fail the keystone in exactly the way the guard exists to prevent. A
 THROW is caught for a different reason: the fiscal start has to resolve before the window can be
 computed, so this read is awaited ahead of the roster, the lookups and the summary, and an escaping
-rejection would abort the whole section over a value that has a documented fallback.
+rejection would abort the whole section over a value that has a documented fallback. Both fall back to the
+calendar year with the basis `unreadable`, which the selector words as "fiscal year start could not be
+read". They used to report `no-profiles`, which told a user without accounting access that no company
+profile sets a fiscal year.
 
-Second, the setting is per-company while the dashboard is not company-scoped: `Sales: Dashboard
-Summary` accepts a `CompanyID` the UI does not pass. **When active company profiles disagree about the
-fiscal start, the dashboard falls back to the calendar year rather than picking one.** Choosing
+Second, the setting is per-company while the dashboard's period is read once for the page, whatever
+selling companies the filter bar picks. **When active company profiles disagree about the fiscal start,
+the dashboard falls back to the calendar year rather than picking one.** Choosing
 silently would produce a window correct for one company's figures and wrong for another's, with
 nothing on screen saying which. This is the rule `deal-board` already applies to mixed currency: refuse
 to present a total over a set holding more than one distinct value.
 
-All four cases — configured, accounting absent, no profile, companies disagreeing — are named on the
-dashboard beside the selector. A period control whose boundaries are invisible is the same defect
-golive#232 was filed about.
+All four cases — configured, accounting absent, no profile, companies disagreeing — are named in the
+Period dropdown's tooltip, and the window's dates are printed beside it. A period control whose
+boundaries are invisible is the same defect golive#232 was filed about.
 
 ### What this does NOT do
 
 `ForecastSnapshotJob`'s `CurrentMonthPeriod()` is untouched. A fiscal start being readable makes D-28
 answerable, but changing the snapshot's period changes what every stored row means and has its own
 integration checks. That is a separate decision; D-28 records the new fact.
+
+---
+
+## D-ST1 — A save that moves a deal's status into or out of a locking status runs the close or the reopen
+
+**Ruling** (bc-aidp-next-golive#205; built in sales PRs #68 and #73): when any save moves
+`Deal.DealStatusTypeID` from a non-locking status to one with `DealStatusType.LocksDeal = 1`, the deal
+entity server runs `Sales.CloseDeal`; a move the other way runs `Sales.ReopenDeal`. A status write that
+cannot run its flow is refused. Code: `DealEntityServer.planStatusTransition` and
+`runStatusTransition`; pinned by `close-deal.CD26` and `close-deal.CD27`.
+
+**What it reverses.** The earlier design had the operations drive the entity and nothing else: a close
+or reopen happened only through `Sales.CloseDeal` / `Sales.ReopenDeal`, and #68 refused a bare status
+write into a locking status. #205 showed the cost. Setting Status to Won on the form locked the deal with
+no stage event, contract or finance tasks, and the lock then refused every later status write, so the
+deal could not be reopened. Refusing the write closed that hole but left a form user, an importer and an
+agent with no way to close a deal by its status. Running the flow serves both: the close is the real one,
+and every caller (form, import, agent, raw `BaseEntity.Save()`) takes the same path.
+
+**How it runs.**
+
+- **Before the close lock.** A reopen is a status write on a locked deal. With the lock first, it is
+  refused before anything sees it as a reopen (`close-deal.CD27`).
+- **The status is put back, then the flow runs after the save.** The operation loads and saves its own
+  copy of the deal. If this save wrote the status too, the two would race over one row. So the field is
+  reverted, the ordinary save commits the caller's other edits, and the flow runs against the committed
+  row. `DealStatusTypeID` stays out of `DEAL_FIELDS_EDITABLE_WHILE_LOCKED`: the field is reached through
+  the flow, never by writing it.
+- **Declared transitions are skipped.** `Sales.CloseDeal` and `Sales.ReopenDeal` call
+  `DeclareTransition` before their own save, so that save does not re-enter the flow.
+- **No reopen reason is required.** The reopen records a fixed sentence as its reason, so the audit
+  trail still says how the deal was reopened (#205; master plan §7.3).
+
+**Refusals before anything is written.**
+
+- A Lost close with no `LossReasonID`: the operation would refuse it every time, so the save refuses up
+  front instead of committing the other edits first.
+- A target status that cannot be read: neither guess is safe. Read as locking, it would close a deal
+  nobody asked to close; read as open, it would write a locking status with no close behind it.
+- A prior status with no row, moving to a locking status: nothing says whether the deal is already
+  closed, and a second close would create a second contract.
+
+**Trade-off accepted.** A close or reopen that fails after the save (a downstream route declines, a loss
+reason demands notes, a contract or order write fails) leaves the caller's other edits committed and the
+status unchanged. The save returns false with a message naming both halves. The close itself stays
+transactional; a half-done close is not among the outcomes.
+
+---
+
+## D-SE1 — Stage events are append-only on the server and in the API, not only in the form (#348)
+
+**Decision (the app's owner, 2026-10-16):** `DealStageEvent` refuses an update and a delete in two
+places. `DealStageEventEntityServer` refuses them in `Save()` and `Delete()`, so an Action, an agent or a
+raw `BaseEntity.Save()` cannot rewrite one. The entity's `AllowUpdateAPI` and `AllowDeleteAPI` are off
+(`metadata/entities/.entities.json`), so the GraphQL API has no update or delete mutation for it.
+Inserts are unaffected: `DealEntityServer.appendStageEvent` is the only writer and always creates a new
+row. The stale `spUpdateDealStageEvent` and `spDeleteDealStageEvent` procedures stay in the database;
+dropping them would need a migration and gains nothing once nothing calls them.
+
+**Why the entity-level flag is right here when D-RRC5 rejected the field-level one.** D-RRC5 turned
+down `AllowUpdateAPI = 0` on four `DealLine` columns because that flag takes the columns out of the
+`spCreate` / `spUpdate` parameters, which would have locked out the one caller that must write them.
+A stage event has no such caller. Nothing legitimately updates or deletes one, and the entity-level
+flags leave `spCreate` and the insert path alone. With the flags off, CodeGen drops the update and
+delete mutations, and MemberJunction's own `Save()` and `Delete()` refuse them as well. The server
+subclass is kept beside the flags because it explains the refusal in this app's terms, and because the
+rule should not depend on a metadata row a host may not have pushed or may turn back on.
+
+**What the form does.** `DealStageEventFormComponentExtended` already refuses edit mode. The refusal
+message is `DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE` in `sales-entities` so the form can share it.
+
+Pinned by `DealStageEventEntityServer.test.ts` and integration check `board-move.BD7`.
+
+---
+
+## D-DASH2 — Every dashboard figure is bounded by the period, each on its own date
+
+**Ruling (bc-aidp-next-golive#350):** the Deals dashboard's period bounds every figure that answers
+"how are we doing" or "what is coming". Won counts wins whose `ActualCloseDate` is in the period. The
+open figures — Commit, Open pipeline, Weighted pipeline, the forecast's open segments, Open deals by
+stage, Commit by deal owner and the dated Expected to close buckets — count open deals whose
+`ExpectedCloseDate` is in the period. All time is the whole book.
+
+It reverses the earlier rule that open figures describe the current book whatever the period. That
+rule was internally consistent, but a forecast labelled "this quarter" that counts deals expected to
+close years out reads as wrong to everyone who looks at it, and the tester report said so.
+
+Three consequences, each deliberate:
+
+- **An open deal with no expected close date belongs to no bounded period.** It is not counted in a
+  bounded forecast; the forecast card says how many there are, and they are listed under Needs
+  attention's "No close date" and the "No date" bucket, which ignore the period.
+- **Needs attention is about today, not the period.** Past close date, No owner, No close date and Idle
+  past stage limit follow the filter bar but not the period: a deal that needs a person needs one
+  whatever quarter is being read.
+- **The dated buckets intersect with the period.** Under a past period, Next 7 days and Rest of month
+  read empty, because nothing expected to close in a past quarter is still ahead.
+
+The filters (selling company, product company, deal owner, pipeline) and the period are applied by the
+queries (`Sales: Dashboard Summary`, `Sales: Win Rate by Count and Value`, `Sales: Deal Roster`), and the
+deal list under the tiles is filtered with the same predicate on the server, so a tile and its list
+agree. The forecast snapshot and `Sales: Forecast by Category` are unchanged.
+
+---
+
+## D-BOARD2 — The Board reads the section's filter bar, and its period bounds the closed columns
+
+**Ruling (bc-aidp-next-golive#351):** the Dashboard and the Board share one filter bar and one selection,
+held by the Sales section and kept in its URL. Changing a filter on either page changes it on the other,
+and a link copied on one opens the other with the same filters. On the Board:
+
+- **Period bounds the closed columns only.** A closed deal shows when it closed in the period; every open
+  deal shows whatever the period, as before. This reverses bizapps-sales#209's rule that the Board
+  always shows the current fiscal quarter's closed deals. The default period is still This quarter, so
+  the Board looks the same until someone picks another period; All time loads every closed deal.
+- **Selling company and Pipeline decide the tabs.** The Board draws one pipeline's stages at a time. Its
+  tabs are the picked pipelines, else the picked companies' pipelines, else every pipeline; with one,
+  there are no tabs and that pipeline's name is shown in their place. The Board's own Company picker is
+  gone.
+- **Pipeline "All" includes pipelines flagged out of the forecast**, as the Board always has. The
+  Dashboard leaves them out of its figures; that difference is about forecasting, not about which deals
+  exist, so it stays.
+- **The Inspect slice stays Dashboard-only**, and All deals keeps its own grid filters.
 
 ---

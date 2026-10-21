@@ -207,18 +207,16 @@ describe('after a line is saved', () => {
      */
     it('forces a deal save, because the deal itself is not dirty', async () => {
         const saved: Array<{ IgnoreDirtyState?: boolean }> = [];
-        const p = Object.create(MJSDealLinesPanel.prototype) as {
-            OnLineSaved(): Promise<void>;
-            EditorOpen: boolean;
-            EditingLineID: string | null;
-        };
+        // Constructed, not `Object.create`d: the panel's failure message is a signal field, which only a
+        // constructor initializes.
+        const p = new MJSDealLinesPanel();
         p.EditorOpen = true;
         p.EditingLineID = 'line-1';
         Object.defineProperty(p, 'Record', {
             value: { Save: async (o: { IgnoreDirtyState?: boolean }) => { saved.push(o); return true; } },
             configurable: true,
         });
-        Object.defineProperty(p, 'linesGrid', { value: { Refresh: async () => {} }, configurable: true });
+        Object.defineProperty(p, 'lineCards', { value: { Refresh: async () => {} }, configurable: true });
 
         await p.OnLineSaved();
 

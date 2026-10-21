@@ -1,5 +1,55 @@
 # @mj-biz-apps/sales-server
 
+## 6.19.0
+
+### Patch Changes
+
+- Updated dependencies [9510fd9]
+- Updated dependencies [de98c6f]
+- Updated dependencies [c80645a]
+- Updated dependencies [3717a22]
+- Updated dependencies [6c2a165]
+  - @mj-biz-apps/sales-core-entities-server@6.19.0
+  - @mj-biz-apps/sales-entities@6.19.0
+  - @mj-biz-apps/sales-actions@6.19.0
+
+## 6.18.0
+
+### Minor Changes
+
+- 6e77e8f: Order review by trigger support (bc-aidp-next-golive#320 §5). Sales now registers `DealOrderLink` with orders' `RegisterOrderDealLink` seam at bootstrap, answering which deal created an order from `Deal.OrderID`, so orders can let a deal order confirm without review. The seam ships in `@mj-biz-apps/orders-entities` 5.36.0; with an older orders the registration is skipped and logged. A pipeline's `CloseWonPolicy.CloseWonTasks.RaiseOrderReviewTask: false` stops a won deal raising the `ORDER_REVIEW` task; absent or `true` keeps it, so existing installs are unchanged.
+- 20e1899: MemberJunction floor raised to 6.1.6, and a batch of non-UX fixes:
+
+  - Breaking for direct importers of `@mj-biz-apps/sales-ng`: the unmounted `DealWorkspaceComponent` and the validation helpers only it used (`DiscountRefusalIssues`, `ShouldRefuseLineRemoval`, `LineRemovalRefusedIssues`, `UnlinkedLineIssues`, `MergeValidation`) are removed (#291). `IDownstreamSeam` gains `UpdateContractFromDeal` (#278).
+  - Closing a reopened Won deal Won again reuses its contract, refreshing unsigned terms, instead of creating a second one (#278).
+  - Changing a deal's contact or account moves its order's bill-to while the order is Draft or Quoted and still bills the previous party (#319).
+  - Deal stage events refuse updates and deletes on the server, and the API no longer offers them (#348).
+  - Slipped Deals, Stage Conversion and Forecast History count whole business days at both period bounds; Slipped Deals no longer fails on audit rows that are not JSON (#289).
+  - The Deal form's inline-create key workaround is removed now that MJ 6.1.6 sends the written key (#207).
+  - CodeGen no longer writes recurring reconcilers, including the field prune, into migrations (#345).
+
+### Patch Changes
+
+- Updated dependencies [7041a49]
+- Updated dependencies [769158a]
+- Updated dependencies [6e77e8f]
+- Updated dependencies [0cd81c5]
+- Updated dependencies [20e1899]
+- Updated dependencies [7c5daa9]
+  - @mj-biz-apps/sales-actions@6.18.0
+  - @mj-biz-apps/sales-entities@6.18.0
+  - @mj-biz-apps/sales-core-entities-server@6.18.0
+
+## 6.17.0
+
+### Patch Changes
+
+- Updated dependencies [2018641]
+- Updated dependencies [7b134f9]
+  - @mj-biz-apps/sales-entities@6.17.0
+  - @mj-biz-apps/sales-actions@6.17.0
+  - @mj-biz-apps/sales-core-entities-server@6.17.0
+
 ## 6.16.0
 
 ### Minor Changes

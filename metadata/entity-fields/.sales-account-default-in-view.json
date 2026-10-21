@@ -1,0 +1,32 @@
+[
+  {
+    "_comments": [
+      "Sales Accounts flagged only Name, so the grid showed a single column. The same",
+      "flag builds the columns of the Account picker on the Deal form, so this stays at three columns,",
+      "matching the Sales Contacts picker: enough to tell two same-named accounts apart without turning the",
+      "picker into a grid. All three are the view's name fields, so they render as words, not GUIDs."
+    ],
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=AccountType"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=LifecycleStageType"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=OwnerEmployee"
+    }
+  }
+]

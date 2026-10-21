@@ -77,8 +77,9 @@ watches for this; it is a heuristic, not a proof.
   take the order total (sales never sums lines). A typed figure survives only on a header-only deal.
 - An override price on a line is an **input** to orders' pricing, never a replacement for the totals
   orders computes on top of it.
-- A rep enters a discount as a **percent**; `OrderLine.DiscountPct` stores a **fraction**. Convert only
-  in `packages/Entities/src/discount-conversion.ts` (`pnpm run test:discount-gate`), never at a call
+- A rep enters a discount as a **percent** or a **dollar amount**; `OrderLine.DiscountPct` stores a
+  **fraction** either way (dollars become a percent of orders' list amount). Convert only in
+  `packages/Entities/src/discount-conversion.ts` (`pnpm run test:discount-gate`), never at a call
   site (D-DL2).
 - Closing does not create or price a second order. The deal's own order changes status when the deal
   enters a stage that names one (`PipelineStage.OrderStatusOnEntry`).
@@ -154,7 +155,8 @@ conflict list. When merging feature branches together, record the head you actua
   reach the `claude.exe` that is your own parent. Anything else belongs to another session.
 - **`ps -W` prints no command-line arguments**, so it can never find a run by script name. Use
   `Get-CimInstance Win32_Process` (it has `CommandLine` and `ParentProcessId`).
-- If you cannot establish ownership, **do not kill it.** Say what you see and ask.
+- If you cannot establish ownership, **do not kill it.** Say what you see and ask. The full procedure:
+  `test-harnesses/MUTATION-RUNS.md`.
 - **A Bash call that hits its ten-minute ceiling DETACHES the process; it does not kill it.** A run that
   seems stuck is most likely queued on the suite lock behind your own orphan.
 - The stranded-mutation recovery (`git checkout --` plus a rebuild) is **destructive against a live
@@ -171,7 +173,8 @@ Most defects here were **a claim that was true when somebody checked it, and sta
 stopped being true.** Make the check happen where the claim is USED, not where it was made:
 
 * Do not index a collection and then assert which row it is — **find the row, then assert about it.**
-* Run the anchor validator **after** an edit, not before. Before tells you the state you are leaving.
+* Check a mutant's anchor **after** an edit, not before. Before tells you the state you are leaving
+  (`test-harnesses/MUTATION-RUNS.md`).
 * **Filter, do not count.** `exactly one link` is a statement about today's data; `the link to the ORDER`
   is a statement about the requirement.
 * A guard keyed on a **cause** survives a new code path; one keyed on a **threshold** does not.
@@ -208,7 +211,21 @@ the thing it names is broken?"** The incidents behind rules 5–8: `docs/history
 - Never add `__mj_CreatedAt`/`__mj_UpdatedAt` columns or FK indexes — CodeGen does both.
 - **Author for PostgreSQL from day one.** Production is PG; keep the T-SQL converter-friendly and
   avoid reserved words as column names (this is why `ForecastSnapshot` has `CommitAmount`, not
-  `Commit`). No migration has a PostgreSQL counterpart yet (#197).
+  `Commit`). Newer migrations ship a counterpart in `migrations-pg/`; the older ones lack one (#197).
+- **A migration that ALTERs an existing column (length, type, nullability) syncs that entity's
+  fields itself.** `omitRecurringScriptsFromLog` is `true` in `mj.config.cjs`, so CodeGen no longer
+  captures the reconcilers it runs every pass (#345); without a sync, every host installed from
+  migrations keeps the old length, type or nullability in `EntityField`. After the entity's view
+  refresh, add the entity-scoped call:
+  `EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', @EntityIDs='<entity ID>', @IncludedSchemaNames='${flyway:defaultSchema}';`
+  Never the schema-wide form, and never `spDeleteUnneededEntityFields`: a shipped prune runs on
+  entities the migration never touched. In CI, `.github/scripts/check-migration-column-sync.mjs` fails a
+  new migration that alters a column without the scoped call, or that carries the schema-wide one.
+- **Known gap: CodeGen leaves regenerated CRUD procs out of the run log on a length-only change.** It
+  regenerates the procedures but writes nothing to `migrations/codegen/`, so the migration would ship
+  without them. Capture them with a temporary `forceRegeneration` block in `mj.config.cjs` (`enabled`,
+  `spUpdate`/`spCreate`, and an `entityWhereClause` naming that entity), copy the output into the
+  migration, and never commit the block.
 - `CONFIRM_DROP=<database> scripts/rebuild-db.sh` drops and rebuilds a local database from migrations:
   MJ core, then common, tasks, accounting, orders and contracts from sibling checkouts, then sales.
   It names the database to DESTROY; there is no default. It applies every migration as shipped and
@@ -262,7 +279,7 @@ while trusting things it does not:
 2. **`pnpm run test:money-gate`** — sales records intent; orders computes the number.
 3. **`pnpm run build`** — all turbo tasks including the Angular Explorer.
 4. **`pnpm run test:discount-gate`** — percent vs fraction, both directions.
-5. **`pnpm run test:validation-gate`** — pane attribution, and what blocks a save.
+5. **`pnpm run test:validation-gate`** — pane attribution, and no component writing a stage's defaults.
 6. **`python3 scripts/assert-no-comment-drift.py`** — a documented column that is not returned.
 7. **`npm run test:spec-gate`** — Playwright specs typecheck (it does NOT run them).
 8. **Unit tests**, guarded on any existing.
