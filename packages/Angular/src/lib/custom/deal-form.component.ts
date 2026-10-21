@@ -1,10 +1,9 @@
 /**
  * @fileoverview Deal form — the close lock, and whether the cached amount can still be trusted.
  *
- * THIS STAYS A FORM. Composing a deal — adding lines, picking products, editing the roster — is the deal
- * workspace's job, and duplicating it here would give us two surfaces that must agree forever. What this
- * adds is the two things a *form* is the right place for: refusing an edit the server will refuse, and
- * saying out loud when a number on screen is stale.
+ * This class adds the two things a *form* is the right place for: refusing an edit the server will
+ * refuse, and saying out loud when a number on screen is stale. Lines, products and the roster are
+ * edited by the panels contributed onto this form (`form-panels/`).
  *
  * ── THE CLOSE LOCK ──────────────────────────────────────────────────────────────────────────────
  *
@@ -35,7 +34,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { Component } from '@angular/core';
+import { Component, EventEmitter } from '@angular/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
 import {
@@ -114,6 +113,21 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         this.RecordRefreshed.subscribe(() => { void this.resolveDealState(); });
     }
 
+    /** Emits after {@link RefreshDealState}, so mounted panels re-check their own notices. */
+    public readonly DealStateRefreshed = new EventEmitter<void>();
+
+    /**
+     * Re-resolves the lock and the stale-amount notice after a deal save this form did not run (#271).
+     *
+     * The products panel saves the deal through `Record.Save(options)` to pull the order's new total
+     * into `Amount`, because `SaveRecord` takes no save options. That path raises no `RecordSaved`, so
+     * without this the notices stayed as they were before the product was added.
+     */
+    public async RefreshDealState(): Promise<void> {
+        await this.resolveDealState();
+        this.DealStateRefreshed.emit();
+    }
+
     /** The lock and the amount warning, resolved together — they are read together. */
     private async resolveDealState(): Promise<void> {
         await this.resolveCloseLock();
@@ -130,7 +144,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      * Resolves the lock through the SHARED rule in `sales-entities`.
      *
      * The lookup itself — read `LocksDeal` off the status row, by flag, off the PERSISTED status — lives
-     * in `ResolveDealLockState` so this form and the deal workspace cannot answer it differently.
+     * in `ResolveDealLockState` so every surface that asks gets the same answer.
      */
     private async resolveCloseLock(): Promise<void> {
         const persisted = this.record?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;

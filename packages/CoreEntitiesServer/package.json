@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/sales-core-entities-server",
   "type": "module",
-  "version": "6.17.0",
+  "version": "6.19.0",
   "description": "Server-side entity subclasses for BizApps Sales — the close lock (L-17), the OwnerEmployeeID denormalized stamp, and deal lifecycle hooks.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,32 +19,32 @@
   "author": "MemberJunction.com",
   "license": "BUSL-1.1",
   "devDependencies": {
-    "@memberjunction/core": "6.1.5",
-    "@memberjunction/core-entities": "6.1.5",
-    "@memberjunction/global": "6.1.5",
-    "@memberjunction/sqlserver-dataprovider": "6.1.5",
+    "@memberjunction/core": "6.1.6",
+    "@memberjunction/core-entities": "6.1.6",
+    "@memberjunction/global": "6.1.6",
+    "@memberjunction/sqlserver-dataprovider": "6.1.6",
     "@mj-biz-apps/common-activity-sync": "5.50.1",
     "@mj-biz-apps/common-entities": "5.50.1",
     "@mj-biz-apps/orders-entities": "5.30.0",
-    "@mj-biz-apps/tasks-core": "1.4.1",
-    "@mj-biz-apps/tasks-entities": "1.4.1",
+    "@mj-biz-apps/tasks-core": "1.7.0",
+    "@mj-biz-apps/tasks-entities": "1.7.0",
     "@types/node": "^22.20.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@mj-biz-apps/sales-entities": "^6.17.0"
+    "@mj-biz-apps/sales-entities": "^6.19.0"
   },
   "peerDependencies": {
-    "@memberjunction/core": "^6.1.5",
-    "@memberjunction/core-entities": "^6.1.5",
-    "@memberjunction/global": "^6.1.5",
-    "@memberjunction/sqlserver-dataprovider": "^6.1.5",
+    "@memberjunction/core": "^6.1.6",
+    "@memberjunction/core-entities": "^6.1.6",
+    "@memberjunction/global": "^6.1.6",
+    "@memberjunction/sqlserver-dataprovider": "^6.1.6",
     "@mj-biz-apps/common-activity-sync": "^5.44.0",
     "@mj-biz-apps/common-entities": "^5.44.0",
     "@mj-biz-apps/orders-entities": "^5.30.0",
-    "@mj-biz-apps/tasks-core": "^1.4.1",
-    "@mj-biz-apps/tasks-entities": "^1.4.1"
+    "@mj-biz-apps/tasks-core": "^1.7.0",
+    "@mj-biz-apps/tasks-entities": "^1.7.0"
   },
   "repository": {
     "type": "git",

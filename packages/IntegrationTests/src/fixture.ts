@@ -38,8 +38,12 @@ import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-en
 
 export const SALES_SCHEMA = '__mj_BizAppsSales';
 
-/** A sibling app named in `scripts/expected-check-counts.json` (`probes` and `schemas`). */
-export type SiblingApp = 'orders' | 'contracts' | 'tasks' | 'common';
+/**
+ * A sibling app named in `scripts/expected-check-counts.json` (`probes` and `schemas`), or a feature of
+ * one that arrives in a newer release of it (`probes` and `entities`): `contract-order-links` is
+ * contracts' `Contract Orders` entity.
+ */
+export type SiblingApp = 'orders' | 'contracts' | 'tasks' | 'common' | 'contract-order-links';
 
 /**
  * A check that may need an app its bundle does not require.
@@ -47,6 +51,10 @@ export type SiblingApp = 'orders' | 'contracts' | 'tasks' | 'common';
  * `RequiresApp` is read by `test-harnesses/integration.mjs`: when that app is not present (linked AND its
  * entities registered), the check is left out and listed with the reason instead of failing as if the
  * product were broken. The registry stores the object as given, so the field survives registration.
+ *
+ * It controls the Sales runner only. Any other driver of the registry ignores it and reaches the check,
+ * so a check that sets it must also guard itself (`requireContracts` in `close-won-tasks.checks.ts`).
+ * `pnpm run test:integration` is the supported runner.
  */
 export type SalesCheck = NamedCheck & { RequiresApp?: SiblingApp };
 
@@ -194,7 +202,7 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
     const openStatus = await one<{ ID: string }>(
         ctx, E_STATUS_TYPE, 'IsOpen = 1 AND IsActive = 1', ['ID'], 'OPEN deal status (by IsOpen flag)',
     );
-    const account = await one<{ ID: string }>(ctx, E_ACCOUNT, 'IsActive = 1', ['ID'], 'sales account');
+    const account = await one<{ ID: string }>(ctx, E_ACCOUNT, "Status = 'Active'", ['ID'], 'sales account');
     const employee = await one<{ ID: string }>(ctx, E_EMPLOYEE, 'Active = 1', ['ID'], 'active employee');
 
     const wonStatus = await one<{ ID: string }>(

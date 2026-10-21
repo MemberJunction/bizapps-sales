@@ -30,7 +30,7 @@ const entities = (params: RunViewParams[]): string[] => params.map((p) => p.Enti
 afterEach(() => vi.restoreAllMocks());
 
 describe('Sales section lookups (#209)', () => {
-    it('reads only pipelines, stages and statuses, never accounts or contacts', async () => {
+    it('reads only pipelines, stages, statuses and company names, never accounts or contacts', async () => {
         const calls = recordRunViews();
         const lookups = await new DealWorkspaceService().LoadLookups(SECTION_LOOKUP_KEYS);
 
@@ -40,6 +40,8 @@ describe('Sales section lookups (#209)', () => {
             'MJ_BizApps_Sales: Pipelines',
             'MJ_BizApps_Sales: Pipeline Stages',
             'MJ_BizApps_Sales: Deal Status Types',
+            // The filter bar's company names (bc-aidp-next-golive#350): a short list, unlike accounts.
+            'MJ: Companies',
         ]);
         expect(read).not.toContain('MJ_BizApps_Sales: Sales Accounts');
         expect(read).not.toContain('MJ_BizApps_Sales: Sales Contacts');
@@ -48,6 +50,7 @@ describe('Sales section lookups (#209)', () => {
         expect(lookups.Pipelines.map((p) => p.ID)).toEqual(['id-MJ_BizApps_Sales: Pipelines']);
         expect(lookups.Stages.map((s) => s.ID)).toEqual(['id-MJ_BizApps_Sales: Pipeline Stages']);
         expect(lookups.DealStatusTypes.map((s) => s.ID)).toEqual(['id-MJ_BizApps_Sales: Deal Status Types']);
+        expect(lookups.Companies.map((c) => c.ID)).toEqual(['id-MJ: Companies']);
         expect(lookups.Accounts).toEqual([]);
         expect(lookups.Contacts).toEqual([]);
     });

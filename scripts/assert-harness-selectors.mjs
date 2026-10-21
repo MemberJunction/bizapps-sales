@@ -23,10 +23,24 @@
  * Computed to a fixpoint, so a component used only by a dead one is dead too. A hand-kept list of dead
  * components would be right until the next removal, which is the failure this gate exists to catch.
  *
- * Declarations in a dead component's files do not count. The workspace's own templates still declare
- * `close-open` and `.dw-field`; counting them would certify the exact references that broke.
+ * Declarations in a dead component's files do not count. The deal workspace's templates (deleted in
+ * #291) declared `close-open` and `.dw-field`; counting them would have certified the exact references
+ * that broke.
  *
  * Comments in harness files are stripped before scanning, so prose about the removed UI is allowed.
+ *
+ * ── WHAT IT CANNOT CHECK ─────────────────────────────────────────────────────────────────────────
+ *
+ * A green gate means every hook above is declared in a mounted template. It does not mean the suite
+ * passes against a live host. Not covered:
+ *
+ *   - text and role locators (`getByText`, `getByRole`, `has-text`), which match rendered copy, not a
+ *     declared hook
+ *   - markup MJ or AG Grid renders (`mj-*`, `ag-*`): it lives in their packages, not in this repo
+ *   - a hook built at run time (a template literal or a variable) rather than written as a literal
+ *   - whether the hook is visible, enabled or on the active tab when the spec reaches it
+ *
+ * Only a harness run against a live host checks those.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';

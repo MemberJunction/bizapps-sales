@@ -1,5 +1,5 @@
 /**
- * @fileoverview `board-move` — BD1–BD4. A stage move writes its provenance, exactly once.
+ * @fileoverview `board-move` — BD1–BD7. A stage move writes its provenance, exactly once.
  *
  * WHY THIS BUNDLE EXISTS. The pipeline board's one destructive gesture is a drag, and the guarantee it
  * has to keep is that moving a deal appends **exactly one** `DealStageEvent` stamping what the deal was
@@ -22,7 +22,12 @@ import {
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
-import { DealEntity } from '@mj-biz-apps/sales-entities';
+import { DealStageEventEntityServer } from '@mj-biz-apps/sales-core-entities-server';
+import {
+    DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE,
+    DealEntity,
+    type mjBizAppsSalesDealStageEventEntity,
+} from '@mj-biz-apps/sales-entities';
 
 import {
     InRolledBackTransaction,
@@ -428,6 +433,62 @@ export const BoardMoveChecks: NamedCheck[] = [
                     String(pair!.to.ForecastCategoryTypeID).toLowerCase(),
                     'the forecast category was not stated, so the arriving stage still supplies it',
                 );
+            }),
+    },
+    {
+        Id: 'board-move.BD7',
+        Name: 'BD7: the event a stage move appends cannot be edited or deleted through the entity (#348)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * BD1 proves the move appends exactly one event. This proves that event then stays as it
+                 * was written: the Explorer form refuses edit mode, but an Action, an agent or a raw
+                 * `BaseEntity.Save()` never sees the form. `DealStageEventEntityServer` is the wall they
+                 * hit, so this goes through the entity layer and not through SQL.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const stages = await twoStages(ctx, f);
+                Assert(!!stages, 'needs two stages');
+                const { from, to } = stages as { from: string; to: string };
+
+                const created = await save(ctx, draft(f, 'BD7 append-only', { PipelineStageID: from }));
+                Assert(created.Success, `setup save failed: ${JSON.stringify(created.Issues)}`);
+                const dealID = created.DealID as string;
+                const moved = await save(ctx, draft(f, 'BD7 append-only', { ID: dealID, PipelineStageID: to }));
+                Assert(moved.Success, `the move failed: ${JSON.stringify(moved.Issues)}`);
+
+                const events = await eventsFor(ctx, dealID);
+                AssertEqual(events.length, 1, 'the move appended exactly one event');
+                const eventID = String(events[0].ID);
+
+                const event = await ProviderOf(ctx).GetEntityObject<mjBizAppsSalesDealStageEventEntity>(
+                    E_STAGE_EVENT,
+                    ctx.User,
+                );
+                // Without the server subclass registered, every refusal below would be a pass for the
+                // wrong reason (or a failed save for some other one), so pin which class answered.
+                Assert(
+                    event instanceof DealStageEventEntityServer,
+                    'ClassFactory resolved DealStageEventEntityServer for Deal Stage Events',
+                );
+                Assert(await event.Load(eventID), `the event ${eventID} could not be loaded`);
+
+                event.Notes = 'BD7 rewrote history';
+                AssertEqual(await event.Save(), false, 'editing the event is refused');
+                AssertEqual(
+                    event.LatestResult?.Message,
+                    DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE,
+                    'with the append-only message',
+                );
+                AssertEqual(await event.Delete(), false, 'deleting the event is refused');
+
+                // TxOne fails on no rows, so reading it back also proves the delete did not land.
+                const row = await TxOne<{ Notes: string | null }>(
+                    ctx,
+                    `SELECT Notes FROM ${SALES_SCHEMA}.DealStageEvent WHERE ID = '${eventID}'`,
+                );
+                Assert(row.Notes !== 'BD7 rewrote history', 'the stored event is unchanged');
             }),
     },
 ];

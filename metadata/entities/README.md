@@ -8,7 +8,9 @@ rows:
 - `.entities.json` — which entities and fields the user search API covers (`AllowUserSearchAPI`,
   `IncludeInUserSearchAPI`), with the `AutoUpdate*` flags off so CodeGen leaves them as set. On `Deals`
   it also sets `BaseViewGenerated: false` and `GeneratedBaseViewName: vwDealsGenerated`, the layered
-  base view `V202609202353__v6.4.0__Predictive_Deal_Win_Fields.sql` creates.
+  base view `V202609202353__v6.4.0__Predictive_Deal_Win_Fields.sql` creates. On `Deal Stage Events` it
+  sets `AllowUpdateAPI` and `AllowDeleteAPI` to false: stage events are append-only (`docs/DECISIONS.md`
+  D-SE1).
 
 ## What is set, and why only these knobs
 
