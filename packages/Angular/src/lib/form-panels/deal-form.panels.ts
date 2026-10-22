@@ -1091,11 +1091,7 @@ const FIELD_STYLES = `
                                 <div class="l">Account</div>
                                 <div class="v">
                                     @if (Record.AccountID && G('Account')) {
-                                        <button type="button" class="mjs-ov-link"
-                                            [mjRecordLink]="Record"
-                                            FieldName="AccountID"
-                                            [HandleClick]="false"
-                                            (click)="OpenAccount($event)">{{ G('Account') }}</button>
+                                        <button type="button" class="mjs-ov-link" (click)="OpenAccount($event)">{{ G('Account') }}</button>
                                     } @else { {{ G('Account') || '—' }} }
                                 </div>
                             </div>
@@ -1103,11 +1099,7 @@ const FIELD_STYLES = `
                                 <div class="l">Owner</div>
                                 <div class="v">
                                     @if (Record.OwnerEmployeeID && G('OwnerEmployee')) {
-                                        <button type="button" class="mjs-ov-link"
-                                            [mjRecordLink]="Record"
-                                            FieldName="OwnerEmployeeID"
-                                            [HandleClick]="false"
-                                            (click)="OpenOwner($event)">{{ G('OwnerEmployee') }}</button>
+                                        <button type="button" class="mjs-ov-link" (click)="OpenOwner($event)">{{ G('OwnerEmployee') }}</button>
                                     } @else { {{ G('OwnerEmployee') || 'No owner' }} }
                                 </div>
                             </div>
