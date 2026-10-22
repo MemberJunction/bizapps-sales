@@ -62,7 +62,7 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "BeginsWith"
+            "UserSearchPredicateAPI": "Contains"
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
@@ -134,7 +134,7 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "BeginsWith"
+            "UserSearchPredicateAPI": "Contains"
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
@@ -191,7 +191,7 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "BeginsWith"
+            "UserSearchPredicateAPI": "Contains"
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
@@ -237,7 +237,7 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "BeginsWith"
+            "UserSearchPredicateAPI": "Contains"
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
@@ -346,7 +346,7 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "BeginsWith"
+            "UserSearchPredicateAPI": "Contains"
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
@@ -390,7 +390,7 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "BeginsWith"
+            "UserSearchPredicateAPI": "Contains"
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
@@ -434,7 +434,7 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "BeginsWith"
+            "UserSearchPredicateAPI": "Contains"
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
