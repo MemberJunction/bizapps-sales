@@ -194,11 +194,7 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Account</span>
                         @if (Record.AccountID && AccountName) {
-                            <button type="button" class="mjs-deal-hero__stat-val is-link"
-                                [mjRecordLink]="Record"
-                                FieldName="AccountID"
-                                [HandleClick]="false"
-                                (click)="OpenAccount($event)">{{ AccountName }}</button>
+                            <button type="button" class="mjs-deal-hero__stat-val is-link" (click)="OpenAccount($event)">{{ AccountName }}</button>
                         } @else {
                             <span class="mjs-deal-hero__stat-val">{{ AccountName || '—' }}</span>
                         }
@@ -206,11 +202,7 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Owner</span>
                         @if (Record.OwnerEmployeeID && OwnerName) {
-                            <button type="button" class="mjs-deal-hero__stat-val is-link"
-                                [mjRecordLink]="Record"
-                                FieldName="OwnerEmployeeID"
-                                [HandleClick]="false"
-                                (click)="OpenOwner($event)">{{ OwnerName }}</button>
+                            <button type="button" class="mjs-deal-hero__stat-val is-link" (click)="OpenOwner($event)">{{ OwnerName }}</button>
                         } @else {
                             <span class="mjs-deal-hero__stat-val">{{ OwnerName || 'No owner' }}</span>
                         }
