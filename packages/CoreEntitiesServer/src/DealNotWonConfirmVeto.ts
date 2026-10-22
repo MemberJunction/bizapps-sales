@@ -160,8 +160,22 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
 }
 
 /** Single-quote escaping for an id interpolated into an `ExtraFilter`. */
+/**
+ * An id on its way into a filter string, validated rather than merely escaped.
+ *
+ * This doubled quotes and nothing else, which is sufficient for T-SQL and was not exploitable: the
+ * order id is the entity's own `ID` and the status ids come from a database column. The sibling
+ * `DealLockOrderLineVeto` takes the stricter line for a reason worth matching -- ids reach these
+ * vetoes from ANOTHER APP, so "not ours to trust" is the right posture even where today's callers
+ * happen to be safe. Raised in review on #191.
+ *
+ * A UUID has no quotes in it. Anything that does is not one, and it is not going into a filter.
+ */
 function SafeID(id: string): string {
-    return String(id).replace(/'/g, "''");
+    if (!/^[0-9a-fA-F-]{36}$/.test(id)) {
+        throw new Error(`not a usable record id: ${JSON.stringify(id)}`);
+    }
+    return id;
 }
 
 /**
