@@ -62,7 +62,8 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "Contains"
+            "UserSearchPredicateAPI": "Contains",
+            "AutoUpdateUserSearchPredicate": false
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
@@ -134,7 +135,8 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "Contains"
+            "UserSearchPredicateAPI": "Contains",
+            "AutoUpdateUserSearchPredicate": false
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
@@ -191,7 +193,8 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "Contains"
+            "UserSearchPredicateAPI": "Contains",
+            "AutoUpdateUserSearchPredicate": false
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
@@ -237,7 +240,8 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "Contains"
+            "UserSearchPredicateAPI": "Contains",
+            "AutoUpdateUserSearchPredicate": false
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
@@ -346,7 +350,8 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "Contains"
+            "UserSearchPredicateAPI": "Contains",
+            "AutoUpdateUserSearchPredicate": false
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
@@ -390,7 +395,8 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "Contains"
+            "UserSearchPredicateAPI": "Contains",
+            "AutoUpdateUserSearchPredicate": false
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
@@ -434,7 +440,8 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "Contains"
+            "UserSearchPredicateAPI": "Contains",
+            "AutoUpdateUserSearchPredicate": false
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
