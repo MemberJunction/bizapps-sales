@@ -31,10 +31,15 @@ const { DealNotWonConfirmVeto } = await import('../DealNotWonConfirmVeto.js');
  * real and matches how `vocabulary-list-order` and the server suites shadow a method.
  */
 
-const ORDER = 'oooooooo-0000-4000-8000-000000000001';
+/**
+ * REAL HEX, because `SafeID` now validates the SHAPE of an id rather than only escaping quotes.
+ * The readable placeholders these replaced ('oooooooo-...', 'ssssssss-...win1') are not valid
+ * UUIDs, and the validator rejects them before they reach a filter.
+ */
+const ORDER = '0cde0000-0000-4000-8000-000000000001';
 const DEAL = 'dddddddd-0000-4000-8000-000000000001';
-const WON = 'ssssssss-0000-4000-8000-00000000win1';
-const OPEN = 'ssssssss-0000-4000-8000-0000000open1';
+const WON = '57a70000-0000-4000-8000-000000000001';
+const OPEN = '57a70000-0000-4000-8000-000000000002';
 
 const original = RunView.prototype.RunView;
 afterEach(() => { RunView.prototype.RunView = original; logged.length = 0; });
@@ -123,8 +128,8 @@ describe('an order whose deal is not won', () => {
  */
 describe('the decision is the IsWon flag', () => {
     it('allows a winning status whatever it is called', async () => {
-        withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: 'ssssssss-0000-4000-8000-00000closed' }, {
-            'ssssssss-0000-4000-8000-00000closed': true,
+        withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: '57a70000-0000-4000-8000-000000000003' }, {
+            '57a70000-0000-4000-8000-000000000003': true,
         });
         expect(await veto().MayConfirm(ctx)).toBeNull();
     });
@@ -264,10 +269,26 @@ describe('the reads the veto makes', () => {
         expect(calls[0].user).toBeUndefined();
     });
 
-    it('doubles a quote in the order id instead of building a filter that breaks', async () => {
+    /**
+     * This used to assert the quote was DOUBLED and the read went ahead. `SafeID` now validates the
+     * shape, so an id that is not a UUID never reaches a filter at all -- and because the seam turns
+     * a throw into a refusal, the confirm fails closed rather than running a query built from it.
+     */
+    it('throws on an order id that is not a UUID, instead of escaping it into a filter', async () => {
         const { calls } = withData(null, {});
-        await veto().MayConfirm({ OrderHeaderID: "abc' OR 1=1 --", FromStatus: 'Quoted', ContextUser: null });
-        expect(calls[0].args.ExtraFilter).toContain("abc'' OR 1=1 --");
+        // THROWS rather than returning a refusal, which is the seam's contract and the sibling's
+        // behaviour: `ResolveOrderConfirmRefusal` catches it and turns it into a refusal that names
+        // the fault. Failing closed is the point -- the confirm does not proceed either way.
+        await expect(
+            veto().MayConfirm({ OrderHeaderID: "abc' OR 1=1 --", FromStatus: 'Quoted', ContextUser: null }),
+        ).rejects.toThrow(/not a usable record id/);
+        expect(calls, 'and no read was attempted with it').toHaveLength(0);
+    });
+
+    it('accepts an ordinary UUID, so the validator does not refuse real work', async () => {
+        const { calls } = withData(null, {});
+        await veto().MayConfirm({ OrderHeaderID: ORDER, FromStatus: 'Quoted', ContextUser: null });
+        expect(calls[0].args.ExtraFilter).toContain(ORDER);
     });
 
     it('trims a padded deal number, so the refusal reads as the rep would write it', async () => {
