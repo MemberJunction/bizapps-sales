@@ -17,6 +17,7 @@ import { FormsModule } from '@angular/forms';
 import { CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions, type RunViewParams } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
+import { PartyFieldComponent, type PartyKind } from '@mj-biz-apps/common-ng';
 import { BaseFormPanel, BaseFormsModule, type FormContext } from '@memberjunction/ng-base-forms';
 import {
     EntityViewerModule,
@@ -859,18 +860,25 @@ const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID', 'ExpectedClos
  * module constant has neither problem.
  */
 const PARTY_FIELDS: readonly DealFieldSpec[] = [
-    { name: 'AccountID', type: 'textbox', link: 'Record' },
+    { name: 'AccountID', type: 'textbox', link: 'Record', party: { Kind: 'Organization', QueryName: 'Sales: Party Lookup Accounts' } },
     // Derived by stampCompanyFromPipeline() / stampOwnerFromTeam(); see serverMaintained.
     { name: 'CompanyID', type: 'textbox', link: 'Record', serverMaintained: true },
     { name: 'OwnerEmployeeID', type: 'textbox', link: 'Record', serverMaintained: true },
-    { name: 'PrimaryContactID', type: 'textbox', link: 'Record' },
-    { name: 'BillingContactID', type: 'textbox', link: 'Record' },
+    { name: 'PrimaryContactID', type: 'textbox', link: 'Record', party: { Kind: 'Person', QueryName: 'Sales: Party Lookup Contacts' } },
+    { name: 'BillingContactID', type: 'textbox', link: 'Record', party: { Kind: 'Person', QueryName: 'Sales: Party Lookup Contacts' } },
 ];
 
 interface DealFieldSpec {
     name: string;
     type: DealFieldType;
     link?: 'Record';
+    /**
+     * Draw this foreign key with common's `bizapps-party-field` instead of `mj-form-field`
+     * (bc-aidp-next-golive#372): nothing listed until two characters, then one prefix search on indexed
+     * base columns. `QueryName` is sales' own query, restricted to rows with the SalesAccount /
+     * SalesContact subtype the Deal's FK points at.
+     */
+    party?: { Kind: PartyKind; QueryName: string };
     span?: boolean;
     /**
      * A SERVER-MAINTAINED STAMP: rendered, navigable, never editable.
@@ -1556,7 +1564,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     selector: 'mjs-deal-pipeline-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule],
+    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent],
     styles: [FIELD_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="pipeline" SectionName="Pipeline" Icon="fa-solid fa-diagram-project"
@@ -1564,9 +1572,15 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
             <div class="mjs-fields">
                 @for (f of Fields; track FieldTrackKey(f)) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
-                        <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
-                            (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                        @if (f.party) {
+                            <bizapps-party-field [Record]="Record" [FieldName]="f.name" [Kind]="f.party.Kind" [QueryName]="f.party.QueryName"
+                                [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext"
+                                (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></bizapps-party-field>
+                        } @else {
+                            <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
+                                [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                                (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                        }
                         <!-- What a save will write here from the stage just picked (sales#247). Text
                              only: the server stays the one writer of these two fields. -->
                         @if (EditMode && StageMoveHint(f.name); as hint) {
@@ -2416,7 +2430,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
     selector: 'mjs-deal-party-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule],
+    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent],
     styles: [FIELD_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="party" SectionName="Account &amp; people" Icon="fa-solid fa-building"
@@ -2444,6 +2458,10 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                                     <small class="mjs-field__hint" data-testid="deal-owner-error">{{ OwnerError() }}</small>
                                 }
                             </div>
+                        } @else if (f.party) {
+                            <bizapps-party-field [Record]="Record" [FieldName]="f.name" [Kind]="f.party.Kind" [QueryName]="f.party.QueryName"
+                                [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext"
+                                (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></bizapps-party-field>
                         } @else {
                             <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"

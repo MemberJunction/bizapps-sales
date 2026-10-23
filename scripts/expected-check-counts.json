@@ -46,6 +46,7 @@
     "close-won-contract": { "count": 8, "requires": "contracts", "ids": "CT1, CT4, CT5, CT6, CT7, CT8, CT9, CT10 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild; CT10 needs contract-order-links and is left out where contracts has none" },
     "board-move": { "count": 7, "requires": "orders", "ids": "BD1-BD7" },
     "pipeline-copy": { "count": 2, "requires": null, "ids": "PC1-PC2" },
+    "party-lookup": { "count": 5, "requires": null, "ids": "PL1-PL5" },
     "$comment_close_won_tasks": [
       "12, AND THE TRANSIENT STATE THAT MADE THIS NUMBER ODD IS NOW RESOLVED -- it resolved exactly here.",
       "",
