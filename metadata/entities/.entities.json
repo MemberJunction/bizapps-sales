@@ -244,6 +244,28 @@
             "AutoUpdateUserSearchPredicate": false
           },
           "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=Account&EntityID=@parent:ID"
+          }
+        },
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": true,
+            "AutoUpdateIncludeInUserSearchAPI": false,
+            "UserSearchPredicateAPI": "Contains",
+            "AutoUpdateUserSearchPredicate": false
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.Name=DealNumber&EntityID=@parent:ID"
+          }
+        },
+        {
+          "fields": {
+            "IncludeInUserSearchAPI": true,
+            "AutoUpdateIncludeInUserSearchAPI": false,
+            "UserSearchPredicateAPI": "Contains",
+            "AutoUpdateUserSearchPredicate": false
+          },
+          "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.Name=Name&EntityID=@parent:ID"
           },
           "sync": {
