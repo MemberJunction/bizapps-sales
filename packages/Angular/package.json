@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/sales-ng",
   "type": "module",
-  "version": "6.19.0",
+  "version": "6.20.0",
   "description": "BizApps Sales Angular bootstrap - generated form components and module for the deal-pipeline Open App",
   "main": "dist/public-api.js",
   "types": "dist/public-api.d.ts",
@@ -18,7 +18,7 @@
   "author": "MemberJunction.com",
   "license": "BUSL-1.1",
   "dependencies": {
-    "@mj-biz-apps/sales-entities": "^6.19.0"
+    "@mj-biz-apps/sales-entities": "^6.20.0"
   },
   "peerDependencies": {
     "@angular/animations": ">=21.0.0 <22.0.0",
@@ -38,7 +38,7 @@
     "@memberjunction/ng-shared-generic": "^6.1.6",
     "@memberjunction/ng-ui-components": "^6.1.6",
     "@mj-biz-apps/common-entities": "^5.44.0",
-    "@mj-biz-apps/common-ng": "^5.44.0",
+    "@mj-biz-apps/common-ng": "^5.56.0",
     "@mj-biz-apps/orders-entities": "^5.30.0",
     "@mj-biz-apps/orders-ng": "^5.30.0"
   },
@@ -57,8 +57,8 @@
     "@memberjunction/ng-shared": "6.1.6",
     "@memberjunction/ng-shared-generic": "6.1.6",
     "@memberjunction/ng-ui-components": "6.1.6",
-    "@mj-biz-apps/common-entities": "5.50.1",
-    "@mj-biz-apps/common-ng": "5.50.1",
+    "@mj-biz-apps/common-entities": "5.56.0",
+    "@mj-biz-apps/common-ng": "5.56.0",
     "@mj-biz-apps/orders-entities": "5.30.0",
     "@mj-biz-apps/orders-ng": "5.30.0",
     "typescript": "^5.9.3"
