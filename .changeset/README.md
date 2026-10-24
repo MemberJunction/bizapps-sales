@@ -13,10 +13,16 @@ changeset.** Create one with:
 pnpm run change    # the changesets CLI; `npx changeset` is the same
 ```
 
-**The bump level follows semver, and `minor` is required for exactly two things:** anything under
-`migrations/`, and any change to a package's public API — a removed or renamed export, a changed
-exported signature, a new required argument. Everything else is `patch`: user-facing copy, UI
-behaviour, and server-side fixes that keep their signatures. `major` moves only with
+**The bump level follows semver, and `minor` is required for three things:** anything under
+`migrations/`, anything under `metadata/` that changes a seeded value, and any change to a
+package's public API — a removed or renamed export, a changed exported signature, a new required
+argument. Everything else is `patch`: user-facing copy, UI behaviour, and server-side fixes that
+keep their signatures.
+
+`metadata/` is on that list because it ships: `ci/check-bump-level.sh` treats it as seed data the
+release carries, exactly as it treats `migrations/` as schema. A metadata-only PR that takes
+`patch` is refused by the `migration changeset` check, which is easy to walk into when this file
+names only the other two. `major` moves only with
 MemberJunction's major version (this repo went to 6.x with MJ 6), and a schema change that is not
 additive waits for it; MJ's
 [`PUBLISH_NO_BREAK_POLICY.md`](https://github.com/MemberJunction/MJ/blob/next/packages/OpenApp/PUBLISH_NO_BREAK_POLICY.md)
