@@ -251,7 +251,7 @@
           "fields": {
             "IncludeInUserSearchAPI": true,
             "AutoUpdateIncludeInUserSearchAPI": false,
-            "UserSearchPredicateAPI": "Contains",
+            "UserSearchPredicateAPI": "EndsWith",
             "AutoUpdateUserSearchPredicate": false
           },
           "primaryKey": {
