@@ -34,7 +34,13 @@ import {
     type DealWorkspaceValidation,
 } from './deal-workspace.validation';
 import { BusinessTimeZoneEngine, CalendarDayIn, type CalendarDay } from '@mj-biz-apps/common-entities';
-import { E_ORDERS_PRODUCT, PRODUCT_LOOKUP_FIELDS, ProductFilterFor, type ProductLookup } from '@mj-biz-apps/sales-entities';
+import {
+    E_ORDERS_PRODUCT,
+    PRODUCT_LOOKUP_FIELDS,
+    ProductFilterFor,
+    WithInheritedSubscriptionType,
+    type ProductLookup,
+} from '@mj-biz-apps/sales-entities';
 import {
     CALENDAR_YEAR_START,
     PeriodParameters,
@@ -801,7 +807,9 @@ export class DealWorkspaceService {
             // Shared with the check that guards it, so the two cannot drift — see PRODUCT_LOOKUP_FIELDS.
             Fields: [...PRODUCT_LOOKUP_FIELDS],
         });
-        return result?.Success ? (result.Results ?? []) : [];
+        if (!result?.Success) return [];
+        // A product naming no subscription type inherits its product type's, as confirm does (golive #339).
+        return WithInheritedSubscriptionType(result.Results ?? []);
     }
 
     /**

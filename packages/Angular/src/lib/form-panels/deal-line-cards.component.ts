@@ -30,6 +30,7 @@ import {
     E_ORDERS_PRODUCT,
     EffectiveTermStart,
     HasExplicitTermStart,
+    WithInheritedSubscriptionType,
     type DealEntity,
 } from '@mj-biz-apps/sales-entities';
 import { MJS_FOREIGN_ENTITIES } from '../data/entity-names';
@@ -76,6 +77,7 @@ export interface DealLineCardProduct {
     ProductType: string | null;
     IsTaxable: boolean | null;
     SubscriptionTypeID: string | null;
+    ProductTypeID: string | null;
 }
 
 /** `yyyy-MM-dd` from whatever a date field arrived as, for `mjoDate`. */
@@ -333,10 +335,17 @@ export class MJSDealLineCardsComponent implements OnChanges {
             EntityName: E_ORDERS_PRODUCT,
             ExtraFilter: `ID IN (${ids.map((id) => `'${EscapeSQLString(id)}'`).join(',')})`,
             ResultType: 'simple',
-            Fields: ['ID', 'SKU', 'ProductType', 'IsTaxable', 'SubscriptionTypeID'],
+            Fields: ['ID', 'SKU', 'ProductType', 'IsTaxable', 'SubscriptionTypeID', 'ProductTypeID'],
         });
         // A failed product read costs the card its SKU line and chips, not its line.
         const rows = result.Success ? (result.Results ?? []) : [];
+        try {
+            // A product naming no subscription type inherits its product type's, as confirm does (golive #339).
+            await WithInheritedSubscriptionType(rows);
+        } catch (e) {
+            // Same rule: a failed type read costs an inheriting line its term start, not the card.
+            console.error(`[deal-line-cards] ${e instanceof Error ? e.message : String(e)}`);
+        }
         return new Map(rows.map((p) => [p.ID, p]));
     }
 
