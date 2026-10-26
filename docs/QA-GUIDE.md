@@ -285,11 +285,14 @@ the screen disagree, the spec is the reference.
    Overview stops saying "No owner assigned".
 4. ✅ The owner follows the roster without a hand edit.
 
-### 5.12 Inline create — `72-inline-create`
-1. On a new deal, type a name that does not exist into the **Account** field and choose its **Create**
-   option. A dialog opens with the new account's form; save it.
-2. ✅ The Account field shows the new name, and the saved deal holds that account. Creating a second
-   one replaces the first.
+### 5.12 Account and contact search (bc-aidp-next-golive#372)
+1. On a new deal, click into **Account** and type one character. ✅ Nothing is listed.
+2. Type the start of an account's name, legal name or website domain (`acme.com`). ✅ Matches appear
+   within a second; an organization with no Sales Account is never offered.
+3. In **Primary Contact**, type a last name, an email, or `@` plus an email domain. ✅ Sales contacts
+   whose last name, name or email starts with it appear. A word in the middle of a name does not match.
+4. Pick one of each, save, reopen. ✅ The names show, not IDs. Inline create is not offered on these
+   three fields.
 
 ### 5.13 Regression sweep
 - Reload every page — no console errors.

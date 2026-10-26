@@ -75,8 +75,10 @@ packages:
 # pnpm-lock.yaml, which CI installs frozen; the override only governs what a re-resolution may
 # pick. An exact pin here held this repo on common 5.46.3 after common had fixed its own install
 # (5.46.3's Tags metadata cannot be pushed to an MJ v6 host), and nothing prompted anyone to move
-# it. The floor is common's first release with [__mj_BizAppsCommon].[fnBusinessDayOf], which the
-# Deal Cycle Time and Won Deals With Unconfirmed Orders queries call; mj-app.json carries the same floor.
+# it. The floor is common's first release with bizapps-party-field and the Person.EmailDomain /
+# Organization.WebsiteDomain columns the Deal form's pickers query (bc-aidp-next-golive#372); it also
+# carries [__mj_BizAppsCommon].[fnBusinessDayOf], which the Deal Cycle Time and Won Deals With
+# Unconfirmed Orders queries call. mj-app.json carries the same floor.
 # What travels to a consumer is the range in each package.json, which is what lets a host dedupe
 # instead of nesting a second copy.
 overrides:
@@ -95,9 +97,9 @@ overrides:
   '@angular-devkit/build-angular': '21.1.3'
   '@memberjunction/core': '^6.1.6'
   '@memberjunction/global': '^6.1.6'
-  '@mj-biz-apps/common-entities': '^5.51.0'
-  '@mj-biz-apps/common-ng': '^5.51.0'
-  '@mj-biz-apps/common-activity-sync': '^5.51.0'
+  '@mj-biz-apps/common-entities': '^5.56.0'
+  '@mj-biz-apps/common-ng': '^5.56.0'
+  '@mj-biz-apps/common-activity-sync': '^5.56.0'
   graphql: '16.14.2'
   type-graphql: '2.0.0-beta.3'
   reflect-metadata: '0.2.2'
