@@ -17,12 +17,10 @@ import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.
  *   - On the deal FORM the second header has no `CompanyID`, so the insert dies two apps away on
  *     `Failed to save order header: Company cannot be null` -- a NOT NULL complaint about a column no
  *     human can see, while an order NUMBER is drawn and rolled back on every attempt.
- *   - On the WORKSPACE the header IS stamped with a company, so the save SUCCEEDS and the rep's line
- *     lands on an order nothing points at. `79-embedded-order-refresh.spec.ts` guards that half.
+ *   - On the deal workspace (unmounted, and since deleted in #291) the header WAS stamped with a
+ *     company, so the save succeeded and the rep's line landed on an order nothing pointed at.
  *
- * THESE CHECKS COVER THE DIALOG ONLY. `DealWorkspaceComponent` is not instantiated here and is not
- * changed by this branch -- it is rendered by no template, and fixing `AddLine()` needs more than the
- * resolve-first step (the embedded load does not bring `Lines`, which is `Load: 'explicit'`).
+ * THESE CHECKS COVER THE DIALOG, the only surface that adds a line.
  *
  * `DealEntity.Save()` already resolves the peer after a SAVE. Neither of the above goes through a save,
  * so that guard cannot reach them -- this is the LOAD path, and it needs its own.

@@ -1,9 +1,12 @@
 [
   {
+    "_comments": [
+      "Former description, kept as the design note: The deal is live and progressing. The only status a new deal starts in."
+    ],
     "fields": {
       "Code": "OPEN",
       "Name": "Open",
-      "Description": "The deal is live and progressing. The only status a new deal starts in.",
+      "Description": "The deal is live and progressing. Every new deal starts here.",
       "IsOpen": true,
       "IsClosed": false,
       "IsWon": false,
@@ -21,10 +24,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, corrected: winning runs the pipeline's CloseWonPolicy (a contract when the policy asks for one, plus finance tasks) in one transaction. It creates no order: the deal's own order changes status on stage entry. It LOCKS the deal, because the deal is now the provenance of the contract and the order."
+    ],
     "fields": {
       "Code": "WON",
       "Name": "Won",
-      "Description": "The customer committed. This is the status whose transition creates a contract and/or orders in one transaction — and it LOCKS the deal, because the deal is now the provenance of both.",
+      "Description": "The customer committed. Winning follows the pipeline's close-won policy and locks the deal.",
       "IsOpen": false,
       "IsClosed": true,
       "IsWon": true,
@@ -42,10 +48,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: The customer chose otherwise. Requires a LossReason; locks the deal so the reason cannot be quietly revised later."
+    ],
     "fields": {
       "Code": "LOST",
       "Name": "Lost",
-      "Description": "The customer chose otherwise. Requires a LossReason; locks the deal so the reason cannot be quietly revised later.",
+      "Description": "The customer chose otherwise. Requires a loss reason and locks the deal.",
       "IsOpen": false,
       "IsClosed": true,
       "IsWon": false,
@@ -63,10 +72,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: We walked away, or the deal went dark. Counts as lost for win-rate and forecast purposes — the distinction from Lost is diagnostic, not behavioural, which is exactly why it is a separate ROW rather than a separate code path."
+    ],
     "fields": {
       "Code": "ABANDONED",
       "Name": "Abandoned",
-      "Description": "We walked away, or the deal went dark. Counts as lost for win-rate and forecast purposes — the distinction from Lost is diagnostic, not behavioural, which is exactly why it is a separate ROW rather than a separate code path.",
+      "Description": "We walked away, or the deal went dark. Counts as lost in win rates and forecasts.",
       "IsOpen": false,
       "IsClosed": true,
       "IsWon": false,
@@ -84,10 +96,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Paused — neither progressing nor concluded, which is why it is neither IsOpen nor IsClosed. That combination is the reason those two flags are not each other's inverse: a rollup asking 'still live' and one asking 'not yet concluded' want different answers here."
+    ],
     "fields": {
       "Code": "ONHOLD",
       "Name": "On Hold",
-      "Description": "Paused — neither progressing nor concluded, which is why it is neither IsOpen nor IsClosed. That combination is the reason those two flags are not each other's inverse: a rollup asking 'still live' and one asking 'not yet concluded' want different answers here.",
+      "Description": "Paused: neither progressing nor concluded.",
       "IsOpen": false,
       "IsClosed": false,
       "IsWon": false,

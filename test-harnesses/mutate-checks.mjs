@@ -488,8 +488,8 @@ const MUTATIONS = [
       to: 'this._lockedAtSave ? null : await this.planStageDefaults()',
       note: 'a reopen loses the probability a human set, and disagrees with its own provenance row' },
 
-    // THE CREATE GUARD ON THE STAGE LOG. A new deal whose stage is set twice -- what NewDeal() plus a
-    // rep's choice does -- looked like a MOVE, because the first assignment becomes the OldValue.
+    // THE CREATE GUARD ON THE STAGE LOG. A new deal whose stage is set twice -- what the deal workspace's
+    // NewDeal() plus a rep's choice did -- looked like a MOVE, because the first assignment becomes the OldValue.
     { id: 'M-ST4', file: DES, expect: ['SD30'],
       from: 'if (!this.IsSaved) {\n            return null;\n        }\n\n        const priorStageID',
       to: 'if (false) {\n            return null;\n        }\n\n        const priorStageID',

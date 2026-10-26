@@ -133,9 +133,9 @@ describe('the cards compute no money (rule 1)', () => {
     const src = readFileSync(new URL('../lib/form-panels/deal-line-cards.component.ts', import.meta.url), 'utf8');
     const template = src.slice(src.indexOf('template: `'), src.indexOf('styles: ['));
 
-    it('displays the unit price and line total orders stored, through the money pipe only', () => {
-        expect(template).toContain('line.UnitPrice | mjoMoney');
-        expect(template).toContain('line.LineTotalNet | mjoMoney');
+    it('displays the unit price and line total orders stored, through the display formatter only', () => {
+        expect(template).toContain('Money(line.UnitPrice)');
+        expect(template).toContain('Money(line.LineTotalNet)');
         expect(template).not.toMatch(/Quantity\s*\*|\*\s*line\.UnitPrice/);
     });
 });

@@ -12,7 +12,11 @@
  * THE PARSER IS THE ONE MJ USES, resolved through `@memberjunction/core-entities-server`'s own
  * dependencies rather than a copy this repo declares, so the version measured is the version that runs.
  *
- * SCOPED TO THE FILES #154 TOUCHED. `bookings-by-period.sql` already fails the same way on `next`
+ * SCOPED TO THE BUSINESS-DAY QUERIES (bc-aidp-next-golive#168), plus the three the dashboard's filter bar changed
+ * (bc-aidp-next-golive#350): a Nunjucks `{% else %}` in a select list, or STRING_AGG's WITHIN GROUP,
+ * each made the full parse of those fall back to the regex reader with zero columns, and these pins are
+ * what found it. The three period filters #289 moved onto fnBusinessDayOf() are listed too, with the
+ * same counts they parsed to before. `bookings-by-period.sql` already fails the same way on `next`
  * (zero select columns) for an unrelated reason; it is reported, not fixed, here.
  */
 import { readFileSync } from 'node:fs';
@@ -48,11 +52,20 @@ beforeAll(async () => {
 const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
     'deal-cycle-time.sql': { tables: ['vwDeals', 'DealStatusType', 'DealStageEvent', 'closed', 'ranked'], columns: 10 },
     'won-deals-order-not-confirmed.sql': { tables: ['vwDeals', 'DealStatusType', 'won', 'vwOrderHeaders'], columns: 18 },
-    'dashboard-summary.sql': { tables: ['Deal', 'DealStatusType', 'Pipeline'], columns: 10 },
+    // `scoped` is the summary's own CTE. The order-line EXISTS sits inside a CASE in that CTE, where the
+    // parser does not look; the roster's sits in its select list, where it does.
+    'dashboard-summary.sql': { tables: ['Deal', 'DealStatusType', 'Pipeline', 'ForecastCategoryType', 'scoped'], columns: 19 },
     'deal-roster.sql': {
-        tables: ['vwDeals', 'DealStatusType', 'Pipeline', 'PipelineStage', 'ForecastCategoryType'],
-        columns: 39,
+        tables: ['vwDeals', 'DealStatusType', 'Pipeline', 'PipelineStage', 'ForecastCategoryType', 'OrderLine', 'Company'],
+        columns: 42,
     },
+    'slippage.sql': { tables: ['RecordChange', 'Entity', 'slips', 'vwDeals', 'DealStatusType'], columns: 17 },
+    'stage-conversion-and-dwell.sql': { tables: ['DealStageEvent', 'Deal', 'Pipeline', 'PipelineStage'], columns: 16 },
+    'forecast-history.sql': { tables: ['ForecastSnapshot', 'Company', 'Pipeline', 'Employee'], columns: 15 },
+    'win-rate.sql': { tables: ['vwDeals', 'DealStatusType', 'OrderLine'], columns: 13 },
+    // The Deal form's party pickers (bc-aidp-next-golive#372): base tables only, never a view.
+    'party-lookup-contacts.sql': { tables: ['Person', 'SalesContact'], columns: 3 },
+    'party-lookup-accounts.sql': { tables: ['Organization', 'SalesAccount'], columns: 3 },
 };
 
 describe("MJ's SQL parser reads the business-day queries in full", () => {

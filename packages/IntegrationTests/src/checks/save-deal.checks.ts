@@ -49,13 +49,14 @@
  * @module @mj-biz-apps/sales-integration-tests
  */
 import { Metadata, RunView, ValidationErrorType, type BaseEntity } from '@memberjunction/core';
+import { UUIDsEqual } from '@memberjunction/global';
 import {
     Assert,
     AssertEqual,
     IntegrationCheckRegistry,
     type NamedCheck,
 } from '@memberjunction/testing-integration';
-import { OrdersIsInstalled } from '@mj-biz-apps/sales-core-entities-server';
+import { DealEntityServer, OrdersIsInstalled } from '@mj-biz-apps/sales-core-entities-server';
 import {
     E_ORDERS_PRODUCT,
     ProductFilterFor,
@@ -163,9 +164,9 @@ async function reopen(ctx: Parameters<NamedCheck['Fn']>[0], dealID: string): Pro
  * Loads the lines of the deal's EMBEDDED ORDER, which `deal.LoadRelatedRecords` does not reach.
  *
  * Two hops, and the second is easy to forget: `LoadRelatedRecords` populates the collections declared on
- * THIS entity, and `Lines` is declared on `OrderHeader`. This is the same sequence
- * `DealWorkspaceService.LoadDeal` performs, and for the same reason — which is why it is one named
- * helper rather than two lines copied into nine checks.
+ * THIS entity, and `Lines` is declared on `OrderHeader`. The deal workspace's loader (deleted in
+ * #291) ran the same sequence for the same reason — which is why it is one named helper rather than two
+ * lines copied into nine checks.
  *
  * Returns `readonly BaseEntity[]`, not orders' generated line class: these checks must not take a
  * compile-time dependency on another app's entity package, so fields are reached with `Get`/`Set`. The
@@ -394,6 +395,84 @@ const idsOf = (rows: Record<string, unknown>[]): string =>
     rows.map((r) => String(r.ID).toLowerCase()).sort().join(',');
 
 const seqOf = (dealNumber: string): number => Number(dealNumber.replace(/^DEAL-/, ''));
+
+/* ── #319: a party changed after the order exists ──────────────────────────────────────────── */
+
+const ORDERS_SCHEMA = '__mj_BizAppsOrders';
+
+/** The deal's order bill-to and status, read inside the check's transaction. */
+interface OrderBillToRow extends Record<string, unknown> {
+    Status: string;
+    BillToPersonID: string | null;
+    BillToOrganizationID: string | null;
+}
+
+/**
+ * `count` distinct sales contacts. Any `SalesContact` id is a `Person` id (IsA), so each one is a value
+ * `OrderHeader.BillToPersonID` accepts. Discovered, never hardcoded, like every other fixture here.
+ */
+async function salesContacts(ctx: Parameters<NamedCheck['Fn']>[0], count: number): Promise<string[]> {
+    const r = await new RunView().RunView<{ ID: string }>(
+        { EntityName: 'MJ_BizApps_Sales: Sales Contacts', OrderBy: 'ID', MaxRows: count, ResultType: 'simple', Fields: ['ID'] },
+        ctx.User,
+    );
+    Assert(r.Success, `setup: reading sales contacts failed — ${r.ErrorMessage}`);
+    const ids = (r.Results ?? []).map((row) => row.ID);
+    Assert(ids.length >= count, `setup: this check needs ${count} SalesContact rows, found ${ids.length}. Re-seed.`);
+    return ids;
+}
+
+/** The deal's order, by the deal's own FK. */
+async function billToOf(ctx: Parameters<NamedCheck['Fn']>[0], dealID: string): Promise<OrderBillToRow & { ID: string }> {
+    return QueryOneRow<OrderBillToRow & { ID: string }>(
+        ctx,
+        `SELECT o.ID, o.Status, o.BillToPersonID, o.BillToOrganizationID
+           FROM ${ORDERS_SCHEMA}.OrderHeader o JOIN ${SALES_SCHEMA}.Deal d ON d.OrderID = o.ID
+          WHERE d.ID = '${dealID}'`,
+    );
+}
+
+/**
+ * A deal billed to `billing`, saved, with its order put in `status` — then the deal LOADED FRESH, the
+ * way a form save arrives on the server. Deals track record changes, so MJAPI's update resolver loads
+ * the record from the database before applying the form's values, and a load hydrates the embedded
+ * order (`EmbeddedRecord.LoadEager`). The order the save sees is therefore the persisted one, read after
+ * the status change below, not an object left over from the create.
+ */
+async function dealWithOrderIn(
+    ctx: Parameters<NamedCheck['Fn']>[0],
+    f: SalesFixture,
+    name: string,
+    billing: string,
+    order: { Status: 'Draft' | 'Confirmed'; Booked: boolean; BillToPersonID?: string },
+): Promise<{ deal: DealEntityServer; orderID: string }> {
+    const created = await newDeal(ctx, f, (d) => {
+        d.Name = name;
+        d.BillingContactID = billing;
+    });
+    await saveOk(created, 'create');
+    const orderID = (await billToOf(ctx, created.ID)).ID;
+    // Set outright rather than relying on the fixture stage's OrderStatusOnEntry, which a host may change.
+    await execSql(
+        ctx,
+        `UPDATE ${ORDERS_SCHEMA}.OrderHeader SET Status = '${order.Status}'` +
+            (order.Booked ? ', ConfirmedAt = SYSDATETIMEOFFSET()' : '') +
+            (order.BillToPersonID ? `, BillToPersonID = '${order.BillToPersonID}'` : '') +
+            ` WHERE ID = '${orderID}'`,
+        `${name}: put the order in ${order.Status}`,
+    );
+    const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+    Assert(await deal.Load(created.ID), 'the deal reloads');
+    if (!(deal instanceof DealEntityServer)) {
+        throw new Error('setup: the deal must resolve to DealEntityServer, or no server rule runs');
+    }
+    const embedded = deal.OrderID_Object;
+    Assert(
+        !!embedded && UUIDsEqual(embedded.ID, orderID) && embedded.Status === order.Status,
+        `setup: the reloaded deal must embed its persisted ${order.Status} order, as a server-side load does`,
+    );
+    return { deal, orderID };
+}
 
 export const SaveDealChecks: NamedCheck[] = [
     {
@@ -1623,9 +1702,9 @@ export const SaveDealChecks: NamedCheck[] = [
                  * a deal that had MOVED, and one row went into an append-only log describing a transition
                  * out of a stage the deal was never in.
                  *
-                 * That is not a contrived sequence: it is what the workspace does. `NewDeal()` preselects
-                 * a pipeline and its first stage so the form opens with something valid, and then the rep
-                 * picks the stage they actually want. Every deal created through the UI that way carried a
+                 * That is not a contrived sequence: it is what the deal workspace did. Its `NewDeal()`
+                 * preselected a pipeline and its first stage so the form opened with something valid, and
+                 * then the rep picked the stage they actually wanted. Every deal created through the UI that way carried a
                  * fictional event.
                  *
                  * `BD1` asserts a new deal owes no event and stayed green throughout, because it assigns
@@ -1813,7 +1892,7 @@ export const SaveDealChecks: NamedCheck[] = [
                 /**
                  * ── A DEAL WITH NO STATUS IS INVISIBLE, AND NOTHING USED TO GIVE IT ONE ─────────────
                  *
-                 * `NewDeal()` seeds no status and the column is nullable with no default, so a rep who
+                 * The deal workspace's `NewDeal()` seeded no status and the column is nullable with no default, so a rep who
                  * never touched the Status select saved a deal that every `IsOpen`/`IsWon` rollup skipped
                  * — and while the roster and summary queries INNER JOINed that FK, invisible to every
                  * surface in the app. `PipelineStage.DealStatusTypeID` is seeded on every stage and the
@@ -1958,9 +2037,26 @@ export const SaveDealChecks: NamedCheck[] = [
 
                 const created = await newDeal(ctx, f, (d) => { d.Name = 'SD35 a stage cannot close a deal'; });
                 await saveOk(created, 'create');
-                const before = await TxOne<{ DealStatusTypeID: string }>(
-                    ctx, `SELECT DealStatusTypeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${created.ID}'`,
-                );
+                /**
+                 * The deal's own figures, read so the move can be shown to leave them alone. A closing
+                 * stage's probability, forecast category and order status describe a DECIDED deal; an
+                 * open deal that took them was counted as closed by the forecast, and the losing stage
+                 * voided its order.
+                 */
+                const figures = (id: string) =>
+                    TxOne<{
+                        DealStatusTypeID: string;
+                        Probability: number | null;
+                        ForecastCategoryTypeID: string | null;
+                        OrderStatus: string | null;
+                    }>(
+                        ctx,
+                        `SELECT d.DealStatusTypeID, d.Probability, d.ForecastCategoryTypeID, o.Status AS OrderStatus
+                           FROM ${SALES_SCHEMA}.Deal d
+                           LEFT JOIN __mj_BizAppsOrders.OrderHeader o ON o.ID = d.OrderID
+                          WHERE d.ID = '${id}'`,
+                    );
+                const before = await figures(created.ID);
 
                 // A PLAIN SAVE into the closing stage. Not a close — nobody called Sales.CloseDeal.
                 const moved = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
@@ -1982,6 +2078,15 @@ export const SaveDealChecks: NamedCheck[] = [
                     String(before.DealStatusTypeID).toLowerCase(),
                     'the STATUS is untouched — a stage may name the status a deal sits in, never close it',
                 );
+
+                const kept = await figures(created.ID);
+                AssertEqual(kept.Probability, before.Probability, 'the probability is the deal\'s own, not the closing stage\'s');
+                AssertEqual(
+                    String(kept.ForecastCategoryTypeID ?? '').toLowerCase(),
+                    String(before.ForecastCategoryTypeID ?? '').toLowerCase(),
+                    'the forecast category is the deal\'s own, not the closing stage\'s',
+                );
+                AssertEqual(kept.OrderStatus, before.OrderStatus, 'and the order was not moved by a stage the deal never closed into');
 
                 // And the deal is still editable, which is the observable consequence of not being closed.
                 const edit = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
@@ -2317,6 +2422,97 @@ export const SaveDealChecks: NamedCheck[] = [
                     'the note from a REFUSED save must not land on a later, unrelated event — a '
                         + 'declaration governs ONE save',
                 );
+            }),
+    },
+    {
+        Id: 'save-deal.SD42',
+        Name: 'SD42: a Draft order\'s bill-to follows a changed billing contact, and keeps the account (#319)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * Provisioning stamps the bill-to once. Before #319, changing the billing contact after
+                 * the order existed left the order billing the old person. The organization must stay
+                 * the deal's account: newer orders builds clear an organization that is the replaced
+                 * person's employer unless the writer keeps it.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const [first, second] = await salesContacts(ctx, 2);
+                const { deal } = await dealWithOrderIn(ctx, f, 'SD42 bill-to follows', first, { Status: 'Draft', Booked: false });
+
+                deal.BillingContactID = second;
+                await saveOk(deal, 'the billing contact change');
+
+                const after = await billToOf(ctx, deal.ID);
+                AssertEqual(
+                    String(after.BillToPersonID).toLowerCase(),
+                    second.toLowerCase(),
+                    'the Draft order must bill the new billing contact',
+                );
+                AssertEqual(
+                    String(after.BillToOrganizationID).toLowerCase(),
+                    String(f.AccountID).toLowerCase(),
+                    'the bill-to organization must stay the deal\'s account',
+                );
+                AssertEqual(deal.OrderStatusWarnings.length, 0, `no warning expected — got ${deal.OrderStatusWarnings.join(' | ')}`);
+            }),
+    },
+    {
+        Id: 'save-deal.SD43',
+        Name: 'SD43: a Confirmed order\'s bill-to is left alone, and the deal save warns (#319)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                // Orders' IsEditable is false once booked, and its trigger refuses a bill-to change.
+                // The deal save must still succeed; the order not following is a warning.
+                const f = await ResolveSalesFixture(ctx);
+                const [first, second] = await salesContacts(ctx, 2);
+                const { deal } = await dealWithOrderIn(ctx, f, 'SD43 booked bill-to stays', first, { Status: 'Confirmed', Booked: true });
+
+                deal.BillingContactID = second;
+                await saveOk(deal, 'the billing contact change on a deal whose order is booked');
+
+                const after = await billToOf(ctx, deal.ID);
+                AssertEqual(after.Status, 'Confirmed', 'setup: the order must still be Confirmed');
+                AssertEqual(
+                    String(after.BillToPersonID).toLowerCase(),
+                    first.toLowerCase(),
+                    'a booked order must keep billing the previous contact',
+                );
+                Assert(
+                    deal.OrderStatusWarnings.some((w) => w.includes('Confirmed')),
+                    `the deal save must warn that the order did not follow — got ${JSON.stringify(deal.OrderStatusWarnings)}`,
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD44',
+        Name: 'SD44: a bill-to finance changed by hand survives a contact change on the deal (#319)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                // The order follows only a side that still bills the deal's PREVIOUS party. Anything
+                // else was put there on purpose, by someone working the order.
+                const f = await ResolveSalesFixture(ctx);
+                const [first, second, financePick] = await salesContacts(ctx, 3);
+                // Finance re-points the bill-to BEFORE the deal is loaded, as it would be before a form
+                // save arrives: the save works from the order as the load read it.
+                const { deal } = await dealWithOrderIn(ctx, f, 'SD44 finance bill-to survives', first, {
+                    Status: 'Draft',
+                    Booked: false,
+                    BillToPersonID: financePick,
+                });
+
+                deal.BillingContactID = second;
+                await saveOk(deal, 'the billing contact change');
+
+                const after = await billToOf(ctx, deal.ID);
+                AssertEqual(
+                    String(after.BillToPersonID).toLowerCase(),
+                    financePick.toLowerCase(),
+                    'the bill-to finance chose must survive the deal\'s contact change',
+                );
+                AssertEqual(deal.OrderStatusWarnings.length, 0, `no warning expected — got ${deal.OrderStatusWarnings.join(' | ')}`);
             }),
     },
 ];

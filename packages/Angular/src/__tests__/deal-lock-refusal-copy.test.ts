@@ -37,11 +37,11 @@ describe('the form save refusal on a locked deal', () => {
 });
 
 /**
- * THE LINE-EDIT REFUSAL, WHICH EXISTS IN FOUR PLACES AND MUST NOT DRIFT.
+ * THE LINE-EDIT REFUSAL, WHICH EXISTS IN THREE PLACES AND MUST NOT DRIFT.
  *
  * `DealLockRefusal('update')` in `sales-core-entities-server` is the authority — it is what a save
- * actually produces. Three UI surfaces repeat it so a rep is told the same thing BEFORE the round
- * trip: the deal form's lines panel, the restricted line editor, and the deal workspace.
+ * actually produces. Two UI surfaces repeat it so a rep is told the same thing BEFORE the round
+ * trip: the deal form's lines panel and the restricted line editor.
  *
  * They repeat it rather than import it, and that is not laziness: the server package pulls
  * `node:crypto` and cannot be bundled for a browser — MJExplorer's own manifest says so, which is why
@@ -68,7 +68,6 @@ describe('the line-edit refusal, across every surface that states it', () => {
     it.each([
         ['the deal form lines panel', '../lib/form-panels/deal-form.panels.ts'],
         ['the restricted line editor', '../lib/form-panels/deal-line-editor.component.ts'],
-        ['the deal workspace', '../lib/workspace/deal-workspace.component.ts'],
     ])('%s states it word for word', (_label, path) => {
         expect(read(path)).toContain(expected);
     });

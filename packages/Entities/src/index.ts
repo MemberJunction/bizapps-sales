@@ -54,6 +54,12 @@ export * from './close-lock';
 export * from './amount-freshness';
 
 /**
+ * The refusal a stage event edit or delete gets, shared by `DealStageEventEntityServer` and the Explorer
+ * form so both say the same thing (#348).
+ */
+export * from './stage-event-append-only';
+
+/**
  * Forces the generated entity subclasses to be loaded. Without an explicit
  * import + call, tree-shaking drops the generated entities because they are not
  * directly referenced. Import and call this from the app bootstrap so the

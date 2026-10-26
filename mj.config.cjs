@@ -158,7 +158,12 @@ module.exports = {
     folderPath: './migrations/codegen/',
     appendToFile: false,
     convertCoreSchemaToFlywayMigrationFile: true,
-    omitRecurringScriptsFromLog: false,
+    // Leave out the reconcilers CodeGen runs on every pass (field prunes, schema
+    // syncs, column widths), matching MJ's default and the sibling apps. Captured,
+    // they ran schema-wide in shipped migrations and pruned fields of entities the
+    // migration never touched (#345). A migration that alters an existing column
+    // adds its own scoped field sync instead; see CLAUDE.md "Migrations".
+    omitRecurringScriptsFromLog: true,
     schemaPlaceholders: [
       // Order matters: the more-specific schema must come first because
       // substitution runs sequentially with a greedy regex. If '__mj' were

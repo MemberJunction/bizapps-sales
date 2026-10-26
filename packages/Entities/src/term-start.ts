@@ -59,7 +59,7 @@ export function IsSubscriptionProduct(
  * Three cases, and the third is the one worth reading:
  *
  * · **No product chosen** — nothing to say. A line with no `ProductID` cannot be a subscription, and it
- *   already blocks the save on its own account (`UnlinkedLineIssues`).
+ *   already blocks the save on its own account (the deal line editor's `CanSave` requires a product).
  * · **Product in the catalogue** — orders' predicate decides, and that is #32's requirement 3 exactly,
  *   BUT ONLY WHEN NOTHING IS STORED. A stored value short-circuits every case here: a term start that
  *   exists is always offered, whatever the product turns out to be, so it can be seen and cleared

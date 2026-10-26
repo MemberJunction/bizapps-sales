@@ -49,6 +49,8 @@ export * from './DealTeamMemberEntityServer.js';
 export * from './DealPaymentScheduleEntityServer.js';
 export * from './deal-schedule-to-order.js';
 export * from './PipelineStageEntityServer.js';
+export * from './PipelineEntityServer.js';
+export * from './DealStageEventEntityServer.js';
 export * from './CloseDealOperation.js';
 
 /**
@@ -114,6 +116,7 @@ export type {
  */
 export * from './DealLockOrderLineVeto.js';
 export * from './DealNotWonConfirmVeto.js';
+export * from './DealOrderLink.js';
 export * from './forecast/ForecastSource.js';
 export * from './forecast/FixtureForecastSource.js';
 export * from './forecast/QueryForecastSource.js';
@@ -137,6 +140,8 @@ import { DealEntityServer } from './DealEntityServer.js';
 import { DealTeamMemberEntityServer } from './DealTeamMemberEntityServer.js';
 import { DealPaymentScheduleEntityServer } from './DealPaymentScheduleEntityServer.js';
 import { PipelineStageEntityServer } from './PipelineStageEntityServer.js';
+import { PipelineEntityServer } from './PipelineEntityServer.js';
+import { DealStageEventEntityServer } from './DealStageEventEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
 import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 
@@ -152,7 +157,7 @@ import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 export function LoadSalesCoreEntitiesServer(): void {
     LoadActivitySyncEngine();
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, DealPaymentScheduleEntityServer, PipelineStageEntityServer, CloseDealOperation, ReopenDealOperation, DealLinkerExtension];
+    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, DealPaymentScheduleEntityServer, PipelineStageEntityServer, PipelineEntityServer, DealStageEventEntityServer, CloseDealOperation, ReopenDealOperation, DealLinkerExtension];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }

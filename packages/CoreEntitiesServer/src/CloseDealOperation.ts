@@ -65,7 +65,7 @@ import { DealEntityServer } from './DealEntityServer.js';
 import { SendDealScheduleToOrder } from './deal-schedule-to-order.js';
 import { OrdersIsInstalled } from './orders-availability.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
-import { CloseWonTaskDueAt, CloseWonTaskService, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
+import { CloseWonTaskDueAt, CloseWonTaskService, RaisesOrderReviewTask, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
 import {
     AnswerAsNextTerm,
     FindUnansweredSubscriptionLines,
@@ -207,6 +207,17 @@ function issue(Section: SalesCloseIssue['Section'], Message: string, Field: stri
 }
 
 /**
+ * A refusal raised inside the close's transaction. Thrown so the transaction rolls back, and reported
+ * as a plain error issue rather than as "the deal could not be closed: Error: ...".
+ */
+class CloseRefusal extends Error {
+    public constructor(message: string, public readonly Field: string | null = null) {
+        super(message);
+        this.name = 'CloseRefusal';
+    }
+}
+
+/**
  * The deal's order-status warnings, as Issues — the channel D-OS1's rule 3 needs.
  *
  * A stage change that asks the order for a status orders refuses must not fail the operation, so the
@@ -256,9 +267,9 @@ function orderStatusIssues(deal: DealEntityServer): SalesCloseIssue[] {
  *
  * ── WHY THIS EXISTS WHEN `Routing` ALREADY CARRIES THE REASON ───────────────────────────────────
  *
- * It carries it for anyone who reads `Routing`. The workspace does — `deal-workspace.component.html`
- * renders `— not created: {{ r.Reason }}` on a `--failed` row — so a REP closing a deal already sees
- * the refusal and why. That surface is fine and is not what this is for.
+ * It carries it for anyone who reads `Routing`. The deal workspace did (it rendered
+ * `— not created: {{ r.Reason }}` on a failed row; deleted in #291), so a REP closing a deal there saw
+ * the refusal and why. That is not what this is for.
  *
  * The gap is programmatic. An API client, an agent or an importer that checks `Success` and reads
  * `Issues` — the two fields every other failure mode in this operation reports through — sees
@@ -545,8 +556,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             // Before the deal's save, which is what confirms the order and applies the answer.
             await AnswerAsNextTerm(validation.RenewalNextTerm);
 
+            const routeIssues: SalesCloseIssue[] = [];
             for (const plan of routing) {
-                await this.execute(plan, deal, policy, provider, user);
+                routeIssues.push(...(await this.execute(plan, deal, policy, provider, user)));
             }
 
             /**
@@ -710,6 +722,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                                   RoleID: cfg.AssigneeRoleID ?? undefined,
                               }
                             : undefined,
+                        // Off only where the policy says `false` (golive#320 §5); absent keeps the task.
+                        RaiseOrderReviewTask: RaisesOrderReviewTask(cfg),
                     },
                     provider,
                     user,
@@ -742,6 +756,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                  */
                 Issues: [
                     ...closing.Issues,
+                    ...routeIssues,
                     ...taskIssues,
                     ...scheduleNotes,
                     ...linkIssues,
@@ -764,6 +779,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 } catch (rollbackErr) {
                     LogError(`Sales.CloseDeal: rollback failed: ${rollbackErr}`);
                 }
+            }
+            if (err instanceof CloseRefusal) {
+                return { ...empty, Issues: [issue('deal', err.message, err.Field)] };
             }
             LogError(`Sales.CloseDeal failed: ${err}`);
             return { ...empty, Issues: [issue('deal', `The deal could not be closed: ${err}`)] };
@@ -953,17 +971,25 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         return plans;
     }
 
-    /** Attempt one planned route through the seam, recording honestly whether it executed. */
+    /**
+     * Attempt one planned route through the seam, recording honestly whether it executed.
+     *
+     * @returns notes and warnings the route raised beyond its own `Routing` entry.
+     */
     private async execute(
         plan: SalesCloseRoutingResult,
         deal: DealEntityServer,
         policy: SalesCloseWonPolicy,
         provider: IMetadataProvider,
         user: UserInfo,
-    ): Promise<void> {
+    ): Promise<SalesCloseIssue[]> {
         const seam = resolveSeam(user, provider);
 
         if (plan.Target === 'Contract') {
+            // A deal that already names a contract reuses it, before either door below (#278).
+            if (deal.ContractID) {
+                return this.reuseContract(plan, deal, policy, provider, user, seam);
+            }
             // A renewal takes a different door: RenewTerm against the contract being renewed, not a
             // new agreement. Decided by DealType.RequiresRenewalSource — a flag, not a type name.
             const isRenewal = await this.dealTypeRequiresRenewalSource(deal.DealTypeID, provider, user);
@@ -982,12 +1008,67 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 // §7.2 step 4: stamp the agreement onto the deal.
                 deal.ContractID = result.ContractID;
             }
-            return;
+            return [];
         }
 
 
         // Subscription materialization has no seam at all yet; the plan already carries its reason.
         plan.Executed = false;
+        return [];
+    }
+
+    /**
+     * The contract route for a deal that already names a contract: closed Won, reopened, closed Won
+     * again (#278).
+     *
+     * Creating a second contract here is what orphaned the first: the deal's `ContractID` was
+     * overwritten and nothing pointed back at the original. So the deal's own contract is reused, and
+     * `ContractID` never changes. The seam refreshes it from the deal while it is unsigned and leaves it
+     * alone once signed; a signed contract comes back as a warning that the deal and the paper may
+     * differ.
+     *
+     * A contract the deal names but nobody can read REFUSES the close, the same way an unreadable
+     * current status does above: creating a new one would orphan it, and stamping it as reused would
+     * claim a record nobody has seen. The refusal is thrown so the transaction rolls back; the catch in
+     * `InternalExecute` turns it into an ordinary error issue.
+     */
+    private async reuseContract(
+        plan: SalesCloseRoutingResult,
+        deal: DealEntityServer,
+        policy: SalesCloseWonPolicy,
+        provider: IMetadataProvider,
+        user: UserInfo,
+        seam: IDownstreamSeam,
+    ): Promise<SalesCloseIssue[]> {
+        const contractID = String(deal.ContractID);
+        const result = await seam.UpdateContractFromDeal({
+            ...(await this.buildContractInput(deal, policy, provider, user)),
+            ContractID: contractID,
+        });
+        if (result.Unreadable) {
+            throw new CloseRefusal(result.Message ?? `Contract ${contractID} could not be read.`, 'ContractID');
+        }
+
+        plan.Executed = result.Success === true;
+        plan.RecordID = result.Success ? contractID : null;
+        plan.Reason = result.Success ? null : result.Message ?? 'not executed';
+        if (!result.Success) {
+            return [];   // reported through `routingIssues`, like any route that did not execute
+        }
+
+        const number = result.ContractNumber || contractID;
+        const issues: SalesCloseIssue[] = [
+            { Section: 'deal', Field: 'ContractID', Severity: 'info', Message: `Reused contract ${number}.` },
+        ];
+        if (result.Signed) {
+            issues.push({
+                Section: 'deal',
+                Field: 'ContractID',
+                Severity: 'warning',
+                Message: result.Message ?? `Contract ${number} is signed and was not changed; the deal may differ from it.`,
+            });
+        }
+        return issues;
     }
 
     /**
@@ -996,7 +1077,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
      * ── THE MIRROR OF `closeEventBeingUndone`, AND THE OTHER HALF OF DN-18 ───────────────────────
      *
      * `CD18` proves a reopen restores the stage the deal came from. It could not help a deal closed
-     * through the browser, because `DealWorkspaceComponent.ConfirmClose()` sends no `ClosingStageID` — so
+     * through the browser, because the deal workspace's `ConfirmClose()` sent no `ClosingStageID` — so
      * no browser-driven close ever moved the stage, every close event recorded
      * `FromStageID === ToStageID`, and the reopen correctly derived the stage the deal was already in.
      * The mechanism was right and the UI could not reach it. `71-lost-and-reopen` is the spec that names
@@ -1502,10 +1583,9 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * when the peer is not. FK set + peer unresolved is not "no order" — it is "unknown
              * order", and an unknown ledger state cannot be certified safe to reopen.
              *
-             * THE SIBLING CALL SITE ALREADY DECIDED THIS. `DealWorkspaceService.LoadDeal` treats the same
-             * state as a hard failure and refuses to render, on the reasoning that a deal with an
-             * unreadable order must not be shown as a deal with no lines. Two files reading one state and
-             * returning opposite verdicts is the defect; this makes them agree.
+             * THE SAME VERDICT THE DEAL WORKSPACE'S LOADER REACHED (deleted in #291): it treated this
+             * state as a hard failure and refused to render, on the reasoning that a deal with an
+             * unreadable order must not be shown as a deal with no lines.
              */
             if (deal.OrderID && !deal.OrderID_Object) {
                 return {
@@ -1572,11 +1652,16 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * stage where it was, so this resolves to the stage the deal is already in and nothing fires.
              */
             const undone = await this.closeEventBeingUndone(deal.ID, provider, user);
-            const landingStage = input.StageID ?? undone?.FromStageID ?? null;
-            const stageMoves =
-                !!landingStage && landingStage.toLowerCase() !== (deal.PipelineStageID ?? '').toLowerCase();
+            const landing = this.reopenLanding(input.StageID ?? null, undone, deal.PipelineStageID ?? null);
+            const landingStage = landing.StageID;
+            const stageMoves = landing.StageMoves;
             if (landingStage) {
                 deal.PipelineStageID = landingStage;
+            } else if (landing.ClearsStage) {
+                deal.PipelineStageID = null;
+                // The stageless deal took the closing stage's category at the close, and the event keeps
+                // no prior one. "Closed" on an open deal is wrong in every case, so it is cleared.
+                deal.ForecastCategoryTypeID = null;
             }
 
             /**
@@ -1587,13 +1672,11 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * The category is only taken when the stage actually moves; a deal that stays where it is
              * keeps the category it has.
              */
-            if (undone && undone.ProbabilityAtTransition !== null) {
-                deal.Probability = undone.ProbabilityAtTransition;
-            }
+            deal.Probability = this.reopenProbability(undone, deal.Probability ?? null);
             if (stageMoves && landingStage) {
-                const landing = await readStage(landingStage, provider, user);
-                if (landing?.ForecastCategoryTypeID) {
-                    deal.ForecastCategoryTypeID = landing.ForecastCategoryTypeID;
+                const landingRow = await readStage(landingStage, provider, user);
+                if (landingRow?.ForecastCategoryTypeID) {
+                    deal.ForecastCategoryTypeID = landingRow.ForecastCategoryTypeID;
                 }
             }
             // The close stamps describe a close that is no longer in effect; clearing them keeps every
@@ -1602,6 +1685,8 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             deal.ClosedAt = null;
             deal.ClosedByUserID = null;
             deal.ActualCloseDate = null;
+            // `ContractID` stays on the deal on purpose: the next close reuses that contract and decides
+            // whether to refresh it (#278).
 
             /**
              * THE LOSS REASON IS A CLOSE STAMP TOO, and leaving it behind was not harmless
@@ -1809,6 +1894,43 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             FromStageID: row.FromStageID ? String(row.FromStageID) : null,
             ProbabilityAtTransition: row.ProbabilityAtTransition ?? null,
         };
+    }
+
+    /**
+     * Where a reopened deal lands: the stage the caller named, else the stage the close event left.
+     *
+     * A close event whose `FromStageID` is NULL records a deal that had NO stage before the close; the
+     * close moved it into the outcome's stage. That is told apart from "no close event found" (`undone`
+     * null), and the reopen clears the stage so the deal goes back to "No stage set" rather than staying
+     * open in the closing stage.
+     */
+    private reopenLanding(
+        requestedStageID: string | null,
+        undone: { FromStageID: string | null } | null,
+        currentStageID: string | null,
+    ): { StageID: string | null; StageMoves: boolean; ClearsStage: boolean } {
+        const stageID = requestedStageID ?? undone?.FromStageID ?? null;
+        if (stageID) {
+            return {
+                StageID: stageID,
+                StageMoves: stageID.toLowerCase() !== (currentStageID ?? '').toLowerCase(),
+                ClearsStage: false,
+            };
+        }
+        const clears = !!undone && !!currentStageID;
+        return { StageID: null, StageMoves: clears, ClearsStage: clears };
+    }
+
+    /**
+     * The probability a reopened deal takes: the close event's pre-close stamp, NULL included, so a deal
+     * that had no probability before the close goes back to none rather than keeping the close's 100 or
+     * 0 (#275). With no close event found there is nothing to restore, and the deal keeps what it has.
+     */
+    private reopenProbability(
+        undone: { ProbabilityAtTransition: number | null } | null,
+        currentProbability: number | null,
+    ): number | null {
+        return undone ? undone.ProbabilityAtTransition : currentProbability;
     }
 
     /** The default landing status — chosen by the `IsOpen` FLAG, never by a status name. */

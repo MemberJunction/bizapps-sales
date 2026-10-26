@@ -24,7 +24,7 @@ import { CommonModule } from '@angular/common';
 import { RunView } from '@memberjunction/core';
 import { EscapeSQLString } from '@memberjunction/global';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
-import { MJOConsequenceChipComponent, MJODatePipe, MJOMoneyPipe } from '@mj-biz-apps/orders-ng';
+import { MJOConsequenceChipComponent, MJODatePipe } from '@mj-biz-apps/orders-ng';
 import {
     DiscountFractionToPercent,
     E_ORDERS_PRODUCT,
@@ -33,6 +33,7 @@ import {
     type DealEntity,
 } from '@mj-biz-apps/sales-entities';
 import { MJS_FOREIGN_ENTITIES } from '../data/entity-names';
+import { FormatDealMoney } from './deal-money';
 
 /** The order line columns a card reads. Virtual name fields (`Product`, `Company`, `ProductPrice`) come with the view. */
 const LINE_FIELDS = [
@@ -88,7 +89,7 @@ function DayOf(value: Date | string | null | undefined): string | null {
 @Component({
     selector: 'mjs-deal-line-cards',
     standalone: true,
-    imports: [CommonModule, SharedGenericModule, MJOConsequenceChipComponent, MJOMoneyPipe, MJODatePipe],
+    imports: [CommonModule, SharedGenericModule, MJOConsequenceChipComponent, MJODatePipe],
     template: `
         <div class="mjs-lc" data-testid="deal-lines">
             @if (Loading && Lines.length === 0) {
@@ -105,10 +106,16 @@ function DayOf(value: Date | string | null | undefined): string | null {
                                 <div class="mjs-lc-card__meta">{{ MetaFor(line) }}</div>
                             </div>
 
-                            <div class="mjs-lc-qty" aria-label="Quantity">{{ line.Quantity }}</div>
+                            <!-- Visible captions (#371 item 9): three bare figures in a row did not say
+                                 which was the quantity, the unit price or the total. -->
+                            <div class="mjs-lc-card__qtycol">
+                                <span class="mjs-lc-cap">Qty</span>
+                                <div class="mjs-lc-qty">{{ line.Quantity }}</div>
+                            </div>
 
                             <div class="mjs-lc-card__price">
-                                <div class="mjs-lc-card__amt">{{ line.UnitPrice | mjoMoney }}</div>
+                                <span class="mjs-lc-cap">Unit price</span>
+                                <div class="mjs-lc-card__amt">{{ Money(line.UnitPrice) }}</div>
                                 @if (line.PriceOverridden) {
                                     <span class="mjs-lc-pill is-override">overridden</span>
                                 } @else if (line.ProductPrice) {
@@ -121,7 +128,10 @@ function DayOf(value: Date | string | null | undefined): string | null {
                                 }
                             </div>
 
-                            <div class="mjs-lc-card__tot">{{ line.LineTotalNet | mjoMoney }}</div>
+                            <div class="mjs-lc-card__tot">
+                                <span class="mjs-lc-cap">Total</span>
+                                <div>{{ Money(line.LineTotalNet) }}</div>
+                            </div>
 
                             @if (!Locked) {
                                 <button type="button" class="mjs-lc-iconbtn" data-testid="line-edit"
@@ -205,7 +215,12 @@ function DayOf(value: Date | string | null | undefined): string | null {
             font-variant-numeric: tabular-nums; font-weight: var(--mj-font-semibold);
             font-size: var(--mj-text-sm); line-height: 28px;
         }
-        .mjs-lc-card__tot { flex: none; min-width: 104px; text-align: right; }
+        .mjs-lc-card__tot { flex: none; min-width: 104px; text-align: right; display: flex; flex-direction: column; align-items: flex-end; }
+        .mjs-lc-card__qtycol { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+        .mjs-lc-cap {
+            font-size: 10.5px; font-weight: var(--mj-font-semibold); line-height: 1.2;
+            color: var(--mj-text-muted); white-space: nowrap;
+        }
         .mjs-lc-source { font-size: 10.5px; color: var(--mj-text-muted); white-space: nowrap; }
         .mjs-lc-pill { padding: 1px 8px; border-radius: 999px; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; }
         .mjs-lc-pill.is-override { color: var(--mj-status-warning-text); background: color-mix(in srgb, var(--mj-status-warning-text) 16%, transparent); }
@@ -323,6 +338,11 @@ export class MJSDealLineCardsComponent implements OnChanges {
         // A failed product read costs the card its SKU line and chips, not its line.
         const rows = result.Success ? (result.Results ?? []) : [];
         return new Map(rows.map((p) => [p.ID, p]));
+    }
+
+    /** A stored line figure in the deal's currency, with cents (#371 items 4 and 5). */
+    public Money(amount: number | null): string {
+        return FormatDealMoney(amount, this.Deal?.CurrencyID, 'cents') || '—';
     }
 
     public OpenLine(line: DealLineCardRow): void {
