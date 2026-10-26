@@ -23,7 +23,7 @@
  */
 import { Metadata } from '@memberjunction/core';
 import type { mjBizAppsOrdersOrderConcessionEntity } from '@mj-biz-apps/orders-entities';
-import type { SalesRecordDiscountConcessionInput, SalesRecordDiscountConcessionOutput } from './generated/remote_operations';
+import { SalesRecordDiscountConcessionOperation } from './generated/remote_operations';
 
 export const ORDER_CONCESSION_ENTITY = 'MJ_BizApps_Orders: Order Concessions';
 
@@ -70,19 +70,10 @@ export type DiscountConcessionOutcome =
     | { Recorded: false; Message: string };
 
 /**
- * `RouteOperation` lives on the client and server providers, not on the `IMetadataProvider` interface
- * `Metadata.Provider` is declared as, so it is narrowed to this shape. Declared precisely so the
- * operation's input and output stay type-checked.
+ * Shown only when neither the operation nor orders says why the concession was not recorded. The server
+ * operation returns the same sentence when orders' result carries no text.
  */
-interface ConcessionOperationRouter {
-    RouteOperation<TInput, TOutput>(
-        operationKey: string,
-        input: TInput,
-    ): Promise<{ Success: boolean; Output?: TOutput; ErrorMessage?: string }>;
-}
-
-/** Shown only when neither the operation nor orders says why the concession was not recorded. */
-const NO_REASON_GIVEN = 'Orders refused the concession and gave no reason.';
+export const CONCESSION_REFUSED_WITHOUT_REASON = 'Orders refused the concession and gave no reason.';
 
 /**
  * Records a Price concession for the line's discount through `Sales.RecordDiscountConcession`. The line
@@ -101,16 +92,16 @@ export async function RecordDiscountConcession(request: DiscountConcessionReques
     if (!reason) return { Recorded: false, Message: 'A discount needs a reason before it can be recorded.' };
 
     try {
-        const router = Metadata.Provider as unknown as ConcessionOperationRouter;
-        const envelope = await router.RouteOperation<SalesRecordDiscountConcessionInput, SalesRecordDiscountConcessionOutput>(
-            'Sales.RecordDiscountConcession',
-            { OrderLineID: request.OrderLineID, ReasonCategory: request.ReasonCategory, Reason: reason },
-        );
+        const envelope = await new SalesRecordDiscountConcessionOperation().Execute({
+            OrderLineID: request.OrderLineID,
+            ReasonCategory: request.ReasonCategory,
+            Reason: reason,
+        });
         const out = envelope.Output;
         if (!envelope.Success || !out) {
             return { Recorded: false, Message: envelope.ErrorMessage?.trim() || 'Sales.RecordDiscountConcession could not be reached.' };
         }
-        if (!out.Success) return { Recorded: false, Message: out.Message?.trim() || NO_REASON_GIVEN };
+        if (!out.Success) return { Recorded: false, Message: out.Message?.trim() || CONCESSION_REFUSED_WITHOUT_REASON };
         return { Recorded: true, AwaitingApproval: out.AwaitingApproval };
     } catch (err) {
         return { Recorded: false, Message: err instanceof Error ? err.message : String(err) };

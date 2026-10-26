@@ -38,7 +38,7 @@
  *                        only, % and _ literal (bc-aidp-next-golive#372). Saves no deal
  *   discount-concession  A deal line's raised discount is recorded through Sales.RecordDiscountConcession,
  *                        where orders' subclass fills, values and decides it; a refusal carries orders'
- *                        reason (golive#340)
+ *                        reason, and a second raise withdraws the line's earlier concession (golive#340)
  *
  * ⚠️ EVERY BUNDLE REQUIRES bizapps-orders EXCEPT `close-won-contract`, whose single check needs nothing
  * at all — it is asserting an absence. save-deal and close-deal require it too. A deal cannot be
