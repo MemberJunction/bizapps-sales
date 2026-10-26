@@ -5,7 +5,8 @@ import type { SalesRecordDiscountConcessionInput, SalesRecordDiscountConcessionO
 vi.mock('../orders-availability.js', () => ({ OrdersIsInstalled: vi.fn(() => true) }));
 
 import { OrdersIsInstalled } from '../orders-availability.js';
-import { CONCESSION_REFUSED_WITHOUT_REASON, RecordDiscountConcessionOperation } from '../RecordDiscountConcessionOperation.js';
+import { CONCESSION_REFUSED_WITHOUT_REASON } from '@mj-biz-apps/sales-entities';
+import { RecordDiscountConcessionOperation } from '../RecordDiscountConcessionOperation.js';
 
 /**
  * `Sales.RecordDiscountConcession` creates the concession on the server so orders' subclass fills and
@@ -32,9 +33,37 @@ function concession(saved: boolean, decidedBy: string | null, completeMessage = 
     } as Record<string, unknown>;
 }
 
-function providerReturning(entity: Record<string, unknown>) {
+/** An earlier concession on the line; `withdrawable` is what orders' `Delete` guard answers. */
+function earlier(id: string, withdrawable: boolean, log: string[]) {
+    return {
+        ID: id,
+        Delete: vi.fn(async () => {
+            log.push(`delete ${id}`);
+            return withdrawable;
+        }),
+        LatestResult: { CompleteMessage: withdrawable ? '' : 'This concession is Approved.' },
+    };
+}
+
+function providerReturning(entity: Record<string, unknown>, existing: Array<Record<string, unknown>> = [], log: string[] = []) {
+    const save = entity.Save as () => Promise<boolean>;
+    entity.Save = vi.fn(async () => {
+        log.push('save new');
+        return save();
+    });
     const get = vi.fn(async () => entity);
-    return { provider: { GetEntityObject: get } as unknown as IMetadataProvider, get };
+    const runView = vi.fn(async () => ({ Success: true, Results: existing }));
+    const begin = vi.fn(async () => log.push('begin'));
+    const commit = vi.fn(async () => log.push('commit'));
+    const rollback = vi.fn(async () => log.push('rollback'));
+    const provider = {
+        GetEntityObject: get,
+        RunView: runView,
+        BeginTransaction: begin,
+        CommitTransaction: commit,
+        RollbackTransaction: rollback,
+    } as unknown as IMetadataProvider;
+    return { provider, get, runView, commit, rollback, log };
 }
 
 function run(input: Partial<SalesRecordDiscountConcessionInput>, provider: IMetadataProvider) {
@@ -99,7 +128,49 @@ describe('Sales.RecordDiscountConcession', () => {
         entity.Save = vi.fn(async () => {
             throw new Error('connection reset');
         });
-        const { provider } = providerReturning(entity);
+        const { provider, rollback } = providerReturning(entity);
         expect(await run({}, provider)).toMatchObject({ Success: false, Message: 'connection reset' });
+        expect(rollback).toHaveBeenCalled();
+    });
+
+    describe('a raised discount on a line that already has a concession', () => {
+        it('withdraws the earlier one before recording, in one committed transaction', async () => {
+            const log: string[] = [];
+            const { provider, runView } = providerReturning(concession(true, null), [earlier('A', true, log)], log);
+            expect(await run({}, provider)).toMatchObject({ Success: true });
+            expect(log).toEqual(['begin', 'delete A', 'save new', 'commit']);
+            expect(runView).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    EntityName: 'MJ_BizApps_Orders: Order Concessions',
+                    ExtraFilter: `OrderLineID = '${LINE}' AND DeliveryForm IN ('Price', 'Scope') AND SubscriptionTermID IS NULL`,
+                    ResultType: 'entity_object',
+                }),
+                USER,
+            );
+        });
+
+        it('keeps one orders will not withdraw, and still records the new one', async () => {
+            const log: string[] = [];
+            const { provider } = providerReturning(concession(true, 'user-1'), [earlier('decided', false, log), earlier('B', true, log)], log);
+            expect(await run({}, provider)).toMatchObject({ Success: true });
+            expect(log).toEqual(['begin', 'delete decided', 'delete B', 'save new', 'commit']);
+        });
+
+        it('rolls the withdrawal back when orders refuses the new one', async () => {
+            const log: string[] = [];
+            const { provider, commit } = providerReturning(concession(false, null, 'no tier'), [earlier('A', true, log)], log);
+            expect(await run({}, provider)).toMatchObject({ Success: false, Message: 'no tier' });
+            expect(log).toEqual(['begin', 'delete A', 'save new', 'rollback']);
+            expect(commit).not.toHaveBeenCalled();
+        });
+
+        it('records nothing when the earlier concessions cannot be read', async () => {
+            const entity = concession(true, null);
+            const { provider, runView, rollback } = providerReturning(entity);
+            runView.mockResolvedValueOnce({ Success: false, Results: [], ErrorMessage: 'timeout' } as never);
+            expect(await run({}, provider)).toMatchObject({ Success: false });
+            expect(entity.Save).not.toHaveBeenCalled();
+            expect(rollback).toHaveBeenCalled();
+        });
     });
 });

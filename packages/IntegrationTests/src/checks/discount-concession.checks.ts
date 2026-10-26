@@ -1,5 +1,5 @@
 /**
- * @fileoverview `discount-concession` — DC1–DC3. A deal line's raised discount is recorded as orders'
+ * @fileoverview `discount-concession` — DC1–DC5. A deal line's raised discount is recorded as orders'
  * Price concession through `Sales.RecordDiscountConcession`, against a live database (golive#340).
  *
  * ── WHY THIS NEEDS A DATABASE ───────────────────────────────────────────────────────────────────
@@ -8,6 +8,10 @@
  * generated class's required-field validation failed first and the rep saw a refusal with no reason. A
  * unit test can show the operation is called; only a live run shows orders' subclass actually fills the
  * order, the value and the requester, and decides the concession, for a line saved through a deal.
+ *
+ * DC4 and DC5 raise the same line twice. Orders values the second concession at the line's whole
+ * discount and sums every concession on the order that is not rejected, so the first one has to be
+ * withdrawn or it is counted twice and the order cannot be confirmed.
  *
  * ── FIXTURE ─────────────────────────────────────────────────────────────────────────────────────
  *
@@ -19,6 +23,7 @@
  */
 import { RunView, type BaseEntity } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
+import type { mjBizAppsOrdersOrderLineEntity } from '@mj-biz-apps/orders-entities';
 import { OrdersIsInstalled } from '@mj-biz-apps/sales-core-entities-server';
 import {
     E_ORDERS_PRODUCT,
@@ -183,6 +188,50 @@ async function discountedLine(ctx: Ctx, f: SalesFixture): Promise<string> {
     return id as string;
 }
 
+const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
+
+/** Raises the saved line's discount, as the editor does when the rep reopens the line. */
+async function raiseDiscount(ctx: Ctx, lineID: string, discountPct: number): Promise<void> {
+    const line = await ProviderOf(ctx).GetEntityObject<mjBizAppsOrdersOrderLineEntity>(E_ORDER_LINE, ctx.User);
+    Assert(await line.Load(lineID), `the line ${lineID} could not be loaded`);
+    line.DiscountPct = discountPct;
+    await saveOk(line, 'raising the line\'s discount');
+}
+
+/** The IDs of every concession recorded on the line. */
+async function concessionIDsOnLine(ctx: Ctx, lineID: string): Promise<string[]> {
+    const r = await new RunView().RunView<{ ID: string }>(
+        {
+            EntityName: ORDER_CONCESSION_ENTITY,
+            ExtraFilter: `OrderLineID = '${lineID}'`,
+            ResultType: 'simple',
+            Fields: ['ID'],
+        },
+        ctx.User,
+    );
+    Assert(r.Success, `reading the line's concessions failed: ${r.ErrorMessage ?? ''}`);
+    return (r.Results ?? []).map((row) => row.ID);
+}
+
+/** Records a concession for the line, raises its discount, records again; returns both outcomes. */
+async function recordRaiseRecord(
+    ctx: Ctx,
+    lineID: string,
+): Promise<{ first: SalesRecordDiscountConcessionOutput; second: SalesRecordDiscountConcessionOutput }> {
+    const first = await record(ctx, { OrderLineID: lineID, ReasonCategory: 'Retention', Reason: REASON });
+    Assert(first.Success, `the first concession was not recorded: ${first.Message}`);
+    await raiseDiscount(ctx, lineID, 0.2);
+    const second = await record(ctx, { OrderLineID: lineID, ReasonCategory: 'Retention', Reason: REASON });
+    Assert(second.Success, `the concession for the raised discount was not recorded: ${second.Message}`);
+    return { first, second };
+}
+
+function assertOnlyTheSecondRemains(ids: string[], first: SalesRecordDiscountConcessionOutput, second: SalesRecordDiscountConcessionOutput): void {
+    Assert(!ids.some((id) => sameID(id, first.ConcessionID)), 'the concession for the earlier discount must be withdrawn');
+    AssertEqual(ids.length, 1, `the line must carry exactly one concession; it carries ${ids.length}`);
+    Assert(sameID(ids[0], second.ConcessionID), 'the remaining concession must be the one for the raised discount');
+}
+
 async function record(ctx: Ctx, input: SalesRecordDiscountConcessionInput): Promise<SalesRecordDiscountConcessionOutput> {
     const result = await new SalesRecordDiscountConcessionOperation().Execute(input, { provider: ctx.Provider, user: ctx.User });
     const output = (result as { Output?: SalesRecordDiscountConcessionOutput })?.Output;
@@ -274,6 +323,41 @@ export const DiscountConcessionChecks: NamedCheck[] = [
                 Assert(message.trim().length > 0, 'a refusal must say why');
                 Assert(!message.includes(NO_REASON_FALLBACK), `the refusal lost orders' reason again: "${message}"`);
                 Assert(/authority/i.test(message), `the refusal should be orders' own explanation; got "${message}"`);
+            }),
+    },
+    {
+        Id: 'discount-concession.DC4',
+        Name: 'DC4: raising a discount approved on the rep\'s authority withdraws that concession and records one for the new discount',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                const f = await ResolveSalesFixture(ctx);
+                await isolateConcessionPolicy(ctx);
+                await giveAuthority(ctx, 0.5);
+                const lineID = await discountedLine(ctx, f);
+
+                const { first, second } = await recordRaiseRecord(ctx, lineID);
+                AssertEqual(first.AwaitingApproval, false, 'setup: the first concession must be approved on the rep\'s authority');
+                AssertEqual(second.AwaitingApproval, false, 'the raised discount is still inside the rep\'s authority');
+                assertOnlyTheSecondRemains(await concessionIDsOnLine(ctx, lineID), first, second);
+            }),
+    },
+    {
+        Id: 'discount-concession.DC5',
+        Name: 'DC5: raising a discount whose concession is Pending withdraws it and records one for the new discount',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                const f = await ResolveSalesFixture(ctx);
+                await isolateConcessionPolicy(ctx);
+                await giveAuthority(ctx, 0.05);
+                await addConcessionRule(ctx, await approverRoleTheUserLacks(ctx));
+                const lineID = await discountedLine(ctx, f);
+
+                const { first, second } = await recordRaiseRecord(ctx, lineID);
+                AssertEqual(first.AwaitingApproval, true, 'setup: the first concession must wait for the approving role');
+                AssertEqual(second.AwaitingApproval, true, 'the raised discount is still outside the rep\'s authority');
+                assertOnlyTheSecondRemains(await concessionIDsOnLine(ctx, lineID), first, second);
             }),
     },
 ];

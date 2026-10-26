@@ -46,7 +46,7 @@ describe('RecordDiscountConcession', () => {
             OrderLineID: LINE,
             ReasonCategory: 'Retention',
             Reason: 'keep the account',
-        });
+        }, {});
         expect(outcome).toEqual({ Recorded: true, AwaitingApproval: false });
     });
 
@@ -80,5 +80,15 @@ describe('RecordDiscountConcession', () => {
         expect(await RecordDiscountConcession({ OrderLineID: LINE, ReasonCategory: 'Other', Reason: '  ' }))
             .toMatchObject({ Recorded: false });
         expect(route).not.toHaveBeenCalled();
+    });
+
+    it('turns a thrown operation into a refusal with its message', async () => {
+        vi.spyOn(Metadata, 'Provider', 'get').mockReturnValue({
+            RouteOperation: vi.fn(async () => {
+                throw new Error('network down');
+            }),
+        } as never);
+        expect(await RecordDiscountConcession({ OrderLineID: LINE, ReasonCategory: 'Other', Reason: 'r' }))
+            .toEqual({ Recorded: false, Message: 'network down' });
     });
 });
