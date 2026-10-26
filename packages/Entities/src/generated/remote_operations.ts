@@ -247,7 +247,7 @@ export class SalesCloseDealOperation extends BaseRemotableOperation<SalesCloseDe
 // ============================================================
 /**
  * Record Discount Concession
- * Record a deal line's raised discount as a Price concession on its order line, as the calling user, with the rep's reason category and reason. Orders values the concession, approves it on save when the requester's Sales Authority covers it, and otherwise leaves it Pending for the approving role. Returns whether it was recorded, whether it awaits approval, and orders' own message when it refuses. Sales states intent only; orders computes every figure.
+ * Records a deal line's raised discount as a Price concession on its order line, replacing the line's earlier one, for orders to value and decide.
  * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
  * under 'Sales.RecordDiscountConcession'. This generated base provides the typed contract only (client-safe).
  */
