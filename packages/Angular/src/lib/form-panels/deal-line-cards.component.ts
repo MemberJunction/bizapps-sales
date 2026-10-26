@@ -17,21 +17,36 @@
  * here multiplies, sums or rounds money. Editing still goes through the restricted line editor
  * (`mjs-deal-line-editor`): this list only says which line to open.
  *
+ * ── THE STATE OF A DISCOUNT'S CONCESSION (golive#340) ───────────────────────────────────────────────
+ *
+ * A discounted line says where its concession stands: waiting for approval, rejected, or never recorded
+ * (orders refused it, or the line predates recording). The order cannot be confirmed in any of those
+ * states, and before this the rep learned that only from the confirm gate. Rejected and Not recorded
+ * offer Record again, which opens the editor: nothing covers the line, so the editor asks for a reason
+ * and records a new concession on save. The state is read from orders' stored concession rows
+ * (`ResolveLineConcessionState`); a line orders does not value (no engine price, a renewal) says nothing,
+ * because orders records no concession for it and its confirm gate asks for none.
+ *
  * @module @mj-biz-apps/sales-ng
  */
 import { ChangeDetectorRef, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RunView } from '@memberjunction/core';
+import { Metadata, RunView } from '@memberjunction/core';
 import { EscapeSQLString } from '@memberjunction/global';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
+import { ResolveLinePriceStanding } from '@mj-biz-apps/orders-entities';
 import { MJOConsequenceChipComponent, MJODatePipe } from '@mj-biz-apps/orders-ng';
 import {
     DiscountFractionToPercent,
     E_ORDERS_PRODUCT,
     EffectiveTermStart,
     HasExplicitTermStart,
+    LoadLineConcessionRows,
+    ResolveLineConcessionState,
     WithInheritedSubscriptionType,
     type DealEntity,
+    type LineConcessionRow,
+    type LineConcessionState,
 } from '@mj-biz-apps/sales-entities';
 import { MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { FormatDealMoney } from './deal-money';
@@ -51,6 +66,9 @@ const LINE_FIELDS = [
     'PriceOverrideReason',
     'ProductPrice',
     'ServicePeriodStart',
+    'OrderHeaderID',
+    'ProductPriceID',
+    'RenewsSubscriptionID',
 ] as const;
 
 /** One order line, as the card shows it. */
@@ -68,7 +86,17 @@ export interface DealLineCardRow {
     PriceOverrideReason: string | null;
     ProductPrice: string | null;
     ServicePeriodStart: string | null;
+    OrderHeaderID: string;
+    ProductPriceID: string | null;
+    RenewsSubscriptionID: string | null;
 }
+
+/** What a card says about a concession state, and whether it offers Record again. */
+const CONCESSION_BADGES: Partial<Record<LineConcessionState, { Label: string; Tone: 'pending' | 'problem'; Retry: boolean }>> = {
+    Pending: { Label: 'Discount awaiting approval', Tone: 'pending', Retry: false },
+    Rejected: { Label: 'Discount rejected', Tone: 'problem', Retry: true },
+    NotRecorded: { Label: 'Discount not recorded for approval', Tone: 'problem', Retry: true },
+};
 
 /** The product facts a card shows beside the line. */
 export interface DealLineCardProduct {
@@ -158,6 +186,18 @@ function DayOf(value: Date | string | null | undefined): string | null {
                             <div class="mjs-lc-card__why">{{ line.PriceOverrideReason }}</div>
                         }
 
+                        @if (ConcessionBadge(line); as badge) {
+                            <div class="mjs-lc-conc" data-testid="line-concession" [class.is-problem]="badge.Tone === 'problem'">
+                                <i class="fa-solid" [class.fa-hourglass-half]="badge.Tone === 'pending'"
+                                   [class.fa-circle-exclamation]="badge.Tone === 'problem'" aria-hidden="true"></i>
+                                <span>{{ badge.Label }}</span>
+                                @if (badge.Retry && !Locked) {
+                                    <button type="button" class="mjs-lc-conc__retry" data-testid="line-concession-retry"
+                                            (click)="RecordAgain(line)">Record again</button>
+                                }
+                            </div>
+                        }
+
                         @if (ShowsTermStart(line)) {
                             <div class="mjs-lc-term">
                                 <span class="mjs-lc-term__label">Term start</span>
@@ -237,6 +277,17 @@ function DayOf(value: Date | string | null | undefined): string | null {
         .mjs-lc-card__chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: var(--mj-space-2); }
         .mjs-lc-card__why { margin-top: 6px; font-size: var(--mj-text-xs); color: var(--mj-text-secondary); line-height: 1.35; }
 
+        .mjs-lc-conc {
+            display: flex; align-items: center; gap: var(--mj-space-2); flex-wrap: wrap; margin-top: var(--mj-space-2);
+            font-size: var(--mj-text-xs); color: var(--mj-status-info-text);
+        }
+        .mjs-lc-conc.is-problem { color: var(--mj-status-warning-text); }
+        .mjs-lc-conc__retry {
+            border: 1px solid currentColor; border-radius: var(--mj-radius-sm); background: transparent;
+            color: inherit; font: inherit; font-weight: var(--mj-font-semibold); padding: 1px 8px; cursor: pointer;
+        }
+        .mjs-lc-conc__retry:hover { background: var(--mj-bg-surface-hover); }
+
         .mjs-lc-term { display: flex; align-items: center; gap: var(--mj-space-2); flex-wrap: wrap; margin-top: var(--mj-space-2); }
         .mjs-lc-term__label, .mjs-lc-term__hint { font-size: var(--mj-text-xs); color: var(--mj-text-muted); }
         .mjs-lc-term__value { font-size: var(--mj-text-sm); color: var(--mj-text-primary); font-variant-numeric: tabular-nums; }
@@ -277,6 +328,8 @@ export class MJSDealLineCardsComponent implements OnChanges {
     public Loading = false;
     public Error: string | null = null;
     private products = new Map<string, DealLineCardProduct>();
+    /** Each discounted line's concession state, keyed by line id. */
+    private concessionStates = new Map<string, LineConcessionState>();
     private loadedOrderID: string | null = null;
 
     public ngOnChanges(changes: SimpleChanges): void {
@@ -299,7 +352,11 @@ export class MJSDealLineCardsComponent implements OnChanges {
         try {
             const lines = await this.loadLines(orderID);
             const products = await this.loadProducts(lines);
-            if (this.loadedOrderID === orderID) this.setLines(lines, products);
+            const states = await this.loadConcessionStates(orderID, lines);
+            if (this.loadedOrderID === orderID) {
+                this.concessionStates = states;
+                this.setLines(lines, products);
+            }
         } catch (e) {
             this.Error = `The products on this deal could not be loaded: ${e instanceof Error ? e.message : String(e)}`;
         } finally {
@@ -347,6 +404,73 @@ export class MJSDealLineCardsComponent implements OnChanges {
             console.error(`[deal-line-cards] ${e instanceof Error ? e.message : String(e)}`);
         }
         return new Map(rows.map((p) => [p.ID, p]));
+    }
+
+    /**
+     * Each discounted line's concession state. A failed read costs the cards their concession line, not
+     * the cards: orders' confirm gate still reports an unapproved discount.
+     */
+    private async loadConcessionStates(orderID: string, lines: DealLineCardRow[]): Promise<Map<string, LineConcessionState>> {
+        const states = new Map<string, LineConcessionState>();
+        const discounted = lines.filter((l) => this.DiscountPercent(l) !== null);
+        if (discounted.length === 0) return states;
+        let rows: LineConcessionRow[];
+        try {
+            rows = await LoadLineConcessionRows(orderID);
+        } catch {
+            return states;
+        }
+        // Whether orders values a line is asked only when nothing was recorded for it (a recorded
+        // concession already says orders valued it), so on most deals no line is asked at all.
+        await Promise.all(
+            discounted.map(async (line) => {
+                const own = rows.filter((r) => r.OrderLineID === line.ID);
+                const valued = own.length > 0 ? true : await this.ordersValuesLine(line);
+                states.set(line.ID, ResolveLineConcessionState({ DiscountPct: line.DiscountPct, Rows: own, OrdersValuesLine: valued }));
+            }),
+        );
+        return states;
+    }
+
+    /**
+     * Whether orders records a price concession for this line's discount: not for a renewal line, and not
+     * when no rule prices its product. Asked of orders' own `ResolveLinePriceStanding`; null when it could
+     * not answer, which shows no state rather than a wrong one.
+     */
+    private async ordersValuesLine(line: DealLineCardRow): Promise<boolean | null> {
+        if (line.RenewsSubscriptionID) return false;
+        const user = Metadata.Provider?.CurrentUser;
+        if (!user) return null;
+        try {
+            const standing = await ResolveLinePriceStanding(
+                {
+                    ProductID: line.ProductID,
+                    OrderHeaderID: line.OrderHeaderID,
+                    Quantity: line.Quantity,
+                    UnitPrice: line.UnitPrice,
+                    ProductPriceID: line.ProductPriceID,
+                },
+                Metadata.Provider,
+                user,
+            );
+            return standing ? standing.EngineUnitPrice !== null : null;
+        } catch {
+            return null;
+        }
+    }
+
+    /** The concession line a card shows, or null when its discount needs nothing said. */
+    public ConcessionBadge(line: DealLineCardRow): { Label: string; Tone: 'pending' | 'problem'; Retry: boolean } | null {
+        const state = this.concessionStates.get(line.ID);
+        return (state && CONCESSION_BADGES[state]) ?? null;
+    }
+
+    /**
+     * Opens the editor on the line. Nothing covers a rejected or unrecorded discount, so the editor asks
+     * for a reason and records a new concession when the rep saves.
+     */
+    public RecordAgain(line: DealLineCardRow): void {
+        this.OpenLine(line);
     }
 
     /** A stored line figure in the deal's currency, with cents (#371 items 4 and 5). */
