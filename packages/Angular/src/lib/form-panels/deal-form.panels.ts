@@ -966,8 +966,9 @@ const FIELD_STYLES = `
        this component and both hints rendered as unstyled body text. FIELD_STYLES is a template
        literal, so no backticks in here. */
     .mjs-field__hint { display: block; margin-top: var(--mj-space-1); color: var(--mj-text-muted); font-size: 0.78rem; }
+    /* Spans both columns of the field grid, so it does not push the next field down a row. */
     .mjs-hint--warning {
-        margin: 0 var(--mj-space-5) var(--mj-space-4); padding: var(--mj-space-2) var(--mj-space-3);
+        grid-column: 1 / -1; padding: var(--mj-space-2) var(--mj-space-3);
         border: 1px solid var(--mj-status-warning-border); border-radius: var(--mj-radius-sm);
         background: var(--mj-status-warning-bg); color: var(--mj-status-warning-text); font-size: 0.82rem;
     }
