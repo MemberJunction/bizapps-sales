@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { AccountContactsWhere } from '../lib/form-panels/account-contacts';
+import { AccountContactsWhere, ContactAccountsWhere } from '../lib/form-panels/account-contacts';
 
 /**
  * bizapps-sales#301: an account listed nobody who works there. Sales Contacts carry no account
@@ -56,5 +56,41 @@ describe('#301 — the people an account lists', () => {
 
     it('quotes the account ID, so a stray quote cannot end the literal', () => {
         expect(AccountContactsWhere("x'; DROP TABLE y; --", VIEW)).toContain("'x''; DROP TABLE y; --'");
+    });
+});
+
+/**
+ * #442: a Sales Contact showed no employer. The contact's Accounts panel reads the same Relationship
+ * rows from the person's end, so the two panels agree on who works where.
+ */
+const CONTACT = 'C0111111-0000-4000-A000-000000000001';
+
+describe('#442 — the accounts a contact lists', () => {
+    const where = ContactAccountsWhere(CONTACT, VIEW);
+
+    it('selects accounts by organization ID, from the Relationships base view', () => {
+        expect(where.startsWith('(ID IN (')).toBe(true);
+        expect(where).toContain('[__mj_BizAppsCommon].[vwRelationships]');
+        expect(where).not.toContain('[Relationship]');
+        expect(where).not.toMatch(/\bUNION\b/i);
+    });
+
+    it('takes an organization the contact is linked TO ("is employee of")', () => {
+        expect(where).toContain(`SELECT ToOrganizationID FROM [__mj_BizAppsCommon].[vwRelationships] WHERE FromPersonID = '${CONTACT}'`);
+    });
+
+    it('takes an organization linked to the contact ("employs"), stored the other way', () => {
+        expect(where).toContain(`SELECT FromOrganizationID FROM [__mj_BizAppsCommon].[vwRelationships] WHERE ToPersonID = '${CONTACT}'`);
+    });
+
+    it('skips rows whose far side is not an organization, and admits only active links', () => {
+        expect(where).toContain('ToOrganizationID IS NOT NULL');
+        expect(where).toContain('FromOrganizationID IS NOT NULL');
+        expect(where.match(/Status = 'Active'/g)).toHaveLength(2);
+        expect(where).not.toContain('RelationshipType');
+    });
+
+    it('quotes the contact ID', () => {
+        expect(ContactAccountsWhere("x'; --", VIEW)).toContain("'x''; --'");
     });
 });
