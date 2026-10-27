@@ -564,16 +564,26 @@ SELECT 'remaining_activities=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsComm
                              WHERE d.ID = TRY_CONVERT(UNIQUEIDENTIFIER, al.RecordID)));
 `;
 
-export function cleanup() {
-  const env = readEnv();
-  const args = [
+/**
+ * The sqlcmd arguments for the sweep.
+ *
+ * `-I` turns QUOTED_IDENTIFIER on. sqlcmd leaves it off, and SQL Server refuses any delete from a
+ * table with a filtered index while it is off (Msg 1934), so without it the sweep failed on its first
+ * such table and every leftover row stayed. The seed scripts pass `-I` for the same reason.
+ */
+export function sqlcmdArgs(env, sql) {
+  return [
     '-S', `${env.DB_HOST ?? 'localhost'},${env.DB_PORT ?? '1433'}`,
     '-U', env.DB_USERNAME ?? 'sa',
     '-P', env.DB_PASSWORD ?? '',
     '-d', env.DB_DATABASE ?? 'MJ_BizAppsSales',
-    '-C', '-N', 'o', '-b', '-h', '-1', '-W',
-    '-Q', SQL,
+    '-C', '-N', 'o', '-b', '-I', '-h', '-1', '-W',
+    '-Q', sql,
   ];
+}
+
+export function cleanup() {
+  const args = sqlcmdArgs(readEnv(), SQL);
   try {
     const out = execFileSync('sqlcmd', args, { encoding: 'utf8', timeout: 60_000 });
     const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);

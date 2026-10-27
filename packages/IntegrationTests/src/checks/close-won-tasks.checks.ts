@@ -156,7 +156,7 @@ async function baseInput(ctx: Ctx, createsContract: boolean): Promise<CloseWonTa
      * field from it — the selling company — and the DEAL already carries that. Taking it from the deal is
      * both less coupled and more correct: the order has to belong to the same company as the deal.
      */
-    const { DealID, DealName, DealOrderID, PipelineID, CompanyID } = await dealOnPolicy(ctx, createsContract);
+    const { DealID, DealName, DealOrderID, CompanyID } = await dealOnPolicy(ctx, createsContract);
     // The deal's own order when it has one; any order of the company only as a last resort, which is the
     // shape WT13 covers deliberately (a deal whose order the close has to create).
     const orderID = DealOrderID || (await anyID(ctx, E_ORDER, `CompanyID = '${CompanyID}'`, 'order'));
@@ -168,7 +168,8 @@ async function baseInput(ctx: Ctx, createsContract: boolean): Promise<CloseWonTa
         DealID,
         DealName,
         OrderID: orderID,
-        PipelineID,
+        // The close passes its effective policy's flag (#354); here it is the pipeline's, with no override.
+        CreateContract: createsContract,
         Assignee: { EntityName: E_PEOPLE, RecordID: personID, RoleID: roleID },
     };
 }

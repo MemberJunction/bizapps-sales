@@ -1,0 +1,19 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Owner Rows Held by a Person",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "Which deals name a person rather than an employee in the owner role, and so have no deal owner?",
+      "Description": "Deals whose owner-role team row names a Person instead of an Employee. The deal's owner is read from the owner row's employee, so these deals have no owner while the team grid shows one, and the row cannot be saved again until it names an employee. Fix each on the deal's Internal team panel by picking the employee, which clears the person. Rows saved before such saves were refused are the ones expected here.",
+      "SQL": "@file:SQL/owner-rows-held-by-a-person.sql",
+      "TechnicalDescription": "Grain: DealTeamMember row whose DealRole.IsOwnerRole = 1, EmployeeID IS NULL and PersonID IS NOT NULL, joined to its deal. Owner role is read from the flag, never the role name. IsOpen is DealStatusType.IsOpen; closed deals are included. PersonEmail is common's vwPeople.PrimaryEmail. MatchingEmployeeCount counts __mj.Employee rows with that email; MatchingEmployeeID is set only when exactly one matches, as a suggestion. Optional CompanyID limits the deals listed. No date dimension: this is a data-quality list, not a period report.",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 2,
+      "UsesTemplate": true
+    },
+    "primaryKey": {
+      "ID": "F08AE733-24F8-4ABD-989E-94236A5DBD8F"
+    }
+  }
+]

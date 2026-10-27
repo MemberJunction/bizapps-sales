@@ -8,7 +8,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 
-import { DealEntityServer } from '../DealEntityServer.js';
+// A booking first asks whether any line extends a held subscription (#426); none here.
+vi.mock('../subscription-choice.js', () => ({
+    FindUnansweredSubscriptionLines: async () => [],
+}));
+
+const { DealEntityServer } = await import('../DealEntityServer.js');
 
 const TODAY = '2026-10-16';
 const CREATED = new Date('2026-07-01T00:00:00Z');
