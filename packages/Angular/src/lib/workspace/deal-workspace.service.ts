@@ -756,9 +756,11 @@ export class DealWorkspaceService {
      * simplification — one worth making deliberately rather than as a side effect of #29, since it
      * changes when the fetch happens for every caller.
      *
-     * Returns an empty list on failure rather than throwing: a picker that cannot load should offer
-     * nothing and let the rest of the line editor keep working. The consequence — a rep unable to select
-     * a product — is visible, whereas a half-loaded catalogue silently missing rows is not.
+     * A FAILED READ THROWS, after logging orders' reason. It used to return an empty list, so a picker
+     * whose query failed (a permissions refusal, a column an older orders install lacks) looked exactly
+     * like a catalogue with nothing in it, and nothing was logged (#380). The line editor catches it and
+     * says the catalogue could not be loaded, and the rest of the dialog keeps working. An empty list
+     * now means only what it says: orders is absent, or offers nothing today.
      *
      * THE AVAILABILITY WINDOW IS JUDGED ON THE BUSINESS DAY (bc-aidp-next-golive#168). It took a `Date`
      * defaulting to `new Date()` and `ProductFilterFor` read the UTC day out of it, so from 7 PM Central
@@ -801,7 +803,12 @@ export class DealWorkspaceService {
             // Shared with the check that guards it, so the two cannot drift — see PRODUCT_LOOKUP_FIELDS.
             Fields: [...PRODUCT_LOOKUP_FIELDS],
         });
-        return result?.Success ? (result.Results ?? []) : [];
+        if (!result?.Success) {
+            const reason = result?.ErrorMessage || 'no reason was given';
+            LogError(`The product catalogue could not be loaded - ${reason}`);
+            throw new Error(`The product catalogue could not be loaded: ${reason}`);
+        }
+        return result.Results ?? [];
     }
 
     /**

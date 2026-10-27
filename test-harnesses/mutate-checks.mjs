@@ -591,7 +591,7 @@ const MUTATIONS = [
          * true raises a second task the policy never asked for.
          */
         { id: 'M-WT3P', file: CWT, expect: ['WT3'],
-          from: '        if (await this.policyRaisesContractTask(input.PipelineID, contextUser, result)) {',
+          from: '        if (input.CreateContract === true) {',
           to: '        if (true) {',
           note: 'every policy raises the contract task, including the ones that create no contract' },
 

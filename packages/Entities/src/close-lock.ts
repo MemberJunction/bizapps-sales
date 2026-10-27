@@ -136,7 +136,12 @@ const DEAL_FIELD_LABELS: Readonly<Record<string, string>> = {
     LeadSourceTypeID: 'Lead Source',
     CampaignID: 'Campaign',
     LossNotes: 'Loss Notes',
-    DealStatusTypeID: 'Deal Status',
+    // The two below match the relabels in metadata/entity-fields/.deal-field-labels.json, which set
+    // them on the virtual name fields (DealStatusType, ForecastCategoryType) the form reads. A test
+    // pins every override to that file, so a relabel there cannot leave a notice naming a field the
+    // form no longer shows (#387).
+    DealStatusTypeID: 'Status',
+    ForecastCategoryTypeID: 'Forecast Category',
     // The close stamps, named in the refusal a direct write gets (#252).
     ClosedByUserID: 'Closed By',
 };
@@ -181,7 +186,7 @@ export function DealFieldLabel(fieldName: string): string {
  * and `Sales.ReopenDeal`, which the form's status control routes to. So the field IS editable to a
  * person and IS NOT writable by a raw save, and one set cannot say both.
  *
- * The notice describes what a PERSON can do, so it is the one that carries Deal Status.
+ * The notice describes what a PERSON can do, so it is the one that carries the status.
  *
  * It takes `isLost` because the set it wraps does: golive#206 keeps Loss Notes editable on a lost
  * deal and frozen on a won one, so the notice must name it on one and not the other.
@@ -241,6 +246,13 @@ export interface DealLockState {
      * getters tests the CLOSE STAMPS first, so an open won-status deal still reads "Closes".
      */
     IsWon: boolean;
+    /**
+     * The deal points at a status row that no longer exists (#402). Locked like a closed deal, with
+     * one difference the server makes too: `DealStatusTypeID` itself may be written, to an OPEN
+     * status, because that is how the orphan is repaired. A surface reads this to leave its status
+     * control usable, which the notice below tells the user to do.
+     */
+    IsStatusMissing: boolean;
     /** A ready-to-render explanation, or null when the deal is open. */
     Notice: string | null;
 }
@@ -267,7 +279,14 @@ export async function ResolveDealLockState(
     persistedStatusID: string | null | undefined,
     contextUser?: UserInfo,
 ): Promise<DealLockState> {
-    const open: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, IsWon: false, Notice: null };
+    const open: DealLockState = {
+        IsLocked: false,
+        StatusName: null,
+        IsLost: false,
+        IsWon: false,
+        IsStatusMissing: false,
+        Notice: null,
+    };
     if (!persistedStatusID) {
         return open;
     }
@@ -297,6 +316,7 @@ export async function ResolveDealLockState(
             StatusName: null,
             IsLost: false,
             IsWon: false,
+            IsStatusMissing: true,
             Notice:
                 `This deal's status could not be found, so it is treated as closed. Only ${editable} can be ` +
                 'edited. To change anything else, set the status to an open one.',
@@ -335,6 +355,7 @@ export async function ResolveDealLockState(
         StatusName: row.Name,
         IsLost: isLost,
         IsWon: isWon,
+        IsStatusMissing: false,
         Notice:
             `This deal is closed (${row.Name}). Only ${editable} can be edited. ` +
             'To change anything else, set the status back to Open.',

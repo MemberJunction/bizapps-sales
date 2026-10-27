@@ -29,9 +29,16 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import sql from 'mssql';
 
-import { BizAppsDuplicates, MJCoreInstances, OverriddenRanges, ShareTestedCheckoutPackages } from './one-mj-core.mjs';
-// Symlinked sibling directories count; the shared helper says why.
-import { listDirs } from './sibling-resolve.mjs';
+import {
+    AmbiguousSiblings,
+    BizAppsDuplicates,
+    MJCoreInstances,
+    OverriddenRanges,
+    SetAsideSiblingBuilds,
+    ShareTestedCheckoutPackages,
+} from './one-mj-core.mjs';
+// One scan for the runner, the helper and the resolve hook, so all three pick the same checkout.
+import { resolveSiblingPackage } from './sibling-resolve.mjs';
 import { formatAppPresence, judgeAppPresence, presentApps } from '../scripts/app-presence.mjs';
 
 dotenv.config();
@@ -404,40 +411,6 @@ function declaredDownstream() {
     return out;
 }
 
-async function resolveSiblingPackage(name) {
-    const { existsSync, readFileSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    const parent = join(process.cwd(), '..');
-    let repos = [];
-    try {
-        repos = listDirs(parent);
-    } catch {
-        return null;
-    }
-    for (const repo of repos) {
-        const pkgDir = join(parent, repo, 'packages');
-        if (!existsSync(pkgDir)) continue;
-        let subs = [];
-        try {
-            subs = listDirs(pkgDir);
-        } catch {
-            continue;
-        }
-        for (const sub of subs) {
-            const manifest = join(pkgDir, sub, 'package.json');
-            if (!existsSync(manifest)) continue;
-            try {
-                if (JSON.parse(readFileSync(manifest, 'utf8')).name !== name) continue;
-            } catch {
-                continue;
-            }
-            const entry = join(pkgDir, sub, 'dist', 'index.js');
-            return existsSync(entry) ? entry : null;
-        }
-    }
-    return null;
-}
-
 // Escape hatch for bisecting: run the same host WITHOUT the downstream apps loaded, to tell a
 // handoff problem apart from a host-data problem.
 for (const [pkg, anchor] of (process.env.MJ_SKIP_DOWNSTREAM === '1' ? [] : ORDERS_PACKAGES)) {
@@ -447,7 +420,7 @@ for (const [pkg, anchor] of (process.env.MJ_SKIP_DOWNSTREAM === '1' ? [] : ORDER
     } catch {
         // The CONSUMER's resolution first: a registry install puts these under the package that
         // declares them, never under the root this file runs from.
-        const entry = (await resolveFromConsumer(pkg)) ?? (await resolveSiblingPackage(pkg));
+        const entry = (await resolveFromConsumer(pkg)) ?? resolveSiblingPackage(pkg);
         if (!entry) {
             optionalLoads.push(`${pkg}: absent`);
             continue;
@@ -468,6 +441,50 @@ for (const [pkg, anchor] of (process.env.MJ_SKIP_DOWNSTREAM === '1' ? [] : ORDER
     optionalLoads.push(`${pkg}: loaded`);
 }
 console.log(`  downstream packages -> ${optionalLoads.join(' | ')}`);
+
+/**
+ * ── A SIBLING CARRIED BY SEVERAL CHECKOUTS IS AN ENVIRONMENT FAILURE, said before any check runs ───
+ *
+ * In a folder holding several worktrees of one repo, the scan used to take the first in directory
+ * order, so packages of one app loaded from different worktrees (sales#456). Now no sibling build is
+ * used for such a package, and an optional app's bundles would silently not register, so the run stops
+ * and names the checkouts and the variable that picks one.
+ */
+const ambiguousSiblings = AmbiguousSiblings();
+if (ambiguousSiblings.length > 0) {
+    console.error(
+        [
+            '',
+            `✖ ${ambiguousSiblings.length} @mj-biz-apps PACKAGE(S) HAVE NO CHOSEN CHECKOUT: several beside this one carry`,
+            '  each, or the variable names one that does not. Name the checkout this run tests for each (a path,',
+            '  relative to this checkout or absolute):',
+            '',
+            ...ambiguousSiblings.flatMap(({ name, variable, checkouts }) =>
+                checkouts.length === 0
+                    ? [`    ${name} -> ${variable}=${process.env[variable]} does not carry it; fix the path`]
+                    : [`    ${name} -> set ${variable}`, ...checkouts.map((c) => `      ${c}`)],
+            ),
+            '',
+        ].join(String.fromCharCode(10)),
+    );
+    process.exit(2);
+}
+
+/**
+ * A sibling build sales' declared range refuses is not loaded; sales' own copy is. Said, so a run on a
+ * joined workspace does not read as a test of a sibling checkout it never loaded (sales#372).
+ */
+const setAsideBuilds = SetAsideSiblingBuilds();
+if (setAsideBuilds.length > 0) {
+    console.warn(
+        [
+            '',
+            '  ⚠ Sibling builds outside the range sales declares (sales\' own copy was loaded instead):',
+            ...setAsideBuilds.map(({ name, version, range, entry }) => `    ${name} ${version} (sales declares ${range}) ${entry}`),
+            '',
+        ].join(String.fromCharCode(10)),
+    );
+}
 
 /**
  * ── MORE THAN ONE MJ CORE IS AN ENVIRONMENT FAILURE, said before any check runs ───────────────────

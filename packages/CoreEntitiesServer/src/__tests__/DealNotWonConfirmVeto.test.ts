@@ -16,6 +16,8 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 });
 
 const { RunView } = await import('@memberjunction/core');
+const { UserCache } = await import('@memberjunction/generic-database-provider');
+const { Metadata } = await import('@memberjunction/core');
 const { DealNotWonConfirmVeto } = await import('../DealNotWonConfirmVeto.js');
 
 /**
@@ -253,7 +255,27 @@ describe('the reads the veto makes', () => {
         expect(dealRead!.args.OrderBy, 'without an ORDER BY a view promises nothing twice running').toBe('ID');
     });
 
-    it('forwards the signed-in user to every read, so the rows are the ones that user may see', async () => {
+    /**
+     * #423: a role that may confirm orders but cannot read Deals had every confirm refused, because the
+     * read ran as that role and failed. The rule is the server's, so it reads as the system user.
+     */
+    it('reads as the system user when the cache holds one, whatever the caller may read', async () => {
+        const system = { ID: 'system', Name: 'System' } as never;
+        const spy = vi.spyOn(UserCache.Instance, 'GetSystemUser').mockReturnValue(system);
+        try {
+            const user = { ID: 'finance-1', Name: 'Orders-only finance' } as never;
+            const { calls } = withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: WON }, { [WON]: true });
+            expect(await veto().MayConfirm({ OrderHeaderID: ORDER, FromStatus: 'Quoted', ContextUser: user })).toBeNull();
+            expect(calls.length, 'both reads happen').toBe(2);
+            for (const c of calls) {
+                expect(c.user, 'the veto is not the caller\'s to answer').toBe(system);
+            }
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('falls back to the signed-in user when no system user is cached', async () => {
         const user = { ID: 'user-1', Name: 'A Rep' } as never;
         const { calls } = withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: OPEN }, { [OPEN]: false });
         await veto().MayConfirm({ OrderHeaderID: ORDER, FromStatus: 'Quoted', ContextUser: user });
@@ -331,5 +353,54 @@ describe('a read failure reaches the log, not only the caller', () => {
         withData({ ID: DEAL, DealNumber: 'DEAL-1', DealStatusTypeID: OPEN }, { [OPEN]: false });
         expect(await veto().MayConfirm(ctx)).not.toBeNull();
         expect(logged, 'a refused confirm is the veto working, and must not read as an error').toEqual([]);
+    });
+});
+
+/**
+ * #423: the reads run as the system user, so a caller who cannot read Deals must not be handed the
+ * deal number the read found. `EntityInfo.GetUserPermisions` is stubbed per case.
+ */
+describe('the refusal and the caller\'s read permission on Deals', () => {
+    const caller = { ID: 'finance-1' } as never;
+    function permit(canRead: boolean) {
+        return vi.spyOn(Metadata.prototype, 'EntityByName').mockImplementation(
+            () => ({ GetUserPermisions: () => ({ CanRead: canRead }) }) as never,
+        );
+    }
+
+    it('names the deal for a caller who can read Deals', async () => {
+        const spy = permit(true);
+        try {
+            withData({ ID: DEAL, DealNumber: 'DEAL-002148', DealStatusTypeID: OPEN }, { [OPEN]: false });
+            const refusal = (await veto().MayConfirm({ OrderHeaderID: ORDER, FromStatus: 'Quoted', ContextUser: caller })) ?? '';
+            expect(refusal).toContain('Deal DEAL-002148 is not Won');
+            expect(spy).toHaveBeenCalledWith('MJ_BizApps_Sales: Deals');
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('omits the deal number and id for a caller who cannot', async () => {
+        const spy = permit(false);
+        try {
+            withData({ ID: DEAL, DealNumber: 'DEAL-002148', DealStatusTypeID: OPEN }, { [OPEN]: false });
+            const refusal = (await veto().MayConfirm({ OrderHeaderID: ORDER, FromStatus: 'Quoted', ContextUser: caller })) ?? '';
+            expect(refusal).toContain('The deal behind this order is not Won');
+            expect(refusal).not.toContain('DEAL-002148');
+            expect(refusal).not.toContain(DEAL);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('omits them when the permission cannot be resolved', async () => {
+        const spy = vi.spyOn(Metadata.prototype, 'EntityByName').mockImplementation(() => { throw new Error('no metadata'); });
+        try {
+            withData({ ID: DEAL, DealNumber: 'DEAL-002148', DealStatusTypeID: OPEN }, { [OPEN]: false });
+            const refusal = (await veto().MayConfirm({ OrderHeaderID: ORDER, FromStatus: 'Quoted', ContextUser: caller })) ?? '';
+            expect(refusal).not.toContain('DEAL-002148');
+        } finally {
+            spy.mockRestore();
+        }
     });
 });
