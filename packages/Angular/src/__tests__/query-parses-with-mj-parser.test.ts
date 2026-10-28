@@ -74,6 +74,11 @@ const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
     // The Deal form's party pickers (bc-aidp-next-golive#372): base tables only, never a view.
     'party-lookup-contacts.sql': { tables: ['Person', 'SalesContact'], columns: 3 },
     'party-lookup-accounts.sql': { tables: ['Organization', 'SalesAccount'], columns: 3 },
+    // golive #388: a `SELECT *` here registered 156 query fields, every column of every joined view.
+    'confirmed-orders-missing-agreement.sql': {
+        tables: ['vwOrderHeaders', 'vwDeals', 'vwContracts', 'ContractType', 'checked'],
+        columns: 24,
+    },
 };
 
 describe("MJ's SQL parser reads the business-day queries in full", () => {
