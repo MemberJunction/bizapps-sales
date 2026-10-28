@@ -189,9 +189,10 @@ describe('a picked price needs a reason', () => {
         expect(plain.ProductSelectTitle).toBe(plain.BlockedReason);
     });
 
-    it('binds the product select title to that rule', () => {
-        const select = SOURCE.slice(SOURCE.indexOf('data-testid="line-product"'), SOURCE.indexOf('</select>'));
-        expect(select).toContain('[title]="ProductSelectTitle"');
+    it('binds the product box title to that rule', () => {
+        const at = SOURCE.indexOf('data-testid="line-product"');
+        const box = SOURCE.slice(at, SOURCE.indexOf('/>', at));
+        expect(box).toContain('[title]="ProductSelectTitle"');
     });
 });
 
