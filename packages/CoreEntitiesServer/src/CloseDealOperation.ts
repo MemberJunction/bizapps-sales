@@ -62,6 +62,7 @@ import {
 } from '@mj-biz-apps/sales-entities';
 
 import { DealEntityServer } from './DealEntityServer.js';
+import { SendDealScheduleToOrder } from './deal-schedule-to-order.js';
 import { OrdersIsInstalled } from './orders-availability.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
 import { CloseWonTaskDueAt, CloseWonTaskService, RaisesOrderReviewTask, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
@@ -588,11 +589,33 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 validation.LossReasonName,
             );
 
+            /**
+             * THE DEAL'S PAYMENT SCHEDULE GOES ONTO ITS ORDER (bc-aidp-next-golive#290).
+             *
+             * BEFORE the deal's save when the order already exists, because that save is what tells
+             * the order about the closing stage: a pipeline whose won stage moves the order further
+             * would otherwise do so with no schedule on it. A deal whose order is provisioned by the
+             * save itself is sent after it. Orders refusing (an incomplete row, rows that do not tie
+             * to the order) refuses the close, in orders' words: a deal must not win with a schedule
+             * its order cannot bill. A deal with no rows leaves the order's own schedule alone.
+             */
+            const orderBeforeSave = deal.OrderID ? String(deal.OrderID) : null;
+            const scheduleNotes: SalesCloseIssue[] = [];
+            const noteSchedule = (note: string | null): void => {
+                if (note) scheduleNotes.push({ Section: 'deal', Field: null, Severity: 'info', Message: note });
+            };
+            if (target.IsWon && orderBeforeSave) {
+                noteSchedule(await this.sendScheduleToOrder(deal.ID, orderBeforeSave, provider, user));
+            }
+
             // The close stamps are writable only inside this call (#252); every other save refuses them.
             if (!(await deal.BeginClose(() => deal.Save()))) {
                 throw new Error(
                     `the deal could not be saved: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
                 );
+            }
+            if (target.IsWon && !orderBeforeSave && deal.OrderID) {
+                noteSchedule(await this.sendScheduleToOrder(deal.ID, String(deal.OrderID), provider, user));
             }
 
             // The save appended the close's `DealStageEvent` — one row, whether or not the stage moved.
@@ -740,6 +763,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                     ...closing.Issues,
                     ...routeIssues,
                     ...taskIssues,
+                    ...scheduleNotes,
                     ...linkIssues,
                     ...orderStatusIssues(deal),
                     ...routingIssues(routing, false),
@@ -767,6 +791,18 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             LogError(`Sales.CloseDeal failed: ${err}`);
             return { ...empty, Issues: [issue('deal', `The deal could not be closed: ${err}`)] };
         }
+    }
+
+    /**
+     * Send the deal's schedule to its order at Close Won; throw orders' refusal so the close rolls back.
+     * Returns a note for the close's issues when the schedule was deliberately left on the deal.
+     */
+    private async sendScheduleToOrder(dealID: string, orderID: string, provider: IMetadataProvider, user: UserInfo): Promise<string | null> {
+        const outcome = await SendDealScheduleToOrder(dealID, orderID, provider, user, true);
+        if (outcome.Kind === 'Hard' || outcome.Kind === 'Soft') {
+            throw new Error(`its payment schedule could not be put on the order: ${outcome.Message}`);
+        }
+        return outcome.Kind === 'Skipped' ? (outcome.Note ?? null) : null;
     }
 
     /* ── Validation (§7.2 step 1–2) ─────────────────────────────────────────── */

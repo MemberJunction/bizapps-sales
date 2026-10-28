@@ -20,6 +20,8 @@
  *                        is what names the order's status, so CO3 proves the order follows a stage that
  *                        names one and ignores a stage that does not, and CO5 proves a REFUSED status
  *                        never blocks the stage change (S-US5/S-US7/S-US8)
+ *   close-won-schedule   The deal's payment schedule reaches its order at Close Won, and a won deal's later
+ *                        edits follow it; an invoiced instalment refuses the edit (golive #290)
  *   close-won-contract   ONE tripwire (CT0), not a route. CT1-CT4 were retired on 2026-08-20: they named
  *                        ContractTerm and ContractLine, deleted in contracts' clean-sheet rebuild, and a
  *                        Contract.Status column that no longer exists -- while being SKIPPED on every
@@ -81,6 +83,7 @@ import './checks/save-deal.checks.js';
 import './checks/close-deal.checks.js';
 import './checks/product-picker.checks.js';
 import './checks/close-won-order.checks.js';
+import './checks/close-won-schedule.checks.js';
 import './checks/close-won-contract.checks.js';
 import './checks/board-move.checks.js';
 import './checks/close-won-tasks.checks.js';
@@ -97,6 +100,7 @@ export { TermStartChecks } from './checks/term-start.checks.js';
 export { PipelineCopyChecks } from './checks/pipeline-copy.checks.js';
 export { PartyLookupChecks } from './checks/party-lookup.checks.js';
 export { CloseWonOrderChecks } from './checks/close-won-order.checks.js';
+export { CloseWonScheduleChecks } from './checks/close-won-schedule.checks.js';
 export { CloseWonContractChecks } from './checks/close-won-contract.checks.js';
 export { BoardMoveChecks } from './checks/board-move.checks.js';
 export { CloseWonTasksChecks } from './checks/close-won-tasks.checks.js';
