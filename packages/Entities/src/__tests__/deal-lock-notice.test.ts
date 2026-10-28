@@ -52,7 +52,7 @@ describe('the labels the notice uses', () => {
     it('names the ID columns as the thing, not the id', () => {
         expect(DealFieldLabel('BillingContactID')).toBe('Billing Contact');
         expect(DealFieldLabel('LeadSourceTypeID')).toBe('Lead Source');
-        expect(DealFieldLabel('DealStatusTypeID')).toBe('Deal Status');
+        expect(DealFieldLabel('DealStatusTypeID')).toBe('Status');
     });
 
     it('spaces the run-together column names', () => {
@@ -67,7 +67,7 @@ describe('the labels the notice uses', () => {
         // source of a label, so row 18 cannot regress to column names by someone adding a column.
         expect(DealFieldLabel('SomeFieldNobodyLabelled')).toBe('Some Field Nobody Labelled');
         expect(DealFieldLabel('AnnualIncreasePctOverride')).toBe('Annual Increase Pct Override');
-        expect(DealFieldLabel('ForecastCategoryTypeID')).toBe('Forecast Category Type');
+        expect(DealFieldLabel('PipelineStageID')).toBe('Pipeline Stage');
     });
 });
 
@@ -80,11 +80,11 @@ describe('what the notice lists', () => {
      * Sales.ReopenDeal instead, which the form's status control routes to. So it is editable to a
      * person and not writable by a raw save, and the notice is the one that describes people.
      */
-    it('leads with Deal Status, because that is the way out of the lock', () => {
+    it('leads with the status, because that is the way out of the lock', () => {
         expect(DealFieldsListedAsEditable(false)[0]).toBe('DealStatusTypeID');
     });
 
-    it('does NOT put Deal Status in the set the server enforces', () => {
+    it('does NOT put the status in the set the server enforces', () => {
         expect(DealFieldsEditableWhileLocked(false).has('DealStatusTypeID')).toBe(false);
         expect(DealFieldsEditableWhileLocked(true).has('DealStatusTypeID')).toBe(false);
     });
@@ -124,8 +124,8 @@ describe('how the list reads in a sentence', () => {
 describe('the sentence the user actually reads', () => {
     const listed = JoinLabels(DealFieldsListedAsEditable(false).map(DealFieldLabel));
 
-    it('leads with Deal Status, so the way out is the first thing named', () => {
-        expect(listed.startsWith('Deal Status')).toBe(true);
+    it('leads with Status, so the way out is the first thing named', () => {
+        expect(listed.startsWith('Status')).toBe(true);
     });
 
     it('reads as prose, not as a column dump', () => {

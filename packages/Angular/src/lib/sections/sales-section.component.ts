@@ -1298,7 +1298,7 @@ export class MJSSalesSectionComponent implements OnInit {
         const s = this.summary;
         return [
             { Key: 'slipped', Icon: 'fa-calendar-xmark', Label: 'Past close date', Note: 'Open deals past their expected close date', Tooltip: 'Open deals whose expected close date is before today', Count: s?.PastExpectedCloseCount ?? null },
-            { Key: 'noowner', Icon: 'fa-user-slash', Label: 'No owner', Note: 'Open deals with no owner on the deal team', Tooltip: 'Open deals where no one on the deal team holds the owner role', Count: s?.NoOwnerCount ?? null },
+            { Key: 'noowner', Icon: 'fa-user-slash', Label: 'No owner', Note: 'Open deals with no employee in the owner role', Tooltip: 'Open deals where no employee on the deal team holds the owner role. A person who is not an employee in that role does not count as the owner', Count: s?.NoOwnerCount ?? null },
             { Key: 'nodate', Icon: 'fa-calendar', Label: 'No close date', Note: 'Open deals with no expected close date', Tooltip: 'Open deals that cannot be placed in any period until someone sets an expected close date', Count: s?.NoCloseDateCount ?? null },
             { Key: 'idle', Icon: 'fa-hourglass-half', Label: 'Idle past stage limit', Note: 'Open deals in their stage longer than it allows', Tooltip: 'Open deals that have sat in their current stage longer than the stage\'s day limit', Count: this.DetailLoading ? null : this.IdleIDs.size },
         ];

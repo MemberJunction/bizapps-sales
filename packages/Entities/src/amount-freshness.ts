@@ -41,6 +41,8 @@ const E_ORDER_HEADER = 'MJ_BizApps_Orders: Order Headers';
  * Saving the deal genuinely is the fix, and that is verifiable rather than hopeful:
  * `DealEntityServer.Save()` sets `amountMayHaveMoved` when `AmountIsComputed === true`, which is
  * precisely the state this notice appears in, and then re-reads `OrderHeader.TotalGross` into the cache.
+ * When the order changed elsewhere the deal itself is clean, and a clean save sends nothing; the deal
+ * form forces that save past the dirty check when this rule reports stale (#399).
  */
 export const DEAL_AMOUNT_STALE_NOTICE =
     'The products on this deal changed after the amount was calculated. Save the deal to update it.';

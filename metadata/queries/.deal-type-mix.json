@@ -6,7 +6,7 @@
       "UserQuestion": "How is our business split between new, renewal and expansion motions?",
       "Description": "Deals and amounts by deal type.",
       "SQL": "@file:SQL/deal-type-mix.sql",
-      "TechnicalDescription": "Grain: Deal. RequiresRenewalSource is the one flag this branches on, and it is the same flag CloseDealOperation uses to route a renewal — so the mix and the routing agree by construction. RenewalsMissingSource surfaces renewal-type deals with no RenewsContractID, which means the routing had nothing to renew against. Dates: actual close for closed deals, expected for open, reported in separate columns so the two are never added.",
+      "TechnicalDescription": "Grain: Deal. RequiresRenewalSource is the one flag this branches on, and it is the same flag CloseDealOperation uses to route a renewal — so the mix and the routing agree by construction. RenewalsMissingSource surfaces renewal-type deals with no RenewsContractID, which means the routing had nothing to renew against. Dates: actual close for closed deals, expected for open, reported in separate columns so the two are never added. Open deals in pipelines with IncludeInForecast = 0 are left out, as in Pipeline Summary; their won and lost deals stay, and naming the pipeline in PipelineID includes it.",
       "Status": "Approved",
       "QualityRank": 7,
       "ExecutionCostRank": 2,

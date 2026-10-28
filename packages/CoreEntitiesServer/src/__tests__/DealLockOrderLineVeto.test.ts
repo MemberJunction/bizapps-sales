@@ -17,7 +17,15 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
     return { ...actual, LogError: () => undefined, RunView: class { public RunView = runView; } };
 });
 
-const { DealLockOrderLineVeto, DealLockRefusal } = await import('../DealLockOrderLineVeto.js');
+const { DealLockOrderLineVeto, DealLockRefusal, DealLockRefusalUnreadable, DealAbsentStatusLockRefusal } = await import('../DealLockOrderLineVeto.js');
+const { Metadata } = await import('@memberjunction/core');
+
+/** Whether the caller may read Deals, as `EntityInfo.GetUserPermisions` would answer. */
+let callerCanRead = true;
+const entityByName = vi.spyOn(Metadata.prototype, 'EntityByName').mockImplementation(
+    () => ({ GetUserPermisions: () => ({ CanRead: callerCanRead }) }) as never,
+);
+const { UserCache } = await import('@memberjunction/generic-database-provider');
 
 const ORDER = 'b1c2d3e4-0000-4000-8000-000000000001';
 const DEAL = 'b1c2d3e4-0000-4000-8000-000000000002';
@@ -26,6 +34,7 @@ const USER = { ID: 'user-1' } as never;
 
 afterEach(() => {
     runView.mockReset();
+    callerCanRead = true;
 });
 
 /** Queue the two reads the veto makes: the deal behind the order, then that status' flag. */
@@ -88,11 +97,21 @@ describe('an open deal, and orders Sales has no claim on', () => {
         expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBeNull();
     });
 
-    it('does not lock on a status row that is missing', async () => {
-        // The deal points at a status that does not exist. That is a data fault for the close lock to
-        // report, not a reason to freeze somebody's order.
+});
+
+describe('a deal whose status row is missing (#401)', () => {
+    it('refuses, because the header lock treats that deal as closed', async () => {
+        // The deal points at a status that does not exist. The header is frozen in that state, so its
+        // lines must be too, or the products change through Orders while the rest of the deal cannot.
         answers({ locks: undefined });
-        expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBeNull();
+        expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBe(DealAbsentStatusLockRefusal('update'));
+    });
+
+    it('names the repair the header names: an open status, not "back to Open"', async () => {
+        answers({ locks: undefined });
+        const v = new DealLockOrderLineVeto();
+        expect(await v.MayEdit(ctx('create'))).toMatch(/could not be found.*open one before adding a product/);
+        expect(await v.MayEdit(ctx('delete'))).toMatch(/open one before removing a product/);
     });
 });
 
@@ -156,5 +175,54 @@ describe('the refusal wording', () => {
         for (const kind of ['create', 'update', 'delete'] as const) {
             expect(DealLockRefusal(kind)).toMatch(/^This deal is closed\. Set the status back to Open before /);
         }
+    });
+});
+
+/**
+ * #423: the edit check read Deals as the caller, so a role that may edit order lines but cannot read
+ * Deals had every edit refused. It reads as the system user when the cache holds one.
+ */
+describe('the user the deal is read as', () => {
+    it('is the system user when the cache holds one', async () => {
+        const system = { ID: 'system' } as never;
+        const spy = vi.spyOn(UserCache.Instance, 'GetSystemUser').mockReturnValue(system);
+        try {
+            answers({ locks: false });
+            expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBeNull();
+            expect(runView.mock.calls.length).toBe(2);
+            for (const call of runView.mock.calls) expect(call[1]).toBe(system);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('is the caller when no system user is cached', async () => {
+        answers({ locks: false });
+        await new DealLockOrderLineVeto().MayEdit(ctx());
+        for (const call of runView.mock.calls) expect(call[1]).toBe(USER);
+    });
+});
+
+/** #423: the read runs as the system user, so a caller who cannot read Deals is told no deal field. */
+describe('the refusal for a caller who cannot read Deals', () => {
+    it('keeps the ordinary wording for a caller who can', async () => {
+        answers({ locks: true });
+        expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBe(DealLockRefusal('update'));
+        expect(entityByName).toHaveBeenCalledWith('MJ_BizApps_Sales: Deals');
+    });
+
+    it('omits the deal and the status control for a caller who cannot', async () => {
+        callerCanRead = false;
+        answers({ deal: { ID: DEAL, DealStatusTypeID: STATUS }, locks: true });
+        const refusal = await new DealLockOrderLineVeto().MayEdit(ctx());
+        expect(refusal).toBe(DealLockRefusalUnreadable());
+        expect(refusal).not.toContain(DEAL);
+        expect(refusal).not.toContain('Set the status');
+    });
+
+    it('omits the status repair too when the status row is missing (#401)', async () => {
+        callerCanRead = false;
+        answers({ deal: { ID: DEAL, DealStatusTypeID: STATUS }, locks: undefined });
+        expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBe(DealLockRefusalUnreadable());
     });
 });
