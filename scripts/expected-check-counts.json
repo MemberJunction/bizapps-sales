@@ -64,6 +64,7 @@
     "close-won-tasks": { "count": 18, "requires": "tasks", "ids": "WT1-WT18" },
     "activities": { "count": 21, "requires": "common", "ids": "AC1-AC14, AC16, AC18-AC23" },
     "forecast": { "count": 15, "requires": null, "ids": "FS1-FS15" },
+    "discount-concession": { "count": 5, "requires": "orders", "ids": "DC1-DC5 — a deal line's raised discount recorded as orders' Price concession through Sales.RecordDiscountConcession: decided inside authority, Pending outside it, orders' reason on refusal, and a second raise withdrawing the line's earlier concession, approved (DC4) or Pending (DC5) (golive#340)." },
     "term-start": { "count": 6, "requires": "orders", "ids": "TS1-TS6 — the term start a deal states for a subscription line (#32). TS1-TS4 are pure rule checks; TS5 reads the catalogue; TS6 round-trips OrderLine.ServicePeriodStart through a deal save." }
   },
   "schemas": {
