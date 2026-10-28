@@ -116,6 +116,13 @@ describe('Sales.RecordDiscountConcession', () => {
         expect(get).not.toHaveBeenCalled();
     });
 
+    it('refuses a line ID that is not a UUID before reading or deleting anything', async () => {
+        const { provider, get, runView } = providerReturning(concession(true, null));
+        expect(await run({ OrderLineID: "x' OR '1'='1" }, provider)).toMatchObject({ Success: false });
+        expect(runView).not.toHaveBeenCalled();
+        expect(get).not.toHaveBeenCalled();
+    });
+
     it('refuses on a host without orders', async () => {
         vi.mocked(OrdersIsInstalled).mockReturnValue(false);
         const { provider, get } = providerReturning(concession(true, null));
