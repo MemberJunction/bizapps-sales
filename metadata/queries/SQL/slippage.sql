@@ -44,6 +44,12 @@
 -- table failed the whole query with Msg 13609. A CASE is evaluated in order, so the guard holds
 -- whatever plan is chosen.
 --
+-- FIRST AND LAST ARE BY ChangedAt, NOT BY DATE VALUE (#353). A deal moved Oct 1 -> Dec 1 -> Nov 1
+-- started at Oct 1 and ends at Nov 1, net +31 days. MIN(FromDate) and MAX(ToDate) gave Dec 1 and +61,
+-- and a deal pulled in twice read as not moved. `moves` ranks each deal's moves in the window both
+-- ways by ChangedAt (the RecordChange ID breaks a tie), so the first move's FromDate and the last
+-- move's ToDate are picked by position. ROW_NUMBER() OVER exists in PostgreSQL unchanged.
+--
 -- POSITIVE DAYS = SLIPPED LATER, which is the case people mean. A negative figure is a deal PULLED
 -- FORWARD and is kept rather than filtered, because a report that only ever shows bad news is one
 -- people learn to discount.
@@ -65,6 +71,7 @@ WITH slips AS (
          * shape today but is exactly the input that would otherwise turn a report into an outage.
          */
         TRY_CONVERT(UNIQUEIDENTIFIER, SUBSTRING(rc.RecordID, CHARINDEX('|', rc.RecordID) + 1, 36)) AS DealID,
+        rc.ID                                   AS ChangeID,
         rc.ChangedAt,
         TRY_CONVERT(DATE, CASE WHEN ISJSON(rc.ChangesJSON) = 1
                                THEN JSON_VALUE(rc.ChangesJSON, '$.ExpectedCloseDate.oldValue') END) AS FromDate,
@@ -86,6 +93,20 @@ WITH slips AS (
       AND rc.ChangedAt < DATEADD(day, 2, {{ PeriodEnd | sqlString }})
       AND [__mj_BizAppsCommon].[fnBusinessDayOf](rc.ChangedAt) <= {{ PeriodEnd | sqlString }}
       {% endif %}
+),
+moves AS (
+    SELECT
+        s.DealID,
+        s.ChangedAt,
+        s.FromDate,
+        s.ToDate,
+        ROW_NUMBER() OVER (PARTITION BY s.DealID ORDER BY s.ChangedAt ASC, s.ChangeID ASC)   AS FirstRank,
+        ROW_NUMBER() OVER (PARTITION BY s.DealID ORDER BY s.ChangedAt DESC, s.ChangeID DESC) AS LastRank
+    FROM slips s
+    WHERE s.DealID IS NOT NULL
+      AND s.FromDate IS NOT NULL
+      AND s.ToDate IS NOT NULL
+      AND s.FromDate <> s.ToDate
 )
 SELECT
     d.ID                                        AS DealID,
@@ -101,21 +122,21 @@ SELECT
     d.AmountIsComputed,
     st.IsOpen                                   AS IsStillOpen,
     COUNT(*)                                    AS SlipCount,
-    MIN(s.FromDate)                             AS EarliestExpected,
-    MAX(s.ToDate)                               AS CurrentExpected,
+    -- The first move's FromDate: where the deal was expected before the window's first move.
+    MAX(CASE WHEN m.FirstRank = 1 THEN m.FromDate END) AS EarliestExpected,
+    -- The last move's ToDate: where the window's last move left it.
+    MAX(CASE WHEN m.LastRank = 1 THEN m.ToDate END)    AS CurrentExpected,
     -- Net movement across every slip in the window: where it was first expected, versus where it
     -- ended up. Summing each individual slip would double-count a deal moved twice in one direction.
-    DATEDIFF(day, MIN(s.FromDate), MAX(s.ToDate)) AS NetDaysSlipped,
-    MAX(s.ChangedAt)                            AS LastSlippedAt
-FROM slips s
+    DATEDIFF(day, MAX(CASE WHEN m.FirstRank = 1 THEN m.FromDate END),
+                  MAX(CASE WHEN m.LastRank = 1 THEN m.ToDate END)) AS NetDaysSlipped,
+    MAX(m.ChangedAt)                            AS LastSlippedAt
+FROM moves m
 INNER JOIN [__mj_BizAppsSales].vwDeals d
-        ON d.ID = s.DealID
+        ON d.ID = m.DealID
 INNER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
-WHERE s.DealID IS NOT NULL
-  AND s.FromDate IS NOT NULL
-  AND s.ToDate IS NOT NULL
-  AND s.FromDate <> s.ToDate
+WHERE 1 = 1
   {% if CompanyID %}
   AND d.CompanyID = {{ CompanyID | sqlString }}
   {% endif %}

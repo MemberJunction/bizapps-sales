@@ -35,6 +35,12 @@ const OTHER_IDENTITY_FIELD: Readonly<Record<string, string>> = {
     PersonID: 'EmployeeID',
 };
 
+/** Each identity field's display name, joined in by the view and read-only on the entity. */
+const IDENTITY_NAME_FIELD: Readonly<Record<string, string>> = {
+    EmployeeID: 'Employee',
+    PersonID: 'Person',
+};
+
 export const TEAM_MEMBER_BOTH_MESSAGE =
     'A team member is either an employee or a person, not both. Clear one of them.';
 export const TEAM_MEMBER_NEITHER_MESSAGE =
@@ -51,13 +57,30 @@ export class DealTeamMemberEntity extends mjBizAppsSalesDealTeamMemberEntity {
      *
      * Only a NON-EMPTY value clears, so emptying one field never empties its partner. Loads do not come
      * through here (`SetMany` writes with `SetLocal`), so reading a stored row changes nothing.
+     *
+     * The cleared field's display name goes with it (#437): the view's `Person` / `Employee` column
+     * would otherwise keep showing the old holder until a reload, so the row looks as if both are set.
      */
     public override Set(FieldName: string, Value: unknown): void {
         super.Set(FieldName, Value);
         const other = OTHER_IDENTITY_FIELD[FieldName];
         if (other && hasValue(Value) && hasValue(this.Get(other))) {
             super.Set(other, null);
+            this.clearDisplayName(IDENTITY_NAME_FIELD[other]);
         }
+    }
+
+    /**
+     * Empties a view-joined name field. Such a field is read-only and accepts one write after a load,
+     * so the one-write flag is re-armed first, the same way MJ re-arms it when it reloads a record.
+     */
+    private clearDisplayName(fieldName: string): void {
+        const field = this.GetFieldByName(fieldName);
+        if (!field) {
+            return;
+        }
+        field.ResetNeverSetFlag();
+        field.Value = null;
     }
 
     /**

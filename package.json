@@ -55,6 +55,7 @@
     "test:selector-gate": "node scripts/assert-harness-selectors.mjs",
     "test:mutate-harness": "node --test test-harnesses/mutate-checks.spec.mjs",
     "test:one-copy-harness": "node --test test-harnesses/one-mj-core.spec.mjs",
+    "test:cleanup-harness": "node --test test-harnesses/playwright-cleanup.spec.mjs",
     "test:drift-gate": "node scripts/run-python.mjs scripts/assert-no-comment-drift.py",
     "change": "changeset",
     "lint:distribution": "node scripts/check-distribution-seed.mjs",

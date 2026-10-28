@@ -21,6 +21,7 @@
   "devDependencies": {
     "@memberjunction/core": "6.1.6",
     "@memberjunction/core-entities": "6.1.6",
+    "@memberjunction/generic-database-provider": "6.1.6",
     "@memberjunction/global": "6.1.6",
     "@memberjunction/sqlserver-dataprovider": "6.1.6",
     "@mj-biz-apps/common-activity-sync": "5.56.0",
@@ -38,10 +39,11 @@
   "peerDependencies": {
     "@memberjunction/core": "^6.1.6",
     "@memberjunction/core-entities": "^6.1.6",
+    "@memberjunction/generic-database-provider": "^6.1.6",
     "@memberjunction/global": "^6.1.6",
     "@memberjunction/sqlserver-dataprovider": "^6.1.6",
-    "@mj-biz-apps/common-activity-sync": "^5.44.0",
-    "@mj-biz-apps/common-entities": "^5.44.0",
+    "@mj-biz-apps/common-activity-sync": "^5.51.0",
+    "@mj-biz-apps/common-entities": "^5.51.0",
     "@mj-biz-apps/orders-entities": "^5.30.0",
     "@mj-biz-apps/tasks-core": "^1.7.0",
     "@mj-biz-apps/tasks-entities": "^1.7.0"
