@@ -164,7 +164,6 @@ export class DealNotWonConfirmVeto implements OrderConfirmVeto {
     }
 }
 
-/** Single-quote escaping for an id interpolated into an `ExtraFilter`. */
 /**
  * An id on its way into a filter string, validated rather than merely escaped.
  *
