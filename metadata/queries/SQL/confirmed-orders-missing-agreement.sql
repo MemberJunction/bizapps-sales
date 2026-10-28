@@ -7,8 +7,12 @@
 -- THE WALK IS order -> deal -> contract. OrderHeader holds neither a deal nor a contract (sales
 -- depends on orders and contracts, not the reverse), so the deal is the vwDeals row whose OrderID
 -- is the order, and the contract is that deal's ContractID. Deal.OrderID is not unique, so the
--- oldest deal on the order is the one checked (ID breaks a tie), the same deal the Order form's
--- provenance chip shows (order-related.panel.ts).
+-- deal checked is a Won one first (DealStatusType.IsWon), then the newest, with ID breaking a tie.
+-- order-related.panel.ts (oldest) and DealOrderLink.ts (lowest ID) pick differently; they are not
+-- changed here.
+--
+-- RENEWAL DEALS: a won renewal deal gets no ContractID while renewals are unbuilt (D-11), only
+-- RenewsContractID, so the contract is COALESCE(ContractID, RenewsContractID).
 --
 -- EXCLUDED (Andrew, 2026-10-28):
 --   * Web orders: checkout terms stand in for an agreement. A checkout order is the one with a
@@ -17,6 +21,8 @@
 --   * Returns, and subscription cancellations: both reverse an order this report already covers.
 --     Excluded by ReversesOrderHeaderID, and by OrderType (CHECK-constrained, compared by value
 --     like Status) for one whose link was never set.
+--   * Subscription auto-renewals: any order with a line that has RenewsSubscriptionID. Orders
+--     spawns these with no deal, and its own order review exempts them the same way.
 --
 -- PAYMENT LINK is not named. It is the contract type with RequiresExecutedDocument = 0 (the
 -- customer accepts terms at payment). An order whose contract has that flag off is checked for a
@@ -57,10 +63,12 @@ WITH checked AS (
         CAST(CASE WHEN ct.RequiresExecutedDocument = 0 OR c.IsAwaitingDocument = 0 THEN 1 ELSE 0 END AS bit) AS HasExecutedDocument
     FROM [__mj_BizAppsOrders].vwOrderHeaders o
     OUTER APPLY (
-        SELECT TOP 1 x.ID, x.DealNumber, x.Name, x.OwnerEmployee, x.ContractID
+        SELECT TOP 1 x.ID, x.DealNumber, x.Name, x.OwnerEmployee, COALESCE(x.ContractID, x.RenewsContractID) AS ContractID
         FROM [__mj_BizAppsSales].vwDeals x
+        LEFT JOIN [__mj_BizAppsSales].DealStatusType xs
+               ON xs.ID = x.DealStatusTypeID
         WHERE x.OrderID = o.ID
-        ORDER BY x.__mj_CreatedAt, x.ID
+        ORDER BY CASE WHEN xs.IsWon = 1 THEN 0 ELSE 1 END, x.__mj_CreatedAt DESC, x.ID
     ) d
     LEFT JOIN [__mj_BizAppsContracts].vwContracts c
            ON c.ID = d.ContractID
@@ -70,6 +78,10 @@ WITH checked AS (
       AND o.SourceCheckoutWidgetID IS NULL
       AND o.ReversesOrderHeaderID IS NULL
       AND o.OrderType NOT IN (N'Return', N'Cancellation')
+      AND NOT EXISTS (
+          SELECT 1 FROM [__mj_BizAppsOrders].OrderLine ol
+          WHERE ol.OrderHeaderID = o.ID AND ol.RenewsSubscriptionID IS NOT NULL
+      )
       {% if CompanyID %}
       AND o.CompanyID = {{ CompanyID | sqlString }}
       {% endif %}

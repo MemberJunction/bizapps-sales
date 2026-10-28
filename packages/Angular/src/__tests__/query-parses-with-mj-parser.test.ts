@@ -76,7 +76,7 @@ const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
     'party-lookup-accounts.sql': { tables: ['Organization', 'SalesAccount'], columns: 3 },
     // golive #388: a `SELECT *` here registered 156 query fields, every column of every joined view.
     'confirmed-orders-missing-agreement.sql': {
-        tables: ['vwOrderHeaders', 'vwDeals', 'vwContracts', 'ContractType', 'checked'],
+        tables: ['vwOrderHeaders', 'vwDeals', 'DealStatusType', 'vwContracts', 'ContractType', 'OrderLine', 'checked'],
         columns: 24,
     },
 };
