@@ -7,7 +7,8 @@
 -- THE WALK IS order -> deal -> contract. OrderHeader holds neither a deal nor a contract (sales
 -- depends on orders and contracts, not the reverse), so the deal is the vwDeals row whose OrderID
 -- is the order, and the contract is that deal's ContractID. Deal.OrderID is not unique, so the
--- most recently created deal on the order is the one checked.
+-- oldest deal on the order is the one checked (ID breaks a tie), the same deal the Order form's
+-- provenance chip shows (order-related.panel.ts).
 --
 -- EXCLUDED (Andrew, 2026-10-28):
 --   * Web orders: checkout terms stand in for an agreement. A checkout order is the one with a
@@ -59,7 +60,7 @@ WITH checked AS (
         SELECT TOP 1 x.ID, x.DealNumber, x.Name, x.OwnerEmployee, x.ContractID
         FROM [__mj_BizAppsSales].vwDeals x
         WHERE x.OrderID = o.ID
-        ORDER BY x.__mj_CreatedAt DESC
+        ORDER BY x.__mj_CreatedAt, x.ID
     ) d
     LEFT JOIN [__mj_BizAppsContracts].vwContracts c
            ON c.ID = d.ContractID
@@ -69,6 +70,9 @@ WITH checked AS (
       AND o.SourceCheckoutWidgetID IS NULL
       AND o.ReversesOrderHeaderID IS NULL
       AND o.OrderType NOT IN (N'Return', N'Cancellation')
+      {% if CompanyID %}
+      AND o.CompanyID = {{ CompanyID | sqlString }}
+      {% endif %}
       {% if CompanyIDs %}
       AND o.CompanyID IN {{ CompanyIDs | sqlIn }}
       {% endif %}
