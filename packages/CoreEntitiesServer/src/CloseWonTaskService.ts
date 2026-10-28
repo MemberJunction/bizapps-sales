@@ -334,6 +334,34 @@ export function ReadCloseWonTaskConfig(policy: unknown): CloseWonTasksPolicyConf
     return holder?.CloseWonTasks ?? {};
 }
 
+/** The entity a pipeline's own assignee column points at. */
+export const CLOSE_WON_ASSIGNEE_ENTITY = 'MJ_BizApps_Common: People';
+
+/**
+ * The policy with the pipeline's `CloseWonAssigneePersonID` folded into its `CloseWonTasks` block.
+ *
+ * ── THE COLUMN WINS OVER THE JSON (bc-aidp-next-golive#326) ──────────────────────────────────────
+ *
+ * The two default pipelines ship as rows in `metadata/pipelines`, and a metadata push writes the file's
+ * `CloseWonPolicy` back over the database with the assignee null. An assignee a deployment typed into
+ * the JSON therefore lasts until the next install of this app. The column is not in the metadata files,
+ * so a push leaves it alone, and its foreign key refuses a person who is not there.
+ *
+ * Only the assignee is replaced. `AssigneeRoleID`, `DueInDays` and `RaiseOrderReviewTask` still come from
+ * the policy. An empty column changes nothing, so a deployment that configured the JSON keeps working.
+ */
+export function WithPipelineAssignee<T extends object>(policy: T, personID: string | null | undefined): T {
+    if (!personID) return policy;
+    return {
+        ...policy,
+        CloseWonTasks: {
+            ...ReadCloseWonTaskConfig(policy),
+            AssigneeEntityName: CLOSE_WON_ASSIGNEE_ENTITY,
+            AssigneeRecordID: personID,
+        },
+    };
+}
+
 /**
  * Whether a policy's close-won task configuration raises the order-review task: true unless
  * `RaiseOrderReviewTask` is the boolean `false`. See {@link CloseWonTasksPolicyConfig.RaiseOrderReviewTask}.
@@ -839,8 +867,8 @@ export class CloseWonTaskService {
     ): Promise<string | null> {
         if (!input.Assignee?.RecordID || !input.Assignee?.EntityName) {
             result.Issues.push(
-                `The ${kind} task was created but NOT routed: no finance assignee is configured on the `
-                    + 'pipeline\'s CloseWonPolicy (CloseWonTasks.AssigneeRecordID).',
+                `The ${kind} task was created but NOT routed: no finance assignee is configured. Set the `
+                    + "pipeline's Close Won Assignee (or CloseWonTasks.AssigneeRecordID in its CloseWonPolicy).",
             );
             return null;
         }
@@ -876,7 +904,8 @@ export class CloseWonTaskService {
             result.Issues.push(
                 `The ${kind} task was created but NOT routed: the configured assignee `
                     + `'${input.Assignee!.RecordID}' does not exist in ${input.Assignee!.EntityName}. `
-                    + "Point CloseWonTasks.AssigneeRecordID on the pipeline's CloseWonPolicy at a real record.",
+                    + "Set the pipeline's Close Won Assignee, or point CloseWonTasks.AssigneeRecordID in "
+                    + 'its CloseWonPolicy at a real record.',
             );
             return null;
         }
