@@ -26,43 +26,69 @@ describe('DiscountNeedsConcession', () => {
 describe('RecordDiscountConcession', () => {
     const LINE = 'aaaaaaaa-0000-4000-8000-000000000001';
 
-    function stubConcession(saved: boolean, decidedBy: string | null, message = '') {
-        const entity = {
-            NewRecord: vi.fn(),
-            Save: vi.fn(async () => saved),
-            DecidedByUserID: decidedBy,
-            LatestResult: { Message: message },
-        } as Record<string, unknown>;
-        vi.spyOn(Metadata.prototype, 'GetEntityObject').mockResolvedValue(entity as never);
-        return entity;
+    /**
+     * Stands in for the provider's `RouteOperation`. The concession is created on the server (golive#340),
+     * so the browser-side function must call the operation and never build the entity itself.
+     */
+    function stubOperation(envelope: { Success: boolean; Output?: Record<string, unknown>; ErrorMessage?: string }) {
+        const route = vi.fn(async () => envelope);
+        vi.spyOn(Metadata, 'Provider', 'get').mockReturnValue({ RouteOperation: route } as never);
+        return route;
     }
 
     afterEach(() => vi.restoreAllMocks());
 
-    it('states a Price concession on the line with the rep\'s reason', async () => {
-        const entity = stubConcession(true, 'user-1');
+    it('asks Sales.RecordDiscountConcession for a concession with the rep\'s trimmed reason', async () => {
+        const route = stubOperation({ Success: true, Output: { Success: true, AwaitingApproval: false, ConcessionID: 'c-1' } });
         const outcome = await RecordDiscountConcession({ OrderLineID: LINE, ReasonCategory: 'Retention', Reason: ' keep the account ' });
 
-        expect(entity).toMatchObject({ OrderLineID: LINE, DeliveryForm: 'Price', ReasonCategory: 'Retention', Reason: 'keep the account' });
+        expect(route).toHaveBeenCalledWith('Sales.RecordDiscountConcession', {
+            OrderLineID: LINE,
+            ReasonCategory: 'Retention',
+            Reason: 'keep the account',
+        }, {});
         expect(outcome).toEqual({ Recorded: true, AwaitingApproval: false });
     });
 
+    it('never creates the concession entity in the browser', async () => {
+        stubOperation({ Success: true, Output: { Success: true, AwaitingApproval: false } });
+        const create = vi.spyOn(Metadata.prototype, 'GetEntityObject');
+        await RecordDiscountConcession({ OrderLineID: LINE, ReasonCategory: 'Other', Reason: 'r' });
+        expect(create).not.toHaveBeenCalled();
+    });
+
     it('reports a concession orders left undecided as awaiting approval', async () => {
-        stubConcession(true, null);
+        stubOperation({ Success: true, Output: { Success: true, AwaitingApproval: true } });
         expect(await RecordDiscountConcession({ OrderLineID: LINE, ReasonCategory: 'Other', Reason: 'r' }))
             .toEqual({ Recorded: true, AwaitingApproval: true });
     });
 
     it('passes orders\' refusal through', async () => {
-        stubConcession(false, null, 'no one could approve it');
+        stubOperation({ Success: true, Output: { Success: false, AwaitingApproval: false, Message: 'no one could approve it' } });
         expect(await RecordDiscountConcession({ OrderLineID: LINE, ReasonCategory: 'Other', Reason: 'r' }))
             .toEqual({ Recorded: false, Message: 'no one could approve it' });
     });
 
-    it('refuses a blank reason without asking orders', async () => {
-        const spy = vi.spyOn(Metadata.prototype, 'GetEntityObject');
+    it('reports an operation that could not run, with its error', async () => {
+        stubOperation({ Success: false, ErrorMessage: 'scope sales:write required' });
+        expect(await RecordDiscountConcession({ OrderLineID: LINE, ReasonCategory: 'Other', Reason: 'r' }))
+            .toEqual({ Recorded: false, Message: 'scope sales:write required' });
+    });
+
+    it('refuses a blank reason without calling the operation', async () => {
+        const route = stubOperation({ Success: true, Output: { Success: true, AwaitingApproval: false } });
         expect(await RecordDiscountConcession({ OrderLineID: LINE, ReasonCategory: 'Other', Reason: '  ' }))
             .toMatchObject({ Recorded: false });
-        expect(spy).not.toHaveBeenCalled();
+        expect(route).not.toHaveBeenCalled();
+    });
+
+    it('turns a thrown operation into a refusal with its message', async () => {
+        vi.spyOn(Metadata, 'Provider', 'get').mockReturnValue({
+            RouteOperation: vi.fn(async () => {
+                throw new Error('network down');
+            }),
+        } as never);
+        expect(await RecordDiscountConcession({ OrderLineID: LINE, ReasonCategory: 'Other', Reason: 'r' }))
+            .toEqual({ Recorded: false, Message: 'network down' });
     });
 });
