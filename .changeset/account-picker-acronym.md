@@ -3,5 +3,6 @@
 ---
 
 The Deal form's Account picker finds a sales account by its acronym as a starts-with match, and shows
-the acronym next to the website domain under the name ("NAR · nar.realtor"). Requires bizapps-common
-5.57.0 or later (Organization.Acronym).
+the acronym next to the website domain under the name ("NAR · nar.realtor"). Sales now requires
+bizapps-common 5.57.0 or later (Organization.Acronym), in `mj-app.json` and in every package's common
+peer range.
