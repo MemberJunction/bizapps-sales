@@ -21,8 +21,10 @@
 --   * Returns, and subscription cancellations: both reverse an order this report already covers.
 --     Excluded by ReversesOrderHeaderID, and by OrderType (CHECK-constrained, compared by value
 --     like Status) for one whose link was never set.
---   * Subscription auto-renewals: any order with a line that has RenewsSubscriptionID. Orders
---     spawns these with no deal, and its own order review exempts them the same way.
+--   * Subscription auto-renewals: a renewal-ONLY order, where every top-level, non-reversal line
+--     has RenewsSubscriptionID. Orders spawns these with no deal. This is the same test as orders'
+--     OrderReviewExemption (order-review.ts). An order that renews one subscription and sells
+--     something new stays on the report.
 --
 -- PAYMENT LINK is not named. It is the contract type with RequiresExecutedDocument = 0 (the
 -- customer accepts terms at payment). An order whose contract has that flag off is checked for a
@@ -78,9 +80,21 @@ WITH checked AS (
       AND o.SourceCheckoutWidgetID IS NULL
       AND o.ReversesOrderHeaderID IS NULL
       AND o.OrderType NOT IN (N'Return', N'Cancellation')
-      AND NOT EXISTS (
-          SELECT 1 FROM [__mj_BizAppsOrders].OrderLine ol
-          WHERE ol.OrderHeaderID = o.ID AND ol.RenewsSubscriptionID IS NOT NULL
+      AND NOT (
+          EXISTS (
+              SELECT 1 FROM [__mj_BizAppsOrders].OrderLine ol
+              WHERE ol.OrderHeaderID = o.ID
+                AND ol.ParentOrderLineID IS NULL
+                AND ol.ReversesOrderLineID IS NULL
+                AND ol.RenewsSubscriptionID IS NOT NULL
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM [__mj_BizAppsOrders].OrderLine ol
+              WHERE ol.OrderHeaderID = o.ID
+                AND ol.ParentOrderLineID IS NULL
+                AND ol.ReversesOrderLineID IS NULL
+                AND ol.RenewsSubscriptionID IS NULL
+          )
       )
       {% if CompanyID %}
       AND o.CompanyID = {{ CompanyID | sqlString }}
