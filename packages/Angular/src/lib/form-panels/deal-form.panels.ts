@@ -58,6 +58,7 @@ import { FormatDealMoney } from './deal-money';
 import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './deal-stage-preview';
 import { IsFieldReadable } from './field-readable';
 import { SelectableStages } from '../data/selectable-stages';
+import { BillComCustomerWarning, CheckBillComCustomer } from '../data/billcom-customer';
 
 const E = MJS_ENTITIES.Deal;
 
@@ -655,6 +656,7 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
             return;
         }
         this.AccountDefaultsError.set(null);
+        const billCom = this.CheckBillComCustomer();
         try {
             const filled = await this.Record.FillContactsFromAccount();
             if (filled.length > 0) {
@@ -664,7 +666,31 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
             const reason = err instanceof Error ? err.message : String(err);
             this.AccountDefaultsError.set(`The account's default contacts were not filled in: ${reason}`);
         }
+        await billCom;
     }
+
+    /**
+     * Warns when the account has no Bill.com customer under the deal's selling company, which means
+     * its first Bill.com invoice creates a new customer there. See `billcom-customer.ts`.
+     *
+     * A warning, not a refusal: most accounts get their Bill.com customer from that first invoice.
+     * Re-run when the pipeline changes, since that changes the company. Only the latest check's
+     * answer is shown, so a slow read for an account the rep has since replaced cannot overwrite it.
+     */
+    public async CheckBillComCustomer(): Promise<void> {
+        const run = ++this.billComCheckRun;
+        const rec = this.Record;
+        let warning: string | null = null;
+        try {
+            const check = await CheckBillComCustomer(rec?.AccountID ?? null, rec?.CompanyID ?? null, rec?.PipelineID ?? null);
+            warning = BillComCustomerWarning(check);
+        } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            warning = `Could not check whether this account has a Bill.com customer ID: ${reason}`;
+        }
+        if (run === this.billComCheckRun) this.BillComCustomerWarning.set(warning);
+    }
+    private billComCheckRun = 0;
 
     /**
      * The `@for` track key. Contact fields carry a counter that a fill bumps.
@@ -684,6 +710,7 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
      * read in the template marks this panel without `inject()`, which would stop tests constructing it.
      */
     public readonly AccountDefaultsError = signal<string | null>(null);
+    public readonly BillComCustomerWarning = signal<string | null>(null);
     private readonly contactRenderKey = signal(0);
 
     public DrawsOwnMoney(f: DealFieldSpec): boolean {
@@ -939,6 +966,12 @@ const FIELD_STYLES = `
        this component and both hints rendered as unstyled body text. FIELD_STYLES is a template
        literal, so no backticks in here. */
     .mjs-field__hint { display: block; margin-top: var(--mj-space-1); color: var(--mj-text-muted); font-size: 0.78rem; }
+    /* Spans both columns of the field grid, so it does not push the next field down a row. */
+    .mjs-hint--warning {
+        grid-column: 1 / -1; padding: var(--mj-space-2) var(--mj-space-3);
+        border: 1px solid var(--mj-status-warning-border); border-radius: var(--mj-radius-sm);
+        background: var(--mj-status-warning-bg); color: var(--mj-status-warning-text); font-size: 0.82rem;
+    }
     .mjs-reopen { display: flex; flex-direction: column; gap: var(--mj-space-2); margin-top: var(--mj-space-2); }
     .mjs-reopen__field { display: flex; flex-direction: column; gap: var(--mj-space-1); font-size: 0.82rem; }
     .mjs-reopen__field textarea { width: 100%; font: inherit; }
@@ -1601,6 +1634,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 @if (AccountDefaultsError()) {
                     <div class="mjs-hint" data-testid="account-defaults-error">{{ AccountDefaultsError() }}</div>
                 }
+                @if (BillComCustomerWarning()) {
+                    <div class="mjs-hint mjs-hint--warning" role="status" data-testid="account-billcom-warning">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ BillComCustomerWarning() }}
+                    </div>
+                }
 
                 <!-- PIPELINE AND STAGE ARE NOT GENERIC FIELDS HERE, for the reason Status is not:
                      <mj-form-field> renders a foreign key as an unfiltered dropdown off the related
@@ -1972,6 +2010,8 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         if (!stages.some((st) => st.ID.toLowerCase() === String(this.Record?.PipelineStageID ?? '').toLowerCase())) {
             this.Record.PipelineStageID = null as unknown as string;
         }
+        // A new pipeline can mean a new selling company, and the Bill.com customer is per company.
+        if (this.Record.AccountID) void this.CheckBillComCustomer();
     }
 
     /**
@@ -2502,6 +2542,11 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                 }
                 @if (AccountDefaultsError()) {
                     <div class="mjs-hint" data-testid="account-defaults-error">{{ AccountDefaultsError() }}</div>
+                }
+                @if (BillComCustomerWarning()) {
+                    <div class="mjs-hint mjs-hint--warning" role="status" data-testid="account-billcom-warning">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ BillComCustomerWarning() }}
+                    </div>
                 }
             </div>
         </mj-collapsible-panel>
