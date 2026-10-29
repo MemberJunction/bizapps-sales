@@ -37,9 +37,9 @@ its base branch, so a changeset another PR left pending on `next` does not count
 that legitimately have no version impact, and the sibling repo's experience is that such an X is
 quickly learned and then ignored. Treat the warning as a review item.
 
-The `migrations/` half of the rule is enforced: the `migration changeset` check fails a PR into `next`
-that adds a migration with only a patch changeset, and `rr: minor bump` fails the release PR. Nothing
-checks the public-API half.
+Two of the three are enforced, not conventional: the `migration changeset` check fails a PR into
+`next` that changes `migrations/` OR `metadata/` with only a patch changeset, and `rr: minor bump`
+fails the release PR on the same two. Nothing checks the public-API part -- that one is on review.
 
 `baseBranch` is **`next`**, the integration branch, not `main`. `main` is the release branch and only
 ever receives the coordinating release PR.
