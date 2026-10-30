@@ -1,5 +1,5 @@
 -- =============================================================================================
--- PostgreSQL counterpart of V202610281200__v6.21.x__Pipeline_CloseWon_Assignee.sql
+-- PostgreSQL counterpart of V202610301736__v6.22.x__Pipeline_CloseWon_Assignee.sql
 -- =============================================================================================
 -- `mj sql-convert --from tsql --to postgres` (MJ CLI 6.1.6) output, finished by hand:
 --   * Tables, columns, constraints, indexes, views, data and grants are the converter's.
