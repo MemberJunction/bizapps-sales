@@ -12,6 +12,7 @@ import {
     configureSection,
     initSectionTestEnvironment,
     stubService,
+    Summary,
     visiblePage,
     type StubService,
 } from './helpers/sales-section-mount';
@@ -33,20 +34,15 @@ vi.mock('../lib/pages/deal-views', async (importOriginal) => {
     };
 });
 
-const SUMMARY: DealDashboardSummary = {
+const SUMMARY: DealDashboardSummary = Summary({
     OpenAmount: 1000,
     OpenCount: 2,
     TotalCount: 2,
-    PastExpectedCloseCount: 0,
-    WonCount: 0,
-    WonAmount: 0,
-    OpenPricedAmount: 0,
     OpenStatedAmount: 1000,
-    OpenNoAmountCount: 0,
-};
+});
 
 const ENTITIES = [
-    { ID: 'deal-entity', Name: 'MJ_BizApps_Sales: Deals', SchemaName: '__mj_BizAppsSales', BaseTable: 'Deal' },
+    { ID: 'deal-entity', Name: 'MJ_BizApps_Sales: Deals', SchemaName: '__mj_BizAppsSales', BaseTable: 'Deal', BaseView: 'vwDeals' },
 ] as unknown as EntityInfo[];
 
 const LOOKUPS = { Pipelines: [], Stages: [], DealStatusTypes: [] } as unknown as DealWorkspaceLookups;
@@ -98,7 +94,7 @@ describe('while the lookups, win rate and view are still out', () => {
 
         const dashboard = visiblePage(fixture);
         expect(dashboard.querySelector('.kpis')?.textContent).toContain('Open pipeline');
-        expect(dashboard.querySelector('[data-testid="sales-winrate-count"]')?.textContent?.trim()).toBe('…');
+        expect(dashboard.querySelector('[data-testid="sales-kpi-closed"]')?.textContent?.trim()).toBe('…');
         expect(dashboard.querySelector('.mjs-viewer-host mj-loading'), 'inspect grid').not.toBeNull();
         expect(showPage(fixture, 'list').querySelector('mj-loading'), 'All Deals').not.toBeNull();
         expect(showPage(fixture, 'board').querySelector('mj-loading'), 'board').not.toBeNull();
@@ -107,29 +103,31 @@ describe('while the lookups, win rate and view are still out', () => {
         await vi.waitFor(() => expect(fixture.componentInstance.DetailLoading).toBe(false));
         expect(showPage(fixture, 'board').querySelector('mj-loading')).toBeNull();
         const settled = showPage(fixture, 'dashboard');
-        expect(settled.querySelector('[data-testid="sales-winrate-count"]')?.textContent?.trim()).not.toBe('…');
+        expect(settled.querySelector('[data-testid="sales-kpi-closed"]')?.textContent?.trim()).not.toBe('…');
         expect(settled.querySelector('.mjs-viewer-host mj-loading')).toBeNull();
     });
 
-    it('replaces the tiles with the Retry state when one of them then fails', async () => {
+    it('keeps the tiles when one of them then fails, and shows that failure where it is used (bizapps-sales#371)', async () => {
         const lookups = held<DealWorkspaceLookups>();
         service.LoadLookups.mockReturnValue(lookups.promise.then(() => Promise.reject(new Error('Received status code 504'))));
         const fixture = await mountFiguresOnly();
         expect(visiblePage(fixture).querySelector('.kpis')).not.toBeNull();
 
         lookups.release(LOOKUPS);
-        await vi.waitFor(() => expect(fixture.componentInstance.LoadError).toContain('504'));
+        await vi.waitFor(() => expect(fixture.componentInstance.LookupsError).toContain('504'));
+        await vi.waitFor(() => expect(fixture.componentInstance.DetailLoading).toBe(false));
         fixture.detectChanges();
 
         const page = visiblePage(fixture);
-        expect(page.querySelector('[data-testid="sales-load-failed"]')).not.toBeNull();
-        expect(page.querySelector('.kpis')).toBeNull();
-        expect(page.querySelector('mj-loading')).toBeNull();
+        expect(fixture.componentInstance.LoadError).toBeNull();
+        expect(page.querySelector('[data-testid="sales-load-failed"]')).toBeNull();
+        expect(page.querySelector('.kpis')).not.toBeNull();
+        expect(showPage(fixture, 'board').querySelector('[data-testid="sales-part-failed"]')).not.toBeNull();
     });
 
     it("does not overwrite a period's win rate picked meanwhile with the load's own", async () => {
         const firstWinRate = held<Record<string, unknown>[]>();
-        service.RunNamedQuery.mockReturnValueOnce(firstWinRate.promise).mockResolvedValue([
+        service.LoadWinRate.mockReturnValueOnce(firstWinRate.promise).mockResolvedValue([
             { ClosedCount: 4, WonCount: 3, WonAmount: 300, LostAmount: 100 },
         ]);
         const fixture = await mountFiguresOnly();

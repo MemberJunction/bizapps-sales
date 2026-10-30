@@ -36,6 +36,8 @@ const MARKER = '.mutate-checks.run.json';
 const SIGNAL_EXIT = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
 const NO_POSIX_SIGNALS = process.platform === 'win32'
     && 'Windows cannot deliver SIGINT/SIGTERM/SIGHUP to another process; Ctrl-C there is checked by hand';
+const NO_SCRIPT = (process.platform === 'win32' && 'Windows has no pty to close; a closed console window there is checked by hand')
+    || (spawnSync('sh', ['-c', 'command -v script'], { stdio: 'ignore' }).status !== 0 && 'no `script` on this host to run the driver in a pty');
 
 /** The source files the mutants edit, read from the driver's own `--list`. */
 function mutantFiles() {
@@ -104,21 +106,27 @@ function fingerprintOf(root) {
     return createHash('sha256').update(FILES.map((f) => readFileSync(join(root, f))).join('\0')).digest('hex');
 }
 
-/** With no IDs the driver runs every mutant, so a test waits for whichever applies first. */
-function startDriver(root, ids = []) {
+function fixtureEnv(root, extra = {}) {
     const tmp = join(root, 'tmp');
-    const child = spawn(process.execPath, [join(root, 'test-harnesses', 'mutate-checks.mjs'), ...ids], {
-        cwd: root,
-        env: {
-            ...process.env,
-            TMPDIR: tmp,
-            TEMP: tmp,
-            TMP: tmp,
-            MUTATE_CHECKS_BUILD_COMMAND: `"${process.execPath}" build.mjs`,
-            MUTATE_CHECKS_TEST_COMMAND: `"${process.execPath}" suite.mjs`,
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    return {
+        ...process.env,
+        TMPDIR: tmp,
+        TEMP: tmp,
+        TMP: tmp,
+        MUTATE_CHECKS_BUILD_COMMAND: `"${process.execPath}" build.mjs`,
+        MUTATE_CHECKS_TEST_COMMAND: `"${process.execPath}" suite.mjs`,
+        ...extra,
+    };
+}
+
+/** With no IDs the driver runs every mutant, so a test waits for whichever applies first. */
+function startDriver(root, ids = [], extraEnv = {}) {
+    return track(spawn(process.execPath, [join(root, 'test-harnesses', 'mutate-checks.mjs'), ...ids], {
+        cwd: root, env: fixtureEnv(root, extraEnv), stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+}
+
+function track(child) {
     child.output = '';
     child.stdout.on('data', (chunk) => { child.output += chunk; });
     child.stderr.on('data', (chunk) => { child.output += chunk; });
@@ -283,24 +291,114 @@ test('a marker naming a live PID refuses to run and changes nothing', async () =
     }
 });
 
-test('two drivers started together: exactly one runs, the other refuses', { skip: NO_POSIX_SIGNALS }, async () => {
+/**
+ * The race the exclusive create closes: driver A has found no marker and is about to write one when B
+ * claims the tree. The claim gate holds A in exactly that gap, so B lands there on every run rather
+ * than when two launches happen to collide.
+ */
+test('a driver that loses the claim to one started in its gap refuses and leaves nothing', async () => {
     const fixture = makeFixture();
-    const drivers = [startDriver(fixture.root), startDriver(fixture.root)];
+    const gate = join(fixture.root, 'claim-gate');
+    const held = startDriver(fixture.root, [], { MUTATE_CHECKS_CLAIM_GATE: gate });
+    let runner;
     try {
-        const first = Promise.race(drivers.map((driver) => driver.exited.then(({ code }) => ({ driver, code }))));
-        const refused = await withDeadline(first, 'one of the two drivers to refuse -- both are running');
-        assert.equal(refused.code, 2, refused.driver.output);
-        assert.match(refused.driver.output, /another mutation run is live in this tree|another driver keeps claiming/);
+        await waitFor('the first driver to reach the gap between recovery and create', () => existsSync(`${gate}.waiting`));
+        assert.ok(!existsSync(join(fixture.root, MARKER)), 'precondition: the held driver has not written a marker');
 
-        const runner = drivers.find((driver) => driver !== refused.driver);
+        runner = startDriver(fixture.root);
         await waitForSuite(fixture);
-        runner.kill('SIGKILL');
-        await waitForExit(runner);
+        writeFileSync(`${gate}.go`, '');
+        const { code } = await waitForExit(held);
+
+        assert.equal(code, 2, held.output);
+        assert.match(held.output, new RegExp(`another mutation run is live in this tree: PID ${runner.pid}`));
+        assert.equal(readMarker(fixture.root).pid, runner.pid, 'the marker still belongs to the run that claimed the tree');
         assert.equal(backupDirs(fixture).length, 1, 'only the driver that runs may make a backup dir');
     } finally {
-        // When both ran, SIGTERM lets each kill its own tree; cleanUp only knows the last suite's PIDs.
-        for (const driver of drivers) if (driver.exitCode === null) driver.kill('SIGTERM');
-        await Promise.allSettled(drivers.map((driver) => waitForExit(driver)));
+        writeFileSync(`${gate}.go`, '');
+        // SIGKILL, so this also runs on Windows; cleanUp then kills the suite tree the runner left.
+        for (const driver of [held, runner]) if (driver && driver.exitCode === null) driver.kill('SIGKILL');
+        await Promise.allSettled([held, runner].filter(Boolean).map((driver) => waitForExit(driver)));
+        cleanUp(fixture);
+    }
+});
+
+/**
+ * After a reboot or in a container the OS can hand a dead run's PID to the next start. That PID is not
+ * a live run, so the start must recover rather than refuse. Only a process whose PID is the marker's can
+ * show it, so a fixture script writes the marker with its own PID and then starts a run.
+ */
+const OWN_PID_START = `
+import { writeFileSync } from 'node:fs';
+import { startMutationRun } from './test-harnesses/mutation-run.mjs';
+writeFileSync('${MARKER}', JSON.stringify({ ...JSON.parse(process.env.STRANDED_RUN), pid: process.pid }));
+const run = await startMutationRun(process.cwd());
+run.finish();
+console.log('claimed');
+`;
+
+test('a marker naming the starting process\'s own PID is recovered, not refused', async () => {
+    const fixture = makeFixture();
+    try {
+        const safety = join(fixture.root, 'tmp', 'mj-mutate-own-pid');
+        const file = join(fixture.root, FILES[0]);
+        mkdirSync(safety);
+        cpSync(file, join(safety, 'backup'));
+        writeFileSync(file, `${readFileSync(file, 'utf8')}\n// stranded mutant\n`);
+        writeFileSync(join(fixture.root, 'own-pid.mjs'), OWN_PID_START);
+        const stranded = { startedAt: 'earlier', safety, mutant: 'M-OWN', file, backup: join(safety, 'backup'), distDirty: true };
+
+        const start = track(spawn(process.execPath, ['own-pid.mjs'], {
+            cwd: fixture.root, env: fixtureEnv(fixture.root, { STRANDED_RUN: JSON.stringify(stranded) }), stdio: ['ignore', 'pipe', 'pipe'],
+        }));
+        const { code } = await waitForExit(start);
+
+        assert.equal(code, 0, start.output);
+        assert.doesNotMatch(start.output, /another mutation run is live/);
+        assert.match(start.output, /recovering a run that ended without cleaning up/);
+        assert.match(start.output, /claimed/);
+        assert.equal(fingerprintOf(fixture.root), fixture.original, 'the stranded mutant is restored');
+        assert.equal(builds(fixture.root).at(-1), `done ${fixture.original}`, 'dist/ is rebuilt from the restored source');
+        assert.ok(!existsSync(safety), 'the stranded run\'s backup folder is removed');
+        assert.ok(!existsSync(join(fixture.root, MARKER)), 'the run that claimed the tree removes its marker on finish');
+    } finally {
+        cleanUp(fixture);
+    }
+});
+
+/**
+ * A closed terminal: the driver runs on a pty under the system \`script\`, and \`script\` is killed
+ * outright, so the pty closes and the kernel sends the hangup. Unlike \`kill -HUP\`, the driver's output
+ * now goes to a dead terminal, so this also checks that writing there does not stop the cleanup.
+ */
+test('a closed terminal mid-suite kills the process tree, restores the source, rebuilds, and leaves nothing behind', { skip: NO_SCRIPT }, async () => {
+    const fixture = makeFixture();
+    let pty;
+    let driver;
+    try {
+        const driverPath = join(fixture.root, 'test-harnesses', 'mutate-checks.mjs');
+        const args = process.platform === 'darwin'
+            ? ['-q', '/dev/null', process.execPath, driverPath]
+            : ['-qc', `'${process.execPath}' '${driverPath}'`, '/dev/null'];
+        // stdin is /dev/null: macOS \`script\` refuses a socket there, and the end of its input does not end
+        // the session on macOS or util-linux 2.39.
+        pty = track(spawn('script', args, { cwd: fixture.root, env: fixtureEnv(fixture.root), stdio: ['ignore', 'pipe', 'pipe'] }));
+        await waitForSuite(fixture).catch((err) => { throw new Error(`${err.message}\n${pty.output}`); });
+        driver = readMarker(fixture.root).pid;
+        const { suite, grandchild } = readPids(fixture.root);
+
+        pty.kill('SIGKILL');
+        await waitForExit(pty);
+
+        await waitFor('the driver to exit', () => !isAlive(driver));
+        await waitFor('the suite and its grandchild to die', () => !isAlive(suite) && !isAlive(grandchild), 5_000);
+        assert.equal(fingerprintOf(fixture.root), fixture.original, 'every mutant file must be byte-identical to before the run');
+        assert.equal(builds(fixture.root).at(-1), `done ${fixture.original}`, 'the last build must be a completed rebuild of the restored source');
+        assert.ok(!existsSync(join(fixture.root, MARKER)), 'the run marker must be removed');
+        assert.deepEqual(backupDirs(fixture), [], 'no backup dir may be left behind');
+    } finally {
+        // The driver's PID came from its own marker, so this kills nothing but the run this test started.
+        if (driver && isAlive(driver)) process.kill(driver, 'SIGKILL');
         cleanUp(fixture);
     }
 });

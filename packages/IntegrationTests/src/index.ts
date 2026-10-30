@@ -28,9 +28,15 @@
  *   board-move           A stage move appends EXACTLY ONE DealStageEvent, stamped with the values the
  *                        deal held on the way OUT — the provenance a board drag owes (D-BD2). Its writer
  *                        shares one transaction with the stage-order writer and the deal counter; see
- *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters
+ *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters.
+ *                        BD7 proves the event it appends then refuses an edit and a delete (#348)
  *   pipeline-copy        Every company gets its own copy of the default pipeline and all of its stages,
  *                        and a second run copies nothing (#327). Needs no sibling app: it saves no deal
+ *   party-lookup         The Deal form's Account and Contact picker queries: prefix only, subtype rows
+ *                        only, % and _ literal (bc-aidp-next-golive#372). Saves no deal
+ *   discount-concession  A deal line's raised discount is recorded through Sales.RecordDiscountConcession,
+ *                        where orders' subclass fills, values and decides it; a refusal carries orders'
+ *                        reason, and a second raise withdraws the line's earlier concession (golive#340)
  *
  * ⚠️ EVERY BUNDLE REQUIRES bizapps-orders EXCEPT `close-won-contract`, whose single check needs nothing
  * at all — it is asserting an absence. save-deal and close-deal require it too. A deal cannot be
@@ -85,12 +91,16 @@ import './checks/activities.checks.js';
 import './checks/forecast.checks.js';
 import './checks/term-start.checks.js';
 import './checks/pipeline-copy.checks.js';
+import './checks/party-lookup.checks.js';
+import './checks/discount-concession.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
 export { ProductPickerChecks } from './checks/product-picker.checks.js';
 export { TermStartChecks } from './checks/term-start.checks.js';
 export { PipelineCopyChecks } from './checks/pipeline-copy.checks.js';
+export { PartyLookupChecks } from './checks/party-lookup.checks.js';
+export { DiscountConcessionChecks } from './checks/discount-concession.checks.js';
 export { CloseWonOrderChecks } from './checks/close-won-order.checks.js';
 export { CloseWonContractChecks } from './checks/close-won-contract.checks.js';
 export { BoardMoveChecks } from './checks/board-move.checks.js';

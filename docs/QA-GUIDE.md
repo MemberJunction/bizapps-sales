@@ -30,10 +30,10 @@ covers only what a tester needs afterwards.
 
 | App | Range | What sales needs it for |
 |---|---|---|
-| bizapps-common | `>=5.49.0 <6.0.0` | Accounts and contacts are IS-A children of common's Organization and Person; activities live in common's tables |
-| bizapps-tasks | `>=1.2.0 <2.0.0` | A won close raises the order-review and contract-processing tasks |
+| bizapps-common | `>=5.51.0 <6.0.0` | Accounts and contacts are IS-A children of common's Organization and Person; activities live in common's tables |
+| bizapps-tasks | `>=1.7.0 <2.0.0` | A won close raises the order-review and contract-processing tasks |
 | bizapps-accounting | `>=0.2.0 <1.0.0` | Orders books orders through accounting's engine |
-| bizapps-orders | `>=5.26.0 <6.0.0` | **A deal cannot be saved without it.** The save provisions the deal's embedded `OrderHeader`, and the deal's lines live on that order |
+| bizapps-orders | `>=5.30.0 <6.0.0` | **A deal cannot be saved without it.** The save provisions the deal's embedded `OrderHeader`, and the deal's lines live on that order |
 | bizapps-contracts | `>=0.1.1 <1.0.0` | A won close on a pipeline whose policy creates a contract (B2B) creates one. Without contracts the close still succeeds and records why no contract was made |
 
 ### The workspace CLI rule
@@ -62,9 +62,9 @@ exist" on core metadata, which reads like a broken migration rather than a versi
 If sales' `.env` carries `GRAPHQL_PORT=4141`, ignore it: sales ships no API, and the API you connect to
 is the host's.
 
-`MJ_BASE_ENCRYPTION_KEY` is not set in local dev. You will see a boxed
-`ENCRYPTION KEY VALIDATION FAILED` warning at API and test startup. It is **expected and non-fatal** —
-nothing in sales uses an encrypted field. Ignore it.
+Set `MJ_BASE_ENCRYPTION_KEY` in `.env` (`openssl rand -base64 32`; see `.env.example`). Without it you
+see a boxed `ENCRYPTION KEY VALIDATION FAILED` warning at API and test startup. It is non-fatal:
+nothing in sales uses an encrypted field.
 
 ### Servers, ports and login
 
@@ -277,19 +277,22 @@ the screen disagree, the spec is the reference.
 4. On a closed deal the Activity panel still renders, and logging works as on an open one.
 
 ### 5.11 Deal team and owner — `76-team-roster-owner-stamp`
-1. A deal's owner comes from its **Internal team** row with the Owner / AE role. With none, the Overview
+1. A deal's owner comes from its **Internal team** row with the Owner role. With none, the Overview
    says "No owner assigned".
-2. Save the Owner / AE team row (from the Internal team grid or its own record): the deal's owner is
+2. Save the Owner team row (from the Internal team grid or its own record): the deal's owner is
    stamped from it.
 3. With the deal already open while the owner changes elsewhere, open its Internal team section: the
    Overview stops saying "No owner assigned".
 4. ✅ The owner follows the roster without a hand edit.
 
-### 5.12 Inline create — `72-inline-create`
-1. On a new deal, type a name that does not exist into the **Account** field and choose its **Create**
-   option. A dialog opens with the new account's form; save it.
-2. ✅ The Account field shows the new name, and the saved deal holds that account. Creating a second
-   one replaces the first.
+### 5.12 Account and contact search (bc-aidp-next-golive#372)
+1. On a new deal, click into **Account** and type one character. ✅ Nothing is listed.
+2. Type the start of an account's name, legal name or website domain (`acme.com`). ✅ Matches appear
+   within a second; an organization with no Sales Account is never offered.
+3. In **Primary Contact**, type a last name, an email, or `@` plus an email domain. ✅ Sales contacts
+   whose last name, name or email starts with it appear. A word in the middle of a name does not match.
+4. Pick one of each, save, reopen. ✅ The names show, not IDs. Inline create is not offered on these
+   three fields.
 
 ### 5.13 Regression sweep
 - Reload every page — no console errors.
@@ -318,7 +321,7 @@ the screen disagree, the spec is the reference.
 7. **The dashboard does not re-query when you navigate back to it.** Close a deal, return to Dashboard,
    and the tiles still show the pre-close numbers. **Press refresh (top right)** and they correct — the
    close did happen, only the reading is old.
-8. **The encryption-key warning at startup** is expected (§2).
+8. **The encryption-key warning at startup** means `MJ_BASE_ENCRYPTION_KEY` is unset (§2).
 9. **`ForecastSnapshot` columns are `*Amount`-suffixed** (`CommitAmount`, not `Commit`) — `COMMIT` is
    reserved in T-SQL and Postgres (D6).
 10. **The Playwright specs run slowly** against a development-mode Explorer: the suite takes about 34

@@ -1,5 +1,62 @@
 # @mj-biz-apps/sales-entities
 
+## 6.21.0
+
+### Minor Changes
+
+- a3400af: Deal, Sales Account, Pipeline, Pipeline Stage, Deal Type, Deal Status Type and Deal Role now match a name by any part of it rather than only from the start, so a filter box finds a record from a word in the middle of its name. Deals are also searchable by account name and deal number, which were not searchable at all before, so a deal can be found by the customer it belongs to or by the number printed on it.
+- 9daffcf: A deal line's raised discount is now recorded as orders' Price concession through a new `Sales.RecordDiscountConcession` remote operation, so orders' server subclass fills, values and decides it. Before, the browser created the concession itself, its required-field validation failed before any request was sent, and the rep saw "Orders refused the concession and gave no reason". A refusal now carries orders' own reason. Raising a line's discount again withdraws the concession recorded for its earlier discount (when orders allows it) before recording the new one, so orders no longer counts both. `CONCESSION_REFUSED_WITHOUT_REASON` is exported from `@mj-biz-apps/sales-entities`. `RecordDiscountConcession` no longer takes a `contextUser` argument.
+- f5aacda: Sales bug fixes:
+
+  - Close lock: a permitted edit on a closed deal no longer rewrites its Amount (#351); order lines lock when the deal's status row is missing, as the header does (#401); a save that reopens a deal and changes a frozen field says to save the status change first (#390); a Lost close takes its loss reason and notes from the caller, not from values left on the deal (#400).
+  - Close routing: the Contract Processing task follows the close's effective policy, overrides included. `CloseWonTaskInput.PipelineID` is replaced by `CreateContract` (#354).
+  - Order vetoes read Deals as the system user, so a role that may confirm orders but not read Deals is no longer refused; its refusals do not name the deal (#423).
+  - A stage that confirms the order holds it back with a warning while a line for a product the customer already holds has no next-term answer (#426).
+  - Deal form: no duplicate order-total read (#386); saving clears the stale-amount notice when only the order changed (#399); Amount, MRR, ARR and Weighted honour field-level read security (#403); an empty Pipeline shows the required underline (#416); a deal whose status row is gone can be set to an open status (#402); the closed-deal notice names Status and Forecast Category as the form labels them (#387).
+  - Deal lines: a term start is cleared when the product changes to a non-subscription (#374); a failed product catalogue load is shown, not an empty picker (#380); the product select explains an overridden price to reps without the price grant (#408).
+  - Team and contacts: picking an Employee clears the old Person's name on the row (#437); the Sales Contact form lists the accounts the contact works at (#442); the default contact fields are labelled without "ID" (#435); a new query lists owner-role rows held by a Person (#438).
+  - Queries: Deal Type Mix leaves out open deals of pipelines flagged out of the forecast (#404); Bookings by Period parses with MJ's SQL parser (#417); Slipped Deals takes the first and last move by when each was made (#353); the No owner queue says no employee holds the owner role (#438).
+
+- d716be7: Release seed for 6.21: `V202610300200__v6.21.x__Metadata_Sync.sql` and its PostgreSQL counterpart carry this release's metadata to hosts, which install by migration and never read `metadata/`: the new "Sales: Owner Rows Held by a Person" query with its parameter, fields and query entities; the new SQL of Bookings by Period, Deal Type Mix and Slipped Deals, with the fields and query entity they add; the `Sales.RecordDiscountConcession` remote operation (golive #340); and the Contains search on the Name fields of Deals, Sales Accounts, Pipelines, Pipeline Stages, Deal Types, Deal Status Types and Deal Roles, Deals searchable by account and by number (golive #359), and the Sales Accounts default contact labels. Every create is guarded on its ID or key, so a host that already pushed this metadata is untouched.
+
+### Patch Changes
+
+- f2ed582: Sales now requires bizapps-common 5.51.0 or later, in `mj-app.json` and in every package's common peer range. Deal Cycle Time and Won Deals With Unconfirmed Orders call common's `fnBusinessDayOf`, which 5.51.0 added, so an install on common 5.49 or 5.50 passed the check and then failed both reports (#406).
+
+## 6.20.0
+
+### Minor Changes
+
+- 849236d: Release seed for 6.20: `V202610230130__v6.20.x__Metadata_Sync.sql` and its PostgreSQL counterpart create the two party-lookup queries behind the Deal form's Account and Contact pickers (#475), with their parameters, fields and query entities, guarded so a host that already has them is untouched.
+
+## 6.19.0
+
+### Minor Changes
+
+- de98c6f: Sales metadata from the #371 UX digest. Deal, Stage history, Buying team, Internal team, Pipeline Stage and Forecast Snapshot fields show readable labels instead of column names (Annual Increase Override (%), Previous Status, Buying Role, Attribution (%), Owner and others). The Deal Stage Event sections on the Pipeline Stage and Deal Status Type forms read "Deals Entering/Leaving This Stage" and "… This Status". The shared `Sales: Pipeline` view sorts open deals first, then by expected close, shows "Expected close" and "Closed on" columns, keeps Closed at as a hidden sort column, and shows probability as a percent. Pipeline Stage Rotting Days describes the Board's idle flag; Entry Criteria and Required Fields leave the generated form, and the Sales Contact form drops the older free-text Seniority. Buying team Influence gives its 0–100 range. The deal roles read "Owner" and "Sales Development Rep (SDR)". Applied with `mj sync push`; the hidden fields and the new section titles appear after CodeGen.
+- c80645a: The 6.19 Metadata_Sync ships what metadata/ changed since 6.18: the new SQL, parameters and fields of the reporting queries behind the Deals dashboard filters and period-bound forecast, the plain-sentence descriptions of the vocabulary rows, actions, remote operations and the forecast snapshot job, and the field labels, default grid columns, form relationships and All deals view. It has a Postgres counterpart.
+- 6c2a165: Sales grids show name and status columns instead of IDs for buying team, forecast snapshots, pipeline stages, accounts and contacts. The Sales Account and Sales Contact forms use plain labels, hide Is Active next to Status, and title their related sections by role. Column, lookup, query and action descriptions are rewritten as plain sentences, with the forecast snapshot job, the D2C pipeline, Close Deal and the forecast period corrected. The deal workspace drops its hardcoded renewal placeholders (removes the exported `STANDARD_ANNUAL_INCREASE_PCT` and `STANDARD_CANCELLATION_NOTICE_DAYS`).
+
+## 6.18.0
+
+### Minor Changes
+
+- 0cd81c5: The 6.18 Metadata_Sync ships the new SQL of Forecast History, Slipped Deals and Stage Conversion and Dwell, which judge their date bounds on the business day and survive RecordChange rows that are not JSON, and sets AllowUpdateAPI and AllowDeleteAPI to false on Deal Stage Events. It has a Postgres counterpart.
+- 20e1899: MemberJunction floor raised to 6.1.6, and a batch of non-UX fixes:
+
+  - Breaking for direct importers of `@mj-biz-apps/sales-ng`: the unmounted `DealWorkspaceComponent` and the validation helpers only it used (`DiscountRefusalIssues`, `ShouldRefuseLineRemoval`, `LineRemovalRefusedIssues`, `UnlinkedLineIssues`, `MergeValidation`) are removed (#291). `IDownstreamSeam` gains `UpdateContractFromDeal` (#278).
+  - Closing a reopened Won deal Won again reuses its contract, refreshing unsigned terms, instead of creating a second one (#278).
+  - Changing a deal's contact or account moves its order's bill-to while the order is Draft or Quoted and still bills the previous party (#319).
+  - Deal stage events refuse updates and deletes on the server, and the API no longer offers them (#348).
+  - Slipped Deals, Stage Conversion and Forecast History count whole business days at both period bounds; Slipped Deals no longer fails on audit rows that are not JSON (#289).
+  - The Deal form's inline-create key workaround is removed now that MJ 6.1.6 sends the written key (#207).
+  - CodeGen no longer writes recurring reconcilers, including the field prune, into migrations (#345).
+
+### Patch Changes
+
+- 7041a49: Dependency ranges are caret: `zod` is `^3.24.4` instead of `~3.24.4`.
+- 769158a: A deal line's discount can be typed as a dollar amount. The editor converts it to a percent of orders' list amount and stores it on `DiscountPct`, so the percent's precision, bounds and concession rules apply.
+
 ## 6.17.0
 
 ### Minor Changes

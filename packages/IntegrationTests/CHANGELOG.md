@@ -1,5 +1,59 @@
 # @mj-biz-apps/sales-integration-tests
 
+## 6.21.0
+
+### Patch Changes
+
+- Updated dependencies [f2ed582]
+- Updated dependencies [a3400af]
+- Updated dependencies [9daffcf]
+- Updated dependencies [f5aacda]
+- Updated dependencies [d716be7]
+  - @mj-biz-apps/sales-entities@6.21.0
+  - @mj-biz-apps/sales-core-entities-server@6.21.0
+  - @mj-biz-apps/sales-server@6.21.0
+
+## 6.20.0
+
+### Patch Changes
+
+- Updated dependencies [4f5fddd]
+- Updated dependencies [849236d]
+  - @mj-biz-apps/sales-core-entities-server@6.20.0
+  - @mj-biz-apps/sales-entities@6.20.0
+  - @mj-biz-apps/sales-server@6.20.0
+
+## 6.19.0
+
+### Minor Changes
+
+- 6c2a165: Sales grids show name and status columns instead of IDs for buying team, forecast snapshots, pipeline stages, accounts and contacts. The Sales Account and Sales Contact forms use plain labels, hide Is Active next to Status, and title their related sections by role. Column, lookup, query and action descriptions are rewritten as plain sentences, with the forecast snapshot job, the D2C pipeline, Close Deal and the forecast period corrected. The deal workspace drops its hardcoded renewal placeholders (removes the exported `STANDARD_ANNUAL_INCREASE_PCT` and `STANDARD_CANCELLATION_NOTICE_DAYS`).
+
+### Patch Changes
+
+- Updated dependencies [9510fd9]
+- Updated dependencies [de98c6f]
+- Updated dependencies [c80645a]
+- Updated dependencies [3717a22]
+- Updated dependencies [6c2a165]
+  - @mj-biz-apps/sales-core-entities-server@6.19.0
+  - @mj-biz-apps/sales-entities@6.19.0
+  - @mj-biz-apps/sales-server@6.19.0
+
+## 6.18.0
+
+### Patch Changes
+
+- Updated dependencies [7041a49]
+- Updated dependencies [769158a]
+- Updated dependencies [6e77e8f]
+- Updated dependencies [0cd81c5]
+- Updated dependencies [20e1899]
+- Updated dependencies [7c5daa9]
+  - @mj-biz-apps/sales-entities@6.18.0
+  - @mj-biz-apps/sales-core-entities-server@6.18.0
+  - @mj-biz-apps/sales-server@6.18.0
+
 ## 6.17.0
 
 ### Patch Changes

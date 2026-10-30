@@ -4,7 +4,7 @@
       "Name": "Sales: Product Mix and Discount Depth",
       "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
       "UserQuestion": "What products are we selling, how often do they attach to a deal, and how deep are the discounts?",
-      "Description": "Product mix, attach rate and discount depth at the LINE grain (master plan §9.1, §9.3 measure 11). REBASED FROM DealLine ONTO OrderLine: the embedded-order rework retired DealLine, so lines now live on the order a deal carries. Same grain, same catalog dimension, same measures — only the source table moved, and it moved closer to the catalog, since OrderLine.ProductID is NOT NULL with a real FK.",
+      "Description": "Products sold, how often each is attached to a deal, and how deep the discounts are, from the deals' order lines.",
       "SQL": "@file:SQL/product-mix-and-discount-depth.sql",
       "TechnicalDescription": "Grain: OrderLine, joined via Deal.OrderID. Every money column is READ AS STORED — UnitPrice, DiscountPct, DiscountAmount, LineTotalNet were written by the orders engine and nothing here recomputes them; AvgDiscountPct is a statistic about stored percentages. Attach rate uses DISTINCT deals as its numerator and denominator, because a product on three lines of one deal has not attached three times. Both discount forms are reported, since a mix of percent- and amount-based discounts makes either alone misleading. Date: the DEAL's actual close, falling back to expected.",
       "Status": "Approved",
@@ -44,7 +44,9 @@
       "    e.g. 2026-12-31",
       "  WonOnly (string)",
       "    Pass \"true\" to count only won deals — what was actually sold rather than what is being offered.",
-      "    e.g. true"
+      "    e.g. true",
+      "",
+      "Former description, kept as the design note: Product mix, attach rate and discount depth at the LINE grain (master plan §9.1, §9.3 measure 11). REBASED FROM DealLine ONTO OrderLine: the embedded-order rework retired DealLine, so lines now live on the order a deal carries. Same grain, same catalog dimension, same measures — only the source table moved, and it moved closer to the catalog, since OrderLine.ProductID is NOT NULL with a real FK."
     ],
     "sync": {
       "lastModified": "2026-08-26T00:25:22.183Z",

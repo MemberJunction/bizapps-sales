@@ -4,9 +4,9 @@
  * ── WHY THIS FILE EXISTS ────────────────────────────────────────────────────────────────────────
  *
  * Deals became Explorer record tabs: "New deal" is `OpenNewEntityRecord`, a list row is
- * `OpenEntityRecord`, and both render `mjs-deal-form`. `lib/workspace.ts` still drives
- * `mjs-deal-workspace`, which no template has mounted since the Workspace rail was removed, so every
- * spec reaching it failed in setup before any assertion ran. These helpers drive the live form.
+ * `OpenEntityRecord`, and both render `mjs-deal-form`. The old `lib/workspace.ts` drove
+ * `mjs-deal-workspace`, which no template mounted after the Workspace rail was removed, so every spec
+ * reaching it failed in setup before any assertion ran. These helpers drive the live form.
  *
  * ── THE SELECTOR CONVENTIONS ────────────────────────────────────────────────────────────────────
  *
@@ -330,6 +330,9 @@ export async function SetText(page: Page, fieldName: string, value: string): Pro
  */
 export async function PickLookup(page: Page, fieldName: string, search?: string): Promise<string> {
     const field = await Field(page, fieldName);
+    if ((await field.locator('bizapps-party-field').count()) > 0) {
+        return pickParty(page, field, fieldName, search);
+    }
     const input = field.locator('.mj-fk-search input').first();
     await expect(input, `lookup ${fieldName} must be editable`).toBeVisible({ timeout: 15_000 });
     await input.click();
@@ -370,6 +373,41 @@ export async function PickLookup(page: Page, fieldName: string, search?: string)
     await row.click();
     await page.waitForTimeout(500);
     return text;
+}
+
+/**
+ * The party picker's version of {@link PickLookup} (bc-aidp-next-golive#372): Account and the deal's
+ * contacts list nothing until two characters are typed, so a search is REQUIRED. Its dropdown is
+ * mj-combobox's, in a CDK overlay; the last row may be the inline-create row, which is never a pick.
+ */
+async function pickParty(page: Page, field: Locator, fieldName: string, search?: string): Promise<string> {
+    if (!search || search.trim().length < 2) {
+        throw new Error(`lookup ${fieldName} is a party picker: pass a search of 2+ characters (e.g. FirstSalesAccountName())`);
+    }
+    const input = field.locator('bizapps-party-field input.mj-combobox-input').first();
+    await expect(input, `lookup ${fieldName} must be editable`).toBeVisible({ timeout: 15_000 });
+    await input.click();
+    await input.fill('');
+    await input.pressSequentially(search, { delay: 40 });
+    const row = page
+        .locator('.mj-dropdown-panel .mj-dropdown-option:visible:not(:has(.mj-fk-create-footer))')
+        .filter({ hasText: search })
+        .first();
+    await expect(row, `lookup ${fieldName} offered no row containing "${search}"`).toBeVisible({ timeout: 20_000 });
+    const text = ((await row.innerText()) ?? '').trim();
+    await row.click();
+    await page.waitForTimeout(500);
+    return text;
+}
+
+/** A Sales Account's organization name: a search the Account picker is sure to answer. */
+export async function FirstSalesAccountName(): Promise<string> {
+    const row = await QueryOne<{ Name: string }>(
+        `SELECT TOP 1 o.Name FROM __mj_BizAppsCommon.Organization o
+           JOIN __mj_BizAppsSales.SalesAccount sa ON sa.ID = o.ID ORDER BY o.Name`,
+    );
+    expect(row?.Name, 'the host needs a Sales Account to pick').toBeTruthy();
+    return String(row!.Name);
 }
 
 /** The Pipeline panel's Status control — the one door to a status change on the form. */

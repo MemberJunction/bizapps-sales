@@ -1,5 +1,6 @@
 /**
- * @fileoverview Import a sibling BizApps package by NAME, without declaring a dependency on it.
+ * @fileoverview Import a sibling BizApps package by NAME: a plain import, then the copy
+ * `packages/IntegrationTests` declares, then a built sibling checkout.
  *
  * ── WHY A PLAIN `import` DOES NOT WORK FROM HERE ────────────────────────────────────────────────
  *
@@ -8,75 +9,49 @@
  * `import('@mj-biz-apps/contracts-core-entities-server')` throws `ERR_MODULE_NOT_FOUND` from a script in
  * this folder, no matter that the package is built and sitting one directory up.
  *
- * `test-harnesses/integration.mjs` has carried this scan for a while. It is extracted here because two
- * standalone proof harnesses arrived with plain imports and neither could run —
- * `prove-close-won-route.mjs` and `prove-contracts-seam.mjs`, both of which pass on the branch they were
- * written on and fail the moment they are merged into a tree whose links differ. A harness that only runs
- * where it was written proves something about that checkout, not about the app.
- *
- * The runner keeps its own copy for now, deliberately: it is green, it is the thing every check depends
- * on, and swapping its resolution out as a side effect of a merge is not a trade worth making. Two copies
- * of thirty lines, with this comment naming the other, beats risking the suite.
+ * The scan itself lives in `one-mj-core.mjs`, so this helper, the runner and the resolve hook agree on
+ * which checkout a package comes from: the one `BIZAPPS_<APP>_REPO` names, else the only one carrying
+ * it. When several carry it and none is named, nothing is picked (sales#456).
  *
  * FOLDER NAMES ARE NEVER ASSUMED (`EngineBase` vs `engine-base` vs `Entities`) — the `name` in
  * package.json is the only thing matched, so this keeps working when a sibling reorganises.
  */
-import { readdirSync, existsSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { ShareTestedCheckoutPackages } from './one-mj-core.mjs';
-/**
- * Entries of `dir` that are directories, FOLLOWING SYMLINKS.
- *
- * `Dirent.isDirectory()` is false for a symlink, so a sibling linked into the parent (one real checkout
- * shared by several worktrees, or a per-ref sibling set swapped in by link) was skipped as if absent.
- */
-export function listDirs(dir) {
-    return readdirSync(dir, { withFileTypes: true })
-        .filter((d) => {
-            if (d.isDirectory()) return true;
-            if (!d.isSymbolicLink()) return false;
-            try {
-                return statSync(join(dir, d.name)).isDirectory();
-            } catch {
-                return false; // a dangling link is not a sibling
-            }
-        })
-        .map((d) => d.name);
+import { AmbiguousSiblings, ShareTestedCheckoutPackages, SiblingBuildEntry } from './one-mj-core.mjs';
+
+/** The built entry point of a sibling package, or null when it is absent, unbuilt or ambiguous. */
+export function resolveSiblingPackage(name) {
+    return SiblingBuildEntry(name);
 }
 
-/** The built entry point of a sibling package, or null when it is absent or unbuilt. */
-export function resolveSiblingPackage(name, from = process.cwd()) {
-    const parent = join(from, '..');
-    let repos = [];
+/** Why `name` has no sibling build when several checkouts carry it, or null. */
+export function AmbiguityMessage(name) {
+    const hit = AmbiguousSiblings().find((a) => a.name === name);
+    if (!hit) return null;
+    if (hit.checkouts.length === 0) {
+        return `${hit.variable}=${process.env[hit.variable]} names a checkout that does not carry ${name}.`;
+    }
+    return (
+        `${name} is carried by ${hit.checkouts.length} checkouts beside this one (${hit.checkouts.join(', ')}). ` +
+        `Set ${hit.variable} to the one this run should use.`
+    );
+}
+
+/**
+ * The copy `packages/IntegrationTests` declares, when a plain import cannot see it. The harnesses' sibling
+ * packages are devDependencies there, so a clone with no sibling checkouts still resolves them, at the
+ * version the lockfile records. Null when it is not declared or not installed.
+ */
+function resolveDeclared(name) {
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
     try {
-        repos = listDirs(parent);
+        return createRequire(join(repoRoot, 'packages', 'IntegrationTests', 'package.json')).resolve(name);
     } catch {
         return null;
     }
-    for (const repo of repos) {
-        const pkgDir = join(parent, repo, 'packages');
-        if (!existsSync(pkgDir)) continue;
-        let subs = [];
-        try {
-            subs = listDirs(pkgDir);
-        } catch {
-            continue;
-        }
-        for (const sub of subs) {
-            const manifest = join(pkgDir, sub, 'package.json');
-            if (!existsSync(manifest)) continue;
-            try {
-                if (JSON.parse(readFileSync(manifest, 'utf8')).name !== name) continue;
-            } catch {
-                continue;
-            }
-            const entry = join(pkgDir, sub, 'dist', 'index.js');
-            return existsSync(entry) ? entry : null;
-        }
-    }
-    return null;
 }
 
 /**
@@ -90,14 +65,19 @@ export function resolveSiblingPackage(name, from = process.cwd()) {
 export async function importSibling(name) {
     // A sibling checkout must load THIS checkout's MJ core, not its own (sales#200).
     ShareTestedCheckoutPackages();
+    let mod = null;
     try {
-        return await import(name);
+        mod = await import(name);
     } catch (err) {
         if (err?.code !== 'ERR_MODULE_NOT_FOUND') {
             throw err;
         }
     }
-    const entry = resolveSiblingPackage(name);
+    // Several checkouts carry it and none was chosen: whatever loaded is not a checkout anyone picked.
+    const ambiguity = AmbiguityMessage(name);
+    if (ambiguity) throw new Error(ambiguity);
+    if (mod) return mod;
+    const entry = resolveDeclared(name) ?? resolveSiblingPackage(name);
     if (!entry) {
         throw new Error(
             `${name} is neither resolvable nor built in a sibling repo. Check it out beside this one and ` +
