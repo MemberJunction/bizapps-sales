@@ -51,7 +51,7 @@ BEGIN
       -- The Sales application. ApplicationEntity / ApplicationRole / UserApplication are NOT NULL
       -- children and follow automatically.
       ('${mjSchema}', 'Application',             'D4F8A162-A001-4E71-B0A8-3F17C5E2D803', 0),  -- Sales
-      -- The 17 reporting queries. QueryEntity / QueryField / QueryParameter / QuerySQL /
+      -- The 18 reporting queries. QueryEntity / QueryField / QueryParameter / QuerySQL /
       -- QueryPermission / QueryDependency all carry NOT NULL QueryID and follow automatically --
       -- 327 child rows on a fresh install, none of which is listed here for that reason.
       ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-000000000001', 0),  -- Sales: Pipeline Summary
@@ -71,6 +71,7 @@ BEGIN
       ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-00000000000F', 0),  -- Sales: Forecast by Owner
       ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-000000000010', 0),  -- Sales: Won Deals With Unconfirmed Orders
       ('${mjSchema}', 'Query',                   '5A1E5000-0001-4000-A000-000000000011', 0),  -- Sales: Deal Owners Without a Linked Login
+      ('${mjSchema}', 'Query',                   'F08AE733-24F8-4ABD-989E-94236A5DBD8F', 0),  -- Sales: Owner Rows Held by a Person
       ('${mjSchema}', 'QueryCategory',           '5A1E5000-0000-4000-A000-000000000001', 0),  -- Sales
       ('${mjSchema}', 'Action',                  'DD7CEF7B-C75B-42F8-8D7A-45B9503A6D19', 0),  -- Relink Won Deal Orders To Contracts
       ('${mjSchema}', 'Action',                  '097952C6-0D37-4395-87FD-998AEDD8ECA4', 0),  -- Copy Default Pipeline To Companies
