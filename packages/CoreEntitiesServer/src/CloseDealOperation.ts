@@ -64,7 +64,7 @@ import {
 import { DealEntityServer } from './DealEntityServer.js';
 import { OrdersIsInstalled } from './orders-availability.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
-import { CloseWonTaskDueAt, CloseWonTaskService, RaisesOrderReviewTask, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
+import { CloseWonTaskDueAt, CloseWonTaskService, RaisesOrderReviewTask, ReadCloseWonTaskConfig, WithPipelineAssignee } from './CloseWonTaskService.js';
 import {
     AnswerAsNextTerm,
     FindUnansweredSubscriptionLines,
@@ -890,11 +890,14 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 EntityName: PIPELINE_ENTITY,
                 ExtraFilter: `ID = '${deal.PipelineID}'`,
                 ResultType: 'simple',
-                Fields: ['CloseWonPolicy'],
+                Fields: ['CloseWonPolicy', 'CloseWonAssigneePersonID'],
             },
             user,
         );
-        const raw = ((r.Results ?? [])[0] as { CloseWonPolicy?: string } | undefined)?.CloseWonPolicy;
+        const row = (r.Results ?? [])[0] as
+            | { CloseWonPolicy?: string | null; CloseWonAssigneePersonID?: string | null }
+            | undefined;
+        const raw = row?.CloseWonPolicy;
         if (r.Success && raw) {
             try {
                 fromPipeline = JSON.parse(raw) as SalesCloseWonPolicy;
@@ -902,6 +905,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 LogError(`Sales.CloseDeal: pipeline ${deal.PipelineID} has unparseable CloseWonPolicy; using defaults`);
             }
         }
+        // The pipeline's assignee column outranks the assignee in its JSON; see WithPipelineAssignee.
+        fromPipeline = WithPipelineAssignee(fromPipeline, r.Success ? row?.CloseWonAssigneePersonID : null);
 
         return { ...POLICY_DEFAULTS, ...fromPipeline, ...(input.PolicyOverrides ?? {}) };
     }
