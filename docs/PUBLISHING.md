@@ -43,8 +43,8 @@ next -> main PR and no dispatch-driven publish.
 
 ```bash
 # 1. On your feature branch, describe the change. A schema change (anything under migrations/)
-#    must be at least a `minor` — the `migration changeset` check refuses a PR into next that
-#    adds a migration with only a patch changeset.
+#    or a seeded-value change (anything under metadata/) must be at least a `minor` — the
+#    `migration changeset` check refuses a PR into next that carries only a patch changeset.
 pnpm run change
 
 # 2. Merge the feature branch into next through a PR as usual. changes.yml (migration checks),
@@ -216,9 +216,10 @@ placeholder. `@mj-biz-apps/sales-integration-tests` is the one in this repo.
 
 `fixed` versioning moves all five packages, `mj-app.json` and the git tag together, so there is one
 number to reason about. Which bump a change needs is in [`.changeset/README.md`](../.changeset/README.md).
-One part is enforced, not conventional: any change under `migrations/` needs at least a `minor`.
-The `migration changeset` check fails a PR into `next` that adds one with a patch changeset, and
-`rr: minor bump` fails the release PR.
+One part is enforced, not conventional: any change under `migrations/` or `metadata/` needs at
+least a `minor`. The `migration changeset` check fails a PR into `next` that carries one with a
+patch changeset, and `rr: minor bump` fails the release PR. `metadata/` counts because the
+release ships it as seed data; see `ci/check-bump-level.sh`, which states the rule for both.
 
 Schema changes are new `V…` files; the baseline (`V202608042101`) is not edited. Within a published
 major only additive schema changes are allowed — see MJ's

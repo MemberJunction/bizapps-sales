@@ -1,5 +1,48 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.21.0
+
+### Minor Changes
+
+- 9daffcf: A deal line's raised discount is now recorded as orders' Price concession through a new `Sales.RecordDiscountConcession` remote operation, so orders' server subclass fills, values and decides it. Before, the browser created the concession itself, its required-field validation failed before any request was sent, and the rep saw "Orders refused the concession and gave no reason". A refusal now carries orders' own reason. Raising a line's discount again withdraws the concession recorded for its earlier discount (when orders allows it) before recording the new one, so orders no longer counts both. `CONCESSION_REFUSED_WITHOUT_REASON` is exported from `@mj-biz-apps/sales-entities`. `RecordDiscountConcession` no longer takes a `contextUser` argument.
+- f5aacda: Sales bug fixes:
+
+  - Close lock: a permitted edit on a closed deal no longer rewrites its Amount (#351); order lines lock when the deal's status row is missing, as the header does (#401); a save that reopens a deal and changes a frozen field says to save the status change first (#390); a Lost close takes its loss reason and notes from the caller, not from values left on the deal (#400).
+  - Close routing: the Contract Processing task follows the close's effective policy, overrides included. `CloseWonTaskInput.PipelineID` is replaced by `CreateContract` (#354).
+  - Order vetoes read Deals as the system user, so a role that may confirm orders but not read Deals is no longer refused; its refusals do not name the deal (#423).
+  - A stage that confirms the order holds it back with a warning while a line for a product the customer already holds has no next-term answer (#426).
+  - Deal form: no duplicate order-total read (#386); saving clears the stale-amount notice when only the order changed (#399); Amount, MRR, ARR and Weighted honour field-level read security (#403); an empty Pipeline shows the required underline (#416); a deal whose status row is gone can be set to an open status (#402); the closed-deal notice names Status and Forecast Category as the form labels them (#387).
+  - Deal lines: a term start is cleared when the product changes to a non-subscription (#374); a failed product catalogue load is shown, not an empty picker (#380); the product select explains an overridden price to reps without the price grant (#408).
+  - Team and contacts: picking an Employee clears the old Person's name on the row (#437); the Sales Contact form lists the accounts the contact works at (#442); the default contact fields are labelled without "ID" (#435); a new query lists owner-role rows held by a Person (#438).
+  - Queries: Deal Type Mix leaves out open deals of pipelines flagged out of the forecast (#404); Bookings by Period parses with MJ's SQL parser (#417); Slipped Deals takes the first and last move by when each was made (#353); the No owner queue says no employee holds the owner role (#438).
+
+### Patch Changes
+
+- f2ed582: Sales now requires bizapps-common 5.51.0 or later, in `mj-app.json` and in every package's common peer range. Deal Cycle Time and Won Deals With Unconfirmed Orders call common's `fnBusinessDayOf`, which 5.51.0 added, so an install on common 5.49 or 5.50 passed the check and then failed both reports (#406).
+- Updated dependencies [f2ed582]
+- Updated dependencies [a3400af]
+- Updated dependencies [9daffcf]
+- Updated dependencies [f5aacda]
+- Updated dependencies [d716be7]
+  - @mj-biz-apps/sales-entities@6.21.0
+
+## 6.20.0
+
+### Patch Changes
+
+- 4f5fddd: Closing a Won deal a second time finds the order-review task instead of raising another.
+
+  Reopening a Won deal and closing it again is a supported thing to do, and the second close correctly does not mint a second order. It did try to raise a second Order Review task, though, and on QA that attempt failed inside tasks and put the raw database error on the close panel — connection-state message, `DECLARE` statement and all. The duplicate was never wanted.
+
+  A task of the right type already linked to any of the task's targets is now reported rather than recreated, carrying an `AlreadyExisted` flag so a caller can tell "raised now" from "already there". Every target is checked rather than only the primary, because the primary moves between closes: the contract task points at the contract when there is one and falls back to the deal when there is not.
+
+  A lookup that fails creates the task anyway. Not knowing costs a duplicate row in a queue someone closes; refusing would cost finance the task entirely.
+
+  A genuine creation failure no longer prints SQL. The database error goes to the log, and the close panel gets a sentence saying the close itself held.
+
+- Updated dependencies [849236d]
+  - @mj-biz-apps/sales-entities@6.20.0
+
 ## 6.19.0
 
 ### Patch Changes
