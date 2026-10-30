@@ -510,6 +510,19 @@ export const SECTION_LOOKUP_KEYS: readonly LookupKey[] = ['Pipelines', 'Stages',
 // 'Lines' is NOT here: the deal holds none. Its order's lines arrive with the embedded order.
 const DEAL_COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
 
+/**
+ * Leaves out products orders marks as not sold new (golive#360): catch-all products a Business Central
+ * import books invoice lines to, and products kept only for converted subscriptions. They stay Active,
+ * because orders refuses to price a line whose product is not, so existing orders and renewals keep
+ * saving; only the picker stops offering them.
+ *
+ * Added only when the host's orders has the column. Sales installs alongside older orders releases, and
+ * filtering on a column the host lacks would fail the whole catalogue read.
+ */
+function sellableNewFilter(productFields: readonly string[]): string {
+    return productFields.includes('IsSellableNew') ? ' AND IsSellableNew = 1' : '';
+}
+
 @Injectable({ providedIn: 'root' })
 export class DealWorkspaceService {
     /**
@@ -786,8 +799,8 @@ export class DealWorkspaceService {
          * So the entity is checked in metadata FIRST, and its absence simply means no picker.
          */
         const md = new Metadata();
-        const known = md.Entities.some((e) => e.Name === E_ORDERS_PRODUCT);
-        if (!known) {
+        const productEntity = md.Entities.find((e) => e.Name === E_ORDERS_PRODUCT);
+        if (!productEntity) {
             return [];
         }
 
@@ -797,7 +810,7 @@ export class DealWorkspaceService {
         const rv = new RunView();
         const result = await rv.RunView<ProductLookup>({
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(day),
+            ExtraFilter: ProductFilterFor(day) + sellableNewFilter(productEntity.Fields.map((f) => f.Name)),
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             // Shared with the check that guards it, so the two cannot drift — see PRODUCT_LOOKUP_FIELDS.
