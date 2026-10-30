@@ -1,5 +1,5 @@
 /**
- * @fileoverview `party-lookup` — PL1–PL5. The Deal form's Account and Contact pickers
+ * @fileoverview `party-lookup` — PL1–PL6. The Deal form's Account and Contact pickers
  * (bc-aidp-next-golive#372), run through `RunQuery` by name exactly as `bizapps-party-field` calls them.
  *
  * The fixture is built so a wrong query returns a WRONG ROW rather than no row: a person whose last name
@@ -7,8 +7,8 @@
  * SalesAccount row (the subtype restriction), and a name that `%`, `_` or `[a]` would match as a pattern (escaping).
  * Every name carries a per-run token, so seeded data cannot satisfy or spoil an assertion.
  *
- * Needs common's `Person.EmailDomain` and `Organization.WebsiteDomain` columns (common-ng's party lookup
- * migration) and the two `Sales: Party Lookup *` queries pushed from `metadata/queries`.
+ * Needs common's `Person.EmailDomain`, `Organization.WebsiteDomain` and `Organization.Acronym` columns
+ * (common's party lookup and acronym migrations) and the two `Sales: Party Lookup *` queries pushed from `metadata/queries`.
  *
  * @module @mj-biz-apps/sales-integration-tests
  */
@@ -37,6 +37,8 @@ interface Fixture {
     Account: string;
     /** Name starts with the token; NO SalesAccount. */
     OrgOnly: string;
+    /** Acronym of both organizations: the token upper-cased, so a match is case-insensitive. */
+    Acronym: string;
 }
 
 /** A lower-case token no seeded row starts with. */
@@ -60,10 +62,10 @@ async function person(ctx: Ctx, first: string, last: string, email: string, sale
     return id;
 }
 
-async function organization(ctx: Ctx, name: string, website: string, salesAccount: boolean): Promise<string> {
+async function organization(ctx: Ctx, name: string, website: string, acronym: string, salesAccount: boolean): Promise<string> {
     const id = await insertID(ctx, `
-        INSERT INTO ${COMMON_SCHEMA}.Organization (Name, Website)
-        OUTPUT inserted.ID VALUES (N'${name}', N'${website}')`);
+        INSERT INTO ${COMMON_SCHEMA}.Organization (Name, Website, Acronym)
+        OUTPUT inserted.ID VALUES (N'${name}', N'${website}', N'${acronym}')`);
     if (salesAccount) {
         await insertID(ctx, `INSERT INTO ${SALES_SCHEMA}.SalesAccount (ID) OUTPUT inserted.ID VALUES ('${id}')`);
     }
@@ -72,14 +74,16 @@ async function organization(ctx: Ctx, name: string, website: string, salesAccoun
 
 async function seed(ctx: Ctx): Promise<Fixture> {
     const t = newToken();
+    const acronym = `A${t.toUpperCase()}`;
     return {
         Token: t,
         Contact: await person(ctx, 'Pat', `${t}son`, `pat@${t}dom.test`, true),
         PersonOnly: await person(ctx, 'Lee', `${t}ley`, `lee@${t}dom.test`, false),
         ContainsOnly: await person(ctx, 'Ann', `Mc${t}`, `ann@other-${t}.test`, true),
         Wildcard: await person(ctx, 'Wil', `${t}axb`, `wil@other-${t}.test`, true),
-        Account: await organization(ctx, `${t} Holdings`, `https://www.${t}corp.test/about`, true),
-        OrgOnly: await organization(ctx, `${t} Partners`, `${t}partners.test`, false),
+        Account: await organization(ctx, `${t} Holdings`, `https://www.${t}corp.test/about`, acronym, true),
+        OrgOnly: await organization(ctx, `${t} Partners`, `${t}partners.test`, acronym, false),
+        Acronym: acronym,
     };
 }
 
@@ -125,6 +129,15 @@ export const PartyLookupChecks: NamedCheck[] = [
     seedCheck('PL4', 'a website domain (scheme, www and path stripped) finds the account', async (ctx, f) => {
         const ids = await lookup(ctx, Q_ACCOUNTS, `${f.Token}corp.test`, `${f.Token}corp.test`);
         Assert(ids.includes(f.Account), 'the website domain did not find the account (Organization.WebsiteDomain)');
+    }),
+    seedCheck('PL6', 'an acronym prefix finds sales accounts only, with acronym · domain as the detail', async (ctx, f) => {
+        const r = await new RunQuery().RunQuery({ QueryName: Q_ACCOUNTS, Parameters: { Term: f.Acronym.toLowerCase() } }, ctx.User);
+        Assert(r?.Success === true, `'${Q_ACCOUNTS}' by acronym did not run — ${r?.ErrorMessage ?? 'no reason given'}`);
+        const rows = (r.Results ?? []) as { ID: string; Detail: string | null }[];
+        const account = rows.find((row) => String(row.ID).toLowerCase() === f.Account);
+        Assert(account !== undefined, 'the acronym did not find the sales account (Organization.Acronym)');
+        Assert(!rows.some((row) => String(row.ID).toLowerCase() === f.OrgOnly), 'an acronym match offered an organization with no SalesAccount row');
+        Assert(account?.Detail === `${f.Acronym} · ${f.Token}corp.test`, `Detail was '${account?.Detail}', expected acronym · domain`);
     }),
     /**
      * Each wildcard sits MID-term: sqlLikeBegins strips a TRAILING '%' before escaping, so `token%`
