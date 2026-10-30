@@ -89,9 +89,14 @@ export interface ProductLookup {
 
     /**
      * Non-null when this product is sold as a subscription — read only for WHETHER it is set, never for
-     * its value. The rule that consumes it lives in `term-start.ts`, with the reasoning.
+     * its value. The rule that consumes it lives in `term-start.ts`, with the reasoning. Read from the
+     * product, then filled from its product type's default by `WithInheritedSubscriptionType` when the
+     * product names none, as orders' confirm resolves it (golive #339).
      */
     SubscriptionTypeID: string | null;
+
+    /** The product's type, whose `DefaultSubscriptionTypeID` applies when the product names none. */
+    ProductTypeID: string | null;
 }
 
 /**
@@ -115,6 +120,8 @@ export const PRODUCT_LOOKUP_FIELDS = [
     // #32: decides whether a line offers a term start at all. Drop it and the control silently vanishes
     // from every line — which is what `term-start.TS5` exists to catch.
     'SubscriptionTypeID',
+    // golive #339: a product naming no subscription type inherits its product type's default.
+    'ProductTypeID',
     /**
      * `as const satisfies` rather than a type ANNOTATION, and the difference is the whole point.
      *
