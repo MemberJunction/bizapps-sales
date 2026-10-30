@@ -2894,8 +2894,8 @@ export const CloseDealChecks: NamedCheck[] = [
                  *
                  * ── AND IT MUST BE THE REASON THIS CLOSE USED ──────────────────────────────────────
                  *
-                 * `validateClose` accepts `input.LossReasonID ?? deal.LossReasonID`, so the id being
-                 * closed with is not always the id on the header -- and `LossReasonID` is an ordinary
+                 * `validateClose` closes with the CALLER's reason (#400), so the id being closed with
+                 * is not always the id on the header -- and `LossReasonID` is an ordinary
                  * editable field on an OPEN deal, so the two genuinely diverge in the product. A note
                  * built from the denormalized `deal.LossReason` would name the reason the deal happened
                  * to be carrying, which is the wrong one, and would be wrong in the direction nobody

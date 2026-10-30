@@ -1,0 +1,30 @@
+[
+  {
+    "_comments": [
+      "#435: the two default-contact foreign keys on Sales Account read 'Default Primary Contact ID' and",
+      "'Default Billing Contact ID', the label CodeGen derives from the column name when no AI pass runs.",
+      "",
+      "THESE ARE THE FK ROWS. Both have a RelatedEntityNameFieldMap (DefaultPrimaryContact /",
+      "DefaultBillingContact), so mj-form-field already labels the form field from those virtual rows,",
+      "which read without the suffix. The FK row's own DisplayName is what a grid column, a view and the",
+      "filter builder show, and what CodeGen falls back to when it titles a related section on the Sales",
+      "Contact form. AutoUpdateDisplayName goes to 0 so the label stays a choice."
+    ],
+    "fields": {
+      "DisplayName": "Default Primary Contact",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=DefaultPrimaryContactID"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Default Billing Contact",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=DefaultBillingContactID"
+    }
+  }
+]

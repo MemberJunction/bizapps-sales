@@ -1,9 +1,9 @@
 /**
- * @fileoverview Deal form — the close lock, and whether the cached amount can still be trusted.
+ * @fileoverview Deal form — the close lock.
  *
- * This class adds the two things a *form* is the right place for: refusing an edit the server will
- * refuse, and saying out loud when a number on screen is stale. Lines, products and the roster are
- * edited by the panels contributed onto this form (`form-panels/`).
+ * This class adds the one thing a *form* is the right place for: refusing an edit the server will
+ * refuse. Lines, products and the roster are edited by the panels contributed onto this form
+ * (`form-panels/`).
  *
  * ── THE CLOSE LOCK ──────────────────────────────────────────────────────────────────────────────
  *
@@ -18,19 +18,12 @@
  * The lock is keyed on the PERSISTED status, matching the server: a deal being closed right now still has
  * an open status in the database, and reading the in-memory value would make a deal impossible to close.
  *
- * ── THE STALE AMOUNT ────────────────────────────────────────────────────────────────────────────
+ * ── THE NOTICES ARE THE HEADER'S, NOT THIS CLASS'S ──────────────────────────────────────────────
  *
- * `Deal.Amount` is a CACHED ANSWER from Orders, stamped with `AmountIsComputed` / `AmountComputedAt` /
- * `AmountSourceHash`. Sales never recomputes it — this form does not add, multiply or round anything. It
- * only COMPARES the cached figure with the order's current total: if they differ, the number on screen
- * no longer describes the order it claims to, and the form says so.
- *
- * That comparison is not pricing. It is the difference between showing a number and vouching for one.
- *
- * It compares the NUMBER, not a timestamp, and `amount-freshness.ts` records why: the timestamp test
- * asked whether a line had been touched, and closing a deal touches every line without moving a price —
- * so every Won deal warned forever about an amount it was simultaneously forbidden to change
- * (golive#230).
+ * The lock notice and the stale-amount notice are worked out and shown by the deal header
+ * (`deal-hero.panel.ts`). This class used to work out both as well, and its template showed neither,
+ * so every open and every save of a deal with an order ran a second order-total read for nothing
+ * (#386).
  *
  * @module @mj-biz-apps/sales-ng
  */
@@ -43,7 +36,7 @@ import {
     ResolveDealLockState,
 } from '@mj-biz-apps/sales-entities';
 import type { ValidationResult } from '@memberjunction/core';
-import { RunView } from '@memberjunction/core';
+import { EntitySaveOptions, RunView } from '@memberjunction/core';
 
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
 import { MJS_ENTITIES } from '../data/entity-names';
@@ -78,11 +71,12 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      */
     public IsWon = false;
 
-    /** Shown when locked, so the greyed-out-ness the form cannot render is at least explained. */
-    public LockNotice: string | null = null;
-
-    /** Set when `Deal.Amount` no longer matches its order's total. Null when trustworthy, absent or locked. */
-    public StaleAmountNotice: string | null = null;
+    /**
+     * The persisted status row no longer exists (#402). The deal is locked, but its status may be set
+     * to an open one, which is how the server lets the orphan be repaired; the Status control and
+     * `Validate()` read this so the form offers that one write and nothing else.
+     */
+    public IsStatusMissing = false;
 
     public override async ngOnInit(): Promise<void> {
         await super.ngOnInit();
@@ -117,7 +111,8 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     public readonly DealStateRefreshed = new EventEmitter<void>();
 
     /**
-     * Re-resolves the lock and the stale-amount notice after a deal save this form did not run (#271).
+     * Re-resolves the lock after a deal save this form did not run, and tells the panels so the header
+     * re-checks its lock and stale-amount notices (#271).
      *
      * The products panel saves the deal through `Record.Save(options)` to pull the order's new total
      * into `Amount`, because `SaveRecord` takes no save options. That path raises no `RecordSaved`, so
@@ -128,10 +123,9 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         this.DealStateRefreshed.emit();
     }
 
-    /** The lock and the amount warning, resolved together — they are read together. */
+    /** The lock, then a repaint: the panels read `IsLocked`, `IsLost` and `IsWon` off this instance. */
     private async resolveDealState(): Promise<void> {
         await this.resolveCloseLock();
-        await this.resolveAmountFreshness();
         this.cdr?.detectChanges();
     }
 
@@ -152,32 +146,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
         this.IsWon = lock.IsWon;
-        this.LockNotice = lock.Notice;
-    }
-
-    /**
-     * Compares the cached amount against the order it claims to describe. No arithmetic.
-     *
-     * The rule lives in `ResolveDealAmountFreshness` so this form and the deal hero cannot answer it
-     * differently — the same reason `ResolveDealLockState` is shared. Read that file's header for why
-     * this is no longer a timestamp comparison (golive#230).
-     *
-     * ORDER MATTERS: `resolveCloseLock()` runs first in `ngOnInit`, so `IsLocked` is settled before it
-     * is passed here. A locked deal never warns.
-     */
-    private async resolveAmountFreshness(): Promise<void> {
-        this.StaleAmountNotice = null;
-        if (!this.record?.Get?.('ID')) {
-            return;
-        }
-
-        const freshness = await ResolveDealAmountFreshness({
-            IsLocked: this.IsLocked,
-            AmountIsComputed: this.record.Get('AmountIsComputed') as boolean | null | undefined,
-            Amount: this.record.Get('Amount') as number | string | null | undefined,
-            OrderID: this.record.Get('OrderID') as string | null | undefined,
-        });
-        this.StaleAmountNotice = freshness.Notice;
+        this.IsStatusMissing = lock.IsStatusMissing;
     }
 
     /**
@@ -198,6 +167,45 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     public override async SaveRecord(StopEditModeAfterSave: boolean): Promise<boolean> {
         await this.stampCompanyFromPipeline();
         return super.SaveRecord(StopEditModeAfterSave);
+    }
+
+    /**
+     * A SAVE OF A CLEAN DEAL STILL REACHES THE SERVER WHEN ITS AMOUNT IS STALE (#399).
+     *
+     * The header tells the rep to save the deal when its cached amount no longer matches the order
+     * (`DEAL_AMOUNT_STALE_NOTICE`). When the order changed somewhere else, the deal's own columns are
+     * untouched, so the record is clean and `BaseEntity.Save()` returns without sending anything: the
+     * notice stayed and the amount with it. The add-product path met the same wall and answers it the
+     * same way, with `IgnoreDirtyState`.
+     *
+     * Forced only when the amount is actually stale, by the same rule the header uses, so an ordinary
+     * clean save stays the no-op it always was. The freshness read runs only here, on a clean save
+     * with nothing pending, never on open (#386). A dirty deal needs nothing: its save reaches the
+     * entity server, which refreshes the amount from the order on every save of a computed amount.
+     */
+    protected override async InternalSaveRecord(): Promise<boolean> {
+        const record = this.record;
+        if (record && !record.Dirty && this.PendingRecords.length === 0 && (await this.amountIsStale())) {
+            const options = new EntitySaveOptions();
+            options.IgnoreDirtyState = true;
+            return record.Save(options);
+        }
+        return super.InternalSaveRecord();
+    }
+
+    /** Whether the saved deal's cached amount disagrees with its order, through the shared rule. */
+    private async amountIsStale(): Promise<boolean> {
+        const record = this.record;
+        if (!record?.IsSaved) {
+            return false;
+        }
+        const freshness = await ResolveDealAmountFreshness({
+            IsLocked: this.IsLocked,
+            AmountIsComputed: record.Get('AmountIsComputed') as boolean | null | undefined,
+            Amount: record.Get('Amount') as number | string | null | undefined,
+            OrderID: record.Get('OrderID') as string | null | undefined,
+        });
+        return freshness.IsStale;
     }
 
     /** Reads the chosen pipeline's company and writes it to the deal. See `SaveRecord` for why. */
@@ -247,7 +255,9 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         }
 
         const editable = DealFieldsEditableWhileLocked(this.IsLost);
-        const frozen = this.record.Fields.filter((f) => f.Dirty && !editable.has(f.Name));
+        // The status repair the server allows on a deal whose status row is gone (#402).
+        const statusRepair = (name: string): boolean => this.IsStatusMissing && name === 'DealStatusTypeID';
+        const frozen = this.record.Fields.filter((f) => f.Dirty && !editable.has(f.Name) && !statusRepair(f.Name));
         if (frozen.length === 0) {
             return result;
         }

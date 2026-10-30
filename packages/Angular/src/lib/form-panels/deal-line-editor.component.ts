@@ -112,6 +112,7 @@ import {
     EffectiveTermStart,
     HasExplicitTermStart as StoresOwnTermStart,
     PricedLineListAmount,
+    IsSubscriptionProduct,
     ResolveDealLockState,
     RoundDiscountPercent,
     RecordDiscountConcession,
@@ -211,12 +212,15 @@ interface RemoteOperationRouter {
                              rules, and carrying it onto another product would pin a price nobody chose. -->
                         <select data-testid="line-product" [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)"
                                 [disabled]="IsLocked || ProductLockedByPrice"
-                                [title]="ProductLockedByPrice ? 'Put the price back on Default before changing the product.' : BlockedReason">
+                                [title]="ProductSelectTitle">
                             <option [ngValue]="null">— choose a product —</option>
                             @for (p of Products; track p.ID) {
                                 <option [ngValue]="p.ID">{{ ProductOptionLabel(p) }}</option>
                             }
                         </select>
+                        @if (ProductLoadError) {
+                            <span class="mjs-le__error" data-testid="line-product-error">{{ ProductLoadError }}</span>
+                        }
                     </label>
 
                     <div class="mjs-le__row">
@@ -623,6 +627,8 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     public Products: ProductLookup[] = [];
+    /** Set when orders' catalogue could not be read; shown under the product select. */
+    public ProductLoadError: string | null = null;
     /** Each product's catalog price, for the picker label — read from orders, keyed by product id. */
     private readonly productPriceLabels = new Map<string, string>();
     /** The signed-in rep's price-override grant; `'none'` hides the price picker. */
@@ -663,7 +669,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             const persisted = this.Deal?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
             this.IsLocked = (await ResolveDealLockState(persisted)).IsLocked;
 
-            this.Products = await this.service.LoadProducts();
+            await this.loadProducts();
             await this.loadProductPriceLabels();
             this.OverrideKind = this.resolveOverrideKind();
 
@@ -755,6 +761,24 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             this.Loading = false;
             this.cdr.detectChanges();
             this.focusFirstField();
+        }
+    }
+
+    /**
+     * Orders' catalogue, or a message saying it could not be read. A failed read leaves the picker
+     * empty but says why, so a rep can tell "nothing to sell" from "the load failed" (#380); the rest of
+     * the dialog still opens, since a saved line can be edited without choosing a new product.
+     */
+    private async loadProducts(): Promise<void> {
+        this.ProductLoadError = null;
+        try {
+            this.Products = await this.service.LoadProducts();
+        } catch (err) {
+            this.Products = [];
+            const reason = err instanceof Error ? err.message : String(err);
+            this.ProductLoadError =
+                `${reason.replace(/\.?\s*$/, '.')} Reload the page and try again; if it persists, an administrator needs to check ` +
+                `access to Orders' products.`;
         }
     }
 
@@ -850,7 +874,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     public OnProductChange(productID: string | null): void {
         this.SchedulePrice();   // a priced input changed — ask Orders again
         if (!this.Working) return;
-        this.clearServicePeriodLeavingLineSource(productID);
+        this.clearServicePeriodForProductChange(productID);
         this.Working.ProductID = productID ?? '';
         const product = this.Products.find((p) => p.ID === productID) ?? null;
         if (product) {
@@ -875,6 +899,19 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     /** True while the line's price is off its default — see the product select. */
     public get ProductLockedByPrice(): boolean {
         return !!this.Working && IsLinePriceOverridden(this.Working, this.EngineDefault);
+    }
+
+    /**
+     * Why the product select is disabled. A line off its default price names the remedy only to a rep
+     * who has the price picker; a rep without an override grant has no Default to put it back on, so
+     * they are told the line carries a special price and who can change it (#408). The lock outranks
+     * both, as it does in `BlockedReason`.
+     */
+    public get ProductSelectTitle(): string {
+        if (this.IsLocked || !this.ProductLockedByPrice) return this.BlockedReason;
+        if (this.ShowPricePicker) return 'Put the price back on Default before changing the product.';
+        return 'This line has a special price set on the order. Someone who can override prices has to put it ' +
+            'back on Default before the product can be changed.';
     }
 
     /** The default unit price: orders' answer when it has given one, else the unpinned priced figure. */
@@ -1083,14 +1120,29 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     }
 
     /**
-     * A window typed for a product that needed one says nothing about the product replacing it. Left
-     * on an event line it stops orders stamping the event's dates (`applyEventServicePeriod` skips a
-     * line that already has either date), and left on a subscription line it reads as a term start.
+     * Dates stated for the product being left say nothing about the one replacing it, so both columns
+     * are cleared unless the new product can use them. Left on an event line they stop orders stamping
+     * the event's dates (`applyEventServicePeriod` skips a line that already has either date), and the
+     * confirm then fails for want of a service period.
+     *
+     * Two cases clear:
+     * · Leaving a product the rep dates (`Line` source) for one that is not: the window would read as
+     *   a term start on a subscription, or block an event's dates.
+     * · Moving to a product in the catalogue that is not a subscription (#374): a term start cannot
+     *   carry over. Leaving a subscription reports `Subscription`, not `Line`, so the first case never
+     *   caught it. Both dates go, because orders' guard is `Start || End`.
+     *
+     * A window moving between two dated products is kept, and nothing is cleared for a product the
+     * catalogue does not list, since whether it is a subscription is unknown.
      */
-    private clearServicePeriodLeavingLineSource(nextProductID: string | null): void {
+    private clearServicePeriodForProductChange(nextProductID: string | null): void {
         if (!this.Working) return;
-        const was = this.ServicePeriodSourceFor(this.Working.ProductID);
-        if (was !== 'Line' || this.ServicePeriodSourceFor(nextProductID) === 'Line') return;
+        const leavingDated = this.ServicePeriodSourceFor(this.Working.ProductID) === 'Line';
+        const enteringDated = this.ServicePeriodSourceFor(nextProductID) === 'Line';
+        if (leavingDated && enteringDated) return;
+        const next = this.Products.find((p) => p.ID === nextProductID) ?? null;
+        const enteringNonSubscription = !!next && !IsSubscriptionProduct(next);
+        if (!leavingDated && !enteringNonSubscription) return;
         this.Working.ServicePeriodStart = null;
         this.Working.ServicePeriodEnd = null;
     }

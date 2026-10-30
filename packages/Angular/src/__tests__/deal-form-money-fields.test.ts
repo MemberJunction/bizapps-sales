@@ -17,6 +17,8 @@ import { MJSDealCommercialPanel } from '../lib/form-panels/deal-form.panels';
 type RecordOpts = {
     values?: Record<string, unknown>;
     displayNames?: Record<string, string>;
+    /** Fields field-level security denies the viewer. Reading one throws, as `BaseEntity.Get()` does. */
+    deniedRead?: string[];
 };
 
 function panel(opts: { editMode?: boolean; locked?: boolean; record?: RecordOpts } = {}) {
@@ -26,16 +28,23 @@ function panel(opts: { editMode?: boolean; locked?: boolean; record?: RecordOpts
     const p = Object.create(MJSDealCommercialPanel.prototype) as MJSDealCommercialPanel;
 
     Object.defineProperty(p, 'EditMode', { value: opts.editMode ?? false, configurable: true });
+    const denied = new Set(r.deniedRead ?? []);
+    const viewer = { Name: 'someone' };
     Object.defineProperty(p, 'FormComponent', {
-        value: { IsLocked: opts.locked ?? false, IsLost: false }, configurable: true,
+        value: { IsLocked: opts.locked ?? false, IsLost: false, ProviderToUse: { CurrentUser: viewer } },
+        configurable: true,
     });
     Object.defineProperty(p, 'Record', {
         value: {
-            Get: (name: string) => values[name] ?? null,
+            Get: (name: string) => {
+                if (denied.has(name)) throw new Error(`Field ${name} is not readable`);
+                return values[name] ?? null;
+            },
             EntityInfo: {
                 Fields: Object.entries(r.displayNames ?? {}).map(([Name, DisplayNameOrName]) => ({
                     Name, DisplayNameOrName,
                 })),
+                IsFieldReadableByUser: (name: string, user: unknown) => user !== viewer || !denied.has(name),
             },
             ProviderToUse: { CurrentUser: { Name: 'someone' } },
         },
@@ -91,14 +100,23 @@ describe('what a self-drawn money field shows', () => {
 
 describe('the responsibilities inherited from the control it replaced', () => {
     /**
-     * THERE IS DELIBERATELY NO FIELD-SECURITY CASE HERE, and the omission is the finding.
-     *
-     * The first version of this file asserted that a field the user may not read is never printed.
-     * `EntityInfo.IsFieldReadableByUser` does not exist in the MJ version this app pins — it was read
-     * from a local checkout on a newer branch, and CI caught it. The published `mj-form-field` of the
-     * pinned version has no per-field read check either, so at this version the self-drawn row and the
-     * shared control agree. See `ShowsMoney` for when to put both the check and this test back.
+     * FIELD SECURITY (#403). The shared control asks whether the viewer may read a field before it
+     * reads one; a row drawn here inherits that duty. The fixture's `Get` throws for a denied field,
+     * as `BaseEntity.Get()` does, so these also prove the check runs BEFORE the read.
      */
+    it('never prints a field the viewer may not read, and never reads it', () => {
+        const p = panel({ record: { values: { MRR: 12500 }, deniedRead: ['MRR'] } });
+        expect(p.ShowsMoney(MRR)).toBe(false);
+        expect(p.MoneyValue(MRR)).toBe('');
+    });
+
+    it('hides only the denied field, not its neighbours', () => {
+        const ARR = { name: 'ARR', type: 'number' as const, currency: true };
+        const p = panel({ record: { values: { MRR: 1, ARR: 12 }, deniedRead: ['MRR'] } });
+        expect(p.ShowsMoney(MRR)).toBe(false);
+        expect(p.ShowsMoney(ARR)).toBe(true);
+    });
+
     it('shows a readable field that has a value', () => {
         const p = panel({ record: { values: { MRR: 12500 } } });
         expect(p.ShowsMoney(MRR)).toBe(true);

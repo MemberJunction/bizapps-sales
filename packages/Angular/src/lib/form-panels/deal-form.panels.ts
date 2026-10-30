@@ -56,7 +56,9 @@ import { BusinessDayOf, DealCloseDay } from './deal-close-day';
 import { WeightedAmount } from './deal-weighted-amount';
 import { FormatDealMoney } from './deal-money';
 import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './deal-stage-preview';
+import { IsFieldReadable } from './field-readable';
 import { SelectableStages } from '../data/selectable-stages';
+import { BillComCustomerWarning, CheckBillComCustomer } from '../data/billcom-customer';
 
 const E = MJS_ENTITIES.Deal;
 
@@ -654,6 +656,7 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
             return;
         }
         this.AccountDefaultsError.set(null);
+        const billCom = this.CheckBillComCustomer();
         try {
             const filled = await this.Record.FillContactsFromAccount();
             if (filled.length > 0) {
@@ -663,7 +666,31 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
             const reason = err instanceof Error ? err.message : String(err);
             this.AccountDefaultsError.set(`The account's default contacts were not filled in: ${reason}`);
         }
+        await billCom;
     }
+
+    /**
+     * Warns when the account has no Bill.com customer under the deal's selling company, which means
+     * its first Bill.com invoice creates a new customer there. See `billcom-customer.ts`.
+     *
+     * A warning, not a refusal: most accounts get their Bill.com customer from that first invoice.
+     * Re-run when the pipeline changes, since that changes the company. Only the latest check's
+     * answer is shown, so a slow read for an account the rep has since replaced cannot overwrite it.
+     */
+    public async CheckBillComCustomer(): Promise<void> {
+        const run = ++this.billComCheckRun;
+        const rec = this.Record;
+        let warning: string | null = null;
+        try {
+            const check = await CheckBillComCustomer(rec?.AccountID ?? null, rec?.CompanyID ?? null, rec?.PipelineID ?? null);
+            warning = BillComCustomerWarning(check);
+        } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            warning = `Could not check whether this account has a Bill.com customer ID: ${reason}`;
+        }
+        if (run === this.billComCheckRun) this.BillComCustomerWarning.set(warning);
+    }
+    private billComCheckRun = 0;
 
     /**
      * The `@for` track key. Contact fields carry a counter that a fill bumps.
@@ -683,6 +710,7 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
      * read in the template marks this panel without `inject()`, which would stop tests constructing it.
      */
     public readonly AccountDefaultsError = signal<string | null>(null);
+    public readonly BillComCustomerWarning = signal<string | null>(null);
     private readonly contactRenderKey = signal(0);
 
     public DrawsOwnMoney(f: DealFieldSpec): boolean {
@@ -691,28 +719,26 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
 
     /**
      * Whether a self-drawn money row appears at all: it hides while empty, exactly as every other
-     * empty field hides in read mode (`HideWhenEmptyInReadOnlyMode`, which defaults to true).
+     * empty field hides in read mode (`HideWhenEmptyInReadOnlyMode`, which defaults to true), and it
+     * hides for a viewer field-level security will not let read it, exactly as `mj-form-field` does.
      *
-     * ── WHY THERE IS NO FIELD-SECURITY CHECK HERE, WHICH IS WORTH STATING ──────────────────────
-     *
-     * Drawing a field ourselves means inheriting the shared control's responsibilities, not just its
-     * markup — so the first version of this asked `EntityInfo.IsFieldReadableByUser` before printing
-     * a value. THAT METHOD DOES NOT EXIST IN THE MJ VERSION THIS APP PINS. It was read from a local
-     * MJ checkout sitting on a much newer branch; `@memberjunction/core@6.1.0-edge.5` has only
-     * entity-level `GetUserPermisions`, and the published `mj-form-field` of the same version carries
-     * no per-field read check either — verified by unpacking both tarballs, not inferred.
-     *
-     * So its absence here is not a gap against the shared control: at this version the two agree, and
-     * a check against an API that is not there would only have failed to compile. Per-field read
-     * security arrived in `6.1.0-edge.7`. WHEN THE PIN MOVES PAST IT, PUT THE CHECK BACK — this row
-     * prints a value, and a field somebody may not read is the one thing it must not print.
+     * `MoneyValue` answers '' for a field the viewer may not read, before it reads anything, because
+     * `BaseEntity.Get()` throws for a denied field (#403). The check was left out when the pinned MJ
+     * had no per-field read security; that version is long gone.
      */
     public ShowsMoney(f: DealFieldSpec): boolean {
         return this.MoneyValue(f) !== '';
     }
 
+    /** Field-level read security for the rows this panel draws itself. See `field-readable.ts`. */
+    public FieldReadable(fieldName: string): boolean {
+        const provider = this.FormComponent?.ProviderToUse ?? Metadata.Provider;
+        return IsFieldReadable(this.Record?.EntityInfo, fieldName, provider?.CurrentUser);
+    }
+
     /** The formatted value, or '' when there is nothing to show. */
     public MoneyValue(f: DealFieldSpec): string {
+        if (!this.FieldReadable(f.name)) return '';
         return moneyExact(this.Record?.Get(f.name) as number | null | undefined, this.Record?.CurrencyID);
     }
 
@@ -940,6 +966,12 @@ const FIELD_STYLES = `
        this component and both hints rendered as unstyled body text. FIELD_STYLES is a template
        literal, so no backticks in here. */
     .mjs-field__hint { display: block; margin-top: var(--mj-space-1); color: var(--mj-text-muted); font-size: 0.78rem; }
+    /* Spans both columns of the field grid, so it does not push the next field down a row. */
+    .mjs-hint--warning {
+        grid-column: 1 / -1; padding: var(--mj-space-2) var(--mj-space-3);
+        border: 1px solid var(--mj-status-warning-border); border-radius: var(--mj-radius-sm);
+        background: var(--mj-status-warning-bg); color: var(--mj-status-warning-text); font-size: 0.82rem;
+    }
     .mjs-reopen { display: flex; flex-direction: column; gap: var(--mj-space-2); margin-top: var(--mj-space-2); }
     .mjs-reopen__field { display: flex; flex-direction: column; gap: var(--mj-space-1); font-size: 0.82rem; }
     .mjs-reopen__field textarea { width: 100%; font: inherit; }
@@ -1006,6 +1038,17 @@ const FIELD_STYLES = `
        let you change -- the Status select is disabled whenever the deal is locked. */
     .mjs-field select:disabled, .mjs-reopen__field select:disabled {
         opacity: 0.7; cursor: not-allowed;
+    }
+    /* A required field left empty (#416). The Pipeline control carries MJ's required-empty modifier,
+       but MJ styles that modifier only on its own input classes, so on this native select it drew
+       nothing and the rep learned the field was required when the save failed. Same colour and focus
+       tint as the shared control's rule. */
+    .mjs-field .mj-forms-field--required-empty select {
+        border-bottom-color: var(--mj-status-error);
+    }
+    .mjs-field .mj-forms-field--required-empty select:focus {
+        border-bottom-color: var(--mj-status-error);
+        background: color-mix(in srgb, var(--mj-status-error) 5%, var(--mj-bg-surface));
     }
     /* A money field the panel drew itself. It carries .mj-forms-field-value too, so the size, colour
        and row height are the shared control's rather than a second opinion about them; this adds only
@@ -1591,6 +1634,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 @if (AccountDefaultsError()) {
                     <div class="mjs-hint" data-testid="account-defaults-error">{{ AccountDefaultsError() }}</div>
                 }
+                @if (BillComCustomerWarning()) {
+                    <div class="mjs-hint mjs-hint--warning" role="status" data-testid="account-billcom-warning">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ BillComCustomerWarning() }}
+                    </div>
+                }
 
                 <!-- PIPELINE AND STAGE ARE NOT GENERIC FIELDS HERE, for the reason Status is not:
                      <mj-form-field> renders a foreign key as an unfiltered dropdown off the related
@@ -1792,6 +1840,8 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                  after that first save. -->
                             @if (!Record.IsSaved) {
                                 <small class="mjs-field__hint">No status yet. The deal saves as open; close it after saving.</small>
+                            } @else if (StatusIsMissing) {
+                                <small class="mjs-field__hint">Missing. This deal's status no longer exists. Pick an open status and save to repair it.</small>
                             } @else if (CurrentStatusIsClosing && !PendingReopenStatusID) {
                                 <small class="mjs-field__hint">Closed. Pick an open status to reopen it, or use Reopen on the Close panel.</small>
                             } @else if (!CurrentStatusIsClosing) {
@@ -1960,6 +2010,8 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         if (!stages.some((st) => st.ID.toLowerCase() === String(this.Record?.PipelineStageID ?? '').toLowerCase())) {
             this.Record.PipelineStageID = null as unknown as string;
         }
+        // A new pipeline can mean a new selling company, and the Bill.com customer is per company.
+        if (this.Record.AccountID) void this.CheckBillComCustomer();
     }
 
     /**
@@ -2058,7 +2110,9 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public get SelectableStatuses(): DealStatusOption[] {
         // A CLOSED deal may only move to a non-locking status, and that move is a reopen. Offering it
         // another closing status would be neither a close nor a reopen, and the server has no path for it.
-        if (this.CurrentStatusIsClosing) {
+        // A deal whose status row is gone may only move to an open one too: the server refuses a close
+        // from a status it cannot read (#402).
+        if (this.CurrentStatusIsClosing || this.StatusIsMissing) {
             return this.statuses().filter((s) => !s.LocksDeal);
         }
         return this.statuses();
@@ -2094,8 +2148,22 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public get StatusIsEditable(): boolean {
         if (this.Busy) return false;                               // one in flight
         if (this.statuses().length === 0) return false;                 // list never resolved
+        if (this.StatusIsMissing) return true;                          // the repair, see below
         if (this.Record?.IsSaved && !this.currentStatus) return false;  // status not in the active list
         return true;
+    }
+
+    /**
+     * The deal's status row no longer exists, as the form's lock resolver reports it (#402).
+     *
+     * The deal is locked and the notice says to set the status to an open one. The server allows
+     * exactly that write (`DealEntityServer.checkCloseLock`'s status repair), so the control is
+     * offered with the open statuses only. Not to be confused with a status the list merely does not
+     * contain -- a DEACTIVATED row still exists, says whether it locks, and stays read-only here.
+     */
+    public get StatusIsMissing(): boolean {
+        const form = this.FormComponent as unknown as { IsStatusMissing?: boolean } | undefined;
+        return this.Record?.IsSaved === true && form?.IsStatusMissing === true;
     }
 
     public SetStatus(id: string | null): void {
@@ -2474,6 +2542,11 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                 }
                 @if (AccountDefaultsError()) {
                     <div class="mjs-hint" data-testid="account-defaults-error">{{ AccountDefaultsError() }}</div>
+                }
+                @if (BillComCustomerWarning()) {
+                    <div class="mjs-hint mjs-hint--warning" role="status" data-testid="account-billcom-warning">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ BillComCustomerWarning() }}
+                    </div>
                 }
             </div>
         </mj-collapsible-panel>
