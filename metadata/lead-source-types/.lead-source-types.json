@@ -1,35 +1,13 @@
 [
   {
-    "_comments": [
-      "Former description, kept as the design note: Introduced by a person who already knows us. A long attribution window, because a referral conversation often predates any recorded activity."
-    ],
     "fields": {
-      "Code": "REFERRAL",
-      "Name": "Referral",
-      "Description": "Introduced by someone who already knows us.",
-      "IsInbound": true,
-      "IsPaid": false,
-      "AttributionWindowDays": 90,
-      "DisplayRank": 10,
-      "IsActive": true
-    },
-    "primaryKey": {
-      "ID": "6FC19375-0001-4065-C386-A113C27EB566"
-    },
-    "sync": {
-      "lastModified": "2026-08-26T00:25:08.749Z",
-      "checksum": "8a095ddbe1e5933ca0d37ef6b09c2a95d3fc81b5ce54fa7b7341d1f4a0b1d792"
-    }
-  },
-  {
-    "fields": {
-      "Code": "WEBSITE",
-      "Name": "Website",
-      "Description": "Inbound form, content download or trial signup.",
+      "Code": "INBOUND_WEB",
+      "Name": "Inbound: Website/Phone",
+      "Description": "Came to us through the website, email or a phone call.",
       "IsInbound": true,
       "IsPaid": false,
       "AttributionWindowDays": 30,
-      "DisplayRank": 20,
+      "DisplayRank": 10,
       "IsActive": true
     },
     "primaryKey": {
@@ -38,50 +16,25 @@
     "sync": {
       "lastModified": "2026-08-26T00:25:08.764Z",
       "checksum": "5aeaae0b133bd5b71130514b8dd3f7fd1827f121961a9ac7bb1b54eba7ea7c67"
-    }
+    },
+    "_comments": [
+      "THE NAMES ARE THE ONES THE SALES TEAM USES IN HUBSPOT. The six original types were renamed in",
+      "place (same IDs) so records already pointing at them follow; the five without an original are new."
+    ]
   },
   {
-    "_comments": [
-      "Former description, kept as the design note: Conference, webinar or sponsored session. IsPaid is 1 — events carry direct cost, so CAC reporting needs to separate them from organic inbound."
-    ],
     "fields": {
-      "Code": "EVENT",
-      "Name": "Event",
-      "Description": "Conference, webinar or sponsored session.",
+      "Code": "INBOUND_SOCIAL",
+      "Name": "Inbound: Social Media",
+      "Description": "Came to us through social media.",
       "IsInbound": true,
-      "IsPaid": true,
-      "AttributionWindowDays": 90,
-      "DisplayRank": 30,
-      "IsActive": true
-    },
-    "primaryKey": {
-      "ID": "6FC19375-0003-4065-C386-A113C27EB566"
-    },
-    "sync": {
-      "lastModified": "2026-08-26T00:25:08.779Z",
-      "checksum": "a17651231b9bb80e90cd30a0d0142ff863221e90abbb6e3939201aceabb6bffd"
-    }
-  },
-  {
-    "_comments": [
-      "Former description, kept as the design note: We reached out first. The only seeded source with IsInbound = 0, which is what a sourced-vs-generated pipeline split keys on."
-    ],
-    "fields": {
-      "Code": "OUTBOUND",
-      "Name": "Outbound",
-      "Description": "We reached out first.",
-      "IsInbound": false,
       "IsPaid": false,
       "AttributionWindowDays": 30,
-      "DisplayRank": 40,
+      "DisplayRank": 20,
       "IsActive": true
     },
     "primaryKey": {
-      "ID": "6FC19375-0004-4065-C386-A113C27EB566"
-    },
-    "sync": {
-      "lastModified": "2026-08-26T00:25:08.800Z",
-      "checksum": "b0b9c9ea7857d78c0590d7d749ba0c297d65c0073bef8ab6a00dc2ad70e20cea"
+      "ID": "6FC19375-0007-4065-C386-A113C27EB566"
     }
   },
   {
@@ -89,13 +42,13 @@
       "Former description, kept as the design note: Sourced through a channel or referral partner. A long window because partner pipelines mature slowly."
     ],
     "fields": {
-      "Code": "PARTNER",
-      "Name": "Partner",
-      "Description": "Sourced through a channel or referral partner.",
+      "Code": "INBOUND_PARTNER",
+      "Name": "Inbound: Partner",
+      "Description": "Came to us through a channel or affiliate partner.",
       "IsInbound": true,
       "IsPaid": false,
       "AttributionWindowDays": 180,
-      "DisplayRank": 50,
+      "DisplayRank": 30,
       "IsActive": true
     },
     "primaryKey": {
@@ -107,17 +60,121 @@
     }
   },
   {
+    "fields": {
+      "Code": "INBOUND_WEBINAR",
+      "Name": "Inbound: Webinar",
+      "Description": "Came to us from a webinar we ran.",
+      "IsInbound": true,
+      "IsPaid": false,
+      "AttributionWindowDays": 90,
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "6FC19375-0008-4065-C386-A113C27EB566"
+    }
+  },
+  {
+    "_comments": [
+      "Former description, kept as the design note: We reached out first. IsInbound = 0 on both Outbound types is what a sourced-vs-generated pipeline split keys on."
+    ],
+    "fields": {
+      "Code": "OUTBOUND_CAMPAIGN",
+      "Name": "Outbound: Campaign",
+      "Description": "We reached out first, as part of a campaign or sequence.",
+      "IsInbound": false,
+      "IsPaid": false,
+      "AttributionWindowDays": 30,
+      "DisplayRank": 50,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "6FC19375-0004-4065-C386-A113C27EB566"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.800Z",
+      "checksum": "b0b9c9ea7857d78c0590d7d749ba0c297d65c0073bef8ab6a00dc2ad70e20cea"
+    }
+  },
+  {
+    "fields": {
+      "Code": "OUTBOUND_PROSPECT",
+      "Name": "Outbound: Individual Prospecting",
+      "Description": "We reached out first, one to one.",
+      "IsInbound": false,
+      "IsPaid": false,
+      "AttributionWindowDays": 30,
+      "DisplayRank": 60,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "6FC19375-0009-4065-C386-A113C27EB566"
+    }
+  },
+  {
+    "fields": {
+      "Code": "REFERRAL_INTERNAL",
+      "Name": "Referral: Internal",
+      "Description": "Introduced by someone inside Blue Cypress.",
+      "IsInbound": true,
+      "IsPaid": false,
+      "AttributionWindowDays": 90,
+      "DisplayRank": 70,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "6FC19375-000A-4065-C386-A113C27EB566"
+    }
+  },
+  {
+    "fields": {
+      "Code": "REFERRAL_PARTNER",
+      "Name": "Referral: Partner",
+      "Description": "Introduced by a partner.",
+      "IsInbound": true,
+      "IsPaid": false,
+      "AttributionWindowDays": 180,
+      "DisplayRank": 80,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "6FC19375-000B-4065-C386-A113C27EB566"
+    }
+  },
+  {
+    "_comments": [
+      "Former description, kept as the design note: Introduced by a person who already knows us. A long attribution window, because a referral conversation often predates any recorded activity."
+    ],
+    "fields": {
+      "Code": "REFERRAL_CLIENT",
+      "Name": "Referral: Client",
+      "Description": "Introduced by a client.",
+      "IsInbound": true,
+      "IsPaid": false,
+      "AttributionWindowDays": 90,
+      "DisplayRank": 90,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "6FC19375-0001-4065-C386-A113C27EB566"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.749Z",
+      "checksum": "8a095ddbe1e5933ca0d37ef6b09c2a95d3fc81b5ce54fa7b7341d1f4a0b1d792"
+    }
+  },
+  {
     "_comments": [
       "Former description, kept as the design note: The account was already ours; this is expansion, cross-sell or renewal demand. A full-year window, since the relationship IS the attribution."
     ],
     "fields": {
-      "Code": "EXISTINGCUST",
-      "Name": "Existing Customer",
-      "Description": "Demand from an existing customer: expansion, cross-sell or renewal.",
+      "Code": "UPSELL",
+      "Name": "Upsell: Existing Client",
+      "Description": "Demand from an existing client: expansion, cross-sell or renewal.",
       "IsInbound": true,
       "IsPaid": false,
       "AttributionWindowDays": 365,
-      "DisplayRank": 60,
+      "DisplayRank": 100,
       "IsActive": true
     },
     "primaryKey": {
@@ -126,6 +183,28 @@
     "sync": {
       "lastModified": "2026-08-26T00:25:08.834Z",
       "checksum": "8334bcf542762501c99b566a3b748317a3cfc288c2e145b97903bdad12254647"
+    }
+  },
+  {
+    "_comments": [
+      "Former description, kept as the design note: Conference, webinar or sponsored session. IsPaid is 1 — events carry direct cost, so CAC reporting needs to separate them from organic inbound."
+    ],
+    "fields": {
+      "Code": "EVENT",
+      "Name": "Event Marketing",
+      "Description": "Came to us from a conference or sponsored event.",
+      "IsInbound": true,
+      "IsPaid": true,
+      "AttributionWindowDays": 90,
+      "DisplayRank": 110,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "6FC19375-0003-4065-C386-A113C27EB566"
+    },
+    "sync": {
+      "lastModified": "2026-08-26T00:25:08.779Z",
+      "checksum": "a17651231b9bb80e90cd30a0d0142ff863221e90abbb6e3939201aceabb6bffd"
     }
   }
 ]

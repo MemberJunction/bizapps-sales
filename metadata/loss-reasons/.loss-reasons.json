@@ -108,13 +108,14 @@
   },
   {
     "_comments": [
-      "Former description, kept as the design note: We lost it to ourselves — no capacity, credit refused, deal desk declined, wrong fit accepted too late. RequiresNotes is 1 because this category only earns its keep if it is specific."
+      "Was Internal. Other replaces it at the sales team's request; notes stay required, because Other",
+      "says nothing without them."
     ],
     "fields": {
-      "Code": "INTERNAL",
-      "Name": "Internal",
-      "Description": "We lost it to ourselves: no capacity, credit refused, deal desk declined, or a poor fit found too late. Notes must say which.",
-      "Category": "Internal",
+      "Code": "OTHER",
+      "Name": "Other",
+      "Description": "A reason not on this list. Notes must say what it was.",
+      "Category": "Other",
       "RequiresNotes": true,
       "IsCompetitive": false,
       "DisplayRank": 60,
