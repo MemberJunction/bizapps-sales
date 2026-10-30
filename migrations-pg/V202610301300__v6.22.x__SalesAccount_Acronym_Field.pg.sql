@@ -1,5 +1,5 @@
 -- =============================================================================================
--- PostgreSQL counterpart of V202610291600__v6.21.x__SalesAccount_Acronym_Field.sql
+-- PostgreSQL counterpart of V202610301300__v6.22.x__SalesAccount_Acronym_Field.sql
 -- =============================================================================================
 -- `mj sql-convert --from tsql --to postgres` (MJ CLI 6.1.6) output, finished by hand:
 --   * The view, the EntityField row and the grants are the converter's.
@@ -201,14 +201,14 @@ $do$;
 
 -- SKIPPED: trigger (auto-conversion not supported)
 -- CREATE TRIGGER [__mj_BizAppsSales].trgUpdateSalesAccount
-ON "__mj_BizAppsSales"."SalesAccount"
-AFTER UPDATE
-AS
-BEGIN
-    SET NOCOUNT ON;
-    UPDATE
-        "__mj_BizAppsSales"."SalesAccount"
-    SET
+-- ON "__mj_BizAppsSales"."SalesAccount"
+-- AFTER UPDATE
+-- AS
+-- BEGIN
+--     SET NOCOUNT ON;
+--     UPDATE
+--         "__mj_BizAppsSales"."SalesAccount"
+--     SET
  
 
 
