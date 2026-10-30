@@ -24,6 +24,10 @@ export const MJS_FOREIGN_ENTITIES = {
     Employee: 'MJ: Employees',
     OrderHeader: 'MJ_BizApps_Orders: Order Headers',
     OrderLine: 'MJ_BizApps_Orders: Order Lines',
+    /** Read to warn when a deal's account has no Bill.com customer. See `billcom-customer.ts`. */
+    PaymentProviderType: 'MJ_BizApps_Orders: Payment Provider Types',
+    PaymentProvider: 'MJ_BizApps_Orders: Payment Providers',
+    ExternalCustomer: 'MJ_BizApps_Orders: External Customers',
     /**
      * Contracts' agreement. A deal holds TWO soft references to it — the contract the win produced
      * and the contract a renewal renews — and neither is a database FK, which is what left both
