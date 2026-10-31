@@ -26,6 +26,10 @@ on it. It never compares the words.
 
 ## Moments worth automating
 
+**These are ideas to build from, not features.** Sales ships no workflows and no record-change
+automations. Each row is a change an automation *could* listen for. An administrator builds the ones an
+installation wants, and the condition column is what they would enter as the trigger's filter.
+
 | Moment | Record and event | Condition | Example automation |
 |---|---|---|---|
 | A deal's status changes (won, lost, reopened) | `MJ_BizApps_Sales: Deals`, updated | `DidFieldChange('DealStatusTypeID')`, then branch on the new status's `IsWon` / `IsLost` | Won: notify finance and the delivery lead, start onboarding. Lost: ask the owner for the loss reason, schedule a check-in in six months |
@@ -48,8 +52,8 @@ Notes on the table:
 
 ## Moments that need a schedule instead
 
-These become true without anyone saving a deal, so no record-change trigger can catch them. Run a
-workflow on a schedule that finds them:
+These become true without anyone saving a deal, so no record-change trigger can catch them. These are
+ideas too: a workflow you build, run on a schedule, can find them.
 
 - a deal's expected close date has passed and it is still open;
 - a deal's next-step date is today or overdue;
