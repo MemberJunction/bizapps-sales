@@ -50,7 +50,7 @@ beforeEach(() => {
 
     // Orders IS installed here — an absent entity is a supported state that returns [] before the
     // filter is ever built, so this check would be vacuous without it.
-    vi.spyOn(Metadata.prototype, 'Entities', 'get').mockReturnValue([{ Name: E_ORDERS_PRODUCT }] as never);
+    vi.spyOn(Metadata.prototype, 'Entities', 'get').mockReturnValue([{ Name: E_ORDERS_PRODUCT, Fields: [] }] as never);
 
     vi.spyOn(BusinessTimeZoneEngine.prototype, 'Config').mockResolvedValue(undefined);
     vi.spyOn(BusinessTimeZoneEngine.prototype, 'Zone', 'get').mockReturnValue(BUSINESS_ZONE);
@@ -127,5 +127,23 @@ describe('LoadProducts on a failed read', () => {
     it('still returns an empty list when the catalogue really is empty', async () => {
         captureFilter();
         await expect(new DealWorkspaceService().LoadProducts()).resolves.toEqual([]);
+    });
+});
+
+describe('LoadProducts leaves out products not sold new (golive#360)', () => {
+    it("filters on IsSellableNew when the host's orders has the column", async () => {
+        vi.spyOn(Metadata.prototype, 'Entities', 'get').mockReturnValue(
+            [{ Name: E_ORDERS_PRODUCT, Fields: [{ Name: 'Status' }, { Name: 'IsSellableNew' }] }] as never,
+        );
+        const seen = captureFilter();
+        await new DealWorkspaceService().LoadProducts('2026-08-31');
+        expect(seen.Filters[0]).toContain("Status = 'Active'");
+        expect(seen.Filters[0]).toMatch(/AND IsSellableNew = 1$/);
+    });
+
+    it('asks nothing of the column on an orders release without it', async () => {
+        const seen = captureFilter();
+        await new DealWorkspaceService().LoadProducts('2026-08-31');
+        expect(seen.Filters[0]).not.toContain('IsSellableNew');
     });
 });

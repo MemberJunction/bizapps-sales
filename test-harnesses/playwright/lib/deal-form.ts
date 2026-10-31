@@ -621,3 +621,37 @@ export async function FieldIsEditable(page: Page, fieldName: string): Promise<bo
     if ((await editing.count()) === 0) return false;
     return editing.locator('input, textarea, select').first().isEnabled();
 }
+
+/**
+ * The product names the line editor's type-ahead lists for `query` (golive#360).
+ *
+ * The box shows at most a capped page of rows, so a caller looking for one product types its name
+ * rather than reading the whole catalogue off the list.
+ */
+export async function OfferedLineProducts(editor: Locator, query: string): Promise<string[]> {
+    const box = editor.locator('[data-testid="line-product"]');
+    await expect(box, 'the line editor must offer a product box').toBeVisible({ timeout: 20_000 });
+    await box.click();
+    await box.fill(query);
+    const list = editor.locator('[data-testid="line-product-options"]');
+    await expect(list, 'typing in the product box must open its list').toBeVisible({ timeout: 10_000 });
+    const names = await list.locator('[data-testid="line-product-option"] .mjs-le__pick-name').allTextContents();
+    return names.map((n) => n.trim());
+}
+
+/**
+ * Chooses `productName` in the line editor's type-ahead: types it, then clicks the row with exactly
+ * that name. Fails, listing what was offered, when no row has it.
+ */
+export async function ChooseLineProduct(editor: Locator, productName: string): Promise<void> {
+    const offered = await OfferedLineProducts(editor, productName);
+    expect(offered, `the product box must offer "${productName}" — it offered ${JSON.stringify(offered)}`)
+        .toContain(productName);
+    await editor
+        .locator('[data-testid="line-product-option"]')
+        .filter({ has: editor.page().locator('.mjs-le__pick-name', { hasText: productName }) })
+        .first()
+        .dispatchEvent('mousedown');
+    await expect(editor.locator('[data-testid="line-product-options"]'), 'choosing a product must close the list')
+        .toBeHidden({ timeout: 10_000 });
+}
