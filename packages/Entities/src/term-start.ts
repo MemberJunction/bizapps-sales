@@ -36,9 +36,10 @@ export type DateLike = Date | string | null | undefined;
  *
  * ── THE PREDICATE IS ORDERS', NOT OURS ──
  *
- * `OrderEntityServer.subscriptionLines` selects the lines that will receive subscriptions with
- * `ID IN (...) AND SubscriptionTypeID IS NOT NULL` against this same column. Matching it exactly means
- * a line offering a term start is exactly a line that will receive a term at confirm. Any other test —
+ * `OrderEntityServer.subscriptionLines` gives a line a subscription when its product names a
+ * subscription type or inherits its product type's default. A `ProductLookup` carries that resolved
+ * value (`WithInheritedSubscriptionType`, golive #339), so a line offering a term start is exactly a
+ * line that will receive a term at confirm. Any other test —
  * a product-type string, a name convention — could drift from that and offer a term start on a line
  * which never gets one, which reads as a broken promise rather than a field that does nothing.
  *

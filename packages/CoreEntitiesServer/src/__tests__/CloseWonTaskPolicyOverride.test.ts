@@ -59,6 +59,8 @@ async function wonClose(pipelineCreatesContract: boolean, overrides?: { CreateCo
     op.validate = async () => ({ Issues: [], LossReasonName: null, RenewalNextTerm: [] });
     op.planRouting = async () => [];
     op.resolveClosing = async () => ({ ...NO_CLOSING, Probability: 100 });
+    // The deal's schedule reaching its order has its own checks (close-won-schedule CS1-CS5).
+    op.sendScheduleToOrder = async () => null;
 
     const result = await op.InternalExecute(
         { DealID: 'd1', DealStatusTypeID: WON.ID, PolicyOverrides: overrides },
