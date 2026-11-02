@@ -1,5 +1,12 @@
 # @mj-biz-apps/sales-ng
 
+## 6.23.1
+
+### Patch Changes
+
+- a73d09a: New Deal form: Lead Source and Lead Source Detail are offered while the deal is being created, on the Pipeline section, so a rep no longer has to save the deal and edit it again to record its source.
+  - @mj-biz-apps/sales-entities@6.23.1
+
 ## 6.23.0
 
 ### Minor Changes
