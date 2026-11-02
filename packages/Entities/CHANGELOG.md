@@ -1,5 +1,11 @@
 # @mj-biz-apps/sales-entities
 
+## 6.23.0
+
+### Minor Changes
+
+- 62e89d6: Deal: new Lead Source Detail field, the specific event, campaign or person behind the deal's lead source, as free text. The Deal form now shows Lead Source and Lead Source Detail on the Pipeline section instead of Motion. Adds a migration (Deal.LeadSourceDetail).
+
 ## 6.22.1
 
 ### Patch Changes
