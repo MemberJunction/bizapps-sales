@@ -54,6 +54,10 @@ import {
 
 import { OrdersIsInstalled } from './orders-availability.js';
 
+// The line ID goes into a RunView filter, and the rows that filter returns are deleted, so anything else
+// is refused before the transaction opens.
+const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 function refused(Message: string): SalesRecordDiscountConcessionOutput {
     return { Success: false, AwaitingApproval: false, ConcessionID: null, Message };
 }
@@ -66,6 +70,7 @@ export class RecordDiscountConcessionOperation extends SalesRecordDiscountConces
         user: UserInfo,
     ): Promise<SalesRecordDiscountConcessionOutput> {
         if (!input?.OrderLineID) return refused('A discount concession needs the saved line it is on.');
+        if (!UUID.test(input.OrderLineID)) return refused('A discount concession needs the ID of a saved line.');
         const reason = input.Reason?.trim() ?? '';
         if (!reason) return refused('A discount needs a reason before it can be recorded.');
         if (!input.ReasonCategory) return refused('A discount needs a reason category before it can be recorded.');

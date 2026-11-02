@@ -74,6 +74,8 @@ import {
 
 import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
 import { FindUnansweredSubscriptionLines } from './subscription-choice.js';
+import { KeptOnDealNote, SendDealScheduleToOrder, StatusIsWon } from './deal-schedule-to-order.js';
+import { OrdersIsInstalled } from './orders-availability.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 
@@ -779,6 +781,18 @@ export class DealEntityServer extends DealEntity {
          */
         const needsStatusDefault = !this.IsSaved && !this.DealStatusTypeID;
 
+        /**
+         * A WON DEAL'S SCHEDULE EDIT REACHES ITS ORDER (bc-aidp-next-golive#290). Read here, sent inside
+         * the scope after the companion rows are written. A read that fails refuses the save: letting the
+         * edit through would leave the order on a schedule the deal no longer shows.
+         */
+        let scheduleOrderID: string | null;
+        try {
+            scheduleOrderID = await this.planScheduleSync(transition !== null);
+        } catch (err) {
+            return this.refuseSave(`could not check the payment schedule against the order: ${err instanceof Error ? err.message : String(err)}`);
+        }
+
         // Staged BEFORE the save so the roster row travels in the same transaction, and so
         // `stampOwnerFromTeam()` derives the stamp from it rather than being told the answer.
         await this.seedOwnerOnCreate();
@@ -786,11 +800,11 @@ export class DealEntityServer extends DealEntity {
         const saved = this.IsSaved || this.DealNumber
             ? await this.saveWithinScope(options, {
                   stageOrder, orderBillTo, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: false,
-                  needsStatusDefault,
+                  needsStatusDefault, scheduleOrderID,
               })
             : await this.saveWithinScope(options, {
                   stageOrder, orderBillTo, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: true,
-                  needsStatusDefault,
+                  needsStatusDefault, scheduleOrderID,
               });
 
         // The declaration is cleared by the `finally` in `Save()` above, which covers this exit and the
@@ -1094,6 +1108,8 @@ export class DealEntityServer extends DealEntity {
             amountMayHaveMoved: boolean;
             assignNumber: boolean;
             needsStatusDefault: boolean;
+            /** The won deal's order its schedule is sent to after the save, or null. */
+            scheduleOrderID: string | null;
         },
     ): Promise<boolean> {
         if (
@@ -1105,7 +1121,8 @@ export class DealEntityServer extends DealEntity {
             !work.amountMayHaveMoved &&
             // Without this term a create that supplied its own DealNumber and touched no stage would take
             // the fast path and land NULL again -- the exact gap this closes, through the one door left open.
-            !work.needsStatusDefault
+            !work.needsStatusDefault &&
+            !work.scheduleOrderID
         ) {
             this._committed = await super.Save(options);
             return this._committed;
@@ -1181,6 +1198,25 @@ export class DealEntityServer extends DealEntity {
 
             if (work.stageMove) {
                 await this.appendStageEvent(work.stageMove);
+            }
+
+            // AFTER the save, which is what wrote the schedule rows the copy reads.
+            if (work.scheduleOrderID) {
+                const outcome = await SendDealScheduleToOrder(
+                    this.ID,
+                    work.scheduleOrderID,
+                    this.ProviderToUse as unknown as IMetadataProvider,
+                    this.ContextCurrentUser,
+                );
+                if (outcome.Kind === 'Hard') {
+                    await scope.Rollback();
+                    return this.reportPostSaveFailure(
+                        `This deal was not saved, because it is won and its order refused the new payment schedule: ${outcome.Message}`,
+                    );
+                }
+                if (outcome.Kind === 'Soft') {
+                    this._orderStatusWarnings.push(KeptOnDealNote(outcome.Message));
+                }
             }
 
             // LAST, because it reads a total the trigger only produced a moment ago. See the method.
@@ -1479,6 +1515,28 @@ export class DealEntityServer extends DealEntity {
             'the generated OrderHeader. In MJAPI it arrives through the dependencies MJ declares; in a ' +
             'script, call LoadBizAppsOrdersServer() before saving. Not a database or constraint problem.',
         );
+    }
+
+    /* ── The won deal's schedule → its order (bc-aidp-next-golive#290) ───────── */
+
+    /**
+     * The order a won deal's schedule edit must reach, or null when this save owes it nothing.
+     *
+     * Only a save that changes the `PaymentSchedule` collection on a deal that is ALREADY Won, by the
+     * persisted status row's `IsWon` flag. The closing save is not one: `Sales.CloseDeal` copies the
+     * schedule itself, before the order hears about the stage. A save that also moves the status hands
+     * off to that flow (`transitionPlanned`), and a reopened deal's edits stay on the deal.
+     *
+     * Throws when the status cannot be read; the caller refuses the save.
+     */
+    private async planScheduleSync(transitionPlanned: boolean): Promise<string | null> {
+        if (!this.IsSaved || transitionPlanned || this._closeInProgress || this._reopenInProgress) return null;
+        if (!this.OrderID || !OrdersIsInstalled()) return null;
+        if (!this.Companions.some((c) => c.Name === 'PaymentSchedule' && c.Dirty)) return null;
+        const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
+        if (!persistedStatusID) return null;
+        const won = await StatusIsWon(persistedStatusID, this.ProviderToUse as unknown as IMetadataProvider, this.ContextCurrentUser);
+        return won ? String(this.OrderID) : null;
     }
 
     /* ── The stage → order status writer (S-US5 / S-US7 / S-US8, D-OS1) ─────── */

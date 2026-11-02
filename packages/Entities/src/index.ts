@@ -38,6 +38,7 @@ export * from './downstream-seams';
  * all apply the same one.
  */
 export * from './product-filter';
+export * from './inherited-subscription-type';
 export * from './term-start';
 
 /**

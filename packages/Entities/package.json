@@ -22,7 +22,7 @@
     "@memberjunction/core": "6.1.6",
     "@memberjunction/global": "6.1.6",
     "@mj-biz-apps/common-entities": "5.56.0",
-    "@mj-biz-apps/orders-entities": "5.30.0",
+    "@mj-biz-apps/orders-entities": "5.39.0",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3"
   },
@@ -33,7 +33,7 @@
     "@memberjunction/core": "^6.1.6",
     "@memberjunction/global": "^6.1.6",
     "@mj-biz-apps/common-entities": "^5.51.0",
-    "@mj-biz-apps/orders-entities": "^5.30.0"
+    "@mj-biz-apps/orders-entities": "^5.39.0"
   },
   "repository": {
     "type": "git",
