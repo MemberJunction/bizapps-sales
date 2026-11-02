@@ -908,6 +908,11 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Display Name: Predicted Win Scored At
         * * SQL Data Type: datetimeoffset
         * * Description: Timestamp when the deal was last scored by the predictive deal win propensity model.`),
+    LeadSourceDetail: z.string().nullable().describe(`
+        * * Field Name: LeadSourceDetail
+        * * Display Name: Lead Source Detail
+        * * SQL Data Type: nvarchar(500)
+        * * Description: The specific source within the deal's lead source type, such as the event, campaign or referring person. Free text; empty when not recorded.`),
     Pipeline: z.string().describe(`
         * * Field Name: Pipeline
         * * Display Name: Pipeline
@@ -4320,6 +4325,19 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
     set PredictedWinScoredAt(value: Date | null) {
         this.Set('PredictedWinScoredAt', value);
+    }
+
+    /**
+    * * Field Name: LeadSourceDetail
+    * * Display Name: Lead Source Detail
+    * * SQL Data Type: nvarchar(500)
+    * * Description: The specific source within the deal's lead source type, such as the event, campaign or referring person. Free text; empty when not recorded.
+    */
+    get LeadSourceDetail(): string | null {
+        return this.Get('LeadSourceDetail');
+    }
+    set LeadSourceDetail(value: string | null) {
+        this.Set('LeadSourceDetail', value);
     }
 
     /**
