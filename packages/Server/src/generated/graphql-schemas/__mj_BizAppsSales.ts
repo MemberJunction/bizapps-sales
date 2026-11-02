@@ -2231,6 +2231,10 @@ export class mjBizAppsSalesDeal_ {
     @Field({nullable: true, description: "Timestamp when the deal was last scored by the predictive deal win propensity model."}) 
     PredictedWinScoredAt?: Date;
         
+    @Field({nullable: true, description: "The specific source within the deal's lead source type, such as the event, campaign or referring person. Free text; empty when not recorded."}) 
+    @MaxLength(500)
+    LeadSourceDetail?: string;
+        
     @Field({nullable: true}) 
     @MaxLength(200)
     Pipeline?: string;
@@ -2465,6 +2469,9 @@ export class CreatemjBizAppsSalesDealInput {
     @Field({ nullable: true })
     PredictedWinScoredAt: Date | null;
 
+    @Field({ nullable: true })
+    LeadSourceDetail: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -2618,6 +2625,9 @@ export class UpdatemjBizAppsSalesDealInput {
 
     @Field({ nullable: true })
     PredictedWinScoredAt?: Date | null;
+
+    @Field({ nullable: true })
+    LeadSourceDetail?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

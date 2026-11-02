@@ -2488,6 +2488,11 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
         // Commercial, and a rep who could not find it typed the expected day into Actual Close Date
         // instead (#252). One binding: it is no longer in COMMERCIAL_FIELDS.
         { name: 'ExpectedCloseDate', type: 'datepicker' },
+        // Where the deal came from, with the pipeline fields rather than in Motion, where sales did not
+        // look for it. The detail is the specific event, campaign or person within that channel, free
+        // text carried over from the CRM the deals were imported from.
+        { name: 'LeadSourceTypeID', type: 'textbox', link: 'Record' },
+        { name: 'LeadSourceDetail', type: 'textbox' },
 ];
 
 @RegisterClassEx(BaseFormPanel, {
@@ -2982,7 +2987,6 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
     public readonly Fields: DealFieldSpec[] = [
         { name: 'NextStep', type: 'textbox', span: true },
         { name: 'NextStepDate', type: 'datepicker' },
-        { name: 'LeadSourceTypeID', type: 'textbox', link: 'Record' },
         { name: 'OrderID', type: 'textbox', noLink: true, serverMaintained: true },
         { name: 'ContractID', type: 'textbox', link: 'Record' },
         { name: 'RenewsContractID', type: 'textbox', link: 'Record' },
