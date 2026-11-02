@@ -447,22 +447,19 @@ UPDATE __mj_BizAppsSales.Pipeline SET CompanyID = @co2 WHERE ID = @pipe2 AND Com
 -- unrouted because unrouted says so. The app now ships `AssigneeRecordID: null` and reports an
 -- unrouted task naming the key to set.
 --
--- Which leaves the demo to say who ITS assignee is, and it cannot do that through the INSERTs
--- above: both are guarded by IF NOT EXISTS and a metadata push has already created these rows, so
--- on every host that has one the INSERT never fires. The repoints only move the company. Without
--- the statement below the demo would raise close-won tasks that route nowhere, and the thing this
--- seed exists to demonstrate would quietly stop demonstrating it.
+-- Which leaves the demo to say who ITS assignee is, and it says so on the pipeline's
+-- CloseWonAssigneePersonID column rather than in the policy JSON. The INSERTs above cannot do it:
+-- both are guarded by IF NOT EXISTS and a metadata push has already created these rows, so on every
+-- host that has one the INSERT never fires. And the JSON would not keep it: the next metadata push
+-- writes the shipped policy, assignee null, back over these rows. The column is not in the metadata
+-- files, so a push leaves it alone, and the close takes it over the JSON.
 --
--- MATCHED ON `null`, not applied unconditionally: a host that has already configured a real
--- finance assignee keeps the one it chose. The spacing matches what the metadata ships -- the
--- INSERTs above write the same key without a space, and those rows already carry the id.
+-- ONLY WHERE IT IS EMPTY: a host that has already configured a real finance assignee keeps the one
+-- it chose.
 UPDATE __mj_BizAppsSales.Pipeline
-   SET CloseWonPolicy = REPLACE(
-           CloseWonPolicy,
-           '"AssigneeRecordID": null',
-           '"AssigneeRecordID": "C0111111-0000-4000-A000-000000000004"')
+   SET CloseWonAssigneePersonID = @c4
  WHERE ID IN (@pipe1, @pipe2)
-   AND CloseWonPolicy LIKE '%"AssigneeRecordID": null%';
+   AND CloseWonAssigneePersonID IS NULL;
 
 DECLARE @t1 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000001';
 DECLARE @t2 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000002';
