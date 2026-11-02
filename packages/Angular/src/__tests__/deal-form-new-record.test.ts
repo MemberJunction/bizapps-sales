@@ -317,6 +317,7 @@ describe('creating a deal, on the section it opens on', () => {
     it('puts everything back once the deal is saved', () => {
         expect(names(pipeline(true))).toEqual([
             'DealTypeID', 'ForecastCategoryTypeID', 'Probability', 'ExpectedCloseDate',
+            'LeadSourceTypeID', 'LeadSourceDetail',
         ]);
         expect(names(party(true))).toEqual([
             'AccountID', 'CompanyID', 'OwnerEmployeeID', 'PrimaryContactID', 'BillingContactID',
