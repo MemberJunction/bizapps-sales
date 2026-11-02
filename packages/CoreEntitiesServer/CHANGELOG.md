@@ -1,5 +1,13 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.22.1
+
+### Patch Changes
+
+- 9e6d67e: Deal line: picking a revenue band for a buyer whose revenue is unknown no longer demands a price override reason. Orders 5.40.0 treats that pick as the rules' price and hides its reason box, but the deal line still asked for a reason, so the line could not be saved. Requires Orders 5.40.0.
+- Updated dependencies [9e6d67e]
+  - @mj-biz-apps/sales-entities@6.22.1
+
 ## 6.22.0
 
 ### Minor Changes
