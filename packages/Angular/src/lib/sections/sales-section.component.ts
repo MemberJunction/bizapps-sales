@@ -80,6 +80,7 @@ import {
     BuildLeftNavSections,
     DefaultPageFor,
     PrimaryActionFor,
+    SecondaryActionFor,
     SubPagesFor,
     type SalesNavBadges,
     type SalesPrimaryAction,
@@ -151,6 +152,9 @@ import { MJSSalesFilterBarComponent, type FilterKind, type SalesFilterBarState }
  */
 const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
+const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
+/** The entity each header action creates. */
+const CREATES: Record<SalesPrimaryAction['Creates'], string> = { deal: E_DEAL, account: E_ACCOUNT, contact: E_CONTACT };
 const E_DEAL_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_FORECAST_CATEGORY_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
@@ -352,6 +356,9 @@ export class MJSSalesSectionComponent implements OnInit {
      */
     public WinRateUnavailable = false;
     public DealEntityInfo: EntityInfo | null = null;
+    /** The Accounts and Contacts pages' grids. */
+    public AccountEntityInfo: EntityInfo | null = null;
+    public ContactEntityInfo: EntityInfo | null = null;
     public InspectView: MJUserViewEntityExtended | null = null;
     public AllDealsView: MJUserViewEntityExtended | null = null;
     /**
@@ -493,6 +500,10 @@ export class MJSSalesSectionComponent implements OnInit {
         return PrimaryActionFor(this.Page);
     }
 
+    public get SecondaryAction(): SalesPrimaryAction | null {
+        return SecondaryActionFor(this.Page);
+    }
+
     public get Title(): string {
         return 'Sales';
     }
@@ -510,7 +521,17 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** The header's primary verb. Opens a new Explorer record tab — never an in-rail workspace. */
     public StartPrimary(): void {
-        this.nav.OpenNewEntityRecord(E_DEAL);
+        this.Start(this.PrimaryAction ?? { Label: '', Icon: '', Creates: 'deal' });
+    }
+
+    /** Opens a new record of what the action creates, as an Explorer tab. */
+    public Start(action: SalesPrimaryAction): void {
+        this.nav.OpenNewEntityRecord(CREATES[action.Creates]);
+    }
+
+    /** A row on the Accounts or Contacts page: opens that record as an Explorer tab. */
+    public OnPartyOpened(event: RecordOpenedEvent): void {
+        this.nav.OpenEntityRecord(event.entity.Name, event.compositeKey);
     }
 
     // ── Data ───────────────────────────────────────────────────────────────────
@@ -563,6 +584,8 @@ export class MJSSalesSectionComponent implements OnInit {
         const filters = this.Filters;
         const figures = this.figuresKey();
         this.DealEntityInfo = new Metadata().Entities.find((e) => e.Name === E_DEAL) ?? null;
+        this.AccountEntityInfo = new Metadata().EntityByName(E_ACCOUNT) ?? null;
+        this.ContactEntityInfo = new Metadata().EntityByName(E_CONTACT) ?? null;
         this.MyEmployeeID = this.readMyEmployeeID();
 
         /**
