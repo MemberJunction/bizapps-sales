@@ -4127,6 +4127,10 @@ export class mjBizAppsSalesPipeline_ {
     @Field(() => Boolean, {nullable: true, description: "Whether open deals in this pipeline count toward open and weighted pipeline, the forecast buckets and the dashboard's open-deal figures. Set to 0 for a pipeline that only holds historical deals. Closed deals count toward bookings, win rate and other history regardless."}) 
     IncludeInForecast?: boolean;
         
+    @Field({nullable: true, description: "Person who receives the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Takes precedence over CloseWonTasks.AssigneeRecordID in Close Won Policy. Empty means that policy value is used, and when both are empty the tasks are created but not assigned."}) 
+    @MaxLength(36)
+    CloseWonAssigneePersonID?: string;
+        
     @Field({nullable: true}) 
     @MaxLength(50)
     Company?: string;
@@ -4138,6 +4142,10 @@ export class mjBizAppsSalesPipeline_ {
     @Field({nullable: true}) 
     @MaxLength(200)
     DefaultForecastCategoryType?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(250)
+    CloseWonAssigneePerson?: string;
         
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
@@ -4188,6 +4196,9 @@ export class CreatemjBizAppsSalesPipelineInput {
     @Field(() => Boolean, { nullable: true })
     IncludeInForecast?: boolean;
 
+    @Field({ nullable: true })
+    CloseWonAssigneePersonID: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -4236,6 +4247,9 @@ export class UpdatemjBizAppsSalesPipelineInput {
 
     @Field(() => Boolean, { nullable: true })
     IncludeInForecast?: boolean;
+
+    @Field({ nullable: true })
+    CloseWonAssigneePersonID?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
