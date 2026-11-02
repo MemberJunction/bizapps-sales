@@ -14,6 +14,12 @@ Open defects are GitHub issues, not documents: [bizapps-sales issues](https://gi
 | [`CLAUDE.md`](../CLAUDE.md) | The rules for working in this repository, for people and for Claude | Current |
 | [`.env.example`](../.env.example) | Every environment variable the repository reads, with placeholders | Current |
 
+## Using the app
+
+| Document | What it is for | Status |
+|---|---|---|
+| [`docs/WORKFLOWS.md`](WORKFLOWS.md) | For business users and administrators: the deal moments worth automating, the conditions that catch them, and the rules Sales adds. Builds on MemberJunction's workflow guides | Current |
+
 ## Decisions and known issues
 
 | Document | What it is for | Status |
