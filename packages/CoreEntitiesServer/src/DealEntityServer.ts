@@ -1619,7 +1619,7 @@ export class DealEntityServer extends DealEntity {
      */
     private async planStageDefaults(): Promise<StageDefaultsPlan | null> {
         const stageID = this.PipelineStageID;
-        if (!stageID) {
+        if (!stageID || !GUID_SHAPE.test(stageID)) {
             return null;
         }
         if (this.IsSaved) {
@@ -1683,7 +1683,7 @@ export class DealEntityServer extends DealEntity {
          */
         const stageStatusID = row.DealStatusTypeID ?? null;
         let derivableStatusID: string | null = null;
-        if (stageStatusID) {
+        if (stageStatusID && GUID_SHAPE.test(stageStatusID)) {
             const status = await view.RunView<{ LocksDeal: boolean }>(
                 {
                     EntityName: DEAL_STATUS_ENTITY,
@@ -1899,7 +1899,7 @@ export class DealEntityServer extends DealEntity {
 
     private async planStageOrderStatus(): Promise<StageOrderPlan | null> {
         const stageID = this.PipelineStageID;
-        if (!stageID) {
+        if (!stageID || !GUID_SHAPE.test(stageID)) {
             return null;
         }
         /**
@@ -2425,6 +2425,9 @@ export class DealEntityServer extends DealEntity {
 
     /** The deal's order, loaded only when the row on disk is a Draft dated before `today`. */
     private async staleDraftOrder(today: string) {
+        if (!this.OrderID || !GUID_SHAPE.test(this.OrderID)) {
+            return null;
+        }
         const view = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await view.RunView<{ Status: string; OrderDate: Date | string | null }>(
             {
@@ -2491,7 +2494,7 @@ export class DealEntityServer extends DealEntity {
      * Sales never sums lines itself. It copies the one number orders already stands behind.
      */
     private async refreshAmountFromOrder(): Promise<void> {
-        if (!this.OrderID) {
+        if (!this.OrderID || !GUID_SHAPE.test(this.OrderID)) {
             return;
         }
 
@@ -3112,6 +3115,9 @@ export class DealEntityServer extends DealEntity {
     private async readStatusLockFlags(
         statusID: string,
     ): Promise<{ LocksDeal: boolean; IsLost: boolean; Read: boolean; Absent: boolean }> {
+        if (!GUID_SHAPE.test(statusID)) {
+            return { LocksDeal: true, IsLost: false, Read: false, Absent: false };
+        }
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView(
             {
@@ -3271,6 +3277,9 @@ export class DealEntityServer extends DealEntity {
         if (!this.PipelineID) {
             return;
         }
+        if (!GUID_SHAPE.test(this.PipelineID)) {
+            throw new Error(`DealEntityServer: pipeline ${this.PipelineID} is not a valid ID.`);
+        }
 
         const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await viewProvider.RunView<PipelineCompanyRow>(
@@ -3338,6 +3347,12 @@ export class DealEntityServer extends DealEntity {
         const pipelineDirty = this.GetFieldByName('PipelineID')?.Dirty === true;
         if (this.IsSaved && !stageDirty && !pipelineDirty) {
             return null;
+        }
+        if (!GUID_SHAPE.test(stageID)) {
+            return 'the stage on this deal is not a valid ID.';
+        }
+        if (!GUID_SHAPE.test(pipelineID)) {
+            return 'the pipeline on this deal is not a valid ID.';
         }
 
         const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
