@@ -875,8 +875,11 @@ const CREATION_PARTY_CONTACT_FIELDS: readonly string[] = ['PrimaryContactID', 'B
  * what this subset existed to arrange for them. *
  * `ExpectedCloseDate` is here because it moved into `PIPELINE_FIELDS` (#252) and was already offered
  * on a new deal from the Commercial panel; leaving it out would have dropped it from creation.
+ *
+ * `LeadSourceTypeID` and `LeadSourceDetail` are here because where a deal came from is known when it
+ * is created. Without them a rep had to save the deal and edit it again just to record its source.
  */
-const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID', 'ExpectedCloseDate'];
+const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID', 'ExpectedCloseDate', 'LeadSourceTypeID', 'LeadSourceDetail'];
 
 /**
  * Every field the party panel owns, at module scope rather than as an instance initializer.
