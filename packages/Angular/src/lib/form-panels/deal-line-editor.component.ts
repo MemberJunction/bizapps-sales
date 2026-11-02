@@ -911,7 +911,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
 
     /** True while the line's price is off its default — see the product select. */
     public get ProductLockedByPrice(): boolean {
-        return !!this.Working && IsLinePriceOverridden(this.Working, this.EngineDefault);
+        return !!this.Working && IsLinePriceOverridden(this.Working, this.EngineDefault, this.Applicable);
     }
 
     /**
@@ -1421,7 +1421,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             !this.QuantityInvalid &&
             !this.DiscountRefusal &&
             !!this.Deal?.OrderID_Object &&
-            !LineNeedsOverrideReason(this.Working, this.EngineDefault) &&
+            !LineNeedsOverrideReason(this.Working, this.EngineDefault, this.Applicable) &&
             !this.MissingDiscountReason &&
             !this.ServicePeriodBackwards
         );
@@ -1440,7 +1440,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             DiscountValue: priced ? (this.pricedDiscount ?? null) : null,
             CoveredValue: this.coveredValue ?? null,
             OrdersValuesLine: this.OrdersValuesDiscount,
-            PriceOverridden: IsLinePriceOverridden(this.Working, this.EngineDefault),
+            PriceOverridden: IsLinePriceOverridden(this.Working, this.EngineDefault, this.Applicable),
         });
     }
 
@@ -1498,7 +1498,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
         if (this.QuantityInvalid) return this.QuantityInvalidMessage;
-        if (LineNeedsOverrideReason(this.Working, this.EngineDefault)) return 'Enter a reason for the price override.';
+        if (LineNeedsOverrideReason(this.Working, this.EngineDefault, this.Applicable)) return 'Enter a reason for the price override.';
         if (this.MissingDiscountReason) return 'Choose a category and enter a reason for the discount.';
         if (this.ServicePeriodBackwards) return 'Set a service end on or after the service start.';
         return this.DiscountRefusal ?? '';
