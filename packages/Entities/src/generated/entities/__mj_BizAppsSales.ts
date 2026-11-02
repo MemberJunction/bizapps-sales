@@ -908,6 +908,11 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Display Name: Predicted Win Scored At
         * * SQL Data Type: datetimeoffset
         * * Description: Timestamp when the deal was last scored by the predictive deal win propensity model.`),
+    LeadSourceDetail: z.string().nullable().describe(`
+        * * Field Name: LeadSourceDetail
+        * * Display Name: Lead Source Detail
+        * * SQL Data Type: nvarchar(500)
+        * * Description: The specific source within the deal's lead source type, such as the event, campaign or referring person. Free text; empty when not recorded.`),
     Pipeline: z.string().describe(`
         * * Field Name: Pipeline
         * * Display Name: Pipeline
@@ -1510,6 +1515,12 @@ export const mjBizAppsSalesPipelineSchema = z.object({
         * * SQL Data Type: bit
         * * Default Value: 1
         * * Description: Whether open deals in this pipeline count toward open and weighted pipeline, the forecast buckets and the dashboard's open-deal figures. Set to 0 for a pipeline that only holds historical deals. Closed deals count toward bookings, win rate and other history regardless.`),
+    CloseWonAssigneePersonID: z.string().nullable().describe(`
+        * * Field Name: CloseWonAssigneePersonID
+        * * Display Name: Close Won Assignee
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
+        * * Description: Person who receives the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Takes precedence over CloseWonTasks.AssigneeRecordID in Close Won Policy. Empty means that policy value is used, and when both are empty the tasks are created but not assigned.`),
     Company: z.string().describe(`
         * * Field Name: Company
         * * Display Name: Company
@@ -1522,6 +1533,10 @@ export const mjBizAppsSalesPipelineSchema = z.object({
         * * Field Name: DefaultForecastCategoryType
         * * Display Name: Default Forecast Category Type
         * * SQL Data Type: nvarchar(200)`),
+    CloseWonAssigneePerson: z.string().nullable().describe(`
+        * * Field Name: CloseWonAssigneePerson
+        * * Display Name: Close Won Assignee Name
+        * * SQL Data Type: nvarchar(250)`),
 });
 
 export type mjBizAppsSalesPipelineEntityType = z.infer<typeof mjBizAppsSalesPipelineSchema>;
@@ -4313,6 +4328,19 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
+    * * Field Name: LeadSourceDetail
+    * * Display Name: Lead Source Detail
+    * * SQL Data Type: nvarchar(500)
+    * * Description: The specific source within the deal's lead source type, such as the event, campaign or referring person. Free text; empty when not recorded.
+    */
+    get LeadSourceDetail(): string | null {
+        return this.Get('LeadSourceDetail');
+    }
+    set LeadSourceDetail(value: string | null) {
+        this.Set('LeadSourceDetail', value);
+    }
+
+    /**
     * * Field Name: Pipeline
     * * Display Name: Pipeline
     * * SQL Data Type: nvarchar(200)
@@ -5900,6 +5928,20 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
     }
 
     /**
+    * * Field Name: CloseWonAssigneePersonID
+    * * Display Name: Close Won Assignee
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
+    * * Description: Person who receives the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Takes precedence over CloseWonTasks.AssigneeRecordID in Close Won Policy. Empty means that policy value is used, and when both are empty the tasks are created but not assigned.
+    */
+    get CloseWonAssigneePersonID(): string | null {
+        return this.Get('CloseWonAssigneePersonID');
+    }
+    set CloseWonAssigneePersonID(value: string | null) {
+        this.Set('CloseWonAssigneePersonID', value);
+    }
+
+    /**
     * * Field Name: Company
     * * Display Name: Company
     * * SQL Data Type: nvarchar(50)
@@ -5924,6 +5966,15 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
     */
     get DefaultForecastCategoryType(): string | null {
         return this.Get('DefaultForecastCategoryType');
+    }
+
+    /**
+    * * Field Name: CloseWonAssigneePerson
+    * * Display Name: Close Won Assignee Name
+    * * SQL Data Type: nvarchar(250)
+    */
+    get CloseWonAssigneePerson(): string | null {
+        return this.Get('CloseWonAssigneePerson');
     }
 }
 

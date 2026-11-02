@@ -55,6 +55,7 @@ import { MJSDealLineCardsComponent } from './deal-line-cards.component';
 import { BusinessDayOf, DealCloseDay } from './deal-close-day';
 import { WeightedAmount } from './deal-weighted-amount';
 import { FormatDealMoney } from './deal-money';
+import { ExplainDealScheduleGap, ReadDealScheduleTotal, type DealScheduleRowFigures, type DealScheduleTotal } from './deal-schedule-total';
 import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './deal-stage-preview';
 import { IsFieldReadable } from './field-readable';
 import { SelectableStages } from '../data/selectable-stages';
@@ -874,8 +875,11 @@ const CREATION_PARTY_CONTACT_FIELDS: readonly string[] = ['PrimaryContactID', 'B
  * what this subset existed to arrange for them. *
  * `ExpectedCloseDate` is here because it moved into `PIPELINE_FIELDS` (#252) and was already offered
  * on a new deal from the Commercial panel; leaving it out would have dropped it from creation.
+ *
+ * `LeadSourceTypeID` and `LeadSourceDetail` are here because where a deal came from is known when it
+ * is created. Without them a rep had to save the deal and edit it again just to record its source.
  */
-const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID', 'ExpectedCloseDate'];
+const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID', 'ExpectedCloseDate', 'LeadSourceTypeID', 'LeadSourceDetail'];
 
 /**
  * Every field the party panel owns, at module scope rather than as an instance initializer.
@@ -2487,6 +2491,11 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
         // Commercial, and a rep who could not find it typed the expected day into Actual Close Date
         // instead (#252). One binding: it is no longer in COMMERCIAL_FIELDS.
         { name: 'ExpectedCloseDate', type: 'datepicker' },
+        // Where the deal came from, with the pipeline fields rather than in Motion, where sales did not
+        // look for it. The detail is the specific event, campaign or person within that channel, free
+        // text carried over from the CRM the deals were imported from.
+        { name: 'LeadSourceTypeID', type: 'textbox', link: 'Record' },
+        { name: 'LeadSourceDetail', type: 'textbox' },
 ];
 
 @RegisterClassEx(BaseFormPanel, {
@@ -2981,7 +2990,6 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
     public readonly Fields: DealFieldSpec[] = [
         { name: 'NextStep', type: 'textbox', span: true },
         { name: 'NextStepDate', type: 'datepicker' },
-        { name: 'LeadSourceTypeID', type: 'textbox', link: 'Record' },
         { name: 'OrderID', type: 'textbox', noLink: true, serverMaintained: true },
         { name: 'ContractID', type: 'textbox', link: 'Record' },
         { name: 'RenewsContractID', type: 'textbox', link: 'Record' },
@@ -3871,15 +3879,71 @@ export const SCHEDULE_DATE_ORDER = 'CASE WHEN PaymentDate IS NULL THEN 0 ELSE 1 
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+                <!-- Shown whenever there are rows, not only when they are off: a rep adding instalments
+                     watches the remainder fall to zero. -->
+                @if (Total && Total.RowCount > 0) {
+                    <div class="mjs-deal-schedule-total" [class.mjs-deal-schedule-total--off]="!Total.Ties">
+                        <span><strong>{{ Money(Total.Scheduled) }}</strong> scheduled</span>
+                        @if (Total.Remainder !== null) {
+                            <span>of {{ Money(Total.DealAmount) }}</span>
+                            <span>{{ RemainderLabel }}</span>
+                        }
+                        @if (GapSentence) { <span class="mjs-deal-schedule-total__why">{{ GapSentence }}</span> }
+                    </div>
+                }
             } @else {
                 <p class="mjs-deal-empty">Save the deal first. Payments are scheduled against it once it exists.</p>
             }
         </mj-collapsible-panel>
     `,
-    styles: [EMPTY_STATE_STYLES],
+    styles: [EMPTY_STATE_STYLES, `
+        .mjs-deal-schedule-total {
+            display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--mj-space-1) var(--mj-space-3);
+            margin: var(--mj-space-3) 0 0; padding: var(--mj-space-2) var(--mj-space-3);
+            border-radius: var(--mj-radius-sm); background: var(--mj-bg-surface-sunken);
+            font-size: var(--mj-text-sm); color: var(--mj-text-secondary);
+        }
+        .mjs-deal-schedule-total--off {
+            background: var(--mj-status-warning-bg); color: var(--mj-status-warning-text);
+            border-left: 3px solid var(--mj-status-warning);
+        }
+        .mjs-deal-schedule-total__why { flex-basis: 100%; }
+    `],
 })
 export class MJSDealSchedulePanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealPaymentSchedule;
+    private readonly cdr = inject(ChangeDetectorRef);
+
+    /**
+     * The deal's instalments as last read, for the running total under the grid (bc-aidp-next-golive#290).
+     * Null before the first read and after a failed one: the panel then says nothing rather than
+     * asserting a total it cannot see.
+     */
+    public Rows: DealScheduleRowFigures[] | null = null;
+
+    /** Scheduled total and remainder against the deal's current amount, or null with no rows read. */
+    public get Total(): DealScheduleTotal | null {
+        return this.Rows ? ReadDealScheduleTotal(this.Rows, this.Record?.Amount ?? null) : null;
+    }
+
+    /** "Remaining $0.01", "Nothing remaining" or "Over by $0.50". */
+    public get RemainderLabel(): string {
+        const remainder = this.Total?.Remainder ?? null;
+        if (remainder === null) return '';
+        if (remainder === 0) return 'Nothing remaining';
+        return remainder > 0 ? `Remaining ${this.Money(remainder)}` : `Over by ${this.Money(-remainder)}`;
+    }
+
+    /** One sentence on why the schedule does not tie, or null when it does. */
+    public get GapSentence(): string | null {
+        const total = this.Total;
+        return total ? ExplainDealScheduleGap(total, (n) => this.Money(n)) : null;
+    }
+
+    /** A figure in the deal's currency, to the cent. */
+    public Money(amount: number | null): string {
+        return FormatDealMoney(amount, this.Record?.CurrencyID ?? null, 'cents');
+    }
 
     /**
      * Instalments by payment date, then by DisplayOrder within a date (bizapps-sales#314).
@@ -3900,5 +3964,26 @@ export class MJSDealSchedulePanel extends BaseFormPanel<DealEntity> {
 
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
         this.FormComponent.SetSectionRowCount('payment-schedule', event.totalRowCount);
+        void this.readRows();
+    }
+
+    /**
+     * Read the rows again rather than sum the grid: the load event carries counts, not rows, and the
+     * grid pages, so its rows would be one page of a long schedule.
+     */
+    private async readRows(): Promise<void> {
+        const dealID = this.Record?.ID;
+        if (!dealID) {
+            this.Rows = null;
+            return;
+        }
+        const read = await new RunView().RunView<DealScheduleRowFigures>({
+            EntityName: this.Entity,
+            ExtraFilter: `DealID='${String(dealID).replace(/'/g, "''")}'`,
+            Fields: ['Amount', 'PaymentDate'],
+            ResultType: 'simple',
+        });
+        this.Rows = read.Success ? read.Results ?? [] : null;
+        this.cdr.detectChanges();
     }
 }

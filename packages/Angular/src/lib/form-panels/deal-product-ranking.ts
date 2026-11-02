@@ -31,6 +31,7 @@ function standIn(p: ProductLookup): MJOProductOption {
         Taxable: false,
         MaxQuantityPerLine: null,
         SubscriptionTypeID: p.SubscriptionTypeID ?? null,
+        ContainsSubscription: false,
     };
 }
 

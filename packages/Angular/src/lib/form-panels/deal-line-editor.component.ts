@@ -65,8 +65,11 @@
  * ── A DISCOUNT IS RECORDED AS A CONCESSION (golive#305) ─────────────────────────────────────────
  *
  * Discount % writes `OrderLine.DiscountPct`, and orders' confirm gate holds the order until an
- * Approved Price concession covers it. So a discount that goes UP asks for a reason here, and once
- * the order has saved the line, the reason is recorded as that concession. Orders values it and
+ * Approved Price concession covers it. So a discount worth more than the line's Pending or Approved
+ * concessions cover asks for a reason here, and once the order has saved the line, the reason is
+ * recorded as that concession. "Worth more" compares orders' priced discount with orders' stored
+ * concession values (golive#340): a percent compared with the saved percent asked nothing when a
+ * refused concession left the line uncovered, or when the quantity or price rose at the same percent. Orders values it and
  * decides it: inside the rep's Sales Authority it is Approved on save, outside it the rep is told the
  * order waits for approval. A failure to record it does not undo the saved line; the rep is told the
  * confirm will be held until one is recorded.
@@ -108,11 +111,13 @@ import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountAmountToPercent,
     DiscountFractionToPercent,
-    DiscountNeedsConcession,
     DiscountPercentToFraction,
     DiscountReasonCategories,
     EffectiveTermStart,
     HasExplicitTermStart as StoresOwnTermStart,
+    LargestStandingConcessionValue,
+    LineDiscountNeedsConcession,
+    LoadLineConcessionRows,
     PricedLineListAmount,
     IsSubscriptionProduct,
     ResolveDealLockState,
@@ -719,8 +724,14 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     /** Whether this dialog created the line, so cancelling must take it back off the collection. */
     private IsNewLine = false;
 
-    /** The `DiscountPct` the line carried when it was last saved — what a raise is measured from. */
+    /** The `DiscountPct` the line carried when it was last saved — the fallback a raise is measured from. */
     private savedDiscountPct: number | null = null;
+    /**
+     * The largest value orders stored on this line's Pending or Approved concession: what the discount's
+     * dollar value is measured against (golive#340). 0 for a new line; null until read, or when the read
+     * failed, which falls back to the percent rule.
+     */
+    private coveredValue: number | null = null;
     private reasonCategories: DiscountReasonCategory[] | null = null;
     public DiscountCategory: DiscountReasonCategory | null = null;
     public DiscountReason = '';
@@ -820,13 +831,15 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             }
             this.savedDiscountPct = this.Working.DiscountPct ?? null;
             this.ProductQuery = this.chosenProductLabel();
+            if (this.IsNewLine) this.coveredValue = 0;
+            else void this.refreshCoveredValue();
             void this.refreshHolding();
-            if (this.ShowPricePicker) {
-                // The picker's Default row needs orders' answer before anything is changed, and its list
-                // needs the applicable prices; a saved line otherwise opens with Default disabled.
-                void this.refreshApplicable();
-                this.SchedulePrice();
-            }
+            // The picker's list needs the applicable prices; a saved line otherwise opens with Default disabled.
+            if (this.ShowPricePicker) void this.refreshApplicable();
+            // Orders' answer is asked for before anything is changed: the picker's Default row needs it,
+            // and so does the discount's reason, which compares orders' priced discount with what the
+            // line's concessions already cover and needs to know whether orders values the line at all.
+            if (this.Working.ProductID) this.SchedulePrice();
         } catch (err) {
             this.Error = `This line could not be opened: ${err instanceof Error ? err.message : String(err)}`;
         } finally {
@@ -1067,7 +1080,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
 
     /** True while the line's price is off its default — see the product select. */
     public get ProductLockedByPrice(): boolean {
-        return !!this.Working && IsLinePriceOverridden(this.Working, this.EngineDefault);
+        return !!this.Working && IsLinePriceOverridden(this.Working, this.EngineDefault, this.Applicable);
     }
 
     /**
@@ -1577,15 +1590,54 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             !this.QuantityInvalid &&
             !this.DiscountRefusal &&
             !!this.Deal?.OrderID_Object &&
-            !LineNeedsOverrideReason(this.Working, this.EngineDefault) &&
+            !LineNeedsOverrideReason(this.Working, this.EngineDefault, this.Applicable) &&
             !this.MissingDiscountReason &&
             !this.ServicePeriodBackwards
         );
     }
 
-    /** Whether the discount went up since the line was saved, so it needs a concession behind it. */
+    /**
+     * Whether the discount is worth more than the line's concessions cover, so it needs a reason and a
+     * new concession (golive#340). Every figure compared is orders' own; see `LineDiscountNeedsConcession`.
+     */
     public get NeedsDiscountReason(): boolean {
-        return !!this.Working && DiscountNeedsConcession(this.savedDiscountPct, this.Working.DiscountPct);
+        if (!this.Working) return false;
+        const priced = !this.pricePending && !this.Pricing;
+        return LineDiscountNeedsConcession({
+            SavedPct: this.savedDiscountPct,
+            CurrentPct: this.Working.DiscountPct,
+            DiscountValue: priced ? (this.pricedDiscount ?? null) : null,
+            CoveredValue: this.coveredValue ?? null,
+            OrdersValuesLine: this.OrdersValuesDiscount,
+            PriceOverridden: IsLinePriceOverridden(this.Working, this.EngineDefault, this.Applicable),
+        });
+    }
+
+    /**
+     * Whether orders records a price concession for a discount on this line. Not for a renewal line, and
+     * not for a product no rule prices (orders' `Default` comes back null): orders refuses to record one
+     * for either, saying there is no price concession on the line, and its confirm gate asks for none.
+     * Null until orders has answered.
+     */
+    private get OrdersValuesDiscount(): boolean | null {
+        if (this.Working?.RenewsSubscriptionID) return false;
+        if (this.EngineDefault === undefined) return null;
+        return this.EngineDefault !== null;
+    }
+
+    /** Reads what orders' concessions on this line already cover. A failed read leaves the percent rule. */
+    private async refreshCoveredValue(): Promise<void> {
+        const orderID = this.Deal?.OrderID_Object?.ID;
+        const lineID = this.Working?.ID;
+        if (!orderID || !lineID) return;
+        try {
+            const rows = await LoadLineConcessionRows(orderID);
+            this.coveredValue = LargestStandingConcessionValue(rows.filter((r) => r.OrderLineID === lineID));
+        } catch {
+            this.coveredValue = null;
+        } finally {
+            this.cdr.detectChanges();
+        }
     }
 
     /** Orders' concession reason categories, read from its entity metadata when first shown. */
@@ -1615,7 +1667,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
         if (this.QuantityInvalid) return this.QuantityInvalidMessage;
-        if (LineNeedsOverrideReason(this.Working, this.EngineDefault)) return 'Enter a reason for the price override.';
+        if (LineNeedsOverrideReason(this.Working, this.EngineDefault, this.Applicable)) return 'Enter a reason for the price override.';
         if (this.MissingDiscountReason) return 'Choose a category and enter a reason for the discount.';
         if (this.ServicePeriodBackwards) return 'Set a service end on or after the service start.';
         return this.DiscountRefusal ?? '';
@@ -1739,6 +1791,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             Reason: this.DiscountReason,
         });
         this.savedDiscountPct = this.Working.DiscountPct ?? null;
+        if (outcome.Recorded) await this.refreshCoveredValue();
         if (!outcome.Recorded) {
             return (
                 `The line is saved, but its discount could not be recorded for approval: ${outcome.Message} ` +
