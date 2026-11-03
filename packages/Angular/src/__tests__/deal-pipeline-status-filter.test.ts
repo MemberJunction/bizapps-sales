@@ -2,7 +2,7 @@ import '@angular/compiler';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { DealEntity, DealStatusOption } from '@mj-biz-apps/sales-entities';
-import { MJSDealPipelinePanel, type LossReasonOption } from '../lib/form-panels/deal-form.panels';
+import { MJSDealClosePanel, MJSDealPipelinePanel, type LossReasonOption } from '../lib/form-panels/deal-form.panels';
 
 /**
  * bc-aidp-next-golive#205: the deal form offered Won and Lost in the Status control, and picking one
@@ -589,5 +589,40 @@ describe('the status hints point at this control, not away from it', () => {
                 /\b(Won|Lost|Abandoned|On Hold)\b/,
             );
         }
+    });
+});
+
+describe('a deal in a deactivated closing status can still be reopened (#461)', () => {
+    const WITH_DEACTIVATED_WON: DealStatusOption[] = [
+        { ID: 'open-1', Name: 'Open', LocksDeal: false, IsWon: false, IsLost: false, IsActive: true },
+        { ID: 'hold-1', Name: 'On Hold', LocksDeal: false, IsWon: false, IsLost: false, IsActive: true },
+        { ID: 'won-legacy', Name: 'Legacy Won', LocksDeal: true, IsWon: true, IsLost: false, IsActive: false },
+        { ID: 'lost-1', Name: 'Lost', LocksDeal: true, IsWon: false, IsLost: true, IsActive: true },
+    ];
+
+    it('resolves the deactivated status name and keeps the Status control editable for reopen', () => {
+        const p = panelWith('won-legacy', WITH_DEACTIVATED_WON);
+        expect(p.CurrentStatusName).toBe('Legacy Won');
+        expect(p.CurrentStatusIsClosing).toBe(true);
+        expect(p.StatusIsEditable).toBe(true);
+        expect(p.SelectableStatuses.map((s) => s.Name)).toEqual(['Open', 'On Hold']);
+    });
+
+    it('does not offer a deactivated status as a selectable choice on an open deal', () => {
+        const p = panelWith('open-1', WITH_DEACTIVATED_WON);
+        expect(p.SelectableStatuses.map((s) => s.Name)).toEqual(['Open', 'On Hold', 'Lost']);
+    });
+
+    it('keeps Reopen available on the Close panel while excluding the deactivated status from ClosingStatuses', () => {
+        const closePanel = new MJSDealClosePanel();
+        Object.defineProperty(closePanel, 'Record', {
+            value: { DealStatusTypeID: 'won-legacy', IsSaved: true } as unknown as DealEntity,
+            configurable: true,
+            writable: true,
+        });
+        (closePanel as unknown as { statuses: { set(v: DealStatusOption[]): void } }).statuses.set(WITH_DEACTIVATED_WON);
+        expect(closePanel.CanReopen).toBe(true);
+        expect(closePanel.CanClose).toBe(false);
+        expect(closePanel.ClosingStatuses.map((s) => s.Name)).toEqual(['Lost']);
     });
 });

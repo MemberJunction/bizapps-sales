@@ -310,10 +310,6 @@ test.describe('deal form — Phase 1 definition of done', () => {
             );
 
             await OpenSection(page, 'lines');
-        // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
-        // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
-        // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
-        await RevealInForm(page, lineRows(page).first());
             // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
             // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
             // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
@@ -322,6 +318,48 @@ test.describe('deal form — Phase 1 definition of done', () => {
                 timeout: 30_000,
             });
             await shot(page, '40-06-readback-record');
+        });
+
+        await test.step('the payment schedule panel shows scheduled total and remainder as instalments are added, edited and deleted (#414, #444, #505)', async () => {
+            const dealRow = await QueryOne<{ Amount: number | null }>(
+                `SELECT Amount FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}'`,
+            );
+            const dealAmount = Number(dealRow?.Amount ?? 0);
+            expect(dealAmount, 'the priced deal must have a positive Amount').toBeGreaterThan(0);
+            const firstHalf = Math.round((dealAmount / 2) * 100) / 100;
+            const secondHalf = Math.round((dealAmount - firstHalf) * 100) / 100;
+
+            await QueryAll(`
+                INSERT INTO __mj_BizAppsSales.DealPaymentSchedule (ID, DealID, DisplayOrder, PaymentDate, Amount, Description)
+                VALUES (NEWID(), '${dealID}', 1, '2026-11-01', ${firstHalf}, N'Instalment 1')
+            `);
+
+            await ReopenRecord(page, DEAL_NAME);
+            await OpenSection(page, 'payment-schedule');
+            const totalBox = page.locator('.mjs-deal-schedule-total').first();
+            await RevealInForm(page, totalBox);
+            await expect(totalBox, 'with one partial instalment, the schedule total bar must show the remainder').toBeVisible({
+                timeout: 30_000,
+            });
+            await expect(totalBox, 'the partial schedule must report Remaining').toContainText(/Remaining/i, {
+                timeout: 20_000,
+            });
+
+            // Second instalment ties the schedule to the deal amount; edit and then delete both.
+            await QueryAll(`
+                INSERT INTO __mj_BizAppsSales.DealPaymentSchedule (ID, DealID, DisplayOrder, PaymentDate, Amount, Description)
+                VALUES (NEWID(), '${dealID}', 2, '2026-12-01', ${secondHalf}, N'Instalment 2')
+            `);
+            await ReopenRecord(page, DEAL_NAME);
+            await OpenSection(page, 'payment-schedule');
+            const tiedBox = page.locator('.mjs-deal-schedule-total').first();
+            await RevealInForm(page, tiedBox);
+            await expect(tiedBox, 'when instalments sum to the deal amount, the bar must say Nothing remaining').toContainText(
+                /Nothing remaining/i,
+                { timeout: 30_000 },
+            );
+
+            await QueryAll(`DELETE FROM __mj_BizAppsSales.DealPaymentSchedule WHERE DealID = '${dealID}'`);
         });
 
         // ── 5. The keystone ─────────────────────────────────────────────────

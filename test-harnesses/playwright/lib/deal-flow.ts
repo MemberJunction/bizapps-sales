@@ -20,10 +20,12 @@ import {
     PipelineByName,
     SaveDeal,
     FirstOpenStageOf,
+    SALES_DEALS_ROUTE,
     SetPipelineByID,
     SetStageByID,
     SetStatusByID,
     SetText,
+    WaitForFormSettled,
 } from './deal-form';
 import { EXPLORER_BASE_URL } from './env';
 
@@ -372,6 +374,73 @@ export async function ReopenRecord(page: Page, name: string): Promise<void> {
     await expect(DealForm(page), 'the reopened form must be the deal asked for').toContainText(name, {
         timeout: 30_000,
     });
+}
+
+/**
+ * Returns to the mounted Sales section without `page.goto` when a record tab is already open, or loads
+ * the Sales section once when nothing is mounted yet (#412, #413).
+ *
+ * A full reload (`page.goto`) tears down existing Explorer record tabs under the ephemeral workspace,
+ * so any spec that needs two tabs alive in one session must return to the Sales section by tab click.
+ */
+async function returnToSalesSection(page: Page): Promise<void> {
+    const section = page.locator('mjs-sales-section');
+    if ((await section.count()) === 0) {
+        await page.goto(`${EXPLORER_BASE_URL}${SALES_DEALS_ROUTE}`, { waitUntil: 'domcontentloaded' });
+        await expect(section, 'the Sales section must mount').toBeVisible({ timeout: 60_000 });
+        return;
+    }
+    if (!(await section.isVisible())) {
+        const dealsTab = page.getByRole('button', { name: /^Deals/i }).first();
+        if (await dealsTab.count()) {
+            await dealsTab.click();
+        } else {
+            const glTab = page.locator('mj-tab-container .lm_tab').filter({ hasText: /Sales|Deals/i }).first();
+            await glTab.click();
+        }
+        await expect(section, 'the Sales section must return to the front without reloading').toBeVisible({
+            timeout: 30_000,
+        });
+    }
+}
+
+/**
+ * Opens a deal from the Sales section's All-deals roster without `page.goto`, so previously opened
+ * Explorer record tabs remain mounted beside the newly opened tab (#412).
+ */
+export async function OpenDealFromRoster(page: Page, name: string): Promise<void> {
+    await returnToSalesSection(page);
+    const allDeals = page.locator('mj-left-nav').getByRole('button', { name: /^All deals/i }).first();
+    await expect(allDeals, 'the left rail must offer All deals').toBeVisible({ timeout: 30_000 });
+    await allDeals.click();
+
+    const rosterRows = page.locator('.wrap--list mj-entity-viewer .ag-center-cols-container .ag-row');
+    await expect(rosterRows.first(), 'the All-deals roster must render its rows').toBeVisible({ timeout: 30_000 });
+
+    const row = rosterRows.filter({ hasText: name }).first();
+    await expect(row, `the All-deals roster must list "${name}"`).toBeVisible({ timeout: 30_000 });
+    await row.dblclick();
+
+    await expect(DealForm(page), `double-clicking "${name}" must open its Deal form`).toBeVisible({
+        timeout: 60_000,
+    });
+    await expect(DealForm(page), `the active Deal form must show "${name}"`).toContainText(name, {
+        timeout: 30_000,
+    });
+    await WaitForFormSettled(page);
+}
+
+/**
+ * Starts a new deal from the already-mounted Sales section without `page.goto`, keeping any open
+ * deal record tab mounted in the same SPA session (#413).
+ */
+export async function OpenNewDealWithoutReload(page: Page): Promise<void> {
+    await returnToSalesSection(page);
+    const primary = page.locator('[data-testid="sales-primary"]:visible').first();
+    await expect(primary, 'the Sales header must offer New deal').toBeVisible({ timeout: 30_000 });
+    await primary.click();
+    await expect(DealForm(page), 'clicking New deal must mount the Deal form').toBeVisible({ timeout: 60_000 });
+    await WaitForFormSettled(page);
 }
 
 /**

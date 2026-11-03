@@ -39,7 +39,11 @@ WITH won AS (
         d.OrderID,
         d.ClosedByUserID,
         d.ClosedByUser,
-        COALESCE(d.ActualCloseDate, [__mj_BizAppsCommon].[fnBusinessDayOf](d.ClosedAt)) AS CloseDate
+        COALESCE(
+            d.ActualCloseDate,
+            [__mj_BizAppsCommon].[fnBusinessDayOf](d.ClosedAt),
+            [__mj_BizAppsCommon].[fnBusinessDayOf](d.__mj_UpdatedAt)
+        ) AS CloseDate
     FROM [__mj_BizAppsSales].vwDeals d
     INNER JOIN [__mj_BizAppsSales].DealStatusType st
             ON st.ID = d.DealStatusTypeID

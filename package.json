@@ -19,7 +19,7 @@
     "the first one inside a gate rather than a test.",
     "",
     "So: the four gates that read SOURCES run first and fail fast, then build, then the two that read",
-    "dist. Adding a gate that imports from dist/ means adding it after `npm run build` here -- or",
+    "dist. Adding a gate that imports from dist/ means adding it after `pnpm run build` here -- or",
     "better, making it read sources like the other four."
   ],
   "scripts": {
@@ -38,7 +38,7 @@
     "postinstall": "node scripts/link-local-apps.mjs",
     "link:local": "node scripts/link-local-apps.mjs",
     "install:deps": "pnpm install",
-    "setup": "echo 'Please run: npm run mj:migrate && npm run mj:codegen && npm run build'",
+    "setup": "echo 'Please run: pnpm run mj:migrate && pnpm run mj:codegen && pnpm run build'",
     "test:unit": "vitest run",
     "test:integration": "node test-harnesses/integration.mjs --mutations",
     "test:coverage-gate": "node scripts/assert-check-count.mjs",

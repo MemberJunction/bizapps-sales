@@ -255,8 +255,10 @@ cd C:\ws && pnpm install
 node MJ/packages/MJCLI/bin/run.js dev workspace doctor --dir C:\ws
 ```
 
-Doctor should report **8 passed, 1 warned, 0 failed**. The warning is a pnpm-not-on-PATH-at-the-parent
-notice and is harmless.
+Doctor reports **8 passed, 1 warned, 0 failed** when pnpm is not on `PATH` at the parent (a harmless
+notice), or **9 passed, 0 warned, 0 failed** when pnpm is on `PATH`. If doctor reports peer or duplicate-package
+warnings on a fresh build, check that `.npmrc` has `strict-peer-dependencies=false` and that all `@angular/*`
+and `@memberjunction/*` packages resolve to the workspace's single pinned version (#396).
 
 ## 3b. ALTERNATIVE — installing from PUBLISHED packages
 
@@ -658,34 +660,11 @@ The build is in §5(e), before the demo seed that needs it. After a code change,
 cd C:\ws\bizapps-sales
 RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs                     # every bundle whose app is installed
 RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs product-picker      # one bundle: 5
-RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs close-won-order     # 5
-# RUN_MUTATION_TESTS=1 node test-harnesses/smoke-close-won.mjs               # ⚠ SEE BELOW -- 5/11
+RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs close-won-order     # 6
 ```
 
-Each bundle's check count, and the app it needs, is in `scripts/expected-check-counts.json`: 160 checks
-across 11 bundles when every sibling app is installed.
-
-> ### ⚠ `smoke-close-won.mjs` IS ROTTED. It is commented out above, and 11/11 was never re-measured.
->
-> Measured 2026-08-25: **5/11**, and before repair it did not run at all. It had accumulated three
-> dead references from changes that landed without it being re-run — which is why the number in this
-> document went stale silently rather than going red.
->
-> | Dead reference | Left by |
-> |---|---|
-> | `MJ_BizApps_Sales: Deal Line Types` | the `DealLine` retirement — **the entity exists on no host**, so this threw `Entity ... not found in metadata` at step 2 |
-> | `deal.Lines.Create()` | same retirement — lines live on the embedded order now |
-> | `preview.Amount` | the `PreviewOrderMoney` removal — a `ReferenceError` on a variable whose assignment had already been deleted |
->
-> The first two and the third are fixed. What remains is **not** a stale reference and is not a quick
-> repair: `ClassFactory` falls back to `BaseEntity` inside this harness, so `DealEntityServer` never
-> provisions the embedded order (`deal.OrderID` stays `undefined`) and `OrderLineEntityServer` never
-> stamps `UnitPrice`/`LineNumber`. That is a harness bootstrap problem in the same family as KI-17.
->
-> **Nothing is uncovered by leaving it.** Every behaviour it asserts is also asserted by
-> `integration.mjs`, which is green at **126/6** on this same database — the 6 being contracts checks
-> on a host without contracts. Use that as the gate; treat this harness as needing repair before it is
-> quoted again.
+Each bundle's check count, and the app it needs, is in `scripts/expected-check-counts.json`: 188 checks
+across 14 bundles when every sibling app is installed.
 
 **`RUN_MUTATION_TESTS=1` is mandatory.** Without it the suites run ZERO checks and report success — a
 vacuous pass, which is the failure mode `assert-check-count.mjs` exists to catch.
@@ -693,8 +672,8 @@ vacuous pass, which is the failure mode `assert-check-count.mjs` exists to catch
 `turbo` must be run **from the parent**, not from inside MJ: MJ's own turbo scope cannot see the sibling
 repos and reports *"No package found with name '@mj-biz-apps/sales-integration-tests'"*.
 
-The smoke **commits** what it creates — a `SMOKE-`prefixed deal and a real order — so you can open them
-afterwards. The suite bundles roll everything back.
+`mj.config.cjs` keeps `enable_advanced_generation: false` so `npm run mj:codegen` is deterministic across
+workstations and requires no LLM credentials (#436).
 
 ## 7. Known rough edges, so you can recognise them
 

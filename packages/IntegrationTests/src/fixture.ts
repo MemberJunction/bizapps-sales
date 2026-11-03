@@ -32,9 +32,10 @@
  *
  * @module @mj-biz-apps/sales-integration-tests
  */
-import { DatabaseProviderBase, RunView, type IMetadataProvider } from '@memberjunction/core';
+import { BaseEntity, DatabaseProviderBase, RunView, type IMetadataProvider } from '@memberjunction/core';
 import { Assert, type IntegrationCheckContext, type NamedCheck } from '@memberjunction/testing-integration';
 import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
+import { E_ORDERS_PRODUCT, ProductFilterFor, type DealEntity } from '@mj-biz-apps/sales-entities';
 
 export const SALES_SCHEMA = '__mj_BizAppsSales';
 
@@ -417,4 +418,86 @@ export function ProviderOf(ctx: IntegrationCheckContext): IMetadataProvider {
 export async function businessToday(ctx: IntegrationCheckContext): Promise<CalendarDay> {
     await BusinessTimeZoneEngine.Instance.Config(false, ctx.User, ctx.Provider);
     return BusinessTimeZoneEngine.Instance.Today();
+}
+
+/**
+ * Builds an unsaved Deal entity populated from the fixture and optional overrides (#383).
+ */
+export async function NewDeal(
+    ctx: IntegrationCheckContext,
+    f: SalesFixture,
+    shape?: (deal: DealEntity) => void,
+): Promise<DealEntity> {
+    const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+    deal.NewRecord();
+    deal.Name = 'IT deal';
+    deal.PipelineID = f.PipelineID;
+    deal.PipelineStageID = f.StageID;
+    deal.DealTypeID = f.DealTypeID;
+    deal.DealStatusTypeID = f.OpenStatusID;
+    deal.AccountID = f.AccountID;
+    deal.CompanyID = f.PipelineCompanyID;
+    deal.TermMonths = 12;
+    shape?.(deal);
+    return deal;
+}
+
+/**
+ * Saves an entity and asserts success with its `LatestResult.CompleteMessage` (#383).
+ */
+export async function SaveOk(entity: BaseEntity, what: string): Promise<void> {
+    const ok = await entity.Save();
+    Assert(ok, `${what} failed: ${entity.LatestResult?.CompleteMessage ?? 'unknown error'}`);
+}
+
+/**
+ * Picks `count` active, sellable products for `companyID` (#383).
+ */
+export async function SellableProducts(
+    ctx: IntegrationCheckContext,
+    companyID: string,
+    count: number,
+    extraFilter?: string,
+): Promise<{ ID: string; Name: string }[]> {
+    if (count === 0) {
+        return [];
+    }
+    const rv = new RunView();
+    const filter = [
+        `CompanyID = '${companyID.replace(/'/g, "''")}'`,
+        `(${ProductFilterFor(await businessToday(ctx))})`,
+        extraFilter,
+    ]
+        .filter(Boolean)
+        .join(' AND ');
+    const r = await rv.RunView<{ ID: string; Name: string }>(
+        {
+            EntityName: E_ORDERS_PRODUCT,
+            ExtraFilter: filter,
+            OrderBy: 'Name ASC',
+            ResultType: 'simple',
+            Fields: ['ID', 'Name'],
+        },
+        ctx.User,
+    );
+    Assert(r.Success, `setup: reading orders' catalogue failed — ${r.ErrorMessage}`);
+    const products = (r.Results ?? []).slice(0, count);
+    Assert(
+        products.length >= count,
+        `setup: this host needs at least ${count} sellable product(s) for company ${companyID}, found ${products.length}. ` +
+            'Run scripts/dev/seed-orders-catalog.sql and scripts/dev/seed-revenue-stack.sql first.',
+    );
+    return products;
+}
+
+/**
+ * Picks one active, sellable product for `companyID` (#383).
+ */
+export async function SellableProduct(
+    ctx: IntegrationCheckContext,
+    companyID: string,
+    extraFilter?: string,
+): Promise<{ ID: string; Name: string }> {
+    const [p] = await SellableProducts(ctx, companyID, 1, extraFilter);
+    return p;
 }

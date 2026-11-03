@@ -438,7 +438,7 @@ export class DealBoardComponent {
         return this._columnIDs;
     }
 
-    private _columnIDsKey = ' ';   // not '' — an empty board must still populate the cache once
+    private _columnIDsKey = '\0';   // not '' — an empty board must still populate the cache once
     private _columnIDs: string[] = [];
 
     public SelectPipeline(pipelineID: string): void {
@@ -514,22 +514,20 @@ export class DealBoardComponent {
     /**
      * Moves the card at once, then saves (bizapps-sales#371).
      *
-     * Columns are built from the deals' `PipelineStageID`, so setting it moves the card before the save
-     * goes out; it used to stay in its old column for the whole save and then jump, which read as a
-     * refused move. A failed save puts the card back and says why. On success the section re-reads the
-     * roster as the authority.
+     * Columns are built from the deals' `PipelineStageID`, so replacing the row in `this.Deals` with a
+     * copy carrying the target stage moves the card before the save goes out without mutating the shared
+     * roster row that the dashboard reads. A failed save puts the original row back and says why. On
+     * success the section re-reads the roster as the authority.
      */
     private async moveDeal(deal: DealRosterRow, target: BoardColumn): Promise<void> {
-        const from = { StageID: deal.PipelineStageID, Stage: deal.PipelineStage };
-        deal.PipelineStageID = target.StageID;
-        deal.PipelineStage = target.Label;
+        const moved: DealRosterRow = { ...deal, PipelineStageID: target.StageID, PipelineStage: target.Label };
+        this.Deals = this.Deals.map((d) => (d.ID === deal.ID ? moved : d));
         this.Moving = true;
         this.cdr.detectChanges();
 
         const failure = await this.saveStage(deal, target);
         if (failure) {
-            deal.PipelineStageID = from.StageID;
-            deal.PipelineStage = from.Stage;
+            this.Deals = this.Deals.map((d) => (d.ID === deal.ID ? deal : d));
             this.Message = failure;
         } else {
             this.StageMoved.emit();
@@ -539,12 +537,11 @@ export class DealBoardComponent {
     }
 
     /**
-     * Saves the stage through `Sales.SaveDeal` — the same operation the workspace saves with — rather
-     * than a bespoke write. That is what earns the stage event, the validation and the company
-     * resolution without this component knowing they exist; the operation appends the append-only
-     * `DealStageEvent` itself when it sees the stage change. Reusing `LoadDeal` also means the deal's
-     * lines and instalments round-trip intact, which matters because the operation treats a present
-     * array as the complete desired set.
+     * Saves the stage through {@link DealWorkspaceService.Save} (`deal.Save()`) rather than a bespoke
+     * write. That is what earns the stage event, the validation and the company resolution without this
+     * component knowing they exist; `DealEntityServer.Save()` appends the append-only `DealStageEvent`
+     * itself when it sees the stage change. Reusing `LoadDeal` also means the deal's related-record
+     * collections stay loaded on the entity graph during the save.
      *
      * @returns why the move failed, or null when it saved.
      */

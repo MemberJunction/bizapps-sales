@@ -32,10 +32,28 @@
 -- drift, because there is nothing for it to drift from.
 --
 -- DATE DIMENSION: ActualCloseDate — bookings belong to the period the deal actually closed in.
+WITH owner_row AS (
+    SELECT
+        tm.DealID,
+        tm.EmployeeID,
+        tm.PersonID,
+        r.Name AS OwnerRoleName
+    FROM [__mj_BizAppsSales].DealTeamMember tm
+    INNER JOIN [__mj_BizAppsSales].DealRole r
+            ON r.ID = tm.DealRoleID
+           AND r.IsOwnerRole = 1          -- THE FILTER THAT MAKES THIS ONE-PER-DEAL. Do not remove.
+    WHERE tm.IsActive = 1
+)
 SELECT
     tm.EmployeeID,
-    emp.FirstName + ' ' + emp.LastName          AS OwnerName,
-    r.Name                                      AS OwnerRoleName,
+    tm.PersonID,
+    COALESCE(tm.EmployeeID, tm.PersonID)        AS OwnerID,
+    CASE WHEN tm.EmployeeID IS NOT NULL THEN N'Employee'
+         WHEN tm.PersonID IS NOT NULL THEN N'Person'
+         ELSE N'Unassigned'
+    END                                         AS OwnerKind,
+    ISNULL(COALESCE(emp.FirstName + ' ' + emp.LastName, per.DisplayName), '(unassigned)') AS OwnerName,
+    tm.OwnerRoleName,
     d.CompanyID,
     d.Company                                   AS CompanyName,
     d.PipelineID,
@@ -51,14 +69,12 @@ FROM [__mj_BizAppsSales].vwDeals d
 INNER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
        AND st.IsClosed = 1
-INNER JOIN [__mj_BizAppsSales].DealTeamMember tm
+LEFT OUTER JOIN owner_row tm
         ON tm.DealID = d.ID
-       AND tm.IsActive = 1
-INNER JOIN [__mj_BizAppsSales].DealRole r
-        ON r.ID = tm.DealRoleID
-       AND r.IsOwnerRole = 1          -- THE FILTER THAT MAKES THIS ONE-PER-DEAL. Do not remove.
 LEFT OUTER JOIN [__mj].Employee emp
         ON emp.ID = tm.EmployeeID
+LEFT OUTER JOIN [__mj_BizAppsCommon].Person per
+        ON per.ID = tm.PersonID
 WHERE d.ActualCloseDate IS NOT NULL
   {% if CompanyID %}
   AND d.CompanyID = {{ CompanyID | sqlString }}
@@ -73,7 +89,7 @@ WHERE d.ActualCloseDate IS NOT NULL
   AND d.ActualCloseDate <= {{ PeriodEnd | sqlString }}
   {% endif %}
 GROUP BY
-    tm.EmployeeID, emp.FirstName, emp.LastName, r.Name,
+    tm.EmployeeID, tm.PersonID, emp.FirstName, emp.LastName, per.DisplayName, tm.OwnerRoleName,
     d.CompanyID, d.Company, d.PipelineID, d.Pipeline
 ORDER BY
     BookedAmount DESC;

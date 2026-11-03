@@ -474,7 +474,7 @@ were copied here. What each ID refers to, from the code that cites it:
 | D-CF1 | A close commits even when a downstream route is stubbed or refused; the routing intent is recorded and `Executed` comes back false (`downstream-seams.ts`, `close-deal.CD7`) | In force |
 | D-CF3 | The deal-to-order route was a stub | Retired: close-won creates no order, because the order is embedded at deal creation |
 | D-CF4 | The deal-to-contract route was a stub | Retired: `LiveContractsSeam` creates the contract (`close-won-contract.CT1`) |
-| D-CF5 | The close writes no `Activity`, because the Activity spine did not exist | Not done: the spine now exists in bizapps-common, and the close still writes none |
+| D-CF5 | The close writes no `Activity`, because the Activity spine did not exist | Done (#381): `CloseDealOperation` and `ReopenDealOperation` write a common `Activity` (`"Deal closed"` / `"Deal reopened"`) via `ActivityWriterService` after commit |
 | D-BD1 | MJ had no generic kanban, so the board lays out its own columns on `@angular/cdk` drag-drop, to be deleted when a generic kanban lands (`deal-board.component.ts`) | In force |
 | D-BD2 | A stage move owes a `DealStageEvent` recording what the deal held on the way out (D-CF8) | Done: `DealEntityServer.appendStageEvent` writes it on every stage move |
 

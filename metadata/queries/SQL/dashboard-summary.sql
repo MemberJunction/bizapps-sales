@@ -91,6 +91,7 @@ WITH scoped AS (
         d.Probability,
         d.ExpectedCloseDate,
         d.OwnerEmployeeID,
+        ISNULL(cur.Code, N'USD')                AS CurrencyCode,
         st.ID                                   AS StatusID,
         ISNULL(st.IsOpen, 0)                    AS IsOpen,
         ISNULL(st.IsWon, 0)                     AS IsWon,
@@ -142,6 +143,8 @@ WITH scoped AS (
             ON p.ID = d.PipelineID
     LEFT OUTER JOIN [__mj_BizAppsSales].ForecastCategoryType fc
             ON fc.ID = d.ForecastCategoryTypeID
+    LEFT OUTER JOIN [__mj_BizAppsAccounting].Currency cur
+            ON cur.ID = d.CurrencyID
     WHERE 1 = 1
       {% if CompanyID %}
       AND d.CompanyID = {{ CompanyID | sqlString }}
@@ -163,6 +166,7 @@ WITH scoped AS (
       {% endif %}
 )
 SELECT
+    s.CurrencyCode,
     -- TILE: Open pipeline. Open pipeline deals expected to close in the period. A SUM of stored
     -- answers, not pricing arithmetic.
     SUM(CASE WHEN s.OpenInPeriod = 1 AND s.IncludeInPipeline = 1 THEN ISNULL(s.Amount, 0) ELSE 0 END)
@@ -220,4 +224,6 @@ FROM scoped s
 -- against the business day from fnBusinessToday() rather than the UTC day, which rolls over in the
 -- evening for a business west of Greenwich (bc-aidp-next-golive#168).
 CROSS JOIN [__mj_BizAppsCommon].[fnBusinessToday]() AS bt
-WHERE s.InProductScope = 1;
+WHERE s.InProductScope = 1
+GROUP BY s.CurrencyCode
+ORDER BY s.CurrencyCode;

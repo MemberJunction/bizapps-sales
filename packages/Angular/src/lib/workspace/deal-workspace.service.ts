@@ -60,7 +60,14 @@ function queryParameters(
     filters: DashboardFilters,
     extra: Record<string, string> = {},
 ): Record<string, string | string[]> | undefined {
-    const parameters: Record<string, string | string[]> = { ...(PeriodParameters(window) ?? {}), ...FilterParameters(filters), ...extra };
+    const companies = CleanIDs(filters.CompanyIDs);
+    const singleCompany: Record<string, string> = companies.length === 1 ? { CompanyID: companies[0] } : {};
+    const parameters: Record<string, string | string[]> = {
+        ...(PeriodParameters(window) ?? {}),
+        ...FilterParameters(filters),
+        ...singleCompany,
+        ...extra,
+    };
     return Object.keys(parameters).length ? parameters : undefined;
 }
 
@@ -187,6 +194,10 @@ export interface DealDashboardSummary {
     OpenPricedAmount: number;
     OpenStatedAmount: number;
     OpenNoAmountCount: number;
+    /** The currency code when every row is in one currency; the display default over an empty book. */
+    CurrencyCode?: string;
+    /** True when the summary spans more than one currency. */
+    MixedCurrencies?: boolean;
 }
 
 export interface DealRosterRow {
@@ -904,8 +915,7 @@ export class DealWorkspaceService {
      * save plan, ships the whole graph in one `MJ.SaveEntityGraph` mutation, and the server executes it
      * inside one transaction — header first, then removals, then children. So either the deal and
      * everything under it landed, or nothing did. There is no path here that leaves a numbered deal with
-     * nothing beneath it, which is exactly what the retired `Sales.SaveDeal` operation existed to
-     * guarantee.
+     * nothing beneath it.
      *
      * `IgnoreDirtyState` was set for the deal workspace (deleted, #291), which re-sequenced
      * `DisplayOrder` from array position on every add and remove, so a row that merely MOVED was clean
@@ -1083,33 +1093,37 @@ export class DealWorkspaceService {
             LogError(`Sales: Dashboard Summary failed - ${result?.ErrorMessage ?? 'unknown error'}`);
             return null;
         }
-        const row = (result.Results ?? [])[0] as Record<string, unknown> | undefined;
-        if (!row) {
-            return null;
-        }
-        // The query aggregates, so it returns a row even over an empty table. A null from here means
-        // the query did not RUN, which is a different thing from a database with no deals -- and the
-        // caller renders those two states differently.
+        const rows = (result.Results ?? []) as Record<string, unknown>[];
+        // The query groups by CurrencyCode, so an empty table returns zero rows and a multi-currency
+        // book returns one row per currency. A null from here means the query did not RUN, which is a
+        // different thing from a database with no deals -- and the caller renders those two states differently.
         const num = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v));
+        const sumCount = (field: string): number => rows.reduce((acc, r) => acc + num(r[field]), 0);
+        const mixed = rows.length > 1;
+        const single = rows.length === 1 ? rows[0] : undefined;
+        const amt = (field: string): number => (single ? num(single[field]) : 0);
+        const code = single ? String(single['CurrencyCode'] ?? '').trim() || DEFAULT_DISPLAY_CURRENCY : DEFAULT_DISPLAY_CURRENCY;
         return {
-            OpenAmount: num(row['OpenAmount']),
-            OpenCount: num(row['OpenCount']),
-            OpenOmittedCount: num(row['OpenOmittedCount']),
-            CommitAmount: num(row['CommitAmount']),
-            CommitCount: num(row['CommitCount']),
-            BestCaseOnlyAmount: num(row['BestCaseOnlyAmount']),
-            PipelineOnlyAmount: num(row['PipelineOnlyAmount']),
-            WeightedAmount: num(row['WeightedAmount']),
-            TotalCount: num(row['TotalCount']),
-            PastExpectedCloseCount: num(row['PastExpectedCloseCount']),
-            NoOwnerCount: num(row['NoOwnerCount']),
-            NoCloseDateCount: num(row['NoCloseDateCount']),
-            WonCount: num(row['WonCount']),
-            WonAmount: num(row['WonAmount']),
-            NoLinesDealCount: num(row['NoLinesDealCount']),
-            OpenPricedAmount: num(row['OpenPricedAmount']),
-            OpenStatedAmount: num(row['OpenStatedAmount']),
-            OpenNoAmountCount: num(row['OpenNoAmountCount']),
+            OpenAmount: amt('OpenAmount'),
+            OpenCount: sumCount('OpenCount'),
+            OpenOmittedCount: sumCount('OpenOmittedCount'),
+            CommitAmount: amt('CommitAmount'),
+            CommitCount: sumCount('CommitCount'),
+            BestCaseOnlyAmount: amt('BestCaseOnlyAmount'),
+            PipelineOnlyAmount: amt('PipelineOnlyAmount'),
+            WeightedAmount: amt('WeightedAmount'),
+            TotalCount: sumCount('TotalCount'),
+            PastExpectedCloseCount: sumCount('PastExpectedCloseCount'),
+            NoOwnerCount: sumCount('NoOwnerCount'),
+            NoCloseDateCount: sumCount('NoCloseDateCount'),
+            WonCount: sumCount('WonCount'),
+            WonAmount: amt('WonAmount'),
+            NoLinesDealCount: sumCount('NoLinesDealCount'),
+            OpenPricedAmount: amt('OpenPricedAmount'),
+            OpenStatedAmount: amt('OpenStatedAmount'),
+            OpenNoAmountCount: sumCount('OpenNoAmountCount'),
+            CurrencyCode: code,
+            MixedCurrencies: mixed,
         };
     }
 }

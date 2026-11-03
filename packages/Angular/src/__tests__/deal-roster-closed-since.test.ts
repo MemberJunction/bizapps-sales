@@ -39,7 +39,7 @@ describe('LoadRoster', () => {
 
         await new DealWorkspaceService().LoadRoster('2026-04-01', filters, '2026-06-30');
 
-        expect(calls[0].Parameters).toEqual({ ClosedSince: '2026-04-01', ClosedUntil: '2026-06-30', CompanyIDs: ['C1'] });
+        expect(calls[0].Parameters).toEqual({ ClosedSince: '2026-04-01', ClosedUntil: '2026-06-30', CompanyID: 'C1', CompanyIDs: ['C1'] });
     });
 
     it('throws with the reason when the query fails, rather than returning an empty roster', async () => {
