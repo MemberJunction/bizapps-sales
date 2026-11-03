@@ -760,7 +760,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             }
             this.savedDiscountPct = this.Working.DiscountPct ?? null;
             if (this.IsNewLine) this.coveredValue = 0;
-            else void this.refreshCoveredValue();
+            else this.startCoveredValue();
             void this.refreshHolding();
             // The picker's list needs the applicable prices; a saved line otherwise opens with Default disabled.
             if (this.ShowPricePicker) void this.refreshApplicable();
@@ -896,6 +896,9 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         // The previous product's default, named prices and subscription answer say nothing about this one.
         this.EngineDefault = undefined;
         this.Applicable = [];
+        // The previous product's "you already hold this" prompt goes until this product's read answers
+        // (#355 item 18): left up, "Add as next term" could be stamped on the new product's line.
+        this.Holding = null;
         this.Working.SubscriptionAction = null;
         void this.refreshApplicable();
         void this.refreshHolding();
@@ -942,11 +945,13 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         const order = this.Deal?.OrderID_Object;
         const user = Metadata.Provider.CurrentUser;
         if (!this.ShowPricePicker || !line?.ProductID || !order || !user) {
+            this.nextSeq('applicableSeq');
             this.Applicable = [];
             return;
         }
         // Not asked for a quantity the rep has not entered; Save is blocked until they do.
         if (this.QuantityInvalid) return;
+        const seq = this.nextSeq('applicableSeq');
         const productID = String(line.ProductID);
         try {
             await LoadOrdersEngine(Metadata.Provider, user);
@@ -980,10 +985,14 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
                 Metadata.Provider,
                 user,
             );
-            // A reply for a product the rep has since moved off is dropped rather than shown.
-            if (this.Working?.ProductID === productID) this.Applicable = applicable;
+            /**
+             * Only the newest ask's reply is shown (#355 item 17). Comparing the product alone let a reply
+             * for an earlier quantity land last: typing "12" asks for 1 and then 12, and named prices
+             * banded by quantity are not the same list for both.
+             */
+            if (seq === this.applicableSeq) this.Applicable = applicable;
         } catch {
-            this.Applicable = [];
+            if (seq === this.applicableSeq) this.Applicable = [];
         } finally {
             this.cdr.detectChanges();
         }
@@ -1173,6 +1182,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      * read hides the question; Close Won still asks, because it reads the same rule on the server.
      */
     private async refreshHolding(): Promise<void> {
+        const seq = this.nextSeq('holdingSeq');
         const line = this.Working;
         const subscriber = line ? HoldingSubscriberFor(line, this.Deal?.OrderID_Object ?? null) : null;
         if (!line?.ProductID || line.RenewsSubscriptionID || !this.SelectedProduct?.SubscriptionTypeID || !subscriber) {
@@ -1181,9 +1191,15 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             return;
         }
         const productID = String(line.ProductID);
-        const holding = await GetExistingHolding(productID, subscriber.OrganizationID, subscriber.PersonID);
-        // A reply for a product the rep has since moved off is dropped rather than shown.
-        if (this.Working?.ProductID === productID) this.Holding = holding;
+        let holding: MJOExistingHolding | null = null;
+        try {
+            holding = await GetExistingHolding(productID, subscriber.OrganizationID, subscriber.PersonID);
+        } catch {
+            // A failed read hides the question, as the docblock says; Close Won still asks (#355 item 18).
+            holding = null;
+        }
+        // Only the newest ask's reply is shown: a reply for a product the rep has since moved off is dropped.
+        if (seq === this.holdingSeq) this.Holding = holding;
         this.cdr.detectChanges();
     }
 
@@ -1242,6 +1258,20 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     private pricePending = false;
     public PricingNote: string | null = null;
     private priceTimer: ReturnType<typeof setTimeout> | null = null;
+    /**
+     * Numbers each `refreshPrice()`, so a slower earlier reply cannot overwrite a newer one (#355 item
+     * 16). Two asks can overlap: the debounce fires, the rep types again, and the second fires while the
+     * first is still out. Without it, whichever reply landed last set the unit price and `EngineDefault`.
+     */
+    private priceSeq = 0;
+    /** The newest `refreshPrice()` still running, so Save can wait for it (#509). */
+    private priceRequest: Promise<void> | null = null;
+    /** The read of what this line's concessions cover, while it runs, so Save can wait for it (#509). */
+    private coveredRequest: Promise<void> | null = null;
+    /** Numbers each `refreshApplicable()`; see `priceSeq` (#355 item 17). */
+    private applicableSeq = 0;
+    /** Numbers each `refreshHolding()`; see `priceSeq` (#355 item 18). */
+    private holdingSeq = 0;
 
     /** Orders' answer when there is one, otherwise whatever the saved line already carries. */
     public get DisplayUnitPrice(): number | null {
@@ -1307,8 +1337,49 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.pricePending = true;
         this.priceTimer = setTimeout(() => {
             this.priceTimer = null;
-            void this.refreshPrice();
+            this.startPrice();
         }, 350);
+    }
+
+    /**
+     * Numbers a new ask of one kind and returns its number. Read as `?? 0` because a counter is a class
+     * field, and the field may not be initialised on an instance built without the constructor.
+     */
+    private nextSeq(counter: 'priceSeq' | 'applicableSeq' | 'holdingSeq'): number {
+        this[counter] = (this[counter] ?? 0) + 1;
+        return this[counter];
+    }
+
+    /** Starts a reprice and keeps hold of it, so `settlePendingReads()` can wait for it. */
+    private startPrice(): void {
+        const request = this.refreshPrice();
+        this.priceRequest = request;
+        void request.finally(() => {
+            if (this.priceRequest === request) this.priceRequest = null;
+        });
+    }
+
+    /**
+     * Brings every figure the concession check reads up to date before Save judges it (#509).
+     *
+     * The check compares orders' priced discount with what the line's concessions cover. While a
+     * reprice is pending (the 350 ms debounce, or a reply still out) the priced discount is unknown, and
+     * the check falls back to "did the percent rise", which a quantity or price change never does. A
+     * save in that window was judged against the price from before the change, so a discount that now
+     * exceeds its concession went through without a reason, and orders' confirm refused it later.
+     *
+     * A pending debounce is fired now rather than waited out. The loop covers a reprice started while
+     * the previous one was awaited.
+     */
+    private async settlePendingReads(): Promise<void> {
+        if (this.priceTimer) {
+            clearTimeout(this.priceTimer);
+            this.priceTimer = null;
+            this.startPrice();
+        }
+        while (this.priceRequest || this.coveredRequest) {
+            await Promise.all([this.priceRequest, this.coveredRequest]);
+        }
     }
 
     /**
@@ -1323,6 +1394,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      * because a pricing call timed out would not be.
      */
     private async refreshPrice(): Promise<void> {
+        const seq = this.nextSeq('priceSeq');
         const line = this.Working;
         const companyID = this.Deal?.CompanyID as string | null | undefined;
         const order = this.Deal?.OrderID_Object;
@@ -1333,6 +1405,8 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             this.EngineDefault = undefined;
             this.PricingNote = null;
             this.pricePending = false;
+            // An earlier ask still out no longer owns the spinner (see priceSeq).
+            this.Pricing = false;
             this.cdr.detectChanges();
             return;
         }
@@ -1342,6 +1416,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             this.pricedTotal = null;
             this.EngineDefault = undefined;
             this.PricingNote = this.QuantityInvalidMessage;
+            this.Pricing = false;
             this.cdr.detectChanges();
             return;
         }
@@ -1378,6 +1453,8 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
              * worked. Checking only the outer one is a mistake this repo has already made once, on the
              * contracts seam, where it reported a contract that was never written.
              */
+            // A newer ask has started since this one went out; its answer is the one to show (#355 item 16).
+            if (seq !== this.priceSeq) return;
             const priced = envelope.Success ? envelope.Output : null;
             const row = priced?.Success ? priced.Lines?.[0] : null;
             if (!row) {
@@ -1394,16 +1471,20 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             this.EngineDefault = row.Default;
             this.applyDiscountAmount();
         } catch {
+            if (seq !== this.priceSeq) return;
             this.pricedUnit = null;
             this.pricedTotal = null;
             this.pricedDiscount = null;
             this.EngineDefault = undefined;
             this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
         } finally {
-            this.Pricing = false;
-            // A reprice scheduled while this one was in flight is still pending.
-            this.pricePending = this.priceTimer !== null;
-            this.cdr.detectChanges();
+            // A superseded ask leaves the spinner and the pending flag to the newer one.
+            if (seq === this.priceSeq) {
+                this.Pricing = false;
+                // A reprice scheduled while this one was in flight is still pending.
+                this.pricePending = this.priceTimer !== null;
+                this.cdr.detectChanges();
+            }
         }
     }
 
@@ -1454,6 +1535,15 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         if (this.Working?.RenewsSubscriptionID) return false;
         if (this.EngineDefault === undefined) return null;
         return this.EngineDefault !== null;
+    }
+
+    /** Starts the covered-value read and keeps hold of it, so `settlePendingReads()` can wait for it. */
+    private startCoveredValue(): void {
+        const request = this.refreshCoveredValue();
+        this.coveredRequest = request;
+        void request.finally(() => {
+            if (this.coveredRequest === request) this.coveredRequest = null;
+        });
     }
 
     /** Reads what orders' concessions on this line already cover. A failed read leaves the percent rule. */
@@ -1569,6 +1659,11 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.Error = null;
         this.cdr.detectChanges();
         try {
+            // Judge the line on orders' price for what is on screen, not the price from before the last
+            // edit (#509). When the fresh price shows the discount now needs a reason, Save stops and
+            // the reason box is shown.
+            await this.settlePendingReads();
+            if (!this.CanSave) return;
             /**
              * THE ORDER IS SAVED, NOT THE LINE. Orders numbers and prices the line during this save;
              * see the file header for why saving the line alone cannot work.
