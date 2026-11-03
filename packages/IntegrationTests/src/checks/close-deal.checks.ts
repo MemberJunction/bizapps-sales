@@ -3245,6 +3245,19 @@ export const CloseDealChecks: NamedCheck[] = [
                     LineCount: 1,
                 });
 
+                // Stamp a pre-close ServicePeriodEnd so the post-close edit changes an already-set date
+                // rather than filling a blank (which Orders golive#322 exempts before confirm).
+                const preLineRow = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${ORDERS_SCHEMA}.OrderLine WHERE OrderHeaderID = '${seeded.OrderID}'`,
+                );
+                const preLine = await ProviderOf(ctx).GetEntityObject<mjBizAppsOrdersOrderLineEntity>(
+                    E_ORDER_LINE, ctx.User,
+                );
+                Assert(await preLine.Load(String(preLineRow.ID)), 'setup: the open deal\'s order line loads');
+                preLine.ServicePeriodEnd = LOCKED_LINE_END;
+                Assert(await preLine.Save(), `setup: the open deal's order line saves — ${preLine.LatestResult?.CompleteMessage ?? ''}`);
+
                 const out = await close(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
                 Assert(out.Success, `the won close failed: ${JSON.stringify(out.Issues)}`);
                 Assert(out.Locked, 'the won status carries LocksDeal, so the close must report Locked');
