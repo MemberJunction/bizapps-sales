@@ -30,10 +30,10 @@
  */
 import { BaseAction } from '@memberjunction/actions';
 import type { ActionParam, ActionResultSimple, RunActionParams } from '@memberjunction/actions-base';
-import { Metadata } from '@memberjunction/core';
+import { Metadata, RunView, type UserInfo } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { ActivityWriterService } from '@mj-biz-apps/sales-core-entities-server';
-import type { ActivityTypeCode } from '@mj-biz-apps/sales-entities';
+import { E_DEAL, type ActivityTypeCode } from '@mj-biz-apps/sales-entities';
 
 const P_DEAL_ID = 'DealID';
 const P_TYPE_CODE = 'TypeCode';
@@ -43,6 +43,8 @@ const P_STARTED_AT = 'StartedAt';
 
 /** The codes a person may log by hand. A meeting arrives from the calendar, not from this form. */
 const LOGGABLE: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 'Email'];
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function readParam(params: RunActionParams, name: string): unknown {
     return params.Params?.find((p) => p.Name?.toLowerCase() === name.toLowerCase())?.Value;
@@ -69,6 +71,17 @@ function setOutput(params: RunActionParams, name: string, value: unknown): void 
 
 @RegisterClass(BaseAction, 'Sales.LogActivity')
 export class LogActivityAction extends BaseAction {
+    /**
+     * Lets any signed-in user run this through the `RunAction` mutation, which otherwise runs an action
+     * with no `MJ: Action Authorizations` link for Owners only. Every rep logs activities, so Owner-only
+     * broke the deal pane for everyone else.
+     *
+     * The action makes its own decision instead: the caller must be able to read the deal
+     * (`callerCanReadDeal`), and the Activity and its links are saved as the caller, so their own
+     * entity permissions decide the write.
+     */
+    public static readonly AuthorizesCaller = true;
+
     protected async InternalRunAction(params: RunActionParams): Promise<ActionResultSimple> {
         try {
             return await this.log(params);
@@ -93,6 +106,17 @@ export class LogActivityAction extends BaseAction {
         }
         if (!title) {
             return { Success: false, ResultCode: 'BAD_INPUT', Message: 'A subject is required.' };
+        }
+        if (!UUID.test(dealID)) {
+            return { Success: false, ResultCode: 'BAD_INPUT', Message: `'${dealID}' is not a deal ID.` };
+        }
+
+        /**
+         * THE CALLER MUST BE ABLE TO SEE THE DEAL. The writer links the activity to whatever deal ID it is
+         * given, so without this a caller could attach activities to a deal hidden from them.
+         */
+        if (!(await this.callerCanReadDeal(dealID, params.ContextUser))) {
+            return { Success: false, ResultCode: 'NOT_FOUND', Message: 'No deal you can see has that ID.' };
         }
 
         /**
@@ -170,6 +194,15 @@ export class LogActivityAction extends BaseAction {
             Message: `Logged ${code} with ${result.LinkCount} link(s).`
                 + (result.Issues.length ? ` Notes: ${result.Issues.join(' | ')}` : ''),
         };
+    }
+
+    /** True when the deal comes back for the caller, so their read permission and row-level filters apply. */
+    private async callerCanReadDeal(dealID: string, contextUser: UserInfo): Promise<boolean> {
+        const r = await new RunView().RunView<{ ID: string }>(
+            { EntityName: E_DEAL, ExtraFilter: `ID = '${dealID}'`, ResultType: 'simple', Fields: ['ID'] },
+            contextUser,
+        );
+        return r.Success && (r.Results ?? []).length > 0;
     }
 }
 
