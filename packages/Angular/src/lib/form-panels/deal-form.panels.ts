@@ -779,11 +779,21 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         // The close stamps likewise, from the set the entity server refuses writes against (#252).
         if (IsDealCloseStamp(fieldName)) return false;
 
-        const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
+        const form = this.FormComponent as unknown as {
+            IsLocked?: boolean;
+            IsLost?: boolean;
+            IsPersistedAccountBlank?: boolean;
+        } | undefined;
         const locked = form?.IsLocked === true;
+        const recordAccountOld = this.Record?.GetFieldByName?.('AccountID')?.OldValue as string | null | undefined;
+        const accountBlank =
+            form?.IsPersistedAccountBlank !== undefined
+                ? form.IsPersistedAccountBlank
+                : this.Record !== undefined && (!recordAccountOld || String(recordAccountOld).trim() === '');
         // The outcome rides along with the lock, from the same resolver, because golive#206 keeps Loss
-        // Notes editable on a LOST deal and frozen on a won one.
-        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true);
+        // Notes editable on a LOST deal and frozen on a won one; golive#306 keeps Account editable when
+        // the closed deal was saved without one.
+        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true, accountBlank);
     }
 
     /**

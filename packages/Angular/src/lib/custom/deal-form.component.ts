@@ -129,9 +129,22 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         this.cdr?.detectChanges();
     }
 
+    /**
+     * Whether the deal's PERSISTED `AccountID` is blank, allowing a closed deal with no account to be
+     * linked to one once without reopening (golive#306).
+     */
+    public get IsPersistedAccountBlank(): boolean {
+        const field =
+            this.record?.GetFieldByName?.('AccountID') ??
+            this.record?.Fields?.find((f) => f.Name === 'AccountID');
+        if (!field) return false;
+        const old = field.OldValue as string | null | undefined;
+        return !old || String(old).trim() === '';
+    }
+
     /** The fields a user may still edit right now — everything when open, the carve-outs when locked. */
     public EditableFieldNames(): readonly string[] | null {
-        return this.IsLocked ? [...DealFieldsEditableWhileLocked(this.IsLost)] : null;
+        return this.IsLocked ? [...DealFieldsEditableWhileLocked(this.IsLost, this.IsPersistedAccountBlank)] : null;
     }
 
     /**
@@ -142,7 +155,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      */
     private async resolveCloseLock(): Promise<void> {
         const persisted = this.record?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
-        const lock = await ResolveDealLockState(persisted);
+        const lock = await ResolveDealLockState(persisted, undefined, this.IsPersistedAccountBlank);
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
         this.IsWon = lock.IsWon;
@@ -254,7 +267,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             return result;
         }
 
-        const editable = DealFieldsEditableWhileLocked(this.IsLost);
+        const editable = DealFieldsEditableWhileLocked(this.IsLost, this.IsPersistedAccountBlank);
         // The status repair the server allows on a deal whose status row is gone (#402).
         const statusRepair = (name: string): boolean => this.IsStatusMissing && name === 'DealStatusTypeID';
         const frozen = this.record.Fields.filter((f) => f.Dirty && !editable.has(f.Name) && !statusRepair(f.Name));

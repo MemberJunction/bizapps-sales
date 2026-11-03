@@ -64,6 +64,7 @@ import {
     type OrderStatus,
 } from '@mj-biz-apps/orders-entities';
 import {
+    AlreadyWonRefusal,
     DealCloseStampFields,
     DealFieldsEditableWhileLocked,
     DealFieldLabel,
@@ -522,7 +523,8 @@ export class DealEntityServer extends DealEntity {
          */
         const stampRefusal = this.closeStampEditRefusal();
         if (stampRefusal) {
-            return this.refuseSave(stampRefusal);
+            const wonRefusal = await this.staleWonSaveRefusal();
+            return this.refuseSave(wonRefusal ?? stampRefusal);
         }
 
         /**
@@ -2714,8 +2716,8 @@ export class DealEntityServer extends DealEntity {
      * on the deal's outcome, so the outcome has to reach it. It used to be a flat `ReadonlySet` held in
      * a static, which is precisely how a caller ends up with the list and without the condition.
      */
-    private static lockEditableFields(isLost: boolean): ReadonlySet<string> {
-        return DealFieldsEditableWhileLocked(isLost);
+    private static lockEditableFields(isLost: boolean, accountBlank = false): ReadonlySet<string> {
+        return DealFieldsEditableWhileLocked(isLost, accountBlank);
     }
 
     /**
@@ -2952,8 +2954,16 @@ export class DealEntityServer extends DealEntity {
          * The outcome decides one field. golive#206: Loss Notes stays editable on a LOST deal and is
          * frozen on a won one, and the form asks the same function with the same flag — both take it
          * from the status ROW, never from a name.
+         *
+         * golive#306: A closed deal whose persisted `AccountID` is blank may have its account filled in
+         * once without reopening; changing an existing non-blank account or clearing it stays frozen.
          */
-        const editable = DealEntityServer.lockEditableFields(persisted.IsLost);
+        const accountField = this.GetFieldByName('AccountID');
+        const accountOld = accountField?.OldValue as string | null | undefined;
+        const accountWasBlank = !accountOld || String(accountOld).trim() === '';
+        const fillingBlankAccount =
+            accountWasBlank && !!this.AccountID && String(this.AccountID).trim() !== '';
+        const editable = DealEntityServer.lockEditableFields(persisted.IsLost, fillingBlankAccount);
 
         /**
          * `OwnerEmployeeID` IS FROZEN, AND IS STILL WRITTEN HERE WHEN THE ROSTER DRIVES IT.
@@ -3023,7 +3033,15 @@ export class DealEntityServer extends DealEntity {
 
         const all = [...changed, ...dirtyCollections];
         if (all.length === 0) {
+            if (fillingBlankAccount && accountField?.Dirty) {
+                this._orderStatusWarnings.push(
+                    "Account was set on this closed deal; its order's bill-to and any contract were left unchanged.",
+                );
+            }
             return null;
+        }
+        if (persisted.LocksDeal && persisted.IsWon && changed.includes('DealStatusTypeID') && !reopening) {
+            return await this.alreadyWonRefusal();
         }
         /**
          * golive#207 row 18, verbatim: "This deal is closed. {fields} cannot be changed until the
@@ -3114,9 +3132,9 @@ export class DealEntityServer extends DealEntity {
      */
     private async readStatusLockFlags(
         statusID: string,
-    ): Promise<{ LocksDeal: boolean; IsLost: boolean; Read: boolean; Absent: boolean }> {
+    ): Promise<{ LocksDeal: boolean; IsLost: boolean; IsWon: boolean; Read: boolean; Absent: boolean }> {
         if (!GUID_SHAPE.test(statusID)) {
-            return { LocksDeal: true, IsLost: false, Read: false, Absent: false };
+            return { LocksDeal: true, IsLost: false, IsWon: false, Read: false, Absent: false };
         }
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView(
@@ -3124,7 +3142,7 @@ export class DealEntityServer extends DealEntity {
                 EntityName: DEAL_STATUS_ENTITY,
                 ExtraFilter: `ID = '${statusID}'`,
                 ResultType: 'simple',
-                Fields: ['LocksDeal', 'IsLost'],
+                Fields: ['LocksDeal', 'IsLost', 'IsWon'],
             },
             this.ContextCurrentUser,
         );
@@ -3132,10 +3150,58 @@ export class DealEntityServer extends DealEntity {
             LogError(
                 `DealEntityServer.readStatusLockFlags: could not read status ${statusID}: ${result.ErrorMessage}`,
             );
-            return { LocksDeal: true, IsLost: false, Read: false, Absent: false };
+            return { LocksDeal: true, IsLost: false, IsWon: false, Read: false, Absent: false };
         }
-        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean } | undefined;
-        return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true, Read: !!row, Absent: !row };
+        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean; IsWon?: boolean } | undefined;
+        return {
+            LocksDeal: row?.LocksDeal === true,
+            IsLost: row?.IsLost === true,
+            IsWon: row?.IsWon === true,
+            Read: !!row,
+            Absent: !row,
+        };
+    }
+
+    /**
+     * When a stale pre-close save hits a deal whose persisted status on disk is already Won, explain
+     * that the deal is already Won (and name the contract if one was created) instead of reporting the
+     * close-stamp edit refusal (golive#387).
+     */
+    private async staleWonSaveRefusal(): Promise<string | null> {
+        if (!this.IsSaved) return null;
+        const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
+        if (!persistedStatusID) return null;
+        const persisted = await this.readStatusLockFlags(persistedStatusID);
+        if (!persisted.LocksDeal || !persisted.IsWon) return null;
+        return this.alreadyWonRefusal();
+    }
+
+    private async alreadyWonRefusal(): Promise<string> {
+        const contractID =
+            (this.ContractID ?? (this.GetFieldByName('ContractID')?.OldValue as string | null | undefined)) ?? null;
+        let contractNumber: string | null = null;
+        if (contractID && GUID_SHAPE.test(String(contractID))) {
+            try {
+                const provider = this.ProviderToUse as unknown as IRunViewProvider | undefined;
+                if (provider?.RunView) {
+                    const result = await provider.RunView<{ ContractNumber: string | null }>(
+                        {
+                            EntityName: 'MJ_BizApps_Contracts: Contracts',
+                            ExtraFilter: `ID = '${contractID}'`,
+                            ResultType: 'simple',
+                            Fields: ['ContractNumber'],
+                        },
+                        this.ContextCurrentUser,
+                    );
+                    if (result?.Success) {
+                        contractNumber = (result.Results ?? [])[0]?.ContractNumber ?? null;
+                    }
+                }
+            } catch {
+                contractNumber = null;
+            }
+        }
+        return AlreadyWonRefusal(this.DealNumber || this.Name, contractNumber);
     }
 
     /* ── Parties ────────────────────────────────────────────────────────────── */

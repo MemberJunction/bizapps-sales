@@ -663,6 +663,11 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     private coveredValue: number | null = null;
     private reasonCategories: DiscountReasonCategory[] | null = null;
     public DiscountCategory: DiscountReasonCategory | null = null;
+    /**
+     * Client-generated UUID for the current discount-concession recording attempt, kept across a retry
+     * so a resend after a timeout finds the concession the first attempt already wrote (#512).
+     */
+    private pendingConcessionID: string | null = null;
     public DiscountReason = '';
     /** What the rep must know after a save that recorded, or failed to record, a concession. */
     public Notice: string | null = null;
@@ -897,6 +902,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.EngineDefault = undefined;
         this.Applicable = [];
         this.Working.SubscriptionAction = null;
+        this.pendingConcessionID = null;
         void this.refreshApplicable();
         void this.refreshHolding();
         this.cdr.detectChanges();
@@ -1009,6 +1015,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         }
         this.DiscountRefusal = null;
         this.Working.DiscountPct = converted.Fraction;
+        this.pendingConcessionID = null;
     }
 
     /* ── A discount stated in dollars ─────────────────────────────────────────── */
@@ -1048,6 +1055,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.DiscountRefusal = null;
         if (converted.Fraction === (this.Working.DiscountPct ?? 0)) return;
         this.Working.DiscountPct = converted.Fraction;
+        this.pendingConcessionID = null;
         this.SchedulePrice();   // a priced input changed — ask Orders again
     }
 
@@ -1616,13 +1624,18 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      */
     private async recordDiscountConcession(): Promise<string | null> {
         if (!this.Working || !this.NeedsDiscountReason || !this.DiscountCategory) return null;
+        this.pendingConcessionID ??= crypto.randomUUID();
         const outcome = await RecordDiscountConcession({
             OrderLineID: this.Working.ID,
             ReasonCategory: this.DiscountCategory,
             Reason: this.DiscountReason,
+            ConcessionID: this.pendingConcessionID,
         });
         this.savedDiscountPct = this.Working.DiscountPct ?? null;
-        if (outcome.Recorded) await this.refreshCoveredValue();
+        if (outcome.Recorded) {
+            this.pendingConcessionID = null;
+            await this.refreshCoveredValue();
+        }
         if (!outcome.Recorded) {
             return (
                 `The line is saved, but its discount could not be recorded for approval: ${outcome.Message} ` +
@@ -1671,6 +1684,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.DiscountCategory = null;
         this.DiscountReason = '';
         this.DiscountRefusal = null;
+        this.pendingConcessionID = null;
         this.Closed.emit();
     }
 }

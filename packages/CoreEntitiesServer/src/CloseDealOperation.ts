@@ -45,6 +45,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { IsBooked } from '@mj-biz-apps/orders-entities';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import {
+    AlreadyWonRefusal,
     SalesCloseDealOperation as SalesCloseDealOperationBase,
     SalesReopenDealOperation as SalesReopenDealOperationBase,
     StubDownstreamSeam,
@@ -459,6 +460,13 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 ? await this.loadStatusFlags(deal.DealStatusTypeID, provider, user)
                 : null;
             if (current?.LocksDeal) {
+                if (current.IsWon) {
+                    const contractNumber = await this.readContractNumber(deal.ContractID, provider, user);
+                    return {
+                        ...empty,
+                        Issues: [issue('deal', AlreadyWonRefusal(deal.DealNumber || deal.Name, contractNumber))],
+                    };
+                }
                 return {
                     ...empty,
                     Issues: [
@@ -1534,6 +1542,33 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              * Their half landed; this is ours.
              */
         };
+    }
+
+    private async readContractNumber(
+        contractID: string | null | undefined,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<string | null> {
+        if (!contractID || !GUID_SHAPE.test(String(contractID))) {
+            return null;
+        }
+        try {
+            const rv = provider as unknown as IRunViewProvider | undefined;
+            if (!rv?.RunView) return null;
+            const result = await rv.RunView<{ ContractNumber: string | null }>(
+                {
+                    EntityName: 'MJ_BizApps_Contracts: Contracts',
+                    ExtraFilter: `ID = '${contractID}'`,
+                    ResultType: 'simple',
+                    Fields: ['ContractNumber'],
+                },
+                user,
+            );
+            if (!result?.Success) return null;
+            return (result.Results ?? [])[0]?.ContractNumber ?? null;
+        } catch {
+            return null;
+        }
     }
 }
 
