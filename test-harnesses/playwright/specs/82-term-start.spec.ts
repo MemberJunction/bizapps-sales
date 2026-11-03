@@ -35,7 +35,7 @@ import type { Locator, Page } from '@playwright/test';
 
 import { QueryAll, QueryOne } from '../lib/db';
 import { AssertBaseline, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
-import { ByTestId, OpenSection, RevealInForm } from '../lib/deal-form';
+import { ByTestId, ChooseLineProduct, OpenSection, RevealInForm } from '../lib/deal-form';
 
 const RUN = `PW-TERMSTART-${Date.now().toString(36)}`;
 let dealID = '';
@@ -67,18 +67,9 @@ function inheritedHint(page: Page): Locator {
     return lineEditor(page).locator('.mjs-le__hint');
 }
 
-/**
- * Points the open editor at a NAMED product.
- *
- * An option reads `Name (SKU) — Company`, so it is found by CONTAINMENT and selected by its exact label.
- */
+/** Points the open editor at a NAMED product, through the type-ahead. */
 async function chooseProduct(page: Page, productName: string): Promise<void> {
-    const picker = lineEditor(page).locator('[data-testid="line-product"]');
-    await expect(picker, 'the line editor must offer a product picker').toBeVisible({ timeout: 20_000 });
-    const labels = (await picker.locator('option').allTextContents()).map((o) => o.trim());
-    const match = labels.find((o) => o.includes(productName));
-    expect(match, `the picker must offer "${productName}" — it offered ${JSON.stringify(labels)}`).toBeTruthy();
-    await picker.selectOption({ label: match as string });
+    await ChooseLineProduct(lineEditor(page), productName);
     await page.waitForTimeout(400);
 }
 

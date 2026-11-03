@@ -99,18 +99,16 @@ async function cancelLineEditor(editor: Locator): Promise<void> {
 /**
  * The product ID the open editor has bound, lowercased.
  *
- * Read from the select's VALUE, not its label: labels are catalogue text, the ID is what the line
- * references. Angular's `[ngValue]` writes the DOM value as `"<index>: <value>"`, so the ID is the part
- * after the separator. Polled, because the binding lands after the catalogue loads, and until then the
- * value is the placeholder's `null`.
+ * Read from the product box's `data-product-id`, not its text: the text is catalogue wording, the ID is
+ * what the line references. Polled, because the binding lands after the catalogue loads.
  */
 async function boundProductID(editor: Locator): Promise<string> {
-    const select = editor.locator('[data-testid="line-product"]');
+    const box = editor.locator('[data-testid="line-product"]');
     let id = '';
     await expect
         .poll(
             async () => {
-                id = ((await select.inputValue()).split(': ').pop() ?? '').trim().toLowerCase();
+                id = ((await box.getAttribute('data-product-id')) ?? '').trim().toLowerCase();
                 return /^[0-9a-f-]{36}$/.test(id);
             },
             { timeout: 20_000, message: 'the line editor must bind the saved line\'s product' },

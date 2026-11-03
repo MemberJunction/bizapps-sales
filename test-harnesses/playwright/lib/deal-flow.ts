@@ -9,6 +9,8 @@ import { expect, type Page } from '@playwright/test';
 
 import { QueryAll, QueryOne } from './db';
 import {
+    ChooseLineProduct,
+    OfferedLineProducts,
     ByTestId,
     DealForm,
     FirstOpenStatus,
@@ -184,7 +186,9 @@ export async function AddLines(page: Page, orderID: string, count: number): Prom
         await QueryAll<{ Name: string }>(
             `SELECT DISTINCT p.Name
                FROM __mj_BizAppsOrders.Product p
-               JOIN __mj_BizAppsOrders.ProductPrice pp ON pp.ProductID = p.ID`,
+               JOIN __mj_BizAppsOrders.ProductPrice pp ON pp.ProductID = p.ID
+              WHERE p.Status = 'Active'
+              ORDER BY p.Name`,
         )
     ).map((r) => String(r.Name));
     expect(priceable.length, 'the host needs at least one product carrying a price rule').toBeGreaterThan(0);
@@ -199,27 +203,24 @@ export async function AddLines(page: Page, orderID: string, count: number): Prom
         const editor = page.locator('[data-testid="line-editor"]:visible').first();
         await expect(editor, 'Add a product must open the line editor').toBeVisible({ timeout: 20_000 });
 
-        const product = editor.locator('[data-testid="line-product"]');
-        await expect(product, 'the line editor must offer a product picker').toBeVisible({ timeout: 20_000 });
-        const labels = (await product.locator('option').allTextContents())
-            .map((o) => o.trim())
-            .filter((o) => o && !o.startsWith('—'));
-        if (labels.length === 0) {
-            throw new Error(
-                'the product picker offered nothing — the orders catalogue did not load, and adding a ' +
-                    'line with no product would make this spec pass while testing nothing',
-            );
+        /**
+         * The product box is a type-ahead showing a capped page of rows (golive#360), so each priceable
+         * name is TYPED and kept only when the box offers it — a priced product can still be inactive
+         * or out of window. Stops once there are enough to give each line its own product.
+         */
+        const usable: string[] = [];
+        for (const name of priceable) {
+            if ((await OfferedLineProducts(editor, name)).includes(name)) usable.push(name);
+            if (usable.length > i) break;
         }
-        // An option reads "Name (SKU) — Company", so match on the name the catalogue gave us.
-        const usable = labels.filter((l) => priceable.some((name) => l.startsWith(name)));
         if (usable.length === 0) {
             throw new Error(
-                `the picker offered ${labels.length} product(s) and none of them carries a price rule, so `
-                    + 'every line would be refused for pricing rather than for anything this spec is about. '
-                    + `Priceable products here: ${priceable.join(', ') || '(none)'}`,
+                'the product box offered none of the products that carry a price rule, so every line would '
+                    + 'be refused for pricing rather than for anything this spec is about, or the orders '
+                    + `catalogue did not load. Priceable products here: ${priceable.join(', ') || '(none)'}`,
             );
         }
-        await product.selectOption({ label: usable[Math.min(i, usable.length - 1)] });
+        await ChooseLineProduct(editor, usable[Math.min(i, usable.length - 1)]);
 
         /**
          * Quantity is the rep's to state and is not seeded, so a line without it cannot save — Save
