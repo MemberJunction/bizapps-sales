@@ -38,14 +38,20 @@
  * @module @mj-biz-apps/sales-core-entities-server
  */
 import {
+    type AppCapabilityExecutionContext,
+    AppCapabilityRegistry,
     BaseEntity,
+    type CapabilityContract,
     CompositeKey,
+    DefineCapabilityContract,
+    type EntityInfo,
+    type IAppCapabilityProvider,
+    type IMetadataProvider,
     LogError,
     LogStatus,
     Metadata,
+    RegisterAppCapability,
     RunView,
-    type EntityInfo,
-    type IMetadataProvider,
     type UserInfo,
 } from '@memberjunction/core';
 import type {
@@ -106,9 +112,36 @@ export function pickContractType(
  * Every added member is optional, so a plain `ContractsCreateFromDealSeamInput` still satisfies this
  * and no caller changes.
  */
-type CreateFromDealInput = ContractsCreateFromDealSeamInput & {
+export type CreateFromDealInput = ContractsCreateFromDealSeamInput & {
     ContractTemplateID?: string | null;
 };
+
+export const CONTRACTS_CREATE_FROM_DEAL_CAPABILITY: CapabilityContract<
+    CreateFromDealInput,
+    ContractsSeamResult
+> = DefineCapabilityContract<CreateFromDealInput, ContractsSeamResult>(
+    'Contracts.CreateContractFromDeal',
+    1,
+    'Creates an unsigned contract header from a won sales deal.',
+);
+
+export const CONTRACTS_UPDATE_FROM_DEAL_CAPABILITY: CapabilityContract<
+    ContractsUpdateFromDealSeamInput,
+    ContractsUpdateSeamResult
+> = DefineCapabilityContract<ContractsUpdateFromDealSeamInput, ContractsUpdateSeamResult>(
+    'Contracts.UpdateContractFromDeal',
+    1,
+    'Refreshes an unsigned contract header from a re-closed sales deal.',
+);
+
+export const CONTRACTS_LINK_ORDER_CAPABILITY: CapabilityContract<
+    ContractsLinkOrderSeamInput,
+    ContractsSeamResult
+> = DefineCapabilityContract<ContractsLinkOrderSeamInput, ContractsSeamResult>(
+    'Contracts.LinkOrderToContract',
+    1,
+    'Links a sales deal order to its governing contract.',
+);
 
 /**
  * True when contracts is actually installed here.
@@ -667,7 +700,70 @@ export async function LinkOrderToContract(
     return { Success: true, ContractID: input.ContractID };
 }
 
+@RegisterAppCapability(CONTRACTS_CREATE_FROM_DEAL_CAPABILITY, {
+    ownerApp: '@mj-biz-apps/sales',
+    requiredEntities: [E_CONTRACT],
+})
+export class CreateContractFromDealCapabilityProvider
+    implements IAppCapabilityProvider<CreateFromDealInput, ContractsSeamResult>
+{
+    public async Execute(
+        input: CreateFromDealInput,
+        context: AppCapabilityExecutionContext,
+    ): Promise<ContractsSeamResult> {
+        return new LiveContractsSeam(context.ContextUser, context.Provider).CreateContractFromDeal(input);
+    }
+}
+
+@RegisterAppCapability(CONTRACTS_UPDATE_FROM_DEAL_CAPABILITY, {
+    ownerApp: '@mj-biz-apps/sales',
+    requiredEntities: [E_CONTRACT],
+})
+export class UpdateContractFromDealCapabilityProvider
+    implements IAppCapabilityProvider<ContractsUpdateFromDealSeamInput, ContractsUpdateSeamResult>
+{
+    public async Execute(
+        input: ContractsUpdateFromDealSeamInput,
+        context: AppCapabilityExecutionContext,
+    ): Promise<ContractsUpdateSeamResult> {
+        return new LiveContractsSeam(context.ContextUser, context.Provider).UpdateContractFromDeal(input);
+    }
+}
+
+@RegisterAppCapability(CONTRACTS_LINK_ORDER_CAPABILITY, {
+    ownerApp: '@mj-biz-apps/sales',
+    requiredEntities: [E_CONTRACT],
+})
+export class LinkOrderToContractCapabilityProvider
+    implements IAppCapabilityProvider<ContractsLinkOrderSeamInput, ContractsSeamResult>
+{
+    public async Execute(
+        input: ContractsLinkOrderSeamInput,
+        context: AppCapabilityExecutionContext,
+    ): Promise<ContractsSeamResult> {
+        return new LiveContractsSeam(context.ContextUser, context.Provider).LinkOrderToContract(input);
+    }
+}
+
+export function RegisterLiveContractsCapabilities(): void {
+    AppCapabilityRegistry?.Instance?.Register(
+        CONTRACTS_CREATE_FROM_DEAL_CAPABILITY,
+        CreateContractFromDealCapabilityProvider,
+        { ownerApp: '@mj-biz-apps/sales', requiredEntities: [E_CONTRACT] },
+    );
+    AppCapabilityRegistry?.Instance?.Register(
+        CONTRACTS_UPDATE_FROM_DEAL_CAPABILITY,
+        UpdateContractFromDealCapabilityProvider,
+        { ownerApp: '@mj-biz-apps/sales', requiredEntities: [E_CONTRACT] },
+    );
+    AppCapabilityRegistry?.Instance?.Register(
+        CONTRACTS_LINK_ORDER_CAPABILITY,
+        LinkOrderToContractCapabilityProvider,
+        { ownerApp: '@mj-biz-apps/sales', requiredEntities: [E_CONTRACT] },
+    );
+}
+
 /** Anti-tree-shaking anchor. */
 export function LoadLiveContractsSeam(): void {
-    /* keeps the registration alive */
+    RegisterLiveContractsCapabilities();
 }

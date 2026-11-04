@@ -10,14 +10,23 @@
  * shadowed below.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BaseEntity, BaseEntityResult } from '@memberjunction/core';
-import { MJGlobal } from '@memberjunction/global';
+import {
+    BaseEntity,
+    BaseEntityResult,
+    type EntityInfo,
+    EntityLifecyclePolicyEngine,
+} from '@memberjunction/core';
+import { MJGlobal, ValidationResult } from '@memberjunction/global';
 import {
     DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE,
     mjBizAppsSalesDealStageEventEntity,
 } from '@mj-biz-apps/sales-entities';
 
-import { DealStageEventEntityServer } from '../DealStageEventEntityServer.js';
+import {
+    DEAL_STAGE_EVENT_LIFECYCLE_POLICY,
+    DealStageEventEntityServer,
+    RegisterDealStageEventLifecyclePolicy,
+} from '../DealStageEventEntityServer.js';
 
 /** A stage event row, persisted (`IsSaved`) or new, recording the result history it registers. */
 function eventRow(isSaved: boolean) {
@@ -68,5 +77,32 @@ describe('a deal stage event', () => {
             'MJ_BizApps_Sales: Deal Stage Events',
         );
         expect(registration?.SubClass).toBe(DealStageEventEntityServer);
+    });
+
+    it('registers an AppendOnly write-authority policy on EntityLifecyclePolicyEngine', () => {
+        RegisterDealStageEventLifecyclePolicy();
+        const entityInfo = { Name: 'MJ_BizApps_Sales: Deal Stage Events' } as EntityInfo;
+        const resolved = EntityLifecyclePolicyEngine.Instance.ResolvePolicy(entityInfo);
+        expect(resolved?.writeAuthority).toEqual(DEAL_STAGE_EVENT_LIFECYCLE_POLICY.writeAuthority);
+
+        const { row: newRow } = eventRow(false);
+        Object.defineProperty(newRow, 'EntityInfo', { value: entityInfo, writable: true });
+        expect(
+            EntityLifecyclePolicyEngine.Instance.CheckWritePermissionGate(newRow, 'Create', undefined, true),
+        ).toBeNull();
+        expect(
+            EntityLifecyclePolicyEngine.Instance.CheckWritePermissionGate(newRow, 'Update', undefined, true),
+        ).toBe(DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE);
+        expect(
+            EntityLifecyclePolicyEngine.Instance.CheckWritePermissionGate(newRow, 'Delete', undefined, true),
+        ).toBe(DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE);
+
+        const { row: savedDirtyRow } = eventRow(true);
+        Object.defineProperty(savedDirtyRow, 'EntityInfo', { value: entityInfo, writable: true });
+        Object.defineProperty(savedDirtyRow, 'Dirty', { value: true, writable: true });
+        const validation = new ValidationResult();
+        EntityLifecyclePolicyEngine.Instance.ValidateLifecycleOnEntity(savedDirtyRow, undefined, validation);
+        expect(validation.Success).toBe(false);
+        expect(validation.Errors[0]?.Message).toBe(DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE);
     });
 });
