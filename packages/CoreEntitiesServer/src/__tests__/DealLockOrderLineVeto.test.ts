@@ -17,8 +17,20 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
     return { ...actual, LogError: () => undefined, RunView: class { public RunView = runView; } };
 });
 
-const { DealLockOrderLineVeto, DealLockRefusal, DealLockRefusalUnreadable, DealAbsentStatusLockRefusal } = await import('../DealLockOrderLineVeto.js');
-const { Metadata } = await import('@memberjunction/core');
+const {
+    DealLockOrderLineVeto,
+    DealLockRefusal,
+    DealLockRefusalUnreadable,
+    DealAbsentStatusLockRefusal,
+    RegisterDealLockOrderLineCrossEntityPolicy,
+} = await import('../DealLockOrderLineVeto.js');
+const {
+    CONTRACTS_CREATE_FROM_DEAL_CAPABILITY,
+    CONTRACTS_LINK_ORDER_CAPABILITY,
+    CONTRACTS_UPDATE_FROM_DEAL_CAPABILITY,
+    RegisterLiveContractsCapabilities,
+} = await import('../LiveContractsSeam.js');
+const { AppCapabilityRegistry, CrossEntityPolicyEngine, Metadata } = await import('@memberjunction/core');
 
 /** Whether the caller may read Deals, as `EntityInfo.GetUserPermisions` would answer. */
 let callerCanRead = true;
@@ -224,5 +236,103 @@ describe('the refusal for a caller who cannot read Deals', () => {
         callerCanRead = false;
         answers({ deal: { ID: DEAL, DealStatusTypeID: STATUS }, locks: undefined });
         expect(await new DealLockOrderLineVeto().MayEdit(ctx())).toBe(DealLockRefusalUnreadable());
+    });
+});
+
+describe('transaction-scoped memoization and CrossEntityPolicyEngine batch evaluation', () => {
+    it('coalesces repeated Order -> Deal -> Status lookups within an active transaction epoch and invalidates on Deal mutation', async () => {
+        answers({ locks: true });
+        const txProvider = {
+            TransactionScopeCacheKey: 'tx-epoch-1',
+        } as never;
+        const v = new DealLockOrderLineVeto(txProvider);
+
+        for (let i = 0; i < 5; i++) {
+            expect(await v.MayEdit(ctx('update'))).toBe(DealLockRefusal('update'));
+        }
+        expect(runView, '5 lines in one transaction share 1 deal query + 1 status query').toHaveBeenCalledTimes(2);
+
+        // Mutating the Deal inside the same transaction invalidates the deal snapshot immediately.
+        const mutatedDeal = {
+            EntityInfo: { Name: 'MJ_BizApps_Sales: Deals', PrimaryKeys: [{ Name: 'ID' }] },
+            GetFieldByName: (name: string) => (name === 'ID' ? { Value: DEAL } : undefined),
+            TransactionGroup: null,
+        } as never;
+        CrossEntityPolicyEngine.Instance.NotifyEntityMutated(txProvider, mutatedDeal, 'Update');
+
+        answers({ locks: false });
+        // Status ID changed to an open status on the reopened deal:
+        const OPEN_STATUS = 'b1c2d3e4-0000-4000-8000-000000000099';
+        runView.mockImplementation(async ({ EntityName }: { EntityName: string }) => {
+            if (EntityName === 'MJ_BizApps_Sales: Deals') {
+                return { Success: true, Results: [{ ID: DEAL, DealStatusTypeID: OPEN_STATUS }] };
+            }
+            return { Success: true, Results: [{ LocksDeal: false }] };
+        });
+
+        expect(await v.MayEdit(ctx('update'))).toBeNull();
+        CrossEntityPolicyEngine.Instance.ClearProviderScope(txProvider);
+    });
+
+    it('enforces the DealLockOrderLineCrossEntityPolicy across batch OrderLine writes via CrossEntityPolicyEngine.PreEvaluateBatch', async () => {
+        RegisterDealLockOrderLineCrossEntityPolicy();
+        answers({ locks: true });
+        const batchProvider = {
+            TransactionScopeCacheKey: 'tx-batch-1',
+        } as never;
+
+        const makeOrderLine = (lineId: string) =>
+            ({
+                ID: lineId,
+                OrderHeaderID: ORDER,
+                IsSaved: true,
+                ContextCurrentUser: USER,
+                TransactionGroup: null,
+                EntityInfo: {
+                    Name: 'MJ_BizApps_Orders: Order Lines',
+                    PrimaryKeys: [{ Name: 'ID' }],
+                    Settings: [],
+                },
+                GetFieldByName: (name: string) =>
+                    name === 'OrderHeaderID'
+                        ? { Value: ORDER }
+                        : name === 'ID'
+                          ? { Value: lineId }
+                          : undefined,
+            }) as never;
+
+        const line1 = makeOrderLine('b1c2d3e4-0000-4000-8000-000000000101');
+        const line2 = makeOrderLine('b1c2d3e4-0000-4000-8000-000000000102');
+        const line3 = makeOrderLine('b1c2d3e4-0000-4000-8000-000000000103');
+
+        const refusal = await CrossEntityPolicyEngine.Instance.PreEvaluateBatch(
+            [
+                { Entity: line1, Operation: 'Update' },
+                { Entity: line2, Operation: 'Update' },
+                { Entity: line3, Operation: 'Delete' },
+            ],
+            batchProvider,
+            USER,
+        );
+        expect(refusal).toBe(DealLockRefusal('update'));
+        expect(runView, 'batch of 3 lines queries the deal and its status only once').toHaveBeenCalledTimes(2);
+        CrossEntityPolicyEngine.Instance.ClearProviderScope(batchProvider);
+    });
+
+    it('registers typed Contracts capabilities on AppCapabilityRegistry with host-entity readiness gating', async () => {
+        RegisterLiveContractsCapabilities();
+        expect(AppCapabilityRegistry.Instance.IsRegistered(CONTRACTS_CREATE_FROM_DEAL_CAPABILITY)).toBe(true);
+        expect(AppCapabilityRegistry.Instance.IsRegistered(CONTRACTS_UPDATE_FROM_DEAL_CAPABILITY)).toBe(true);
+        expect(AppCapabilityRegistry.Instance.IsRegistered(CONTRACTS_LINK_ORDER_CAPABILITY)).toBe(true);
+
+        const missingHostProvider = {
+            Entities: [{ Name: 'MJ_BizApps_Sales: Deals' }],
+        } as never;
+        const checkMissing = await AppCapabilityRegistry.Instance.CheckAvailability(
+            CONTRACTS_CREATE_FROM_DEAL_CAPABILITY,
+            { ContextUser: USER, Provider: missingHostProvider },
+        );
+        expect(checkMissing.Available).toBe(false);
+        expect(checkMissing.Reason).toBe('HostEntitiesMissing');
     });
 });

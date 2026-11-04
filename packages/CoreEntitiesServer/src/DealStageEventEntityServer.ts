@@ -20,7 +20,10 @@ import {
     BaseEntity,
     BaseEntityResult,
     type EntityDeleteOptions,
+    type EntityInfo,
+    EntityLifecyclePolicyEngine,
     type EntitySaveOptions,
+    type IEntityLifecyclePolicy,
     LogError,
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
@@ -31,26 +34,66 @@ import {
 
 const DEAL_STAGE_EVENT_ENTITY = 'MJ_BizApps_Sales: Deal Stage Events';
 
+/**
+ * Declarative platform write-authority policy for `MJ_BizApps_Sales: Deal Stage Events`.
+ * Registered with {@link EntityLifecyclePolicyEngine} so `BaseEntity.Validate()`,
+ * `BaseEntity._innerSave` / `_innerDelete`, `DatabaseProviderBase`, and `ResolverBase`
+ * enforce append-only semantics with the domain refusal message.
+ */
+export const DEAL_STAGE_EVENT_LIFECYCLE_POLICY: IEntityLifecyclePolicy = {
+    writeAuthority: {
+        mode: 'AppendOnly',
+        errorMessage: DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE,
+    },
+};
+
+export function RegisterDealStageEventLifecyclePolicy(): void {
+    EntityLifecyclePolicyEngine.Instance.RegisterPolicy(
+        DEAL_STAGE_EVENT_ENTITY,
+        DEAL_STAGE_EVENT_LIFECYCLE_POLICY,
+    );
+}
+
+RegisterDealStageEventLifecyclePolicy();
+
 @RegisterClass(BaseEntity, DEAL_STAGE_EVENT_ENTITY)
 export class DealStageEventEntityServer extends mjBizAppsSalesDealStageEventEntity {
     public override async Save(options?: EntitySaveOptions): Promise<boolean> {
         if (this.IsSaved) {
-            return this.refuse('update');
+            return this.refuse('update', this.resolveAppendOnlyRefusal('Update'));
         }
         return super.Save(options);
     }
 
     public override async Delete(_options?: EntityDeleteOptions): Promise<boolean> {
-        return this.refuse('delete');
+        return this.refuse('delete', this.resolveAppendOnlyRefusal('Delete'));
+    }
+
+    private resolveAppendOnlyRefusal(operation: 'Update' | 'Delete'): string {
+        if (this.EntityInfo?.Name) {
+            const gateMessage = EntityLifecyclePolicyEngine.Instance.CheckWritePermissionGate(
+                this,
+                operation,
+                this.ContextCurrentUser,
+                true,
+            );
+            if (gateMessage) {
+                return gateMessage;
+            }
+        }
+        const policy = EntityLifecyclePolicyEngine.Instance.ResolvePolicy({
+            Name: DEAL_STAGE_EVENT_ENTITY,
+        } as EntityInfo);
+        return policy?.writeAuthority?.errorMessage ?? DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE;
     }
 
     /** Mirrors `DealEntityServer.refuseSave`: log it, register a failed result, return false. */
-    private refuse(type: 'update' | 'delete'): false {
-        LogError(`DealStageEventEntityServer refused a ${type}: ${DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE}`);
+    private refuse(type: 'update' | 'delete', message: string = DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE): false {
+        LogError(`DealStageEventEntityServer refused a ${type}: ${message}`);
         const failed = new BaseEntityResult();
         failed.Success = false;
         failed.Type = type;
-        failed.Message = DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE;
+        failed.Message = message;
         failed.StartedAt = new Date();
         failed.EndedAt = new Date();
         failed.OriginalValues = this.Fields.map((f) => ({ FieldName: f.CodeName, Value: f.OldValue }));
