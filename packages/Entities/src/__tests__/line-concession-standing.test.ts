@@ -110,6 +110,30 @@ describe('ResolveLineConcessionState', () => {
         expect(ResolveLineConcessionState({ ...discounted, Rows: [row({})] })).toBe('Approved');
     });
 
+    it('reports NotCovered when an earlier Approved or Pending concession covers less than orders\' priced discount (#510)', () => {
+        expect(
+            ResolveLineConcessionState({
+                ...discounted,
+                Rows: [row({ ComputedValue: 150 })],
+                DiscountValue: 300,
+            }),
+        ).toBe('NotCovered');
+        expect(
+            ResolveLineConcessionState({
+                ...discounted,
+                Rows: [row({ ComputedValue: 300 })],
+                DiscountValue: 300,
+            }),
+        ).toBe('Approved');
+        expect(
+            ResolveLineConcessionState({
+                ...discounted,
+                Rows: [row({ Status: 'Pending', DecidedByUserID: null, ComputedValue: 150 })],
+                DiscountValue: 300,
+            }),
+        ).toBe('NotCovered');
+    });
+
     it('reports a discount with no concession as not recorded, only when orders values the line', () => {
         expect(ResolveLineConcessionState({ ...discounted, Rows: [] })).toBe('NotRecorded');
         expect(ResolveLineConcessionState({ ...discounted, OrdersValuesLine: false, Rows: [] })).toBe('NotNeeded');

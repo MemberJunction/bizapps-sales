@@ -440,6 +440,92 @@ export const CloseWonOrderChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'close-won-order.CO6',
+        Name: 'CO6: Close Won refuses an unanswered line whose product inherits its subscription type from ProductType (#504, #439)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireOrders();
+                const f = await ResolveSalesFixture(ctx);
+                const seeded = await seedOrderOnly(ctx, f, 1);
+                const productID = seeded.ExpectedProductIDs[0];
+
+                const db = ctx.Provider as unknown as {
+                    ExecuteSQL: (
+                        sql: string,
+                        params: Record<string, unknown>,
+                        options: { isMutation: boolean; description: string },
+                        user: unknown,
+                    ) => Promise<Record<string, unknown>[]>;
+                };
+                const subTypes = await db.ExecuteSQL(
+                    `SELECT TOP 1 ID FROM __mj_BizAppsOrders.SubscriptionType WHERE IsActive = 1 ORDER BY Sequence`,
+                    {},
+                    { isMutation: false, description: 'CO6 find subscription type' },
+                    ctx.User,
+                );
+                const subTypeID = subTypes?.[0]?.ID as string | undefined;
+                Assert(!!subTypeID, 'setup: CO6 needs an active SubscriptionType');
+
+                // Clear Product.SubscriptionTypeID and set ProductType.DefaultSubscriptionTypeID so the
+                // product inherits its subscription type from its ProductType (#504).
+                await db.ExecuteSQL(
+                    `UPDATE p SET p.SubscriptionTypeID = NULL FROM __mj_BizAppsOrders.Product p WHERE p.ID = '${productID}';
+                     UPDATE pt SET pt.DefaultSubscriptionTypeID = '${subTypeID}'
+                       FROM __mj_BizAppsOrders.ProductType pt
+                       JOIN __mj_BizAppsOrders.Product p ON p.ProductTypeID = pt.ID
+                      WHERE p.ID = '${productID}';`,
+                    {},
+                    { isMutation: true, description: 'CO6 make product inherit subscription type from ProductType' },
+                    ctx.User,
+                );
+
+                const lines = await rows(ctx, 'MJ_BizApps_Orders: Order Lines', `OrderHeaderID = '${seeded.OrderID}'`);
+                const lineID = String(lines[0]?.ID ?? '');
+                Assert(lineID.length > 0, 'setup: seeded order must have one line');
+
+                // Seed an active subscription held by the deal's account for the same product.
+                await db.ExecuteSQL(
+                    `UPDATE __mj_BizAppsOrders.OrderHeader SET BillToOrganizationID = '${seeded.AccountID}' WHERE ID = '${seeded.OrderID}';
+                     INSERT INTO __mj_BizAppsOrders.Subscription
+                         (SubscriptionNumber, CompanyID, OrderLineID, SubscriptionTypeID, ProductID, HolderOrganizationID, Status, StartDate, AutoRenew)
+                     VALUES
+                         ('SUB-CO6-TEST', '${seeded.CompanyID}', '${lineID}', '${subTypeID}', '${productID}', '${seeded.AccountID}', 'Active', '2026-01-01', 1);`,
+                    {},
+                    { isMutation: true, description: 'CO6 seed existing active subscription for the customer' },
+                    ctx.User,
+                );
+
+                const refused = await close(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+                Assert(
+                    !refused.Success,
+                    'Close Won must refuse an unanswered inheriting subscription line when the customer already holds the product',
+                );
+                Assert(
+                    refused.Issues.some(
+                        (i) => i.Section === 'lines' && i.Field === 'SubscriptionAction' && i.Severity === 'error',
+                    ),
+                    `expected a lines/SubscriptionAction error issue, got: ${JSON.stringify(refused.Issues)}`,
+                );
+
+                const lineEntity = (await ctx.Provider.GetEntityObject('MJ_BizApps_Orders: Order Lines', ctx.User)) as BaseEntity;
+                const key = new CompositeKey();
+                key.KeyValuePairs.push({ FieldName: 'ID', Value: lineID });
+                Assert(await lineEntity.InnerLoad(key), 'the order line loads to set SubscriptionAction');
+                lineEntity.Set('SubscriptionAction', 'CreateNew');
+                Assert(
+                    await lineEntity.Save(),
+                    `setting SubscriptionAction must save: ${lineEntity.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const accepted = await close(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
+                Assert(
+                    accepted.Success,
+                    `once SubscriptionAction is answered, Close Won must succeed: ${JSON.stringify(accepted.Issues)}`,
+                );
+            }),
+    },
 ];
 
 for (const check of CloseWonOrderChecks) {

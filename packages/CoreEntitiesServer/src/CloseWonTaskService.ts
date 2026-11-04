@@ -957,7 +957,11 @@ export class CloseWonTaskService {
             }
             return assignment.Get('ID') as string;
         } catch (err) {
-            result.Issues.push(`The ${kind} task was created but could not be routed: ${String(err)}`);
+            const why = err instanceof Error ? err.message : String(err);
+            LogError(`CloseWonTaskService: the ${kind} assignment did not save for task ${taskID}: ${why}`);
+            result.Issues.push(
+                `The ${kind} task was created but NOT routed: the assignment did not save (${why}).`,
+            );
             return null;
         }
     }

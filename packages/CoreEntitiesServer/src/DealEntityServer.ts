@@ -44,10 +44,12 @@ import {
     BaseEntity,
     BaseEntityResult,
     DatabaseProviderBase,
+    type EntityDeleteOptions,
     EntitySaveOptions,
     IMetadataProvider,
     IRunViewProvider,
     LogError,
+    type RemoteOpServerContext,
 } from '@memberjunction/core';
 import { createHash } from 'node:crypto';
 
@@ -76,6 +78,7 @@ import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
 import { FindUnansweredSubscriptionLines } from './subscription-choice.js';
 import { KeptOnDealNote, SendDealScheduleToOrder, StatusIsWon } from './deal-schedule-to-order.js';
 import { OrdersIsInstalled } from './orders-availability.js';
+import { CheckTeamGraphRoleRules } from './team-role-rules.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 
@@ -600,6 +603,16 @@ export class DealEntityServer extends DealEntity {
             return this.refuseSave(partyRefusal);
         }
 
+        let teamRoleRefusal: string | null;
+        try {
+            teamRoleRefusal = await this.teamRoleRulesRefusal();
+        } catch (err) {
+            return this.refuseSave(`could not check the deal's team against role rules: ${err}`);
+        }
+        if (teamRoleRefusal) {
+            return this.refuseSave(teamRoleRefusal);
+        }
+
         try {
             await this.stampCompanyFromPipeline();
             await this.stampOwnerFromTeam();
@@ -936,9 +949,10 @@ export class DealEntityServer extends DealEntity {
      */
     private async runStatusTransition(plan: ActionableStatusTransition): Promise<boolean> {
         const { CloseDealOperation, ReopenDealOperation } = await import('./CloseDealOperation.js');
-        const context = {
+        const context: RemoteOpServerContext = {
             provider: this.ProviderToUse as unknown as IMetadataProvider,
             user: this.ContextCurrentUser,
+            emitProgress: () => undefined,
         };
 
         const result =
@@ -950,7 +964,7 @@ export class DealEntityServer extends DealEntity {
                           LossReasonID: this.LossReasonID ?? null,
                           LossNotes: this.LossNotes ?? null,
                       },
-                      context as never,
+                      context,
                   )
                 : await new ReopenDealOperation().ExecuteServer(
                       {
@@ -960,7 +974,7 @@ export class DealEntityServer extends DealEntity {
                           Reason: 'Reopened by setting the deal status back to an open status.',
                           DealStatusTypeID: plan.TargetStatusID,
                       },
-                      context as never,
+                      context,
                   );
 
         const output = result.Output as { Success?: boolean; Issues?: { Message: string }[] } | undefined;
@@ -1441,6 +1455,9 @@ export class DealEntityServer extends DealEntity {
          * trap, and testing the FK here would walk straight back into it.
          */
         if (this.OrderID_Object?.IsSaved) {
+            return;
+        }
+        if (this.IsSaved && this.GetFieldByName('OrderID')?.Dirty && !this.OrderID) {
             return;
         }
         if (!this.CompanyID) {
@@ -3746,7 +3763,124 @@ export class DealEntityServer extends DealEntity {
         }
 
         const ownerRoleID = await this.ResolveOwnerRoleID();
-        const owner = this.Team.Items.find((m) => m.DealRoleID === ownerRoleID);
+        const owner = this.Team.Items.find(
+            (m) => m.IsActive !== false && UUIDsEqual(m.DealRoleID, ownerRoleID),
+        );
         this.OwnerEmployeeID = owner?.EmployeeID ?? null;
+    }
+
+    /**
+     * Enforces single-holder (`AllowsMultiplePerDeal = 0`) and employee-only owner (`IsOwnerRole = 1`)
+     * rules on team rows saved as part of this deal's graph.
+     */
+    private async teamRoleRulesRefusal(): Promise<string | null> {
+        if (!this.RosterDrivesThisSave || this.Team.Items.length === 0) {
+            return null;
+        }
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+        return CheckTeamGraphRoleRules({
+            dealID: this.ID,
+            dealIsSaved: this.IsSaved,
+            teamIsLoaded: this.Team.IsLoaded,
+            items: this.Team.Items,
+            view,
+            user: this.ContextCurrentUser,
+        });
+    }
+
+    /**
+     * Deletes an order-less open deal and its child team, payment-schedule, and contact-role rows in one
+     * transaction, and refuses a deal that has an order or is closed.
+     */
+    public override async Delete(options?: EntityDeleteOptions): Promise<boolean> {
+        if (this.OrderID) {
+            return this.refuseDelete('This deal has an order. Abandon the deal instead.');
+        }
+
+        const persistedStatusID =
+            (this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined)
+            ?? this.DealStatusTypeID
+            ?? null;
+        if (persistedStatusID) {
+            const flags = await this.readStatusLockFlags(persistedStatusID);
+            if (flags.LocksDeal || flags.Absent) {
+                return this.refuseDelete('This deal is closed and cannot be deleted.');
+            }
+        }
+
+        if (!this.ID || !GUID_SHAPE.test(this.ID)) {
+            return this.refuseDelete('This deal cannot be deleted because its ID is missing or invalid.');
+        }
+
+        const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+        const scope = provider?.BeginEntityTransaction ? await provider.BeginEntityTransaction() : null;
+        try {
+            const childEntities = [
+                'MJ_BizApps_Sales: Deal Team Members',
+                'MJ_BizApps_Sales: Deal Payment Schedules',
+                'MJ_BizApps_Sales: Deal Contact Roles',
+            ] as const;
+
+            for (const entityName of childEntities) {
+                const read = await view.RunView<
+                    BaseEntity & { DeleteWithoutRestamp?: (opts?: EntityDeleteOptions) => Promise<boolean> }
+                >(
+                    {
+                        EntityName: entityName,
+                        ExtraFilter: `DealID = '${this.ID}'`,
+                        ResultType: 'entity_object',
+                    },
+                    this.ContextCurrentUser,
+                );
+                if (!read.Success) {
+                    throw new Error(`could not read ${entityName} for deal ${this.ID}: ${read.ErrorMessage}`);
+                }
+                for (const child of read.Results ?? []) {
+                    const ok =
+                        typeof child.DeleteWithoutRestamp === 'function'
+                            ? await child.DeleteWithoutRestamp(options)
+                            : await child.Delete(options);
+                    if (!ok) {
+                        throw new Error(
+                            child.LatestResult?.CompleteMessage
+                                || child.LatestResult?.Message
+                                || `could not delete child row in ${entityName}`,
+                        );
+                    }
+                }
+            }
+
+            if (!(await super.Delete(options))) {
+                throw new Error(
+                    this.LatestResult?.CompleteMessage
+                        || this.LatestResult?.Message
+                        || 'the deal could not be deleted',
+                );
+            }
+
+            await scope?.Commit();
+            return true;
+        } catch (err) {
+            try {
+                await scope?.Rollback();
+            } catch (rollbackErr) {
+                LogError(`DealEntityServer.Delete: rollback failed: ${rollbackErr}`);
+            }
+            return this.refuseDelete(err instanceof Error ? err.message : String(err));
+        }
+    }
+
+    private refuseDelete(message: string): false {
+        LogError(`DealEntityServer.Delete refused: ${message}`);
+        const failed = new BaseEntityResult();
+        failed.Success = false;
+        failed.Type = 'delete';
+        failed.Message = message;
+        failed.StartedAt = new Date();
+        failed.EndedAt = new Date();
+        failed.OriginalValues = this.Fields.map((f) => ({ FieldName: f.CodeName, Value: f.OldValue }));
+        this.RegisterResultHistoryEntry(failed);
+        return false;
     }
 }

@@ -60,6 +60,7 @@ import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './de
 import { IsFieldReadable } from './field-readable';
 import { SelectableStages } from '../data/selectable-stages';
 import { BillComCustomerWarning, CheckBillComCustomer } from '../data/billcom-customer';
+import type { DealFormLockState } from '../custom/deal-form.component';
 
 const E = MJS_ENTITIES.Deal;
 
@@ -788,7 +789,7 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         // The close stamps likewise, from the set the entity server refuses writes against (#252).
         if (IsDealCloseStamp(fieldName)) return false;
 
-        const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
+        const form = this.FormComponent as unknown as Partial<DealFormLockState> | undefined;
         const locked = form?.IsLocked === true;
         // The outcome rides along with the lock, from the same resolver, because golive#206 keeps Loss
         // Notes editable on a LOST deal and frozen on a won one.
@@ -971,7 +972,15 @@ const FIELD_STYLES = `
         gap: var(--mj-space-4) var(--mj-space-5);
         padding: var(--mj-space-4) var(--mj-space-5);
     }
-    @media (max-width: 720px) { .mjs-fields { grid-template-columns: 1fr; } }
+    /* Slot-mounted panels sit inside two display:contents hosts, so MJ's direct-child flex-shrink: 0
+       selector (.mj-forms-all-panels > *) does not reach their mj-collapsible-panel (#397). */
+    .mj-forms-layout--left-nav .mj-forms-all-panels mj-collapsible-panel:not(.mj-panel--related-entity) {
+        flex-shrink: 0;
+    }
+    @media (max-width: 1024px) { .mjs-fields { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) {
+        .mj-forms-layout--left-nav > .mj-forms-chrome-rail { flex: 0 0 auto; }
+    }
     .mjs-field { min-width: 0; }
     .mjs-field--span { grid-column: 1 / -1; }
     /* The Status control's hints. Previously dw-field__hint, which is defined only in the deal
@@ -1439,12 +1448,12 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
 
     /** Whether the PERSISTED status carries `IsLost`, as the form component resolved it once. */
     public get IsLost(): boolean {
-        return (this.FormComponent as unknown as { IsLost?: boolean } | undefined)?.IsLost === true;
+        return (this.FormComponent as unknown as Partial<DealFormLockState> | undefined)?.IsLost === true;
     }
 
     /** Whether the PERSISTED status carries `IsWon`. */
     public get IsWon(): boolean {
-        return (this.FormComponent as unknown as { IsWon?: boolean } | undefined)?.IsWon === true;
+        return (this.FormComponent as unknown as Partial<DealFormLockState> | undefined)?.IsWon === true;
     }
 
     /** "Outcome" once there is one; "Forecast" while the deal can still move. */
@@ -1912,7 +1921,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         // BaseFormPanel declares no lifecycle hook, so there is nothing to chain to. Angular calls this
         // on the component regardless of whether the base class has one.
         const settled = await Promise.allSettled([
-            LoadDealStatusOptions(),
+            LoadDealStatusOptions(undefined, this.Record?.DealStatusTypeID),
             LoadLossReasons(),
             LoadPipelines(),
             LoadPipelineStages(),
@@ -2127,14 +2136,18 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
      * workspace onto the flag is its own change.
      */
     public get SelectableStatuses(): DealStatusOption[] {
+        // Only ACTIVE statuses may be picked as a target (#461); the deal's own deactivated status row
+        // stays in `statuses()` so `currentStatus`, `CurrentStatusName`, `CurrentStatusIsClosing` and
+        // `StatusIsEditable` still resolve it and let a closed deal in a deactivated status be reopened.
+        const active = this.statuses().filter((s) => s.IsActive !== false);
         // A CLOSED deal may only move to a non-locking status, and that move is a reopen. Offering it
         // another closing status would be neither a close nor a reopen, and the server has no path for it.
         // A deal whose status row is gone may only move to an open one too: the server refuses a close
         // from a status it cannot read (#402).
         if (this.CurrentStatusIsClosing || this.StatusIsMissing) {
-            return this.statuses().filter((s) => !s.LocksDeal);
+            return active.filter((s) => !s.LocksDeal);
         }
-        return this.statuses();
+        return active;
     }
 
     /** The display name of whatever status the deal currently holds. */
@@ -2181,7 +2194,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
      * contain -- a DEACTIVATED row still exists, says whether it locks, and stays read-only here.
      */
     public get StatusIsMissing(): boolean {
-        const form = this.FormComponent as unknown as { IsStatusMissing?: boolean } | undefined;
+        const form = this.FormComponent as unknown as Partial<DealFormLockState> | undefined;
         return this.Record?.IsSaved === true && form?.IsStatusMissing === true;
     }
 
@@ -2813,7 +2826,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
     }
 
     public get IsLocked(): boolean {
-        return (this.FormComponent as unknown as { IsLocked?: boolean } | undefined)?.IsLocked === true;
+        return (this.FormComponent as unknown as Partial<DealFormLockState> | undefined)?.IsLocked === true;
     }
 
     /** The line count, for the section badge, after each load of the cards. */
@@ -2923,7 +2936,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
             );
             return;
         }
-        await (this.FormComponent as unknown as { RefreshDealState?: () => Promise<void> } | undefined)?.RefreshDealState?.();
+        await (this.FormComponent as unknown as Partial<DealFormLockState> | undefined)?.RefreshDealState?.();
     }
 
     /**
@@ -3217,7 +3230,10 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
          * its own, and `CanClose` treats an unresolved status list as "not offerable" rather than
          * guessing.
          */
-        const settled = await Promise.allSettled([LoadDealStatusOptions(), LoadLossReasons()]);
+        const settled = await Promise.allSettled([
+            LoadDealStatusOptions(undefined, this.Record?.DealStatusTypeID),
+            LoadLossReasons(),
+        ]);
         const valueOf = <T>(r: PromiseSettledResult<T>): T | null =>
             r.status === 'fulfilled' ? r.value : null; // vocabulary-grep-allow: PromiseSettledResult discriminant, not a domain status
 
@@ -3287,9 +3303,9 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         return ReopenReasonOrDefault(this.ReopenReason, null);
     }
 
-    /** The statuses a close may land in, by flag. Their names are the user's choice of outcome. */
+    /** The active statuses a close may land in, by flag (#461). Their names are the user's choice of outcome. */
     public get ClosingStatuses(): DealStatusOption[] {
-        return this.statuses().filter((s) => s.LocksDeal);
+        return this.statuses().filter((s) => s.LocksDeal && s.IsActive !== false);
     }
 
     /** The row the user picked, or null before they pick one. */
@@ -3928,6 +3944,7 @@ export const SCHEDULE_DATE_ORDER = 'CASE WHEN PaymentDate IS NULL THEN 0 ELSE 1 
 export class MJSDealSchedulePanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealPaymentSchedule;
     private readonly cdr = inject(ChangeDetectorRef);
+    private _readRowsRequestId = 0;
 
     /**
      * The deal's instalments as last read, for the running total under the grid (bc-aidp-next-golive#290).
@@ -3985,8 +4002,12 @@ export class MJSDealSchedulePanel extends BaseFormPanel<DealEntity> {
     /**
      * Read the rows again rather than sum the grid: the load event carries counts, not rows, and the
      * grid pages, so its rows would be one page of a long schedule.
+     *
+     * Guarded by a monotonic request counter (#505) so an earlier in-flight read cannot overwrite a
+     * newer read when grid loads overlap.
      */
     private async readRows(): Promise<void> {
+        const requestId = ++this._readRowsRequestId;
         const dealID = this.Record?.ID;
         if (!dealID) {
             this.Rows = null;
@@ -3998,6 +4019,9 @@ export class MJSDealSchedulePanel extends BaseFormPanel<DealEntity> {
             Fields: ['Amount', 'PaymentDate'],
             ResultType: 'simple',
         });
+        if (requestId !== this._readRowsRequestId) {
+            return;
+        }
         this.Rows = read.Success ? read.Results ?? [] : null;
         this.cdr.detectChanges();
     }

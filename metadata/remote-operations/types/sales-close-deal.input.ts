@@ -65,7 +65,7 @@ export interface SalesCloseDealInput {
 
     /**
      * Per-deal overrides merged OVER the pipeline's policy. This is how §7.1's "a deal may override
-     * it" is expressed without a per-deal policy column — see CLOSE-FLOW-DECISIONS.md D-CF6.
+     * it" is expressed without a per-deal policy column — see `docs/DECISIONS.md`.
      */
     PolicyOverrides?: SalesCloseWonPolicy;
 

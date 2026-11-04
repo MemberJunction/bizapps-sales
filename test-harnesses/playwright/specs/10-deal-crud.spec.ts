@@ -41,6 +41,7 @@ import {
   shot,
 } from '../lib/explorer';
 import { PipelineByName, SetPipelineByID } from '../lib/deal-form';
+import { Db, DealByName } from '../lib/db';
 
 const PIPELINE_NAME = `${TEST_PREFIX} Pipeline`;
 const PIPELINE_CODE = `${TEST_PREFIX}-PIPE`;
@@ -362,6 +363,24 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
   });
 
   await test.step('delete the Deal', async () => {
+    // 1. A deal with a provisioned order refuses deletion ("This deal has an order. Abandon the deal instead.").
+    await deleteRecordViaRecordView(page, DEAL_NAME);
+    const dealWithOrder = await DealByName(DEAL_NAME);
+    expect(
+      dealWithOrder,
+      'a Deal with an order must refuse deletion and remain in the database',
+    ).toBeDefined();
+
+    // 2. Once order-less (while still holding its auto-seeded DealTeamMember owner row), deleting the
+    //    Deal removes its child rows and the Deal itself in one transaction.
+    const db = await Db();
+    await db
+      .request()
+      .query(
+        `UPDATE __mj_BizAppsSales.Deal SET OrderID = NULL WHERE ID = '${dealWithOrder!.ID}'`,
+      );
+
+    await openEntityGrid(page, 'Deals');
     await deleteRecordViaRecordView(page, DEAL_NAME);
     await shot(page, '22-deal-deleted');
 

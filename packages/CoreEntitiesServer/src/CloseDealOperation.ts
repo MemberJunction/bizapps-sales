@@ -45,6 +45,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { IsBooked } from '@mj-biz-apps/orders-entities';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import {
+    E_ACTIVITY,
     SalesCloseDealOperation as SalesCloseDealOperationBase,
     SalesReopenDealOperation as SalesReopenDealOperationBase,
     StubDownstreamSeam,
@@ -61,6 +62,7 @@ import {
     type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
 
+import { ActivityWriterService } from './activities/ActivityWriterService.js';
 import { DealEntityServer } from './DealEntityServer.js';
 import { SendDealScheduleToOrder } from './deal-schedule-to-order.js';
 import { OrdersIsInstalled } from './orders-availability.js';
@@ -260,6 +262,50 @@ function orderStatusIssues(deal: DealEntityServer): SalesCloseIssue[] {
         Severity: 'warning' as const,
         Message,
     }));
+}
+
+/**
+ * Writes one timeline Activity for a committed close or reopen (#381).
+ *
+ * Linked to the deal, its primary contact, and its account via `ActivityWriterService`. Runs after the
+ * close or reopen transaction commits: a timeline write failure is logged and does not undo the close,
+ * because the deal and its stage event are the record of truth.
+ */
+async function writeTimelineActivity(
+    dealID: string,
+    title: 'Deal closed' | 'Deal reopened',
+    description: string,
+    startedAt: Date,
+    provider: IMetadataProvider,
+    user: UserInfo,
+): Promise<void> {
+    if (!Array.isArray(provider?.Entities) || !provider.Entities.some((e) => e.Name === E_ACTIVITY)) {
+        return;
+    }
+    try {
+        const result = await new ActivityWriterService().LogActivity(
+            {
+                DealID: dealID,
+                TypeCode: 'Note',
+                Title: title,
+                Description: description,
+                StartedAt: startedAt,
+                Direction: 'Internal',
+                Status: 'Logged',
+                Source: 'System',
+                IncludeDealParties: true,
+            },
+            provider,
+            user,
+        );
+        if (!result.Success) {
+            LogError(
+                `CloseDealOperation: '${title}' activity could not be written for deal ${dealID}: ${result.Issues.join(' | ')}`,
+            );
+        }
+    } catch (err) {
+        LogError(`CloseDealOperation: '${title}' activity threw for deal ${dealID}: ${err}`);
+    }
 }
 
 /**
@@ -740,6 +786,21 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
 
             await db.CommitTransaction();
             transactionOpen = false;
+
+            const outcomeLabel = target.IsWon ? 'Outcome: Won.' : target.IsLost ? 'Outcome: Lost.' : 'Outcome: Closed.';
+            const closeBodyParts = [
+                outcomeLabel,
+                this.routingNote(routing, input.Notes, validation.LossReasonName),
+                input.LossNotes?.trim() ? `Loss notes: ${input.LossNotes.trim()}` : null,
+            ].filter(Boolean);
+            await writeTimelineActivity(
+                deal.ID,
+                'Deal closed',
+                closeBodyParts.join(' '),
+                deal.ClosedAt instanceof Date ? deal.ClosedAt : new Date(),
+                provider,
+                user,
+            );
 
             return {
                 Success: true,
@@ -1261,10 +1322,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
      * `DealStageEvent` is APPEND-ONLY and stamps `AmountAtTransition` / `ProbabilityAtTransition`,
      * because "what did we think this was worth when we closed it" is unanswerable later once amounts
      * change. The routing outcome goes into `Notes` — which is what preserves the intent of a close
-     * whose downstream was stubbed (D-CF1).
-     *
-     * §7 also calls for writing an `Activity` here. The Activity spine does not exist in common or MJ
-     * core, so that step is skipped and recorded in CLOSE-FLOW-DECISIONS.md D-CF5 rather than faked.
+     * whose downstream was stubbed (D-CF1). The timeline `Activity` is written after commit by
+     * `writeTimelineActivity` (`docs/DECISIONS.md` D-CF5).
      */
     private stampClose(
         deal: DealEntityServer,
@@ -1700,7 +1759,7 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             }
             // The close stamps describe a close that is no longer in effect; clearing them keeps every
             // rollup that tests `ClosedAt IS NOT NULL` honest. The event above preserves the history
-            // (CLOSE-FLOW-DECISIONS.md D-CF8).
+            // (docs/DECISIONS.md D-CF8).
             deal.ClosedAt = null;
             deal.ClosedByUserID = null;
             deal.ActualCloseDate = null;
@@ -1759,6 +1818,15 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
 
             await db.CommitTransaction();
             transactionOpen = false;
+
+            await writeTimelineActivity(
+                deal.ID,
+                'Deal reopened',
+                `Reason: ${input.Reason.trim()}${lossTrail}`,
+                new Date(),
+                provider,
+                user,
+            );
 
             // The reopen SUCCEEDS even when the order could not come back with it, and says what did
             // not happen rather than failing (D-OS1).

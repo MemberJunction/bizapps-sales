@@ -58,8 +58,6 @@ import {
 } from '@memberjunction/testing-integration';
 import { DealEntityServer, OrdersIsInstalled } from '@mj-biz-apps/sales-core-entities-server';
 import {
-    E_ORDERS_PRODUCT,
-    ProductFilterFor,
     type DealEntity,
     type mjBizAppsSalesDealPaymentScheduleEntity,
 } from '@mj-biz-apps/sales-entities';
@@ -72,11 +70,13 @@ import {
     E_STAGE_EVENT,
     E_TEAM,
     InRolledBackTransaction,
+    NewDeal,
     ProviderOf,
     ResolveSalesFixture,
     SALES_SCHEMA,
+    SaveOk,
+    SellableProducts,
     TxOne,
-    businessToday,
     type SalesFixture,
 } from '../fixture.js';
 
@@ -92,34 +92,7 @@ const COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
 const E_ORDER_HEADER = 'MJ_BizApps_Orders: Order Headers';
 const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
 
-/**
- * A minimal valid deal, not yet saved. `shape` mutates it for whatever the check is about.
- *
- * Built through the PROVIDER rather than a global `Metadata`, so the entity rides the same connection as
- * the check's open transaction — otherwise its writes would be invisible to the reads below and would not
- * be rolled back with everything else.
- *
- * `CompanyID` is set to the pipeline's here only so the record is coherent before it is saved. The server
- * overwrites it from the pipeline regardless; SD2 is the check that proves it.
- */
-async function newDeal(
-    ctx: Parameters<NamedCheck['Fn']>[0],
-    f: SalesFixture,
-    shape?: (deal: DealEntity) => void,
-): Promise<DealEntity> {
-    const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
-    deal.NewRecord();
-    deal.Name = 'IT deal';
-    deal.PipelineID = f.PipelineID;
-    deal.PipelineStageID = f.StageID;
-    deal.DealTypeID = f.DealTypeID;
-    deal.DealStatusTypeID = f.OpenStatusID;
-    deal.AccountID = f.AccountID;
-    deal.CompanyID = f.PipelineCompanyID;
-    deal.TermMonths = 12;
-    shape?.(deal);
-    return deal;
-}
+const newDeal = NewDeal;
 
 /**
  * One row, asserted to exist. `TxOne` is the transaction-aware read this bundle uses; this wraps a plain
@@ -184,11 +157,7 @@ async function loadOrderLines(deal: DealEntity): Promise<readonly BaseEntity[]> 
     return order.Lines.Items;
 }
 
-/** Saves and asserts it worked, reporting the entity's own message rather than a generic failure. */
-async function saveOk(deal: DealEntity, what: string): Promise<void> {
-    const ok = await deal.Save();
-    Assert(ok, `${what} failed: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`);
-}
+const saveOk = SaveOk;
 
 /**
  * Adds one ORDER line to the deal's embedded order — product and quantity, and nothing else.
@@ -244,42 +213,8 @@ async function sellableProducts(
     companyID: string,
     count: number,
 ): Promise<string[]> {
-    const r = await new RunView().RunView<{ ID: string }>(
-        {
-            EntityName: E_ORDERS_PRODUCT,
-            /**
-             * THE COMPANY CLAUSE IS SPELLED OUT HERE, and its absence was a real defect.
-             *
-             * #29 removed `CompanyID` from `ProductFilterFor`, which is right for the picker — a deal
-             * may now sell any company's product. It is wrong for THIS helper, whose whole purpose is
-             * "give me products belonging to the company under test". When the clause vanished from the
-             * shared rule, the parameter survived only inside the failure message below, so nothing —
-             * not the compiler, not `noUnusedParameters` — could report that the filtering was gone.
-             *
-             * The effect was silent and green. `twoLines()` takes `slice(0, 2)` of a `Name ASC` list
-             * that now spans every company, so on the seeded host it returns two BC Education Group
-             * products for a Blue Cypress deal. Ten-plus of the save-deal checks went on passing while
-             * exercising a cross-company scenario none of them was written for, and the one assertion
-             * that touches the stamp is a truthiness test the database already guarantees.
-             *
-             * The sibling helper in `close-won-order.fixture.ts` hit this and was fixed; this one was
-             * not. Same fix, same reason.
-             */
-            ExtraFilter: `CompanyID = '${companyID.replace(/'/g, "''")}' AND (${ProductFilterFor(await businessToday(ctx))})`,
-            OrderBy: 'Name ASC',
-            ResultType: 'simple',
-            Fields: ['ID'],
-        },
-        ctx.User,
-    );
-    Assert(r.Success, `setup: reading orders' catalogue failed — ${r.ErrorMessage}`);
-    const ids = (r.Results ?? []).map((row) => row.ID);
-    Assert(
-        ids.length >= count,
-        `setup: this host needs ${count} sellable product(s) for company ${companyID}, found ${ids.length}. ` +
-            'Run scripts/seed-demo-data.sh in bizapps-orders.',
-    );
-    return ids.slice(0, count);
+    const rows = await SellableProducts(ctx, companyID, count);
+    return rows.map((row) => row.ID);
 }
 
 /**
@@ -2513,6 +2448,42 @@ export const SaveDealChecks: NamedCheck[] = [
                     'the bill-to finance chose must survive the deal\'s contact change',
                 );
                 AssertEqual(deal.OrderStatusWarnings.length, 0, `no warning expected — got ${deal.OrderStatusWarnings.join(' | ')}`);
+            }),
+    },
+    {
+        Id: 'save-deal.SD45',
+        Name: 'SD45: deactivating the Owner/AE team row clears Deal.OwnerEmployeeID (#409)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                const f = await ResolveSalesFixture(ctx);
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD45 inactive owner'; });
+                await deal.SetOwner(f.EmployeeID);
+                await saveOk(deal, 'create with owner');
+
+                const initial = await TxOne<{ OwnerEmployeeID: string | null }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
+                );
+                Assert(
+                    UUIDsEqual(initial.OwnerEmployeeID, f.EmployeeID),
+                    `setup: OwnerEmployeeID must start as ${f.EmployeeID}, got ${initial.OwnerEmployeeID}`,
+                );
+
+                const reloaded = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await reloaded.Load(deal.ID), 'the deal reloads');
+                await reloaded.Team.Load();
+                AssertEqual(reloaded.Team.Count, 1, 'setup: one team row on the deal');
+                reloaded.Team.Items[0].IsActive = false;
+                await saveOk(reloaded, 'deactivating the owner team row');
+
+                const afterDeactivate = await TxOne<{ OwnerEmployeeID: string | null }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
+                );
+                AssertEqual(
+                    afterDeactivate.OwnerEmployeeID,
+                    null,
+                    'an inactive Owner/AE team row must clear Deal.OwnerEmployeeID to null',
+                );
             }),
     },
 ];

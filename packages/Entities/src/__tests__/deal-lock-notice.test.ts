@@ -173,23 +173,26 @@ describe('the sentence the user actually reads', () => {
  * and standing one up would test the harness. Both claims are structural, so the source is where
  * they are visible.
  */
-describe('#226 — the won flag survives the resolver', () => {
+describe('#226 / #460 — the won and open flags survive the resolver', () => {
     const source = readFileSync(new URL('../close-lock.ts', import.meta.url), 'utf8');
 
-    it('asks the status row for IsWon', () => {
+    it('asks the status row for IsWon and IsOpen', () => {
         const fields = source.slice(source.indexOf('Fields: ['), source.indexOf('Fields: [') + 120);
         expect(fields, 'a flag that is never selected is always undefined, and undefined is not won')
             .toMatch(/'IsWon'/);
+        expect(fields, 'IsOpen decides the header tone on an open deal without reading status names')
+            .toMatch(/'IsOpen'/);
     });
 
-    it('carries it out of the unlocked exit rather than resetting it', () => {
-        expect(source).toMatch(/if \(!row\?\.LocksDeal\) \{\s*return \{ \.\.\.open, IsWon: isWon \};/);
+    it('carries them out of the unlocked exit rather than resetting them', () => {
+        expect(source).toMatch(/if \(!row\?\.LocksDeal\) \{\s*return \{ \.\.\.open, IsWon: isWon, IsOpen: isOpen \};/);
     });
 
-    it('reads the flag and never a status name', () => {
+    it('reads the flags and never a status name', () => {
         // §3, enforced repo-wide by test:vocabulary-gate. Named here too because THIS is the file a
         // shortcut would be taken in: `row.Name === 'Closed Won'` is one character shorter than the
         // flag and works perfectly until a deployment calls its winning status "Signed".
         expect(source).toMatch(/const isWon = row\?\.IsWon === true;/);
+        expect(source).toMatch(/const isOpen = row\?\.IsOpen === true;/);
     });
 });

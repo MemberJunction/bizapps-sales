@@ -34,7 +34,7 @@ import type { Page } from '@playwright/test';
 import { captureConsoleErrors, expectNoConsoleErrors } from '../lib/explorer';
 import { QueryOne } from '../lib/db';
 import { DealForm, EditDeal, FieldIsEditable } from '../lib/deal-form';
-import { ReopenRecord } from '../lib/deal-flow';
+import { OpenDealFromRoster, OpenNewDealWithoutReload } from '../lib/deal-flow';
 
 /**
  * The field whose editability stands for the lock. Name is frozen on every locked deal — it is not in
@@ -58,30 +58,7 @@ async function expectEditable(page: Page, editable: boolean, why: string): Promi
  * LOCAL HELPER, and the one selector here not declared in this repo: Explorer's shell renders record
  * tabs as Golden Layout tabs (`mj-tab-container .lm_tab`), which is MJ's markup, not the app's. Clicking
  * the tab is the point — navigating to the record route would reload the page and rebuild every form,
- * which is not a switch.
- */
-/**
- * KNOWN FAILING, and the reason is recorded here rather than guessed at again.
- *
- * This spec switches between two open deals, so it needs TWO record tabs alive at once. It opens
- * both with ReopenRecord, which does a full page.goto -- and the comment above already says why
- * that is wrong: a reload rebuilds every form, which is not a switch. It passed historically
- * because the PERSISTED workspace restored the first tab across the reload.
- *
- * The suite now runs an ephemeral workspace (lib/test.ts), so nothing restores it. Measured, two
- * deals opened by url in one context:
- *
- *     ephemeral ON    1 deal form, 1 .lm_tab   -- only the current deal
- *     ephemeral OFF   1 deal form, 57 .lm_tab  -- the host workspace's tabs, not these two
- *
- * So the premise cannot hold under the flag, and without the flag it would be matching tabs against
- * whatever the host workspace happens to contain.
- *
- * WHAT WOULD FIX IT: open both deals through the roster (a double-click goes through
- * OpenEntityRecord and adds a tab beside the open one) and return to the roster between them
- * WITHOUT a reload. An attempt at that helper is not in the tree: it could not locate the roster row
- * reliably even on a fresh roster that demonstrably lists all seven deals, and an unproven helper is
- * worse than a documented gap.
+ * which is not a switch (#412).
  */
 async function selectRecordTab(page: Page, name: string): Promise<void> {
     const tab = page.locator('mj-tab-container .lm_tab').filter({ hasText: name.slice(0, 18) }).first();
@@ -121,7 +98,7 @@ test.describe('close lock — per record tab', () => {
         const openName = String(open!.Name);
 
         // ── 1. The closed deal is locked ────────────────────────────────────
-        await ReopenRecord(page, lockedName);
+        await OpenDealFromRoster(page, lockedName);
         await expect(
             DealForm(page).locator('.mjs-deal-hero__chip:has(.fa-lock)'),
             'a locked deal must say so — the Locked chip is what tells a rep why nothing responds',
@@ -130,8 +107,8 @@ test.describe('close lock — per record tab', () => {
         await expectEditable(page, false, 'a locked deal\'s name must be read-only, even in edit mode');
 
         // ── 2. The open deal, in a second tab, is editable ──────────────────
-        // A record-route navigation reloads the page; Explorer restores the first deal's tab beside it.
-        await ReopenRecord(page, openName);
+        // Opened from the All-deals roster without a page reload so both record tabs stay mounted (#412).
+        await OpenDealFromRoster(page, openName);
         await expect(
             DealForm(page).locator('.mjs-deal-hero__chip:has(.fa-lock)'),
             'an open deal must not show the Locked chip',
@@ -141,9 +118,6 @@ test.describe('close lock — per record tab', () => {
 
         // ── 3. Back to the closed one — still locked ────────────────────────
         await selectRecordTab(page, lockedName);
-        // Edit mode again: opening the second deal reloaded the page, and outside edit mode every field
-        // reads as not editable, which would make this check pass on any deal.
-        await EditDeal(page);
         await expectEditable(page, false, 'returning to the closed deal must find it still locked');
 
         // ── 4. Back to the open one — STILL EDITABLE. This is the defect. ───
@@ -153,7 +127,6 @@ test.describe('close lock — per record tab', () => {
          * "the form randomly stops working".
          */
         await selectRecordTab(page, openName);
-        await EditDeal(page);
         await expectEditable(
             page,
             true,
@@ -161,5 +134,42 @@ test.describe('close lock — per record tab', () => {
         );
 
         expectNoConsoleErrors(sink, 'close lock across tabs');
+    });
+
+    test('opening a closed deal and then clicking New deal leaves the new deal editable (#413)', async ({ page }) => {
+        test.setTimeout(360_000);
+        const sink = captureConsoleErrors(page);
+
+        const locked = await QueryOne<{ Name: string }>(`
+            SELECT TOP 1 d.Name
+              FROM __mj_BizAppsSales.Deal d
+              JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID
+             WHERE t.LocksDeal = 1
+             ORDER BY d.DealNumber`);
+        expect(locked?.Name, 'the host needs a deal in a LOCKING status, or there is nothing to test')
+            .toBeTruthy();
+        const lockedName = String(locked!.Name);
+
+        await OpenDealFromRoster(page, lockedName);
+        await expect(
+            DealForm(page).locator('.mjs-deal-hero__chip:has(.fa-lock)'),
+            'the locked deal must show the Locked chip',
+        ).toBeVisible({ timeout: 30_000 });
+        await EditDeal(page);
+        await expectEditable(page, false, 'the locked deal\'s name must be read-only in edit mode');
+
+        // Start a new deal in the same SPA session without reloading (#413).
+        await OpenNewDealWithoutReload(page);
+        await expect(
+            DealForm(page).locator('.mjs-deal-hero__chip:has(.fa-lock)'),
+            'a brand-new deal must never inherit the Locked chip from a previously opened closed deal',
+        ).toHaveCount(0);
+        await expectEditable(
+            page,
+            true,
+            'a brand-new deal opened after a locked deal must have editable fields',
+        );
+
+        expectNoConsoleErrors(sink, 'new deal after locked deal');
     });
 });

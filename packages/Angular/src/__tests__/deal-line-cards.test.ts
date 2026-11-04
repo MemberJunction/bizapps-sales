@@ -154,8 +154,9 @@ describe('the concession line on a discounted card (golive#340)', () => {
         expect(withState('Pending').ConcessionBadge(line({ DiscountPct: 0.1 }))).toMatchObject({ Retry: false, Tone: 'pending' });
     });
 
-    it('offers Record again for a rejected or unrecorded discount', () => {
+    it('offers Record again for a rejected, uncovered or unrecorded discount (#510)', () => {
         expect(withState('Rejected').ConcessionBadge(line({ DiscountPct: 0.1 }))).toMatchObject({ Label: 'Discount rejected', Retry: true });
+        expect(withState('NotCovered').ConcessionBadge(line({ DiscountPct: 0.1 }))).toMatchObject({ Label: 'Discount not covered', Tone: 'problem', Retry: true });
         expect(withState('NotRecorded').ConcessionBadge(line({ DiscountPct: 0.1 }))).toMatchObject({ Retry: true });
     });
 

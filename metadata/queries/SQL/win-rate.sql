@@ -50,6 +50,7 @@ SELECT
     d.Pipeline                                   AS PipelineName,
     d.DealTypeID,
     d.DealType                                   AS DealTypeName,
+    ISNULL(cur.Code, N'USD')                     AS CurrencyCode,
     COUNT(*)                                     AS ClosedCount,
     SUM(CASE WHEN st.IsWon  = 1 THEN 1 ELSE 0 END) AS WonCount,
     SUM(CASE WHEN st.IsLost = 1 THEN 1 ELSE 0 END) AS LostCount,
@@ -63,6 +64,8 @@ FROM [__mj_BizAppsSales].vwDeals d
 INNER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
        AND st.IsClosed = 1
+LEFT OUTER JOIN [__mj_BizAppsAccounting].Currency cur
+        ON cur.ID = d.CurrencyID
 WHERE 1 = 1
   {% if CompanyID %}
   AND d.CompanyID = {{ CompanyID | sqlString }}
@@ -91,6 +94,7 @@ WHERE 1 = 1
   AND d.ActualCloseDate <= {{ PeriodEnd | sqlString }}
   {% endif %}
 GROUP BY
-    d.CompanyID, d.Company, d.PipelineID, d.Pipeline, d.DealTypeID, d.DealType
+    d.CompanyID, d.Company, d.PipelineID, d.Pipeline, d.DealTypeID, d.DealType,
+    ISNULL(cur.Code, N'USD')
 ORDER BY
-    d.Company, d.Pipeline, d.DealType;
+    d.Company, d.Pipeline, d.DealType, CurrencyCode;
