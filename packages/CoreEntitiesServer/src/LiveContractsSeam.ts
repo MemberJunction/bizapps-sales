@@ -746,17 +746,17 @@ export class LinkOrderToContractCapabilityProvider
 }
 
 export function RegisterLiveContractsCapabilities(): void {
-    AppCapabilityRegistry.Instance.Register(
+    AppCapabilityRegistry?.Instance?.Register(
         CONTRACTS_CREATE_FROM_DEAL_CAPABILITY,
         CreateContractFromDealCapabilityProvider,
         { ownerApp: '@mj-biz-apps/sales', requiredEntities: [E_CONTRACT] },
     );
-    AppCapabilityRegistry.Instance.Register(
+    AppCapabilityRegistry?.Instance?.Register(
         CONTRACTS_UPDATE_FROM_DEAL_CAPABILITY,
         UpdateContractFromDealCapabilityProvider,
         { ownerApp: '@mj-biz-apps/sales', requiredEntities: [E_CONTRACT] },
     );
-    AppCapabilityRegistry.Instance.Register(
+    AppCapabilityRegistry?.Instance?.Register(
         CONTRACTS_LINK_ORDER_CAPABILITY,
         LinkOrderToContractCapabilityProvider,
         { ownerApp: '@mj-biz-apps/sales', requiredEntities: [E_CONTRACT] },

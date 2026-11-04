@@ -278,28 +278,44 @@ export class DealLockOrderLineCrossEntityPolicy implements ICrossEntityPolicy {
         scope: CrossEntityEvaluationScope,
     ): Promise<CrossEntityPolicyVerdict> {
         const line = entity as mjBizAppsOrdersOrderLineEntity;
-        const rawOrderHeaderID = line.OrderHeaderID ?? entity.GetFieldByName('OrderHeaderID')?.Value;
-        const orderHeaderID = rawOrderHeaderID != null ? String(rawOrderHeaderID).trim() : '';
-        if (!orderHeaderID) {
+        const field = entity.GetFieldByName('OrderHeaderID');
+        const candidateIds: string[] = [];
+        const currentRaw = line.OrderHeaderID ?? field?.Value;
+        const currentId = currentRaw != null ? String(currentRaw).trim() : '';
+        if (currentId) {
+            candidateIds.push(currentId);
+        }
+        if (entity.IsSaved && field?.OldValue != null) {
+            const oldId = String(field.OldValue).trim();
+            if (oldId && !candidateIds.includes(oldId)) {
+                candidateIds.push(oldId);
+            }
+        }
+        if (candidateIds.length === 0) {
             return { Allowed: true };
         }
         const rawLineID = line.ID ?? entity.GetFieldByName('ID')?.Value;
         const orderLineID = rawLineID != null ? String(rawLineID).trim() || null : null;
-        const refusal = await this.veto.MayEdit(
-            {
-                OrderHeaderID: orderHeaderID,
-                OrderLineID: orderLineID,
-                Kind: kind,
-                ContextUser: scope.ContextUser ?? entity.ContextCurrentUser ?? null,
-            },
-            scope,
-        );
-        return refusal ? { Allowed: false, ErrorMessage: refusal, FieldName: 'OrderHeaderID' } : { Allowed: true };
+        for (const orderHeaderID of candidateIds) {
+            const refusal = await this.veto.MayEdit(
+                {
+                    OrderHeaderID: orderHeaderID,
+                    OrderLineID: orderLineID,
+                    Kind: kind,
+                    ContextUser: scope.ContextUser ?? entity.ContextCurrentUser ?? null,
+                },
+                scope,
+            );
+            if (refusal) {
+                return { Allowed: false, ErrorMessage: refusal, FieldName: 'OrderHeaderID' };
+            }
+        }
+        return { Allowed: true };
     }
 }
 
 export function RegisterDealLockOrderLineCrossEntityPolicy(veto?: DealLockOrderLineVeto): void {
-    CrossEntityPolicyEngine.Instance.RegisterPolicy(new DealLockOrderLineCrossEntityPolicy(veto));
+    CrossEntityPolicyEngine?.Instance?.RegisterPolicy(new DealLockOrderLineCrossEntityPolicy(veto));
 }
 
 RegisterDealLockOrderLineCrossEntityPolicy();

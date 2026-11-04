@@ -48,7 +48,7 @@ export const DEAL_STAGE_EVENT_LIFECYCLE_POLICY: IEntityLifecyclePolicy = {
 };
 
 export function RegisterDealStageEventLifecyclePolicy(): void {
-    EntityLifecyclePolicyEngine.Instance.RegisterPolicy(
+    EntityLifecyclePolicyEngine?.Instance?.RegisterPolicy(
         DEAL_STAGE_EVENT_ENTITY,
         DEAL_STAGE_EVENT_LIFECYCLE_POLICY,
     );
@@ -70,7 +70,7 @@ export class DealStageEventEntityServer extends mjBizAppsSalesDealStageEventEnti
     }
 
     private resolveAppendOnlyRefusal(operation: 'Update' | 'Delete'): string {
-        if (this.EntityInfo?.Name) {
+        if (this.EntityInfo?.Name && EntityLifecyclePolicyEngine?.Instance) {
             const gateMessage = EntityLifecyclePolicyEngine.Instance.CheckWritePermissionGate(
                 this,
                 operation,
@@ -81,7 +81,7 @@ export class DealStageEventEntityServer extends mjBizAppsSalesDealStageEventEnti
                 return gateMessage;
             }
         }
-        const policy = EntityLifecyclePolicyEngine.Instance.ResolvePolicy({
+        const policy = EntityLifecyclePolicyEngine?.Instance?.ResolvePolicy({
             Name: DEAL_STAGE_EVENT_ENTITY,
         } as EntityInfo);
         return policy?.writeAuthority?.errorMessage ?? DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE;

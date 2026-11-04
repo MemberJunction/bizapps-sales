@@ -151,7 +151,7 @@ export const DEAL_LIFECYCLE_POLICY: IEntityLifecyclePolicy = {
 };
 
 export function RegisterDealLifecyclePolicy(): void {
-    EntityLifecyclePolicyEngine.Instance.RegisterPolicy(DEAL_ENTITY, DEAL_LIFECYCLE_POLICY);
+    EntityLifecyclePolicyEngine?.Instance?.RegisterPolicy(DEAL_ENTITY, DEAL_LIFECYCLE_POLICY);
 }
 
 RegisterDealLifecyclePolicy();
@@ -618,7 +618,8 @@ export class DealEntityServer extends DealEntity {
          */
         const reopenScopeActive =
             this._reopenInProgress ||
-            ServerOperationScopeManager.Instance.IsOperationActive([DEAL_REOPEN_OPERATION_KEY], DEAL_ENTITY);
+            (ServerOperationScopeManager?.Instance?.IsOperationActive([DEAL_REOPEN_OPERATION_KEY], DEAL_ENTITY) ??
+                false);
         if (this.IsSaved && !reopenScopeActive) {
             const refusal = await this.checkCloseLock(transition?.Kind === 'Reopen');
             if (refusal) {
@@ -2792,7 +2793,7 @@ export class DealEntityServer extends DealEntity {
      * a static, which is precisely how a caller ends up with the list and without the condition.
      */
     private static lockEditableFields(isLost: boolean): ReadonlySet<string> {
-        const policy = EntityLifecyclePolicyEngine.Instance.ResolvePolicy({
+        const policy = EntityLifecyclePolicyEngine?.Instance?.ResolvePolicy({
             Name: DEAL_ENTITY,
         } as EntityInfo);
         const stateKey = isLost ? 'LockedLost' : 'LockedWon';
@@ -2851,6 +2852,9 @@ export class DealEntityServer extends DealEntity {
     public async BeginClose<T>(body: () => Promise<T>): Promise<T> {
         this._closeInProgress = true;
         try {
+            if (!ServerOperationScopeManager?.Instance) {
+                return await body();
+            }
             return await ServerOperationScopeManager.Instance.RunWithAuthority(
                 {
                     operationKey: DEAL_CLOSE_OPERATION_KEY,
@@ -2882,14 +2886,14 @@ export class DealEntityServer extends DealEntity {
         if (
             this._closeInProgress ||
             this._reopenInProgress ||
-            ServerOperationScopeManager.Instance.IsOperationActive(
+            (ServerOperationScopeManager?.Instance?.IsOperationActive(
                 [DEAL_CLOSE_OPERATION_KEY, DEAL_REOPEN_OPERATION_KEY],
                 DEAL_ENTITY,
-            )
+            ) ?? false)
         ) {
             return null;
         }
-        const policy = EntityLifecyclePolicyEngine.Instance.ResolvePolicy({
+        const policy = EntityLifecyclePolicyEngine?.Instance?.ResolvePolicy({
             Name: DEAL_ENTITY,
         } as EntityInfo);
         const stampFields = policy?.stateMachine?.frozenFieldsByState?.['Open'] ?? DealCloseStampFields();
@@ -2916,6 +2920,9 @@ export class DealEntityServer extends DealEntity {
     public async BeginReopen<T>(body: () => Promise<T>): Promise<T> {
         this._reopenInProgress = true;
         try {
+            if (!ServerOperationScopeManager?.Instance) {
+                return await body();
+            }
             return await ServerOperationScopeManager.Instance.RunWithAuthority(
                 {
                     operationKey: DEAL_REOPEN_OPERATION_KEY,
