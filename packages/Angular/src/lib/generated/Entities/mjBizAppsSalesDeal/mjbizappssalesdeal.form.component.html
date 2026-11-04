@@ -429,6 +429,14 @@
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
+            FieldName="LeadSourceDetail"
+            Type="textbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
             FieldName="WinOutcome"
             Type="textbox"
             [EditMode]="EditMode"
@@ -487,6 +495,24 @@
             [ShowLabel]="true"
             FieldName="StandardAgreementModifiedFlag"
             Type="textbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
+
+    </mj-collapsible-panel>
+
+    <!-- Timeline & Milestones Section -->
+    <mj-collapsible-panel
+        SectionKey="timelineMilestones"
+        SectionName="Timeline & Milestones"
+        Icon="fa fa-calendar"
+        [Form]="this"
+        [FormContext]="formContext">
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="false"
+            FieldName="CreationDate"
+            Type="datepicker"
             [EditMode]="EditMode"
             [FormContext]="formContext"
         ></mj-form-field>

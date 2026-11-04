@@ -17,6 +17,7 @@ export class mjBizAppsSalesDealFormComponent extends BaseFormComponent {
         await super.ngOnInit();
         this.initSections([
             { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
+            { sectionKey: 'timelineMilestones', sectionName: 'Timeline & Milestones', isExpanded: true },
             { sectionKey: 'mJBizAppsSalesDealContactRoles', sectionName: 'Deal Contact Roles', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDealStageEvents', sectionName: 'Deal Stage Events', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDealTeamMembers', sectionName: 'Deal Team Members', isExpanded: false },
