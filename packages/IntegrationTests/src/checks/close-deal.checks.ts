@@ -719,6 +719,31 @@ export const CloseDealChecks: NamedCheck[] = [
                     !(await locked.Save()),
                     'a field outside the shared set must still be refused — otherwise the lock is advisory',
                 );
+
+                /**
+                 * AND `CreationDate` BY NAME (#532), which the `Name` probe above does not cover.
+                 *
+                 * `Name` proves the lock holds SOMETHING. This proves it holds the one field most
+                 * likely to be carved out later, because the column exists IN ORDER to be editable —
+                 * it is the business creation date a rep corrects when an import got it wrong — and on
+                 * a closed deal only the lock stops that. Adding it to the editable set would leave
+                 * every assertion above still passing while the deal's aging basis became rewritable
+                 * after close, which is the kind of green nobody investigates.
+                 *
+                 * A FRESH ENTITY, because `locked` is still dirty from the refused rename: reusing it
+                 * would let the rename produce the refusal and this probe would prove nothing.
+                 */
+                const lockedDate = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await lockedDate.Load(lockedID), 'the locked deal reloads for the CreationDate probe');
+                Assert(
+                    !DealFieldsEditableWhileLocked(true).has('CreationDate'),
+                    'CreationDate must NOT be carved out of the lock: a closed deal keeps the creation date it closed with (#532)',
+                );
+                lockedDate.CreationDate = new Date('2020-01-01T00:00:00.000Z');
+                Assert(
+                    !(await lockedDate.Save()),
+                    'CreationDate must be refused on a locked deal (#532)',
+                );
             }),
     },
     {
