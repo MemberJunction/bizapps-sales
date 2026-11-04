@@ -121,8 +121,11 @@ async function LoadEmployees(): Promise<EmployeeOption[] | null> {
     return (result.Results ?? []).map((e) => ({ ID: String(e.ID), Name: e.FirstLast ?? '(unnamed employee)' }));
 }
 
-/** One pipeline the deal may sit in, with the company it sells as (#327). */
-export type PipelineOption = CompanyPipeline;
+/**
+ * One pipeline the deal may sit in, with the company it sells as (#327), and whether it is active: an
+ * inactive one is offered only to the deal already in it (bc-aidp-next-golive#423).
+ */
+export type PipelineOption = CompanyPipeline & { IsActive: boolean };
 
 /**
  * One stage, carrying the pipeline that owns it — the whole point of the list — and the defaults a
@@ -135,7 +138,12 @@ export interface PipelineStageOption extends StageDefaults {
 }
 
 /**
- * Every active pipeline, for the picker that also decides which stages are offered.
+ * Every pipeline, active or not, for the picker that also decides which stages are offered.
+ *
+ * INACTIVE ONES ARE LOADED TOO (bc-aidp-next-golive#423). Deactivating a pipeline takes it off the
+ * picker for new choices, but a deal already in it still has to name it: with active-only rows a won
+ * deal in a retired pipeline showed "—" for its pipeline, and its select fell back to "— choose —".
+ * `PipelineOptions` offers an inactive pipeline only to the deal that sits in it.
  *
  * ORDERED THE WAY THE WORKSPACE ORDERS THEM, which is `DisplayRank` first.
  *
@@ -154,10 +162,9 @@ export interface PipelineStageOption extends StageDefaults {
 async function LoadPipelines(): Promise<PipelineOption[]> {
     const result = await new RunView().RunView<PipelineRow>({
         EntityName: MJS_ENTITIES.Pipeline,
-        ExtraFilter: 'IsActive = 1',
         OrderBy: 'DisplayRank ASC, Name ASC',
         ResultType: 'simple',
-        Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'],
+        Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank', 'IsActive'],
     });
     if (!result?.Success) return [];
     return OrderPipelinesByCompany((result.Results ?? []).map(ToPipelineOption));
@@ -172,6 +179,7 @@ interface PipelineRow {
     Company: string | null;
     IsDefault: boolean;
     DisplayRank: number;
+    IsActive: boolean;
 }
 
 function ToPipelineOption(r: PipelineRow): PipelineOption {
@@ -183,6 +191,7 @@ function ToPipelineOption(r: PipelineRow): PipelineOption {
         CompanyName: r.Company ?? null,
         IsDefault: !!r.IsDefault,
         DisplayRank: Number(r.DisplayRank ?? 0),
+        IsActive: !!r.IsActive,
     };
 }
 
@@ -1938,12 +1947,18 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
 
     /** The selected company's pipelines, in picker order (#327). */
     public get PipelineOptions(): PipelineOption[] {
-        return PipelinesForCompany(this.pipelines(), this.SelectedCompanyID);
+        return PipelinesForCompany(this.offeredPipelines, this.SelectedCompanyID);
     }
 
     /** Every company that owns a pipeline, default company first. */
     public get CompanyOptions(): PipelineCompany[] {
-        return PipelineCompanies(this.pipelines());
+        return PipelineCompanies(this.offeredPipelines);
+    }
+
+    /** The active pipelines, plus the deal's own when it is inactive (bc-aidp-next-golive#423). */
+    private get offeredPipelines(): PipelineOption[] {
+        const id = String(this.Record?.PipelineID ?? '').toLowerCase();
+        return this.pipelines().filter((p) => p.IsActive || (!!id && p.ID.toLowerCase() === id));
     }
 
     /**
@@ -1951,12 +1966,12 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
      * company also chooses its pipeline, so the pipeline always says which company is selected.
      */
     public get SelectedCompanyID(): string | null {
-        return InitialCompanyID(this.pipelines(), this.Record?.PipelineID ?? null);
+        return InitialCompanyID(this.offeredPipelines, this.Record?.PipelineID ?? null);
     }
 
     /** Moves the deal to the company's first pipeline, which clears a stage the old one owned. */
     public SetCompany(companyID: string | null): void {
-        const first = PipelinesForCompany(this.pipelines(), companyID)[0];
+        const first = PipelinesForCompany(this.offeredPipelines, companyID)[0];
         if (first) this.SetPipeline(first.ID);
     }
 
