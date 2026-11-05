@@ -244,6 +244,15 @@ describe('the Board tabs (bc-aidp-next-golive#351)', () => {
             // The other tabs still name theirs: the tabs span companies.
             expect(board.TabLabel(PIPELINES[0])).toBe('p-b1 (company-b)');
         });
+
+        it('still names the company on a one-company tab when only the shared tab spans both', () => {
+            // A shared pipeline whose first row is company-b, beside a pipeline only company-b uses:
+            // the tabs span two companies through the shared one, so the single-company tab says whose it is.
+            const pipelines = [P('p-shared', 'company-b'), P('p-shared', 'company-a'), P('p-b-only', 'company-b')];
+            const board = boardWith(null, [], [], pipelines);
+            expect(board.TabLabel(pipelines[2])).toBe('p-b-only (company-b)');
+            expect(board.TabLabel(pipelines[0])).toBe('p-shared');
+        });
     });
 });
 

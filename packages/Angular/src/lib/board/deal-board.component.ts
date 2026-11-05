@@ -310,8 +310,10 @@ export class DealBoardComponent {
      * pipeline serves several companies, where naming one of them would be wrong.
      */
     public TabLabel(pipeline: Pick<PipelineLookup, 'ID' | 'Name' | 'CompanyName'>): string {
-        const tabs = this.TabPipelines;
-        const companies = new Set(tabs.map((p) => String(p.CompanyID).toLowerCase()));
+        // Counted over every row of the tabs' pipelines, not the one row a tab shows: a shared pipeline's
+        // tab carries only its first company, which would hide that the tabs span several.
+        const tabIDs = this.TabPipelines.map((p) => p.ID);
+        const companies = new Set(this.Pipelines.filter((p) => HasID(tabIDs, p.ID)).map((p) => String(p.CompanyID).toLowerCase()));
         const shared = this.Pipelines.filter((p) => HasID([pipeline.ID], p.ID)).length > 1;
         return companies.size > 1 && !shared ? PipelineLabel(pipeline) : pipeline.Name;
     }
