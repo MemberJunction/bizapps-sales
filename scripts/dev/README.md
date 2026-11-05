@@ -2,17 +2,18 @@
 
 Not migrations, not seeds that ship; nothing here belongs in a production database. Each script is
 idempotent. `scripts/seed-demo-data.sh` runs all three, in the order below, once it has settled the
-pipeline companies.
+pipelines' company links.
 
 ## `seed-orders-catalog.sql`
 
 Seeds orders' `Product` catalogue for the product picker and the close-won handoff. The selling
-company is the one the first active pipeline belongs to; a second company carries the products the
+company is the first one actively linked (`PipelineCompany`) to the first active pipeline, the same
+choice the integration fixture makes; a second company carries the products the
 cross-tenant check (PP2) must not see. **The rows make each picker filter observable**, not realistic:
 all four `Status` values, availability windows that are open-ended, already closed and not yet open,
 and one subscription product so the term start shows.
 
-Needs an active pipeline (`scripts/seed-dev-data.sh`), a second `Company`, and orders'
+Needs an active pipeline with an active company link (`scripts/seed-dev-data.sh`), a second `Company`, and orders'
 `metadata/product-types` and `metadata/revenue-recognition-types` pushed. Without orders'
 `metadata/subscription-types` it still seeds, with no subscription product.
 

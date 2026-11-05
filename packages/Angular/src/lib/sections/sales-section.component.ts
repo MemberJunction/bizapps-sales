@@ -963,8 +963,10 @@ export class MJSSalesSectionComponent implements OnInit {
     /** Pipelines of the selected selling companies, or every pipeline when none is selected. */
     public get PipelineOptions(): FilterOption[] {
         const several = PipelineCompanies(this.Pipelines).length > 1 && !this.Filters.CompanyIDs.length;
+        // A pipeline shared by several companies is named alone: labelling it with one would be wrong.
+        const shared = (id: string): boolean => this.Pipelines.filter((p) => HasID([id], p.ID)).length > 1;
         return PipelineOptionsFor(this.Pipelines, this.Filters.CompanyIDs)
-            .map((p) => ({ ID: p.ID, Name: several ? PipelineLabel(p) : p.Name }));
+            .map((p) => ({ ID: p.ID, Name: several && !shared(p.ID) ? PipelineLabel(p) : p.Name }));
     }
 
     private companyName(id: string): string {

@@ -16,7 +16,7 @@ import { Injectable } from '@angular/core';
 import { EntitySaveOptions, LogError, LogStatus, Metadata, RunQuery, RunView, RunViewParams, type RunViewResult } from '@memberjunction/core';
 import { DealEntity } from '@mj-biz-apps/sales-entities';
 
-import { OrderPipelinesByCompany } from '../data/company-pipelines';
+import { ExpandPipelinesByCompany, OrderPipelinesByCompany, type PipelineCompanyLink } from '../data/company-pipelines';
 import { AssertRosterColumns } from './deal-roster.columns';
 
 import {
@@ -65,6 +65,7 @@ function queryParameters(
 }
 
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
+const E_PIPELINE_COMPANY = 'MJ_BizApps_Sales: Pipeline Companies';
 const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
 const E_DEAL_TYPE = 'MJ_BizApps_Sales: Deal Types';
 const E_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
@@ -291,7 +292,7 @@ export interface DealSaveOutcome {
 }
 
 /** Row shapes as they come back from RunView with `ResultType: 'simple'`. */
-interface PipelineRow { ID: string; Name: string; Code: string; CompanyID: string; Company: string | null; IsDefault: boolean; DisplayRank: number }
+interface PipelineRow { ID: string; Name: string; Code: string; IsDefault: boolean; DisplayRank: number }
 interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null; DealStatusTypeID: string | null; RottingDays: number | null }
 interface NamedRow { ID: string; Name: string }
 /** A stage event, as {@link DealWorkspaceService.LoadStageEntries} reads it. */
@@ -375,15 +376,28 @@ interface EmployeeRow { ID: string; FirstLast: string | null }
 /** One named lookup list. */
 export type LookupKey = keyof DealWorkspaceLookups;
 
-/** How one lookup list is read, and where its rows land. */
+/**
+ * How one lookup list is read, and where its rows land. `Joined` is a second read in the same batch
+ * whose rows reach `Apply` alongside the first, for a list built from two entities.
+ */
 interface LookupRead {
     Params: RunViewParams;
-    Apply: (rows: unknown[], into: DealWorkspaceLookups) => void;
+    Joined?: RunViewParams;
+    Apply: (rows: unknown[], into: DealWorkspaceLookups, joined: unknown[]) => void;
 }
 
 /** Typed constructor for a {@link LookupRead}: rows of `T` mapped and assigned. */
 function lookupRead<T>(params: RunViewParams, apply: (rows: T[], into: DealWorkspaceLookups) => void): LookupRead {
     return { Params: params, Apply: (rows, into) => apply(rows as T[], into) };
+}
+
+/** A {@link LookupRead} built from two reads: rows of `T`, joined with rows of `J`. */
+function joinedLookupRead<T, J>(
+    params: RunViewParams,
+    joined: RunViewParams,
+    apply: (rows: T[], joinedRows: J[], into: DealWorkspaceLookups) => void,
+): LookupRead {
+    return { Params: params, Joined: joined, Apply: (rows, into, joinedRows) => apply(rows as T[], joinedRows as J[], into) };
 }
 
 /**
@@ -398,19 +412,22 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
     // be put in a pipeline; this list is the dashboard's and the board's, which still have to show a
     // retired pipeline's won and lost deals. A retired pipeline kept in the forecast stays filterable
     // here; one that is neither active nor in the forecast drops out.
-    Pipelines: lookupRead<PipelineRow>(
-        { EntityName: E_PIPELINE, ExtraFilter: PIPELINE_LIST_FILTER, OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'] },
-        (rows, into) => {
-            // Grouped by company, default company first (#327): the same order the form and the board use.
-            into.Pipelines = OrderPipelinesByCompany(rows.map<PipelineLookup>((p) => ({
+    // One row per (pipeline, linked company): a pipeline serves every company it is linked to, and
+    // the company filters narrow to the pipelines linked to the picked companies. Inactive links are
+    // read too, for the same reason retired pipelines are: their deals still have to be filterable.
+    Pipelines: joinedLookupRead<PipelineRow, PipelineCompanyLink>(
+        { EntityName: E_PIPELINE, ExtraFilter: PIPELINE_LIST_FILTER, OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'IsDefault', 'DisplayRank'] },
+        { EntityName: E_PIPELINE_COMPANY, ResultType: 'simple', Fields: ['PipelineID', 'CompanyID', 'Company'] },
+        (rows, links, into) => {
+            const pipelines = rows.map((p) => ({
                 ID: p.ID,
                 Name: p.Name,
                 Code: p.Code ?? '',
-                CompanyID: p.CompanyID,
-                CompanyName: p.Company ?? null,
                 IsDefault: !!p.IsDefault,
                 DisplayRank: Number(p.DisplayRank ?? 0),
-            })));
+            }));
+            // Grouped by company, default company first (#327): the same order the form and the board use.
+            into.Pipelines = OrderPipelinesByCompany<PipelineLookup>(ExpandPipelinesByCompany(pipelines, links));
         },
     ),
     Stages: lookupRead<StageRow>(
@@ -502,7 +519,7 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
 
 /**
  * Every lookup list: what `LoadLookups` reads when no keys are passed. Companies is the dashboard
- * filter bar's alone: a deal takes its company from its pipeline, so a deal load does not read it.
+ * filter bar's alone: a deal's company choices come from the pipeline links, so a deal load does not read it.
  */
 export const ALL_LOOKUP_KEYS = (Object.keys(LOOKUP_READS) as LookupKey[]).filter((key) => key !== 'Companies');
 
@@ -543,21 +560,32 @@ export class DealWorkspaceService {
      * the Sales section passes {@link SECTION_LOOKUP_KEYS}. Lists not asked for stay empty.
      */
     public async LoadLookups(keys: readonly LookupKey[] = ALL_LOOKUP_KEYS): Promise<DealWorkspaceLookups> {
-        const results = await new RunView().RunViews(keys.map((key) => LOOKUP_READS[key].Params));
-        if (results && results.length !== keys.length) {
+        const params = keys.flatMap((key) => {
+            const read = LOOKUP_READS[key];
+            return read.Joined ? [read.Params, read.Joined] : [read.Params];
+        });
+        const results = await new RunView().RunViews(params);
+        if (results && results.length !== params.length) {
             // Each list below already degrades on its own, so this is not fatal -- but a mismatch means
             // results cannot be matched to the lists asked for. Say so rather than let it be discovered
             // as an empty dropdown.
-            LogError(`DealWorkspaceService.LoadLookups: ${results.length} result(s) for ${keys.length} named lookups.`);
+            LogError(`DealWorkspaceService.LoadLookups: ${results.length} result(s) for ${params.length} reads.`);
         }
         const lookups = EmptyLookups();
         // RunViews does not throw; an unsuccessful view yields an empty list rather than an exception,
         // so each list checks Success independently. A missing picker degrades that one control
         // instead of blanking the whole surface.
-        keys.forEach((key, index) => {
+        const rowsAt = (index: number): unknown[] => {
             const r = results?.[index];
-            LOOKUP_READS[key].Apply(r?.Success ? (r.Results ?? []) : [], lookups);
-        });
+            return r?.Success ? (r.Results ?? []) : [];
+        };
+        let index = 0;
+        for (const key of keys) {
+            const read = LOOKUP_READS[key];
+            const rows = rowsAt(index++);
+            const joined = read.Joined ? rowsAt(index++) : [];
+            read.Apply(rows, lookups, joined);
+        }
         return lookups;
     }
 
