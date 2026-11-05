@@ -38,6 +38,8 @@ Statuses checked on 2026-10-11 against `next` here and in the sibling repos.
 | KI-26 | `mj sync push` after seeding empties every product picker | Standing rule, [below](#ki-26--mj-sync-push-after-seeding-empties-every-product-picker) | sales | — |
 | KI-27 | Orders' lifecycle collapse would break CD24's `Posted` step | Resolved: CD24 asserts the collapse instead (`cf89281`) | sales | — |
 | KI-28 | A fresh install registered 10 fewer orders fields than the views expose, so saves failed on a column-count mismatch | Resolved: orders folded the missing rows into migrations (bizapps-orders `2daf9b9`, `a389782`), and the drift query returned nothing on fresh hosts in October (#161). Metadata that CodeGen still adds on a first run: bizapps-orders#491 | bizapps-orders | bizapps-orders#491 |
+| KI-29 | Two MJ versions sharing a `localhost` port: the older one's client storage will not open | Standing rule, [below](#ki-29--two-mj-versions-on-one-localhost-port-break-each-others-client-storage) | host | — |
+| KI-30 | A host assembled by hand needs sibling bizapps packages as peers, at ONE version each | Standing rule, [below](#ki-30--a-hand-assembled-host-needs-the-sibling-bizapps-peers-at-one-version-each) | host | — |
 | — | Contracts' minimum bootstrap | Obsolete: written for contracts v1 (`ContractTerm`, `ContractLine`), which v2 removed; `scripts/seed-demo-data.sh` seeds the contract template. Its remote-operation rule is [below](#remote-operations-report-success-twice) | — | — |
 
 ---
@@ -184,6 +186,39 @@ Before calling a deployment done, check that `grep -A3 'dynamicPackages' mj.conf
 `orders-server`, or that MJAPI's startup log shows
 `Loaded Open App server package: @mj-biz-apps/orders-server`.
 
+**The one-command confirmation, which beats reading logs.** `MJ_API_KEY` in the host's `.env` is a
+system API key, so MJAPI's GraphQL can be queried with no browser and no login. Ask the schema whether
+the app's resolvers are there at all:
+
+```bash
+curl -s -X POST http://localhost:$GRAPHQL_PORT/ -H 'Content-Type: application/json' \
+  -H "x-mj-api-key: $MJ_API_KEY" \
+  -d '{"query":"{ __schema { queryType { fields { name } } } }"}' |
+  python3 -c "import sys,json; f=[x['name'] for x in json.load(sys.stdin)['data']['__schema']['queryType']['fields']]; print(len([n for n in f if 'BizApps' in n]), 'BizApps query fields of', len(f))"
+```
+
+`0 BizApps query fields of 1701` is this rule; a registered host reads `80 ... of 1781` for sales alone. A
+host with both registered reads `80` sales and `284` orders query fields.
+
+**THE SECOND SYMPTOM, WHICH DOES NOT LOOK LIKE A REGISTRATION PROBLEM AT ALL.** Registering
+`sales-server` and stopping there is easy to do, because sales is the app under test, and the result is
+not a GraphQL error. Deals list, deals open, and then SAVING a new deal fails with:
+
+```
+Cannot insert the value NULL into column 'OrderNumber', table '<db>.__mj_BizAppsOrders.OrderHeader'
+```
+
+`DealEntityServer` provisions an `OrderHeader` for every deal, and the number is minted by ORDERS'
+server classes. Without `orders-server` loaded nothing mints it, and the NOT NULL column rejects the
+insert — a message that points at orders' schema and says nothing about Open App registration. Confirmed
+on 2026-11-04: after adding `orders-server`, MJAPI logs
+`Loaded Open App server package: @mj-biz-apps/orders-server (ran LoadBizAppsOrdersServer)` and a deal
+created through the GraphQL create mutation lands `DEAL-000001` with order `ORD-000008` in `Draft`.
+Measured 2026-11-04 on a hand-built MJ v6.1.6 host. Worth doing FIRST when a record will not open: the
+grid keeps working either way, because `RunView` is a generic core query and only the single-record
+query is per-entity, so the app looks half-alive and every other theory — data, permissions, row-level
+security, the entity subclass — stays plausible for a long time.
+
 ### KI-26 — `mj sync push` after seeding empties every product picker
 
 `metadata/pipelines/.sales-pipelines.json` puts both pipelines on Default Company, the only company on a
@@ -199,6 +234,85 @@ Push metadata first and seed after (`WORKSPACE-SETUP.md` §5). If you push later
 action or a remote operation, re-run `scripts/seed-demo-data.sh`; it is idempotent. The metadata cannot
 name the demo companies, because they come from `scripts/seed-dev-data.sh`, which is local dev data and not
 part of the app.
+
+### KI-29 — Two MJ versions on one `localhost` port break each other's client storage
+
+MJ derives its IndexedDB version from its own package version
+(`GraphQLDataProvider/src/storage-providers.ts`, `computeIdbVersion`):
+
+```ts
+return major * 1000 + minor + MANUAL_CACHE_REVISION;   // 6.1.x -> 6001, 6.2.x -> 6002
+```
+
+IndexedDB refuses to open a database at a LOWER version than the one already stored, and the store is
+per ORIGIN — scheme, host and port. So an Explorer from MJ 6.1.x served on a port that an MJ 6.2.x
+Explorer has already used cannot open its own cache, and the browser console fills with:
+
+```
+The requested version (6001) is less than the existing version (6002).
+```
+
+The damage is not confined to caching. The same storage layer backs workspace state and recent-access
+logging, so the symptoms are a scatter of unrelated-looking failures — `RecentAccessService: Failed to
+create log entry`, `workspace-state-manager` save errors — none of which name the real cause.
+
+MJ's own Explorer serves on **4201**, so that port is the one to avoid for a second host. Serve a test
+host on a different port (this app's convention is **4341**) and the new origin gets a clean store.
+Clearing site data for the shared origin also works, at the cost of the other Explorer's cache.
+
+THE REDIRECT URI IS THE CONSTRAINT ON THAT CHOICE, not taste: MJ's MSAL and Auth0 providers redirect to
+`window.location.origin`, so whatever port you pick has to be registered with the identity provider.
+Picking 4201 because its redirect is known to work is exactly how two hosts end up sharing an origin.
+
+### KI-30 — A hand-assembled host needs the sibling bizapps peers, at one version each
+
+`docs/WORKSPACE-SETUP.md`'s generator produces a host where this is already handled. A host assembled by
+hand — an MJ checkout with this app's packages added to MJAPI and MJExplorer — needs two things the
+generator does for you.
+
+**The siblings are PEERS, so the host supplies them.** `sales-entities` and `sales-ng` declare
+`@mj-biz-apps/common-entities`, `common-ng`, `orders-entities` and `orders-ng` as `peerDependencies`;
+`sales-core-entities-server` adds `common-activity-sync`, `tasks-core` and `tasks-entities`. Adding only
+the `sales-*` packages compiles and installs, then fails in the browser at the first import:
+
+```
+[plugin:vite:import-analysis] Failed to resolve import "@mj-biz-apps/common-entities"
+```
+
+**And they must resolve to ONE version each.** This app pins its siblings exactly while a host may
+declare newer ones, so a plain install leaves two copies — measured on 2026-11-04: `sales-ng` resolved
+`common-ng@5.56.0` while MJExplorer resolved `5.59.0`. Two copies of an Angular library are two
+dependency-injection token identities and two `@RegisterClass` registries, which is the same failure
+mode `CLAUDE.md` describes for `@memberjunction/core`: registrations land in one registry while the
+resolver reads the other, and nothing errors. Pin each one in the host's `pnpm-workspace.yaml`
+`overrides:` to the version this app was compiled against, and verify rather than assume:
+
+```bash
+# must print the same version on both sides, for each shared library
+node -p "require('<sales>/packages/Angular/node_modules/@mj-biz-apps/common-ng/package.json').version"
+node -p "require('<host>/packages/MJExplorer/node_modules/@mj-biz-apps/common-ng/package.json').version"
+```
+
+**AND DO NOT RUN `pnpm install` INSIDE THE JOINED WORKTREE AFTERWARDS.** Once this app's worktree is a
+member of the host's workspace, an install run from the app's own directory re-resolves its
+`@memberjunction/*` dependencies to its own copies and silently undoes the linkage. MJAPI then refuses
+to boot, and the message names neither the install nor the package:
+
+```
+CannotDetermineGraphQLTypeError: Cannot determine GraphQL input type for argument named 'ID'
+of 'mjBizAppsSalesDealSequence' of 'mjBizAppsSalesDealSequenceResolver' class.
+```
+
+The generated resolvers import `Int` from `@memberjunction/server`. With two copies of that package the
+`Int` they get is a different object from the one the host's `buildSchema` knows, so type-graphql cannot
+resolve it — and the resolver line it names is usually untouched by whatever you were working on, which
+sends you looking in the wrong file. Measured 2026-11-04: `@memberjunction/server` had resolved to the
+app worktree's own published 6.1.6 copy instead of the host's workspace `packages/MJServer`. Repair by
+running `pnpm install` AT THE HOST ROOT, then confirm a single copy:
+
+```bash
+readlink <app-worktree>/packages/Server/node_modules/@memberjunction/server   # must point into the host
+```
 
 ### Remote operations report success twice
 
