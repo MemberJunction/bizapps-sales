@@ -46,7 +46,7 @@ async function ordersRequestedOnInit(): Promise<Map<string, string | undefined>>
     const panel = Object.create(MJSDealPipelinePanel.prototype) as { ngOnInit(): Promise<void> };
     // The signals ngOnInit writes into. `Object.create` runs no field initialisers, so each is stubbed
     // with the only thing that is called on it.
-    for (const sig of ['statuses', 'LossReasons', 'pipelines', 'stages']) {
+    for (const sig of ['statuses', 'LossReasons', 'pipelines', 'stages', 'HidePipelines']) {
         Object.defineProperty(panel, sig, { value: { set: () => undefined }, writable: true });
     }
     for (const [k, v] of Object.entries({
