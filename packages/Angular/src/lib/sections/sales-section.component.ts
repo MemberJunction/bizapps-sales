@@ -40,7 +40,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey, LogError, Metadata, type EntityInfo } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
@@ -142,6 +142,7 @@ import {
     type FilterOption,
 } from '../pages/dashboard-filters';
 import { PipelineCompanies, PipelineLabel } from '../data/company-pipelines';
+import { WatchDealSaves } from '../data/deal-saves';
 import { MJSSalesFilterBarComponent, type FilterKind, type SalesFilterBarState } from './sales-filter-bar.component';
 
 /**
@@ -164,6 +165,8 @@ const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
 /** The defaults a null URL field stands for. */
 const DEFAULT_PERIOD: PeriodKey = 'quarter';
 const DEFAULT_INSPECT: InspectKey = 'closing';
+/** How long a burst of deal saves may run before the section re-reads, in ms. */
+const SAVE_REFRESH_SETTLE_MS = 250;
 
 /** An entity's schema and base view from metadata, or null when it is not loaded. */
 function tableOf(entityName: string): { SchemaName: string; BaseView: string } | null {
@@ -248,6 +251,7 @@ export class MJSSalesSectionComponent implements OnInit {
 
     private readonly service = inject(DealWorkspaceService);
     private readonly cdr = inject(ChangeDetectorRef);
+    private readonly destroyRef = inject(DestroyRef);
     /**
      * Opens a RECORD as its own Explorer tab — deals AND accounts.
      */
@@ -313,6 +317,8 @@ export class MJSSalesSectionComponent implements OnInit {
     public LoadError: string | null = null;
     /** Identifies the newest `Refresh()`, so a slower superseded one cannot apply its replies, clear its spinner or set its error. */
     private refreshToken = 0;
+    /** The pending re-read after a deal save; see {@link RefreshAfterSave}. */
+    private saveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     /** The `Refresh()` that ran out of time, whose replies are ignored when they finally arrive. */
     private abandonedToken = 0;
     /** Identifies the newest deal list request, so a slower superseded one cannot replace the grid. */
@@ -413,7 +419,39 @@ export class MJSSalesSectionComponent implements OnInit {
         this.InspectArg = url.InspectArg;
         this.BoardPipelineID = url.Pipeline;
         this.initialized = true;
+        this.watchDealSaves();
         await this.Refresh();
+    }
+
+    /**
+     * Re-reads the roster after any deal save in this browser (bc-aidp-next-golive#419).
+     *
+     * The board re-read after its own drags and nothing else, so an owner changed or a stage moved in a
+     * deal tab stayed stale here until the browser was refreshed. The save stream covers every place a
+     * deal is saved; the board's own drag arrives through it too.
+     */
+    private watchDealSaves(): void {
+        const stop = WatchDealSaves(() => this.RefreshAfterSave());
+        this.destroyRef.onDestroy(() => {
+            stop();
+            if (this.saveRefreshTimer !== null) {
+                clearTimeout(this.saveRefreshTimer);
+            }
+        });
+    }
+
+    /**
+     * A quiet `Refresh()` once a burst of saves has settled. An owner change saves a team row and then
+     * the deal, and a drag raises both the save and `StageMoved`; each burst costs one re-read.
+     */
+    public RefreshAfterSave(): void {
+        if (this.saveRefreshTimer !== null) {
+            clearTimeout(this.saveRefreshTimer);
+        }
+        this.saveRefreshTimer = setTimeout(() => {
+            this.saveRefreshTimer = null;
+            void this.Refresh(true);
+        }, SAVE_REFRESH_SETTLE_MS);
     }
 
     // ── URL state ──────────────────────────────────────────────────────────────

@@ -2,7 +2,10 @@
 import '@angular/compiler';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
-import { Metadata } from '@memberjunction/core';
+import { BaseEntity, BaseEntityEvent, Metadata } from '@memberjunction/core';
+import { MJEventType, MJGlobal } from '@memberjunction/global';
+
+import { MJS_ENTITIES } from '../lib/data/entity-names';
 
 import { BoardPipelines, DealBoardComponent } from '../lib/board/deal-board.component';
 import type { MJLeftNavItem } from '@memberjunction/ng-ui-components';
@@ -86,6 +89,45 @@ describe('the board selection, owned by the section', () => {
         expect(board(fixture)).toBe(before);
         expect(board(fixture)?.SelectedPipelineID).toBe('pipeline-2');
         expect(service.LoadRoster).toHaveBeenCalledTimes(2);
+    });
+});
+
+/**
+ * AN OWNER OR STAGE SAVED IN A DEAL TAB NEVER REACHED THE BOARD (bc-aidp-next-golive#419).
+ *
+ * The section re-read only after its own board's drag. It now re-reads quietly after any deal save in
+ * this browser, once per burst, and stops listening when it is destroyed.
+ */
+describe('the section re-reads after a deal is saved anywhere', () => {
+    function raiseDealSave(entityName = MJS_ENTITIES.Deal): void {
+        const record = { EntityInfo: { Name: entityName }, Get: (f: string) => (f === 'ID' || f === 'DealID' ? 'DEAL-1' : null) } as unknown as BaseEntity;
+        const args = new BaseEntityEvent();
+        args.type = 'save';
+        args.baseEntity = record;
+        MJGlobal.Instance.RaiseEvent({ component: record, event: MJEventType.ComponentEvent, eventCode: BaseEntity.BaseEventCode, args });
+    }
+
+    it('re-reads the roster once for a burst of saves, without the spinner', async () => {
+        const fixture = await mount('board');
+        const before = board(fixture);
+        expect(service.LoadRoster).toHaveBeenCalledTimes(1);
+
+        raiseDealSave(MJS_ENTITIES.DealTeamMember);
+        raiseDealSave();
+        await vi.waitFor(() => expect(service.LoadRoster).toHaveBeenCalledTimes(2));
+
+        await new Promise((r) => setTimeout(r, 400));
+        expect(service.LoadRoster, 'one burst, one re-read').toHaveBeenCalledTimes(2);
+        expect(board(fixture), 'a quiet re-read keeps the board mounted').toBe(before);
+    });
+
+    it('stops listening when destroyed', async () => {
+        const fixture = await mount('board');
+        fixture.destroy();
+
+        raiseDealSave();
+        await new Promise((r) => setTimeout(r, 400));
+        expect(service.LoadRoster).toHaveBeenCalledTimes(1);
     });
 });
 
