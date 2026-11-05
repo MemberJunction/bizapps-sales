@@ -1,0 +1,61 @@
+name: Work item
+description: A feature, change or follow-up that is not a bug. Lands as needs-triage like everything else.
+title: ""
+labels: ["enhancement", "needs-triage", "origin:human"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Title:** what will be different when this is done, from the user's side. *"Deal workspace: a Term start date on subscription lines"*.
+        For something that is broken, use **Bug report** instead; it asks for the reproduction a fix needs.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: For a person. Three sentences at most and under 40 words — what changes, where in the code, and who it is for. People read this and the title, little else.
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is wrong or missing today, and for whom. Evidence welcome (a UAT story, a customer ask, a measured cost).
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-change
+    attributes:
+      label: Proposed change
+      description: What you would build or change. Options are fine; say which you would pick and why.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is in, what is out, what it depends on (other issues, other apps, an MJ change).
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: How we will know it is done. Short, checkable statements; an integration check where one makes sense.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: Target line
+      description: Where it lands. Almost always next.
+      options:
+        - next
+        - next + backport to the current release line
+    validations:
+      required: true
