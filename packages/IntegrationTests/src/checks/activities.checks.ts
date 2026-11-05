@@ -1434,6 +1434,56 @@ export const ActivitiesChecks: NamedCheck[] = [
                 );
             }),
     },
+    {
+        Id: 'activities.AC24',
+        Name: 'AC24: a chosen party list replaces the deal parties, one link per target, deal first (#408)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+
+                /**
+                 * The compose form's shape: the deal parties are NOT added by the service, and the list
+                 * names the deal's own account plus the same person twice. The primary contact is left
+                 * out on purpose, so a service that still added it would show up here.
+                 */
+                const [someone] = await rows(ctx, E_PERSON, `ID <> '${deal.ContactID}'`);
+                Assert(!!someone, 'setup: no Person besides the deal contact on this host');
+                const personID = String(someone['ID']);
+                const out = await writer.LogActivity(
+                    {
+                        DealID: deal.DealID,
+                        TypeCode: 'Call',
+                        Title: 'AC24 call',
+                        StartedAt: new Date('2026-11-04T09:00:00.000Z'),
+                        IncludeDealParties: false,
+                        Parties: [
+                            { Kind: 'Organization', RecordID: deal.AccountID, Role: 'Participant' },
+                            { Kind: 'Person', RecordID: personID, Role: 'Participant' },
+                            { Kind: 'Person', RecordID: personID.toLowerCase(), Role: 'Participant' },
+                        ],
+                    },
+                    ProviderOf(ctx),
+                    ctx.User,
+                );
+                Assert(out.Success, `the writer reported failure — ${out.Issues.join(' | ')}`);
+
+                const links = await rows(ctx, E_ACTIVITY_LINK, `ActivityID = '${out.ActivityID}'`);
+                const targets = links
+                    .sort((a, b) => Number(a['Sequence']) - Number(b['Sequence']))
+                    .map((l) => `${String(l['Role'])}:${String(l['RecordID']).toLowerCase()}`);
+                AssertEqual(
+                    targets.join(' | '),
+                    [
+                        `Regarding:${deal.DealID.toLowerCase()}`,
+                        `Participant:${deal.AccountID.toLowerCase()}`,
+                        `Participant:${personID.toLowerCase()}`,
+                    ].join(' | '),
+                    'exactly the deal (first, Regarding), the account and the person once — no primary contact',
+                );
+            }),
+    },
 ];
 
 for (const check of ActivitiesChecks) {
