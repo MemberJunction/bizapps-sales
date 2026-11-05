@@ -4,6 +4,7 @@ import { RunView, type RunViewParams, type RunViewResult } from '@memberjunction
 import {
     ALL_LOOKUP_KEYS,
     DealWorkspaceService,
+    PIPELINE_LIST_FILTER,
     SECTION_LOOKUP_KEYS,
 } from '../lib/workspace/deal-workspace.service';
 
@@ -79,5 +80,17 @@ describe('Sales section lookups (#209)', () => {
         expect(lookups.Stages).toEqual([]);
         expect(lookups.Pipelines.map((p) => p.ID)).toEqual(['id-MJ_BizApps_Sales: Pipelines']);
         expect(lookups.DealStatusTypes.map((s) => s.ID)).toEqual(['id-MJ_BizApps_Sales: Deal Status Types']);
+    });
+});
+
+describe('which pipelines the Sales section lists (bc-aidp-next-golive#423)', () => {
+    // A retired pipeline is deactivated so no deal can be put in it, but kept in the forecast so the
+    // dashboard filters and the board still reach its won and lost deals.
+    it('reads active pipelines and those kept in the forecast', async () => {
+        const calls = recordRunViews();
+        await new DealWorkspaceService().LoadLookups(SECTION_LOOKUP_KEYS);
+        const pipelines = calls[0].find((p) => p.EntityName === 'MJ_BizApps_Sales: Pipelines');
+        expect(pipelines?.ExtraFilter).toBe(PIPELINE_LIST_FILTER);
+        expect(PIPELINE_LIST_FILTER).toBe('(IsActive = 1 OR IncludeInForecast = 1)');
     });
 });
