@@ -100,16 +100,28 @@ both the most likely and the fastest to confirm.
    perfectly, and MJAPI logs nothing at all. Importing a package registers its entity classes, not its
    resolvers; those need `dynamicPackages.server[]` in the host's `mj.config.cjs`. KI-21 has a
    one-command check using `MJ_API_KEY` that settles it without a browser.
+   **Register BOTH `sales-server` and `orders-server`.** With only sales registered the second symptom
+   is a save failing on `Cannot insert the value NULL into column 'OrderNumber'`, which reads as an
+   orders schema problem rather than a registration one.
 2. **Another MJ version has already claimed this port's client storage**
    ([KI-29](./KNOWN-ISSUES.md#ki-29--two-mj-versions-on-one-localhost-port-break-each-others-client-storage)).
    The console says `The requested version (6001) is less than the existing version (6002)`, plus
    assorted `RecentAccessService` and workspace-state errors. MJ's own Explorer uses 4201; serve a test
    host elsewhere (4341 here).
-3. **Two copies of a shared bizapps library**
+3. **An install run inside the app's own worktree undid the host linkage**
+   ([KI-30](./KNOWN-ISSUES.md#ki-30--a-hand-assembled-host-needs-the-sibling-bizapps-peers-at-one-version-each)).
+   MJAPI stops booting with `CannotDetermineGraphQLTypeError` naming a resolver you did not touch.
+   Repair with `pnpm install` at the host root.
+4. **Two copies of a shared bizapps library**
    ([KI-30](./KNOWN-ISSUES.md#ki-30--a-hand-assembled-host-needs-the-sibling-bizapps-peers-at-one-version-each)).
    Only on hosts assembled by hand rather than by `WORKSPACE-SETUP.md`'s generator. Symptoms are quiet:
    a custom form that does not take over from the generated one, or a registration that silently does
    not apply.
+
+One practical detail that wasted a round: Explorer's Vite pre-bundle cache lives at
+`packages/MJExplorer/.angular/vite-root`, not at the workspace root. A stale bundle survives an
+ordinary restart, so clear that path — and hard-reload the browser — before concluding a change did not
+take effect.
 
 A note on sequencing, learned the expensive way: **check the schema first.** The server can load a
 record perfectly through the SQL provider — the integration suite runs in process and stays green — while

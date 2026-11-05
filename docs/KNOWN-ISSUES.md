@@ -197,11 +197,43 @@ curl -s -X POST http://localhost:$GRAPHQL_PORT/ -H 'Content-Type: application/js
   python3 -c "import sys,json; f=[x['name'] for x in json.load(sys.stdin)['data']['__schema']['queryType']['fields']]; print(len([n for n in f if 'BizApps' in n]), 'BizApps query fields of', len(f))"
 ```
 
-`0 BizApps query fields of 1701` is this rule; a registered host reads `80 ... of 1781` for sales alone.
+`0 BizApps query fields of 1701` is this rule; a registered host reads `80 ... of 1781` for sales alone. A
+host with both registered reads `80` sales and `284` orders query fields.
+
+**THE SECOND SYMPTOM, WHICH DOES NOT LOOK LIKE A REGISTRATION PROBLEM AT ALL.** Registering
+`sales-server` and stopping there is easy to do, because sales is the app under test, and the result is
+not a GraphQL error. Deals list, deals open, and then SAVING a new deal fails with:
+
+```
+Cannot insert the value NULL into column 'OrderNumber', table '<db>.__mj_BizAppsOrders.OrderHeader'
+```
+
+`DealEntityServer` provisions an `OrderHeader` for every deal, and the number is minted by ORDERS'
+server classes. Without `orders-server` loaded nothing mints it, and the NOT NULL column rejects the
+insert — a message that points at orders' schema and says nothing about Open App registration. Confirmed
+on 2026-11-04: after adding `orders-server`, MJAPI logs
+`Loaded Open App server package: @mj-biz-apps/orders-server (ran LoadBizAppsOrdersServer)` and a deal
+created through the GraphQL create mutation lands `DEAL-000001` with order `ORD-000008` in `Draft`.
 Measured 2026-11-04 on a hand-built MJ v6.1.6 host. Worth doing FIRST when a record will not open: the
 grid keeps working either way, because `RunView` is a generic core query and only the single-record
 query is per-entity, so the app looks half-alive and every other theory — data, permissions, row-level
 security, the entity subclass — stays plausible for a long time.
+
+### KI-26 — `mj sync push` after seeding empties every product picker
+
+`metadata/pipelines/.sales-pipelines.json` puts both pipelines on Default Company, the only company on a
+fresh database. `scripts/seed-demo-data.sh` then moves them to the demo companies, which own the products.
+A push after the seed moves them back to Default Company, which owns no products, so every product picker
+is empty and the errors name the orders catalogue:
+
+```
+Error: the product picker offered nothing -- the orders catalogue did not load
+```
+
+Push metadata first and seed after (`WORKSPACE-SETUP.md` §5). If you push later, for example to restore an
+action or a remote operation, re-run `scripts/seed-demo-data.sh`; it is idempotent. The metadata cannot
+name the demo companies, because they come from `scripts/seed-dev-data.sh`, which is local dev data and not
+part of the app.
 
 ### KI-29 — Two MJ versions on one `localhost` port break each other's client storage
 
@@ -261,21 +293,26 @@ node -p "require('<sales>/packages/Angular/node_modules/@mj-biz-apps/common-ng/p
 node -p "require('<host>/packages/MJExplorer/node_modules/@mj-biz-apps/common-ng/package.json').version"
 ```
 
-### KI-26 — `mj sync push` after seeding empties every product picker
-
-`metadata/pipelines/.sales-pipelines.json` puts both pipelines on Default Company, the only company on a
-fresh database. `scripts/seed-demo-data.sh` then moves them to the demo companies, which own the products.
-A push after the seed moves them back to Default Company, which owns no products, so every product picker
-is empty and the errors name the orders catalogue:
+**AND DO NOT RUN `pnpm install` INSIDE THE JOINED WORKTREE AFTERWARDS.** Once this app's worktree is a
+member of the host's workspace, an install run from the app's own directory re-resolves its
+`@memberjunction/*` dependencies to its own copies and silently undoes the linkage. MJAPI then refuses
+to boot, and the message names neither the install nor the package:
 
 ```
-Error: the product picker offered nothing -- the orders catalogue did not load
+CannotDetermineGraphQLTypeError: Cannot determine GraphQL input type for argument named 'ID'
+of 'mjBizAppsSalesDealSequence' of 'mjBizAppsSalesDealSequenceResolver' class.
 ```
 
-Push metadata first and seed after (`WORKSPACE-SETUP.md` §5). If you push later, for example to restore an
-action or a remote operation, re-run `scripts/seed-demo-data.sh`; it is idempotent. The metadata cannot
-name the demo companies, because they come from `scripts/seed-dev-data.sh`, which is local dev data and not
-part of the app.
+The generated resolvers import `Int` from `@memberjunction/server`. With two copies of that package the
+`Int` they get is a different object from the one the host's `buildSchema` knows, so type-graphql cannot
+resolve it — and the resolver line it names is usually untouched by whatever you were working on, which
+sends you looking in the wrong file. Measured 2026-11-04: `@memberjunction/server` had resolved to the
+app worktree's own published 6.1.6 copy instead of the host's workspace `packages/MJServer`. Repair by
+running `pnpm install` AT THE HOST ROOT, then confirm a single copy:
+
+```bash
+readlink <app-worktree>/packages/Server/node_modules/@memberjunction/server   # must point into the host
+```
 
 ### Remote operations report success twice
 
