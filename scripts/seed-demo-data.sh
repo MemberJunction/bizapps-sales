@@ -673,6 +673,19 @@ INSERT INTO __mj_BizAppsSales.DealStageEvent (DealID, FromStageID, ToStageID, Fr
    ChangedAt, DaysInPreviousStage, AmountAtTransition, ProbabilityAtTransition, Notes) VALUES
  (@d5, @s4, @s5, @stOpen, @stWon, '2026-07-28T16:40:00Z', 12, 64000.0000, 100, N'Signed. A closing status with LocksDeal=1 freezes the deal from here.');
 
+-- Back-date CreationDate from the earliest pre-__mj_CreatedAt stage event when this seed runs
+-- AFTER V202611041530 (every fresh rebuild): DEAL-9001 and DEAL-9005 are inserted above with
+-- CreationDate = GETUTCDATE() before their historical DealStageEvent rows exist.
+UPDATE d
+   SET d.CreationDate = ISNULL(
+           (SELECT MIN(e.ChangedAt)
+              FROM __mj_BizAppsSales.DealStageEvent e
+             WHERE e.DealID = d.ID
+               AND e.ChangedAt < d.__mj_CreatedAt),
+           d.__mj_CreatedAt)
+  FROM __mj_BizAppsSales.Deal d
+ WHERE d.ID IN (@d1, @d2, @d3, @d4, @d5, @d6, @d7);
+
 -- ============================ POINT-IN-TIME FORECAST ============================
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.ForecastSnapshot WHERE SnapshotJSON LIKE '%"demo":true%')
 INSERT INTO __mj_BizAppsSales.ForecastSnapshot (CompanyID, PipelineID, OwnerEmployeeID, PeriodStart, PeriodEnd, CapturedAt,

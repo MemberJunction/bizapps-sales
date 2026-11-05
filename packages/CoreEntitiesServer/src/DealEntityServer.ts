@@ -614,6 +614,7 @@ export class DealEntityServer extends DealEntity {
          * try above, because this one may not refuse a save. See {@link defaultCurrencyOnCreate}.
          */
         await this.defaultCurrencyOnCreate();
+        this.defaultCreationDateOnCreate();
 
         /**
          * AFTER the company stamp, deliberately — and NOT AT ALL on a locked deal.
@@ -3664,6 +3665,32 @@ export class DealEntityServer extends DealEntity {
         const currencyID = await this.currencyIDForCode(code);
         if (currencyID) {
             this.CurrencyID = currencyID;
+        }
+    }
+
+    /**
+     * Stamps `Deal.CreationDate` from the server's clock on create when the caller did not supply one (#532).
+     *
+     * `EntityField`'s constructor evaluates `DefaultValue = 'getutcdate()'` during `NewRecord()`, setting
+     * `Value = new Date()` at construction time while leaving `_NeverSet = true`. Any explicit assignment
+     * by a caller (an importer setting a historical creation date, or a check supplying a specific instant)
+     * flips `_NeverSet` to `false`.
+     *
+     * Re-stamping here when `_NeverSet` is still `true` (or when a caller cleared `CreationDate` to null
+     * before saving) ensures that:
+     *   1. A deal created without an explicit `CreationDate` gets the server's save-time clock rather than
+     *      the instant `NewRecord()` happened to run (or failing `Validate()` when `CreationDate` was nulled).
+     *   2. An importer or API caller that explicitly sets a historical `CreationDate` on a new deal keeps
+     *      the date it supplied.
+     *   3. Updates (`this.IsSaved`) are never touched, so an open deal's `CreationDate` remains editable.
+     */
+    private defaultCreationDateOnCreate(): void {
+        if (this.IsSaved) {
+            return;
+        }
+        const field = this.GetFieldByName('CreationDate') as unknown as { _NeverSet?: boolean } | undefined;
+        if (!this.CreationDate || field?._NeverSet === true) {
+            this.CreationDate = new Date();
         }
     }
 
