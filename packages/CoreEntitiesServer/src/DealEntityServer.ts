@@ -3494,7 +3494,7 @@ export class DealEntityServer extends DealEntity {
     }
 
     /**
-     * Gives a NEW deal an owner: the account's owner when it has one, otherwise whoever is creating it.
+     * Gives a NEW deal an owner: whoever is creating it, otherwise the account's owner.
      *
      * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────────────────────────
      *
@@ -3513,10 +3513,15 @@ export class DealEntityServer extends DealEntity {
      *
      * ── THE ORDER OF PREFERENCE, AND WHY ────────────────────────────────────────────────────────────
      *
-     * The ACCOUNT's owner first. A deal on an existing customer belongs to whoever runs that customer,
-     * and that is true whether a rep, an SE or an admin typed it in — so it beats the creator, who is
-     * merely the person at the keyboard. The creator is the fallback for a deal with no account yet, or
-     * an account nobody owns, where the person entering it is the best answer available.
+     * The CREATOR first. The people who enter deals are the people who work them, so a deal that
+     * defaulted to the account's owner had to be reassigned by hand on every create — and reassigning
+     * is the slow path, through the deal team. The account's owner is the fallback for a creator with
+     * no linked Employee (the importer, an agent, `System`), so those deals still land on whoever runs
+     * the customer rather than on nobody. A creator who has an Employee never costs an account read.
+     *
+     * This reverses the first version, which put the account's owner first on the theory that an admin
+     * might be typing a deal in on a rep's behalf (bc-aidp-next-golive#415). That case is a
+     * reassignment after save; the common case is a rep entering their own deal.
      *
      * ── EVERY WAY THIS DECLINES TO ACT ──────────────────────────────────────────────────────────────
      *
@@ -3528,7 +3533,7 @@ export class DealEntityServer extends DealEntity {
      *    `stampOwnerFromTeam` uses, so an importer or an Action that sets its own team is never
      *    second-guessed — and the two cannot disagree about what "the caller is managing this" means.
      *  - nothing resolves. A context user with no linked Employee (`System` and `Anonymous` have none)
-     *    and no account owner leaves the deal unowned, which is exactly what happens today. Refusing the
+     *    on a deal whose account has no owner leaves it unowned, which is exactly what happens today. Refusing the
      *    save because we could not GUESS an owner would turn a working create into a broken one.
      *
      * A failure to READ the account is also not fatal, for the same reason: the deal still saves, just
@@ -3660,7 +3665,7 @@ export class DealEntityServer extends DealEntity {
             return; // the caller is managing the team; do not second-guess it
         }
 
-        const employeeID = (await this.accountOwnerEmployeeID()) ?? this.creatorEmployeeID();
+        const employeeID = this.creatorEmployeeID() ?? (await this.accountOwnerEmployeeID());
         if (!employeeID) {
             return; // nothing to default to — an unowned deal is the honest outcome
         }
