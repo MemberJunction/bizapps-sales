@@ -1206,7 +1206,7 @@ const FIELD_STYLES = `
                                 </div>
                             </div>
                             <div><div class="l">Stage</div><div class="v">{{ G('PipelineStage') || '—' }}</div></div>
-                            @if (!HidePipelines?.()) {
+                            @if (ShowPipelineRow) {
                                 <div><div class="l">Pipeline</div><div class="v">{{ G('Pipeline') || '—' }}</div></div>
                             }
                             <div><div class="l">Type</div><div class="v">{{ G('DealType') || '—' }}</div></div>
@@ -1356,8 +1356,13 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
      */
     private readonly businessZoneLoaded = signal(false);
 
-    /** The `HidePipelines` setting; `?.()` in the template for the reason given above. */
-    public readonly HidePipelines = signal(false);
+    /** The `HidePipelines` setting. */
+    public readonly HidePipelines = signal(SalesSettings.HidePipelinesIfLoaded);
+
+    /** Whether the overview names the pipeline. `?.()` for the `Object.create` reason given above. */
+    public get ShowPipelineRow(): boolean {
+        return !this.HidePipelines?.();
+    }
 
     /**
      * THE ZONE IS LOADED BEFORE THIS PANEL IS ASKED WHAT DAY IT IS (bc-aidp-next-golive#168).
@@ -1959,8 +1964,12 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     private readonly pipelines = signal<PipelineOption[]>([]);
     private readonly stages = signal<PipelineStageOption[]>([]);
 
-    /** The `HidePipelines` setting. A signal for the reason `statuses` is one. */
-    public readonly HidePipelines = signal(false);
+    /**
+     * The `HidePipelines` setting. A signal for the reason `statuses` is one. Starts from the engine when
+     * it is already loaded: the form's rail takes this panel's name when it is first built, so a name
+     * that changed only after `ngOnInit` read the setting stayed "Pipeline" there.
+     */
+    public readonly HidePipelines = signal(SalesSettings.HidePipelinesIfLoaded);
 
     public async ngOnInit(): Promise<void> {
         // BaseFormPanel declares no lifecycle hook, so there is nothing to chain to. Angular calls this

@@ -31,6 +31,18 @@ export class SalesSettings {
         return this.read(SALES_SETTING.HidePipelines)?.toLowerCase() === 'true';
     }
 
+    /**
+     * {@link HidePipelines} without waiting, or false when the engine has not loaded yet. For a value a
+     * component needs on its first render, such as a section name the form's rail reads once.
+     */
+    public static get HidePipelinesIfLoaded(): boolean {
+        try {
+            return ApplicationSettingEngine.Instance.Loaded && this.HidePipelines;
+        } catch {
+            return false;
+        }
+    }
+
     /** Loads the settings, then reads {@link HidePipelines}; a failed load leaves pipelines shown. */
     public static async LoadHidePipelines(): Promise<boolean> {
         try {
