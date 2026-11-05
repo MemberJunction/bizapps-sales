@@ -1060,14 +1060,14 @@ REVOKE EXECUTE ON [${flyway:defaultSchema}].[spDeleteDeal] FROM [cdp_Developer]
 REVOKE EXECUTE ON [${flyway:defaultSchema}].[spDeleteDeal] FROM [cdp_Integration]
 GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteDeal] TO [cdp_Developer], [cdp_Integration];
 
-/* Field category for the new column (from the same run's categorization pass) */
--- UPDATE Entity Field Category Info MJ_BizApps_Sales: Deals.CreationDate 
-UPDATE [${mjSchema}].[EntityField]
-SET 
-   Category = 'Timeline & Milestones',
-   GeneratedFormSection = 'Category'
-WHERE 
-   ID = 'B3C1A716-5C4B-4B5C-AE60-4FA180E44480';
+-- NO FIELD CATEGORY FOR THIS COLUMN, deliberately, and the first draft of this migration got it
+-- wrong. CodeGen's categorization pass assigns a Category to ALL 74 of Deal's fields; shipping only
+-- this column's statement left a database where 73 fields have Category NULL and exactly one has
+-- 'Timeline & Milestones'. The generated form builds a section per category, so the new field got a
+-- section to itself while every other field stayed in the default one --- a worse form than before
+-- the column existed. Half of that pass is worse than all of it or none of it, and a field addition
+-- is the wrong PR to introduce a categorization scheme in, so this ships none: the column joins the
+-- default section like every other field. A host that later runs CodeGen gets the whole pass at once.
 
 /* Refresh custom base views for modified entities so schema changes are picked up */
 EXEC sp_refreshview '${flyway:defaultSchema}.vwDealsGenerated';
