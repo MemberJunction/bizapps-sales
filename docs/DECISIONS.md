@@ -806,7 +806,7 @@ dropping them would need a migration and gains nothing once nothing calls them.
 **Why the entity-level flag is right here when D-RRC5 rejected the field-level one.** D-RRC5 turned
 down `AllowUpdateAPI = 0` on four `DealLine` columns because that flag takes the columns out of the
 `spCreate` / `spUpdate` parameters, which would have locked out the one caller that must write them.
-A stage event has no such caller. Nothing legitimately updates or deletes one, and the entity-level
+A stage event has no such caller. Nothing legitimately updates or deletes one (the one exception, deleting a never-closed deal, is D-DEL1), and the entity-level
 flags leave `spCreate` and the insert path alone. With the flags off, CodeGen drops the update and
 delete mutations, and MemberJunction's own `Save()` and `Delete()` refuse them as well. The server
 subclass is kept beside the flags because it explains the refusal in this app's terms, and because the
@@ -816,6 +816,37 @@ rule should not depend on a metadata row a host may not have pushed or may turn 
 message is `DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE` in `sales-entities` so the form can share it.
 
 Pinned by `DealStageEventEntityServer.test.ts` and integration check `board-move.BD7`.
+
+---
+
+## D-DEL1 — A deal is deleted only while open and never closed, by role, with its order (golive#429)
+
+**Decision (the go-live owners, 2026-11-05):** deleting a deal is allowed when all of these hold, and
+`DealEntityServer.Delete()` refuses with a reason otherwise:
+
+- **The user holds a grant.** `MJ.BizApps.Sales.Deal.Delete` (the Sales Admin role, and Developer) may
+  delete any deal; `MJ.BizApps.Sales.Deal.DeleteOwn` (the Sales User role) only a deal whose
+  `OwnerEmployeeID` is the user's own Employee. `Delete` is the parent, so it implies `DeleteOwn`. A
+  catalog without these rows grants nothing.
+- **The deal is not closed now, and never was.** The stage history is read for any move into a status
+  whose type has `LocksDeal = 1`. A reopened deal has already produced its close's contract, order
+  status and finance tasks, so deleting it would orphan them.
+- **Its order is not Confirmed.** The order is deleted with the deal through orders' own
+  `OrderEntityServer.Delete()`, which refuses a booked order as well.
+
+**What goes with it, in one transaction:** the deal's `DealStageEvent`, `DealContactRole`,
+`DealPaymentSchedule` and `DealTeamMember` rows (by SQL), the deal, then its order. The child rows go by
+SQL because their entities would not let them go cleanly: a stage event refuses delete (D-SE1), and a
+team member or payment schedule re-stamps or re-syncs the deal after each row, which would re-save the
+deal being removed. This is the one sanctioned delete of stage events; D-SE1 still holds for every other
+caller, and only for a deal that never closed, so no close provenance is lost.
+
+**Why authorizations and not a row-level filter on the permission.** The owner rule needs the user's
+Employee, and a refusal should name the rule it broke. Entity permissions only grant `CanDelete` (to the
+two roles on Deals and on the order entities a draft order's delete removes); the rule itself lives in
+code, beside the close lock.
+
+Pinned by `DealDelete.test.ts`.
 
 ---
 
