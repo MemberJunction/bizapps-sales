@@ -580,9 +580,9 @@ INSERT INTO __mj_BizAppsSales.Deal (ID, DealNumber, Name, PipelineID, PipelineSt
 -- this deal negotiate payment terms?" is therefore a row count, not arithmetic.
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealPaymentSchedule WHERE DealID=@d1)
 INSERT INTO __mj_BizAppsSales.DealPaymentSchedule (DealID, PaymentDate, Amount, Description, DisplayOrder) VALUES
- (@d1, '2026-10-01', 80400.0000,  N'40% on execution',                    10),
- (@d1, '2027-01-01', 60300.0000,  N'30% on completion of Phase 1 rollout', 20),
- (@d1, '2027-04-01', 60300.0000,  N'30% on final acceptance',              30);
+ (@d1, '2026-10-01', 49760.0000,  N'40% on execution',                    10),
+ (@d1, '2027-01-01', 37320.0000,  N'30% on completion of Phase 1 rollout', 20),
+ (@d1, '2027-04-01', 37320.0000,  N'30% on final acceptance',              30);
 
 -- ============================ DEAL TEAM — including the D-6 partner rep ============================
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealTeamMember WHERE DealID=@d1)

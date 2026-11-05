@@ -64,6 +64,7 @@ import {
     type OrderStatus,
 } from '@mj-biz-apps/orders-entities';
 import {
+    AlreadyWonRefusal,
     DealCloseStampFields,
     DealFieldsEditableWhileLocked,
     DealFieldLabel,
@@ -522,7 +523,8 @@ export class DealEntityServer extends DealEntity {
          */
         const stampRefusal = this.closeStampEditRefusal();
         if (stampRefusal) {
-            return this.refuseSave(stampRefusal);
+            const wonRefusal = await this.staleWonSaveRefusal();
+            return this.refuseSave(wonRefusal ?? stampRefusal);
         }
 
         /**
@@ -1620,7 +1622,7 @@ export class DealEntityServer extends DealEntity {
      */
     private async planStageDefaults(): Promise<StageDefaultsPlan | null> {
         const stageID = this.PipelineStageID;
-        if (!stageID) {
+        if (!stageID || !GUID_SHAPE.test(stageID)) {
             return null;
         }
         if (this.IsSaved) {
@@ -1684,7 +1686,7 @@ export class DealEntityServer extends DealEntity {
          */
         const stageStatusID = row.DealStatusTypeID ?? null;
         let derivableStatusID: string | null = null;
-        if (stageStatusID) {
+        if (stageStatusID && GUID_SHAPE.test(stageStatusID)) {
             const status = await view.RunView<{ LocksDeal: boolean }>(
                 {
                     EntityName: DEAL_STATUS_ENTITY,
@@ -1900,7 +1902,7 @@ export class DealEntityServer extends DealEntity {
 
     private async planStageOrderStatus(): Promise<StageOrderPlan | null> {
         const stageID = this.PipelineStageID;
-        if (!stageID) {
+        if (!stageID || !GUID_SHAPE.test(stageID)) {
             return null;
         }
         /**
@@ -2426,6 +2428,9 @@ export class DealEntityServer extends DealEntity {
 
     /** The deal's order, loaded only when the row on disk is a Draft dated before `today`. */
     private async staleDraftOrder(today: string) {
+        if (!this.OrderID || !GUID_SHAPE.test(this.OrderID)) {
+            return null;
+        }
         const view = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await view.RunView<{ Status: string; OrderDate: Date | string | null }>(
             {
@@ -2492,7 +2497,7 @@ export class DealEntityServer extends DealEntity {
      * Sales never sums lines itself. It copies the one number orders already stands behind.
      */
     private async refreshAmountFromOrder(): Promise<void> {
-        if (!this.OrderID) {
+        if (!this.OrderID || !GUID_SHAPE.test(this.OrderID)) {
             return;
         }
 
@@ -2712,8 +2717,8 @@ export class DealEntityServer extends DealEntity {
      * on the deal's outcome, so the outcome has to reach it. It used to be a flat `ReadonlySet` held in
      * a static, which is precisely how a caller ends up with the list and without the condition.
      */
-    private static lockEditableFields(isLost: boolean): ReadonlySet<string> {
-        return DealFieldsEditableWhileLocked(isLost);
+    private static lockEditableFields(isLost: boolean, accountBlank = false): ReadonlySet<string> {
+        return DealFieldsEditableWhileLocked(isLost, accountBlank);
     }
 
     /**
@@ -2950,8 +2955,16 @@ export class DealEntityServer extends DealEntity {
          * The outcome decides one field. golive#206: Loss Notes stays editable on a LOST deal and is
          * frozen on a won one, and the form asks the same function with the same flag — both take it
          * from the status ROW, never from a name.
+         *
+         * golive#306: A closed deal whose persisted `AccountID` is blank may have its account filled in
+         * once without reopening; changing an existing non-blank account or clearing it stays frozen.
          */
-        const editable = DealEntityServer.lockEditableFields(persisted.IsLost);
+        const accountField = this.GetFieldByName('AccountID');
+        const accountOld = accountField?.OldValue as string | null | undefined;
+        const accountWasBlank = !accountOld || String(accountOld).trim() === '';
+        const fillingBlankAccount =
+            accountWasBlank && !!this.AccountID && String(this.AccountID).trim() !== '';
+        const editable = DealEntityServer.lockEditableFields(persisted.IsLost, fillingBlankAccount);
 
         /**
          * `OwnerEmployeeID` IS FROZEN, AND IS STILL WRITTEN HERE WHEN THE ROSTER DRIVES IT.
@@ -3021,7 +3034,15 @@ export class DealEntityServer extends DealEntity {
 
         const all = [...changed, ...dirtyCollections];
         if (all.length === 0) {
+            if (fillingBlankAccount && accountField?.Dirty) {
+                this._orderStatusWarnings.push(
+                    "Account was set on this closed deal; its order's bill-to and any contract were left unchanged.",
+                );
+            }
             return null;
+        }
+        if (persisted.LocksDeal && persisted.IsWon && changed.includes('DealStatusTypeID') && !reopening) {
+            return await this.alreadyWonRefusal();
         }
         /**
          * golive#207 row 18, verbatim: "This deal is closed. {fields} cannot be changed until the
@@ -3112,14 +3133,17 @@ export class DealEntityServer extends DealEntity {
      */
     private async readStatusLockFlags(
         statusID: string,
-    ): Promise<{ LocksDeal: boolean; IsLost: boolean; Read: boolean; Absent: boolean }> {
+    ): Promise<{ LocksDeal: boolean; IsLost: boolean; IsWon: boolean; Read: boolean; Absent: boolean }> {
+        if (!GUID_SHAPE.test(statusID)) {
+            return { LocksDeal: true, IsLost: false, IsWon: false, Read: false, Absent: false };
+        }
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView(
             {
                 EntityName: DEAL_STATUS_ENTITY,
                 ExtraFilter: `ID = '${statusID}'`,
                 ResultType: 'simple',
-                Fields: ['LocksDeal', 'IsLost'],
+                Fields: ['LocksDeal', 'IsLost', 'IsWon'],
             },
             this.ContextCurrentUser,
         );
@@ -3127,10 +3151,58 @@ export class DealEntityServer extends DealEntity {
             LogError(
                 `DealEntityServer.readStatusLockFlags: could not read status ${statusID}: ${result.ErrorMessage}`,
             );
-            return { LocksDeal: true, IsLost: false, Read: false, Absent: false };
+            return { LocksDeal: true, IsLost: false, IsWon: false, Read: false, Absent: false };
         }
-        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean } | undefined;
-        return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true, Read: !!row, Absent: !row };
+        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean; IsWon?: boolean } | undefined;
+        return {
+            LocksDeal: row?.LocksDeal === true,
+            IsLost: row?.IsLost === true,
+            IsWon: row?.IsWon === true,
+            Read: !!row,
+            Absent: !row,
+        };
+    }
+
+    /**
+     * When a stale pre-close save hits a deal whose persisted status on disk is already Won, explain
+     * that the deal is already Won (and name the contract if one was created) instead of reporting the
+     * close-stamp edit refusal (golive#387).
+     */
+    private async staleWonSaveRefusal(): Promise<string | null> {
+        if (!this.IsSaved) return null;
+        const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
+        if (!persistedStatusID) return null;
+        const persisted = await this.readStatusLockFlags(persistedStatusID);
+        if (!persisted.LocksDeal || !persisted.IsWon) return null;
+        return this.alreadyWonRefusal();
+    }
+
+    private async alreadyWonRefusal(): Promise<string> {
+        const contractID =
+            (this.ContractID ?? (this.GetFieldByName('ContractID')?.OldValue as string | null | undefined)) ?? null;
+        let contractNumber: string | null = null;
+        if (contractID && GUID_SHAPE.test(String(contractID))) {
+            try {
+                const provider = this.ProviderToUse as unknown as IRunViewProvider | undefined;
+                if (provider?.RunView) {
+                    const result = await provider.RunView<{ ContractNumber: string | null }>(
+                        {
+                            EntityName: 'MJ_BizApps_Contracts: Contracts',
+                            ExtraFilter: `ID = '${contractID}'`,
+                            ResultType: 'simple',
+                            Fields: ['ContractNumber'],
+                        },
+                        this.ContextCurrentUser,
+                    );
+                    if (result?.Success) {
+                        contractNumber = (result.Results ?? [])[0]?.ContractNumber ?? null;
+                    }
+                }
+            } catch {
+                contractNumber = null;
+            }
+        }
+        return AlreadyWonRefusal(this.DealNumber || this.Name, contractNumber);
     }
 
     /* ── Parties ────────────────────────────────────────────────────────────── */
@@ -3272,6 +3344,9 @@ export class DealEntityServer extends DealEntity {
         if (!this.PipelineID) {
             return;
         }
+        if (!GUID_SHAPE.test(this.PipelineID)) {
+            throw new Error(`DealEntityServer: pipeline ${this.PipelineID} is not a valid ID.`);
+        }
 
         const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await viewProvider.RunView<PipelineCompanyRow>(
@@ -3339,6 +3414,12 @@ export class DealEntityServer extends DealEntity {
         const pipelineDirty = this.GetFieldByName('PipelineID')?.Dirty === true;
         if (this.IsSaved && !stageDirty && !pipelineDirty) {
             return null;
+        }
+        if (!GUID_SHAPE.test(stageID)) {
+            return 'the stage on this deal is not a valid ID.';
+        }
+        if (!GUID_SHAPE.test(pipelineID)) {
+            return 'the pipeline on this deal is not a valid ID.';
         }
 
         const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
@@ -3495,7 +3576,7 @@ export class DealEntityServer extends DealEntity {
     }
 
     /**
-     * Gives a NEW deal an owner: the account's owner when it has one, otherwise whoever is creating it.
+     * Gives a NEW deal an owner: whoever is creating it, otherwise the account's owner.
      *
      * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────────────────────────
      *
@@ -3514,10 +3595,15 @@ export class DealEntityServer extends DealEntity {
      *
      * ── THE ORDER OF PREFERENCE, AND WHY ────────────────────────────────────────────────────────────
      *
-     * The ACCOUNT's owner first. A deal on an existing customer belongs to whoever runs that customer,
-     * and that is true whether a rep, an SE or an admin typed it in — so it beats the creator, who is
-     * merely the person at the keyboard. The creator is the fallback for a deal with no account yet, or
-     * an account nobody owns, where the person entering it is the best answer available.
+     * The CREATOR first. The people who enter deals are the people who work them, so a deal that
+     * defaulted to the account's owner had to be reassigned by hand on every create — and reassigning
+     * is the slow path, through the deal team. The account's owner is the fallback for a creator with
+     * no linked Employee (the importer, an agent, `System`), so those deals still land on whoever runs
+     * the customer rather than on nobody. A creator who has an Employee never costs an account read.
+     *
+     * This reverses the first version, which put the account's owner first on the theory that an admin
+     * might be typing a deal in on a rep's behalf (bc-aidp-next-golive#415). That case is a
+     * reassignment after save; the common case is a rep entering their own deal.
      *
      * ── EVERY WAY THIS DECLINES TO ACT ──────────────────────────────────────────────────────────────
      *
@@ -3529,7 +3615,7 @@ export class DealEntityServer extends DealEntity {
      *    `stampOwnerFromTeam` uses, so an importer or an Action that sets its own team is never
      *    second-guessed — and the two cannot disagree about what "the caller is managing this" means.
      *  - nothing resolves. A context user with no linked Employee (`System` and `Anonymous` have none)
-     *    and no account owner leaves the deal unowned, which is exactly what happens today. Refusing the
+     *    on a deal whose account has no owner leaves it unowned, which is exactly what happens today. Refusing the
      *    save because we could not GUESS an owner would turn a working create into a broken one.
      *
      * A failure to READ the account is also not fatal, for the same reason: the deal still saves, just
@@ -3687,7 +3773,7 @@ export class DealEntityServer extends DealEntity {
             return; // the caller is managing the team; do not second-guess it
         }
 
-        const employeeID = (await this.accountOwnerEmployeeID()) ?? this.creatorEmployeeID();
+        const employeeID = this.creatorEmployeeID() ?? (await this.accountOwnerEmployeeID());
         if (!employeeID) {
             return; // nothing to default to — an unowned deal is the honest outcome
         }

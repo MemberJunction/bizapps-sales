@@ -788,11 +788,21 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         // The close stamps likewise, from the set the entity server refuses writes against (#252).
         if (IsDealCloseStamp(fieldName)) return false;
 
-        const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
+        const form = this.FormComponent as unknown as {
+            IsLocked?: boolean;
+            IsLost?: boolean;
+            IsPersistedAccountBlank?: boolean;
+        } | undefined;
         const locked = form?.IsLocked === true;
+        const recordAccountOld = this.Record?.GetFieldByName?.('AccountID')?.OldValue as string | null | undefined;
+        const accountBlank =
+            form?.IsPersistedAccountBlank !== undefined
+                ? form.IsPersistedAccountBlank
+                : this.Record !== undefined && (!recordAccountOld || String(recordAccountOld).trim() === '');
         // The outcome rides along with the lock, from the same resolver, because golive#206 keeps Loss
-        // Notes editable on a LOST deal and frozen on a won one.
-        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true);
+        // Notes editable on a LOST deal and frozen on a won one; golive#306 keeps Account editable when
+        // the closed deal was saved without one.
+        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true, accountBlank);
     }
 
     /**
@@ -2548,7 +2558,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                             <!-- THE OWNER IS CHANGED THROUGH THE DEAL TEAM, never typed. The column is a
                                  server-maintained stamp; SetOwner swaps the owner-role team row and the
                                  server derives the stamp from it on save. Saved deals only: a new deal
-                                 takes the account owner by default, and SetOwner reads the team first. -->
+                                 takes its creator as owner by default, and SetOwner reads the team first. -->
                             <div class="mj-forms-field mj-forms-field--editing">
                                 <label class="mj-forms-field-label" for="mjs-deal-owner">{{ OwnerLabel }}</label>
                                 <select id="mjs-deal-owner" data-testid="deal-owner-picker"
@@ -2636,7 +2646,7 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
     /**
      * Whether the owner field renders as the picker rather than as the read-only stamp.
      *
-     * SAVED DEALS ONLY: a new deal takes the account owner by default when it is first saved, and
+     * SAVED DEALS ONLY: a new deal takes its creator as owner by default when it is first saved, and
      * `SetOwner` loads the deal team before changing it. NOT GATED ON THE LOCK: reassigning a rep after
      * close is record-keeping (golive#206), and the server allows it when the team drives the save.
      */
