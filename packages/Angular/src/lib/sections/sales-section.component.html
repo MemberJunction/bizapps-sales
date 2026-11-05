@@ -348,7 +348,7 @@
             <ng-container *ngTemplateOutlet="filterBar"></ng-container>
           }
 
-          @if (Loading || DetailLoading) {
+          @if (Loading || BoardLoading) {
             <mj-loading></mj-loading>
           } @else if (LoadError) {
             <ng-container *ngTemplateOutlet="loadFailed"></ng-container>
