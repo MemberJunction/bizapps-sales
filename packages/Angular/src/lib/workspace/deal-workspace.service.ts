@@ -299,6 +299,9 @@ export interface StageEventRow { DealID: string; ToStageID: string | null; Chang
 /** An open deal, as {@link DealWorkspaceService.LoadStageEntries} reads it. */
 export interface StageDealRow { ID: string; PipelineStageID: string | null; __mj_CreatedAt: string | Date }
 
+/** Which pipelines the Sales section lists (bc-aidp-next-golive#423). Exported for the test that pins it. */
+export const PIPELINE_LIST_FILTER = '(IsActive = 1 OR IncludeInForecast = 1)';
+
 const sameID = (a: string | null | undefined, b: string | null | undefined): boolean =>
     !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
@@ -391,8 +394,12 @@ function lookupRead<T>(params: RunViewParams, apply: (rows: T[], into: DealWorks
  * key array, so a position cannot drift between them.
  */
 const LOOKUP_READS: Record<LookupKey, LookupRead> = {
+    // Active OR counted in the forecast (bc-aidp-next-golive#423). `IsActive` decides whether a deal can
+    // be put in a pipeline; this list is the dashboard's and the board's, which still have to show a
+    // retired pipeline's won and lost deals. A retired pipeline kept in the forecast stays filterable
+    // here; one that is neither active nor in the forecast drops out.
     Pipelines: lookupRead<PipelineRow>(
-        { EntityName: E_PIPELINE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'] },
+        { EntityName: E_PIPELINE, ExtraFilter: PIPELINE_LIST_FILTER, OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'] },
         (rows, into) => {
             // Grouped by company, default company first (#327): the same order the form and the board use.
             into.Pipelines = OrderPipelinesByCompany(rows.map<PipelineLookup>((p) => ({

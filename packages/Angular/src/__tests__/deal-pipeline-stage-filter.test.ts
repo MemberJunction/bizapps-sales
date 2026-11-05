@@ -37,12 +37,17 @@ const LEGACY = 'p-legacy';
 const HOME = 'c-home';
 const OTHER = 'c-other';
 const OTHER_B2B = 'p-other-b2b';
+/** Retired: deactivated, so only a deal already in it may still name it (bc-aidp-next-golive#423). */
+const RETIRED = 'p-retired';
+/** A company whose only pipeline is retired. */
+const LEGACY_CO = 'c-legacy';
 
 const PIPELINES: PipelineOption[] = [
-    { ID: B2B, Name: 'B2B', Code: 'B2B', CompanyID: HOME, CompanyName: 'Home', IsDefault: true, DisplayRank: 10 },
-    { ID: D2C, Name: 'D2C', Code: 'D2C', CompanyID: HOME, CompanyName: 'Home', IsDefault: false, DisplayRank: 20 },
-    { ID: LEGACY, Name: 'Sidecar Legacy Pipeline', Code: 'LEGACY', CompanyID: HOME, CompanyName: 'Home', IsDefault: false, DisplayRank: 30 },
-    { ID: OTHER_B2B, Name: 'B2B', Code: 'B2B', CompanyID: OTHER, CompanyName: 'Other', IsDefault: false, DisplayRank: 10 },
+    { ID: B2B, Name: 'B2B', Code: 'B2B', CompanyID: HOME, CompanyName: 'Home', IsDefault: true, DisplayRank: 10, IsActive: true },
+    { ID: D2C, Name: 'D2C', Code: 'D2C', CompanyID: HOME, CompanyName: 'Home', IsDefault: false, DisplayRank: 20, IsActive: true },
+    { ID: LEGACY, Name: 'Sidecar Legacy Pipeline', Code: 'LEGACY', CompanyID: HOME, CompanyName: 'Home', IsDefault: false, DisplayRank: 30, IsActive: true },
+    { ID: OTHER_B2B, Name: 'B2B', Code: 'B2B', CompanyID: OTHER, CompanyName: 'Other', IsDefault: false, DisplayRank: 10, IsActive: true },
+    { ID: RETIRED, Name: 'Legacy', Code: 'LEG', CompanyID: LEGACY_CO, CompanyName: 'Legacy Co', IsDefault: false, DisplayRank: 10, IsActive: false },
 ];
 
 const STAGES: PipelineStageOption[] = [
@@ -220,5 +225,31 @@ describe('the company filter over the pipeline list', () => {
 
     it('reads the current pipeline with its company when not editing', () => {
         expect(panelWith(OTHER_B2B).CurrentPipelineName).toBe('B2B (Other)');
+    });
+});
+
+describe('an inactive pipeline is shown only on the deal already in it (bc-aidp-next-golive#423)', () => {
+    it('is not offered to a deal in another pipeline', () => {
+        const panel = panelWith(B2B);
+        expect(panel.CompanyOptions.map((c) => c.CompanyID)).not.toContain(LEGACY_CO);
+        expect(panelWith(null, null, false).PipelineOptions.map((p) => p.ID)).not.toContain(RETIRED);
+    });
+
+    it('stays selected, with its company, on a deal that sits in it', () => {
+        const panel = panelWith(RETIRED);
+        expect(panel.SelectedCompanyID).toBe(LEGACY_CO);
+        expect(panel.PipelineOptions.map((p) => p.ID)).toEqual([RETIRED]);
+        expect(panel.CompanyOptions.map((c) => c.CompanyID)).toContain(LEGACY_CO);
+    });
+
+    it('names it when not editing', () => {
+        expect(panelWith(RETIRED).CurrentPipelineName).toBe('Legacy (Legacy Co)');
+    });
+
+    it('drops out once the deal moves to an active pipeline', () => {
+        const panel = panelWith(RETIRED);
+        panel.SetCompany(HOME);
+        expect(panel.Record?.PipelineID).toBe(B2B);
+        expect(panel.CompanyOptions.map((c) => c.CompanyID)).not.toContain(LEGACY_CO);
     });
 });
