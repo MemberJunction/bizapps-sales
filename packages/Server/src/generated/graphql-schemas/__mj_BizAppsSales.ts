@@ -4504,10 +4504,6 @@ export class mjBizAppsSalesSalesAccount_ {
     @MaxLength(753)
     DefaultBillingContact?: string;
         
-    @Field({nullable: true}) 
-    @MaxLength(20)
-    Acronym?: string;
-        
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
         
@@ -4602,9 +4598,6 @@ export class CreatemjBizAppsSalesSalesAccountInput {
     @Field({ nullable: true })
     Status?: string;
 
-    @Field({ nullable: true })
-    Acronym: string | null;
-
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -4698,9 +4691,6 @@ export class UpdatemjBizAppsSalesSalesAccountInput {
 
     @Field({ nullable: true })
     Status?: string;
-
-    @Field({ nullable: true })
-    Acronym?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

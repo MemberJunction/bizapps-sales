@@ -88,12 +88,12 @@ GO
 -- parity clean, and a second pass wrote no SQL and changed no file, so the run converges.
 --
 -- DEAL-SCOPED BLOCKS ONLY, matching V202611021600's selection. The same run also re-emitted
--- field categories for Deal's other 73 fields, the entity icon, the FieldCategoryInfo settings
+-- field categories for all 74 of Deal's fields, the entity icon, the FieldCategoryInfo settings
 -- and AI validation functions for eleven entities. None of that is caused by this column --- it
 -- is output the committed state predates --- so shipping it here would put unrelated metadata
--- changes in a migration about one field. The one category statement BELOW is kept, because it
--- is this column's own: without it a host installed from migrations gets the field with no
--- Category or GeneratedFormSection while a host that ran CodeGen has both.
+-- changes in a migration about one field. Even this column's own Category UPDATE is omitted
+-- (see the note at the bottom of this file): categorizing 1 of 74 fields pulls CreationDate out
+-- into a standalone section on the generated form while leaving the other 73 in the default one.
 -- =============================================================================
 
 /* SQL text to insert 1 new entity field(s) */

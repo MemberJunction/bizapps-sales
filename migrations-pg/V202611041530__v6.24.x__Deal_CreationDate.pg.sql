@@ -195,11 +195,11 @@ LEFT OUTER JOIN
   ON
     d."BillingContactID" = "mjBizAppsSalesSalesContact_BillingContactID"."ID"
 INNER JOIN
-    ${mjSchema}."Company" AS "MJCompany_CompanyID"
+    __mj."Company" AS "MJCompany_CompanyID"
   ON
     d."CompanyID" = "MJCompany_CompanyID"."ID"
 LEFT OUTER JOIN
-    ${mjSchema}."vwEmployees" AS "MJEmployee_OwnerEmployeeID"
+    __mj."vwEmployees" AS "MJEmployee_OwnerEmployeeID"
   ON
     d."OwnerEmployeeID" = "MJEmployee_OwnerEmployeeID"."ID"
 LEFT OUTER JOIN
@@ -215,11 +215,11 @@ LEFT OUTER JOIN
   ON
     d."LeadSourceTypeID" = "mjBizAppsSalesLeadSourceType_LeadSourceTypeID"."ID"
 LEFT OUTER JOIN
-    ${mjSchema}."User" AS "MJUser_ClosedByUserID"
+    __mj."User" AS "MJUser_ClosedByUserID"
   ON
     d."ClosedByUserID" = "MJUser_ClosedByUserID"."ID"
 LEFT OUTER JOIN
-    ${mjSchema}_BizAppsOrders."OrderHeader" AS "mjBizAppsOrdersOrderHeader_OrderID"
+    __mj_BizAppsOrders."OrderHeader" AS "mjBizAppsOrdersOrderHeader_OrderID"
   ON
     d."OrderID" = "mjBizAppsOrdersOrderHeader_OrderID"."ID"$vsql$;
   v_target_oid OID;
@@ -344,9 +344,9 @@ SET "CreationDate" = COALESCE(
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM ${mjSchema}."EntityField" WHERE "ID" = 'b3c1a716-5c4b-4b5c-ae60-4fa180e44480' OR ("EntityID" = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354' AND "Name" = 'CreationDate')
+        SELECT 1 FROM __mj."EntityField" WHERE "ID" = 'b3c1a716-5c4b-4b5c-ae60-4fa180e44480' OR ("EntityID" = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354' AND "Name" = 'CreationDate')
     ) THEN
-        INSERT INTO ${mjSchema}."EntityField"
+        INSERT INTO __mj."EntityField"
         (
         "ID",
         "EntityID",
@@ -380,7 +380,7 @@ BEGIN
         (
         'b3c1a716-5c4b-4b5c-ae60-4fa180e44480',
         '79148DE5-7F99-44AC-ACD4-5EE7BA93D354', -- "Entity": "MJ_BizApps_Sales": "Deals"
-        (SELECT COALESCE(MAX("Sequence"), 0) + 1 FROM ${mjSchema}."EntityField" WHERE "EntityID" = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354'),
+        (SELECT COALESCE(MAX("Sequence"), 0) + 1 FROM __mj."EntityField" WHERE "EntityID" = '79148DE5-7F99-44AC-ACD4-5EE7BA93D354'),
         'CreationDate',
         'Creation Date',
         'Date and Time the Deal was created, defaulted to the record creation date but editable by the User. Used for deal aging.',
@@ -408,13 +408,6 @@ BEGIN
         );
     END IF;
 END $$;
-
-UPDATE ${mjSchema}."EntityField"
-SET 
-   "Category" = 'Timeline & Milestones',
-   "GeneratedFormSection" = 'Category'
-WHERE 
-   "ID" = 'B3C1A716-5C4B-4B5C-AE60-4FA180E44480';
 
 /* Refresh custom base views for modified entities so schema changes are picked up */
 
@@ -471,8 +464,7 @@ DO $$ BEGIN GRANT EXECUTE ON FUNCTION __mj_BizAppsSales."spDeleteDeal" TO "cdp_D
 DO $$ BEGIN REVOKE EXECUTE ON FUNCTION __mj_BizAppsSales."spDeleteDeal" FROM "cdp_Developer"; EXCEPTION WHEN others THEN NULL; END $$;
 DO $$ BEGIN REVOKE EXECUTE ON FUNCTION __mj_BizAppsSales."spDeleteDeal" FROM "cdp_Integration"; EXCEPTION WHEN others THEN NULL; END $$;
 DO $$ BEGIN GRANT EXECUTE ON FUNCTION __mj_BizAppsSales."spDeleteDeal" TO "cdp_Developer", "cdp_Integration"; EXCEPTION WHEN others THEN NULL; END $$;
-/* Field category for the new column (from the same run's categorization pass) */
--- UPDATE Entity Field Category Info MJ_BizApps_Sales: Deals.CreationDate;
+/* Refresh custom base views for modified entities so schema changes are picked up */
 
 
 -- ===================== Comments =====================
@@ -492,12 +484,12 @@ COMMENT ON COLUMN __mj_BizAppsSales."Deal"."CreationDate" IS 'Date and Time the 
 -- parity clean, and a second pass wrote no SQL and changed no file, so the run converges.
 --
 -- DEAL-SCOPED BLOCKS ONLY, matching V202611021600's selection. The same run also re-emitted
--- field categories for Deal's other 73 fields, the entity icon, the FieldCategoryInfo settings
+-- field categories for all 74 of Deal's fields, the entity icon, the FieldCategoryInfo settings
 -- and AI validation functions for eleven entities. None of that is caused by this column --- it
 -- is output the committed state predates --- so shipping it here would put unrelated metadata
--- changes in a migration about one field. The one category statement BELOW is kept, because it
--- is this column's own: without it a host installed from migrations gets the field with no
--- Category or GeneratedFormSection while a host that ran CodeGen has both.
+-- changes in a migration about one field. Even this column's own Category UPDATE is omitted:
+-- categorizing 1 of 74 fields pulls CreationDate out into a standalone section on the generated
+-- form while leaving the other 73 in the default one.
 -- =============================================================================
 
 /* SQL text to insert 1 new entity field(s) */
