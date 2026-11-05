@@ -133,18 +133,16 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
                                 </label>
                             }
                             <div class="dat__pickers">
-                                <mj-combobox class="dat__picker" TextField="Name" ValueField="ID"
+                                <mj-combobox #personPick class="dat__picker" TextField="Name" ValueField="ID"
                                     [Data]="Options.Person" [ValuePrimitive]="true" [Filterable]="false"
                                     Placeholder="Add person: type 2+ characters"
-                                    [(ngModel)]="Pick.Person" [ngModelOptions]="{ standalone: true }"
                                     (FilterChange)="Search('Person', $event)"
-                                    (ValueChange)="AddParty('Person', $event)"></mj-combobox>
-                                <mj-combobox class="dat__picker" TextField="Name" ValueField="ID"
+                                    (ValueChange)="AddParty('Person', $event, personPick)"></mj-combobox>
+                                <mj-combobox #orgPick class="dat__picker" TextField="Name" ValueField="ID"
                                     [Data]="Options.Organization" [ValuePrimitive]="true" [Filterable]="false"
                                     Placeholder="Add organization: type 2+ characters"
-                                    [(ngModel)]="Pick.Organization" [ngModelOptions]="{ standalone: true }"
                                     (FilterChange)="Search('Organization', $event)"
-                                    (ValueChange)="AddParty('Organization', $event)"></mj-combobox>
+                                    (ValueChange)="AddParty('Organization', $event, orgPick)"></mj-combobox>
                             </div>
                         }
                     </fieldset>
@@ -300,7 +298,6 @@ export class DealActivityTimelineComponent {
     public PartiesLoading = false;
     public PartiesLoaded = false;
     public Options: Record<PartyKind, PartyOption[]> = { Person: [], Organization: [] };
-    public Pick: Record<PartyKind, string | null> = { Person: null, Organization: null };
     /** Drops a search answer that arrives after a newer one was asked. */
     private searchSeq: Record<PartyKind, number> = { Person: 0, Organization: 0 };
 
@@ -382,14 +379,18 @@ export class DealActivityTimelineComponent {
         this.cdr.detectChanges();
     }
 
-    public AddParty(kind: PartyKind, value: unknown): void {
+    public AddParty(kind: PartyKind, value: unknown, picker: MJComboboxComponent): void {
         const id = typeof value === 'string' ? value : null;
         if (!id) return;
         const name = this.Options[kind].find((o) => o.ID === id)?.Name ?? id;
         this.Parties = AddPartyChoice(this.Parties, kind, id, name);
-        // Cleared after the combobox finishes its own selection, so it is ready for the next one.
+        /**
+         * Cleared after the combobox finishes its own selection, so it is ready for the next one. Reset
+         * through `writeValue`, not an ngModel binding: a model that goes null -> ID -> null inside one
+         * change-detection pass never reaches the control, and the box was left showing the raw ID.
+         */
         void Promise.resolve().then(() => {
-            this.Pick = { ...this.Pick, [kind]: null };
+            picker.writeValue(null);
             this.Options = { ...this.Options, [kind]: [] };
             this.cdr.detectChanges();
         });
