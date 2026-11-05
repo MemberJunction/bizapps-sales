@@ -89,6 +89,33 @@ provider your account can sign in to.
 identity provider must accept the origin Explorer serves on (`http://localhost:4341` here) as a redirect
 URI. Which origins it accepts is set in the identity provider, not in this repo.
 
+### When the host looks wired up but a record will not open
+
+Three failures look like application bugs and are host wiring. Each has a standing rule in
+[`KNOWN-ISSUES.md`](./KNOWN-ISSUES.md); this is the order worth checking them in, because the first is
+both the most likely and the fastest to confirm.
+
+1. **The app's GraphQL resolvers are not in the schema** ([KI-21](./KNOWN-ISSUES.md#ki-21--a-host-running-sales-must-also-register-orders-server-package)).
+   Opening a record fails with `InnerLoad returned false for key ID=…` while the grid lists records
+   perfectly, and MJAPI logs nothing at all. Importing a package registers its entity classes, not its
+   resolvers; those need `dynamicPackages.server[]` in the host's `mj.config.cjs`. KI-21 has a
+   one-command check using `MJ_API_KEY` that settles it without a browser.
+2. **Another MJ version has already claimed this port's client storage**
+   ([KI-29](./KNOWN-ISSUES.md#ki-29--two-mj-versions-on-one-localhost-port-break-each-others-client-storage)).
+   The console says `The requested version (6001) is less than the existing version (6002)`, plus
+   assorted `RecentAccessService` and workspace-state errors. MJ's own Explorer uses 4201; serve a test
+   host elsewhere (4341 here).
+3. **Two copies of a shared bizapps library**
+   ([KI-30](./KNOWN-ISSUES.md#ki-30--a-hand-assembled-host-needs-the-sibling-bizapps-peers-at-one-version-each)).
+   Only on hosts assembled by hand rather than by `WORKSPACE-SETUP.md`'s generator. Symptoms are quiet:
+   a custom form that does not take over from the generated one, or a registration that silently does
+   not apply.
+
+A note on sequencing, learned the expensive way: **check the schema first.** The server can load a
+record perfectly through the SQL provider — the integration suite runs in process and stays green — while
+the browser cannot, because only the browser goes through GraphQL. Proving the data, the permissions and
+the entity class are all healthy does not narrow anything if the query itself was never registered.
+
 ---
 
 ## 3. Seeding
