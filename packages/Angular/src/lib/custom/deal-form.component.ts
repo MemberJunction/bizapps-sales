@@ -40,6 +40,7 @@ import { EntitySaveOptions, RunView } from '@memberjunction/core';
 
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
 import { MJS_ENTITIES } from '../data/entity-names';
+import { SameDealID, WatchDealSaves, type DealSave } from '../data/deal-saves';
 import { ShouldStampCompanyFromPipeline, type PipelineCompanyRow } from './company-from-pipeline';
 
 /** See `deal-stage-event-form.component.ts` for why the priority is explicit rather than import-order. */
@@ -105,6 +106,36 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
          */
         this.RecordSaved.subscribe(() => { void this.resolveDealState(); });
         this.RecordRefreshed.subscribe(() => { void this.resolveDealState(); });
+        this.stopWatchingSaves = WatchDealSaves((save) => { void this.OnDealSaved(save); });
+    }
+
+    public override ngOnDestroy(): void {
+        this.stopWatchingSaves?.();
+        this.stopWatchingSaves = null;
+        super.ngOnDestroy();
+    }
+
+    private stopWatchingSaves: (() => void) | null = null;
+
+    /**
+     * Reloads this deal when another copy of it was saved (bc-aidp-next-golive#419).
+     *
+     * Explorer re-focuses a deal's open tab instead of loading it again, and the board's stage move
+     * saves its own copy of the deal. So a reopened deal showed the stage it had when the tab first
+     * opened, until the browser was refreshed. `RefreshRecord` re-reads the row and re-runs the lock
+     * through `RecordRefreshed`.
+     *
+     * Never over the user's work: not in edit mode (`RefreshRecord` refuses that itself) and not while
+     * anything is unsaved. A save this form ran through its own record is not news, so it is skipped.
+     *
+     * @returns whether the record was reloaded.
+     */
+    public async OnDealSaved(save: DealSave): Promise<boolean> {
+        const record = this.record;
+        if (!record || save.EntityName !== MJS_ENTITIES.Deal || save.Record === record) return false;
+        if (!SameDealID(save.DealID, record.Get('ID') as string | null)) return false;
+        if (this.EditMode || record.Dirty || this.PendingRecordsDirty() || this.HasAdditionalUnsavedChanges) return false;
+        return this.RefreshRecord();
     }
 
     /** Emits after {@link RefreshDealState}, so mounted panels re-check their own notices. */

@@ -299,6 +299,9 @@ export interface StageEventRow { DealID: string; ToStageID: string | null; Chang
 /** An open deal, as {@link DealWorkspaceService.LoadStageEntries} reads it. */
 export interface StageDealRow { ID: string; PipelineStageID: string | null; __mj_CreatedAt: string | Date }
 
+/** Which pipelines the Sales section lists (bc-aidp-next-golive#423). Exported for the test that pins it. */
+export const PIPELINE_LIST_FILTER = '(IsActive = 1 OR IncludeInForecast = 1)';
+
 const sameID = (a: string | null | undefined, b: string | null | undefined): boolean =>
     !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
@@ -391,8 +394,12 @@ function lookupRead<T>(params: RunViewParams, apply: (rows: T[], into: DealWorks
  * key array, so a position cannot drift between them.
  */
 const LOOKUP_READS: Record<LookupKey, LookupRead> = {
+    // Active OR counted in the forecast (bc-aidp-next-golive#423). `IsActive` decides whether a deal can
+    // be put in a pipeline; this list is the dashboard's and the board's, which still have to show a
+    // retired pipeline's won and lost deals. A retired pipeline kept in the forecast stays filterable
+    // here; one that is neither active nor in the forecast drops out.
     Pipelines: lookupRead<PipelineRow>(
-        { EntityName: E_PIPELINE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'] },
+        { EntityName: E_PIPELINE, ExtraFilter: PIPELINE_LIST_FILTER, OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'] },
         (rows, into) => {
             // Grouped by company, default company first (#327): the same order the form and the board use.
             into.Pipelines = OrderPipelinesByCompany(rows.map<PipelineLookup>((p) => ({
@@ -515,6 +522,19 @@ export const SECTION_LOOKUP_KEYS: readonly LookupKey[] = ['Pipelines', 'Stages',
  */
 // 'Lines' is NOT here: the deal holds none. Its order's lines arrive with the embedded order.
 const DEAL_COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
+
+/**
+ * Leaves out products orders marks as not sold new (golive#360): catch-all products a Business Central
+ * import books invoice lines to, and products kept only for converted subscriptions. They stay Active,
+ * because orders refuses to price a line whose product is not, so existing orders and renewals keep
+ * saving; only the picker stops offering them.
+ *
+ * Added only when the host's orders has the column. Sales installs alongside older orders releases, and
+ * filtering on a column the host lacks would fail the whole catalogue read.
+ */
+function sellableNewFilter(productFields: readonly string[]): string {
+    return productFields.includes('IsSellableNew') ? ' AND IsSellableNew = 1' : '';
+}
 
 @Injectable({ providedIn: 'root' })
 export class DealWorkspaceService {
@@ -792,8 +812,8 @@ export class DealWorkspaceService {
          * So the entity is checked in metadata FIRST, and its absence simply means no picker.
          */
         const md = new Metadata();
-        const known = md.Entities.some((e) => e.Name === E_ORDERS_PRODUCT);
-        if (!known) {
+        const productEntity = md.Entities.find((e) => e.Name === E_ORDERS_PRODUCT);
+        if (!productEntity) {
             return [];
         }
 
@@ -803,7 +823,7 @@ export class DealWorkspaceService {
         const rv = new RunView();
         const result = await rv.RunView<ProductLookup>({
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(day),
+            ExtraFilter: ProductFilterFor(day) + sellableNewFilter(productEntity.Fields.map((f) => f.Name)),
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             // Shared with the check that guards it, so the two cannot drift — see PRODUCT_LOOKUP_FIELDS.

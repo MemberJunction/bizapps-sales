@@ -1,5 +1,43 @@
 # @mj-biz-apps/sales-ng
 
+## 6.23.4
+
+### Patch Changes
+
+- ddb752d: The Sales board shows as soon as its deals, pipelines and stages load, without waiting for the win rate, the stage history or the grids; idle badges fill in when the stage history arrives. If the board's own reads take longer than 30 seconds, it shows the reason and a Retry instead of loading until a browser refresh.
+- 77bcd74: A saved owner or stage now shows everywhere without a browser refresh. The Sales board and dashboard re-read after any deal save in the browser, and an open deal tab reloads when another copy of its deal is saved, unless it is in edit mode or has unsaved changes.
+  - @mj-biz-apps/sales-entities@6.23.4
+
+## 6.23.3
+
+### Patch Changes
+
+- 6de2a0d: A deactivated pipeline stays on the Sales dashboard and board while it is kept in the forecast
+  (bc-aidp-next-golive#423).
+
+  `Pipeline.IsActive` now decides only whether a deal can be put in a pipeline. The Sales section's
+  pipeline list (dashboard Company and Pipeline filters, stage card, board) reads pipelines that are
+  active or have `IncludeInForecast = 1`, so a retired pipeline holding won and lost deals can be
+  deactivated without dropping out of the dashboard. The deal form still offers only active pipelines,
+  but a deal already in an inactive one keeps showing it, with its company, instead of "—".
+
+  - @mj-biz-apps/sales-entities@6.23.3
+
+## 6.23.2
+
+### Patch Changes
+
+- c1c73b9: A deal line's product is chosen from a type-ahead (name or SKU) instead of a plain list of every product. It ranks with orders' own add-product rule, lists the deal's company first, and warns before Save when the product belongs to another company, since that company books the line's revenue. Products orders marks as not sold new (`IsSellableNew` off) are no longer offered, on hosts whose orders has that column (golive#360).
+- dc2e50a: Sales app: Accounts and Contacts pages in the rail, under Customers, each listing its records with a New account / New contact button. The dashboard offers New account beside New deal.
+  - @mj-biz-apps/sales-entities@6.23.2
+
+## 6.23.1
+
+### Patch Changes
+
+- a73d09a: New Deal form: Lead Source and Lead Source Detail are offered while the deal is being created, on the Pipeline section, so a rep no longer has to save the deal and edit it again to record its source.
+  - @mj-biz-apps/sales-entities@6.23.1
+
 ## 6.23.0
 
 ### Minor Changes

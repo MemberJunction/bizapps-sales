@@ -1,5 +1,39 @@
 # @mj-biz-apps/sales-server
 
+## 6.23.4
+
+### Patch Changes
+
+- Updated dependencies [3c7b6da]
+  - @mj-biz-apps/sales-core-entities-server@6.23.4
+  - @mj-biz-apps/sales-actions@6.23.4
+  - @mj-biz-apps/sales-entities@6.23.4
+
+## 6.23.3
+
+### Patch Changes
+
+- @mj-biz-apps/sales-actions@6.23.3
+- @mj-biz-apps/sales-core-entities-server@6.23.3
+- @mj-biz-apps/sales-entities@6.23.3
+
+## 6.23.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-actions@6.23.2
+- @mj-biz-apps/sales-core-entities-server@6.23.2
+- @mj-biz-apps/sales-entities@6.23.2
+
+## 6.23.1
+
+### Patch Changes
+
+- f616af3: Logging an activity on a deal works again for users who are not Owners. MJ 6.1.6 runs an action through `RunAction` for Owners only unless the action authorizes its caller, so Log Activity now does: it refuses a deal the caller cannot read, and saves the activity with the caller's own permissions.
+  - @mj-biz-apps/sales-actions@6.23.1
+  - @mj-biz-apps/sales-core-entities-server@6.23.1
+  - @mj-biz-apps/sales-entities@6.23.1
+
 ## 6.23.0
 
 ### Patch Changes
