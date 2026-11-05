@@ -1,5 +1,12 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.23.4
+
+### Patch Changes
+
+- 3c7b6da: A new deal's default owner is now the person creating it. The account's owner is used only when the creator has no linked Employee (the importer, an agent, `System`). (golive #415)
+  - @mj-biz-apps/sales-entities@6.23.4
+
 ## 6.23.3
 
 ### Patch Changes
