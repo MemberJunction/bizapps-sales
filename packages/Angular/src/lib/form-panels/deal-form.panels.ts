@@ -2534,7 +2534,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                             <!-- THE OWNER IS CHANGED THROUGH THE DEAL TEAM, never typed. The column is a
                                  server-maintained stamp; SetOwner swaps the owner-role team row and the
                                  server derives the stamp from it on save. Saved deals only: a new deal
-                                 takes the account owner by default, and SetOwner reads the team first. -->
+                                 takes its creator as owner by default, and SetOwner reads the team first. -->
                             <div class="mj-forms-field mj-forms-field--editing">
                                 <label class="mj-forms-field-label" for="mjs-deal-owner">{{ OwnerLabel }}</label>
                                 <select id="mjs-deal-owner" data-testid="deal-owner-picker"
@@ -2622,7 +2622,7 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
     /**
      * Whether the owner field renders as the picker rather than as the read-only stamp.
      *
-     * SAVED DEALS ONLY: a new deal takes the account owner by default when it is first saved, and
+     * SAVED DEALS ONLY: a new deal takes its creator as owner by default when it is first saved, and
      * `SetOwner` loads the deal team before changing it. NOT GATED ON THE LOCK: reassigning a rep after
      * close is record-keeping (golive#206), and the server allows it when the team drives the save.
      */
