@@ -1,5 +1,28 @@
 # @mj-biz-apps/sales-ng
 
+## 6.24.1
+
+### Patch Changes
+
+- b4fca8a: Restore the Acronym field on Sales Accounts. Sales Accounts inherit it from Organization (Common 5.57+), and the 6.24.0 generated code dropped it, so every Sales Account form failed to load with "Cannot query field Acronym". Common is now required at 5.60.0 or later, the version AIDP Next runs, so CodeGen in this repo keeps the field.
+- Updated dependencies [b4fca8a]
+  - @mj-biz-apps/sales-entities@6.24.1
+
+## 6.24.0
+
+### Minor Changes
+
+- 1ceea58: Logging an activity from a deal now lets the rep choose who it is linked to: the deal's account and primary contact start ticked and can be unticked, the billing contact and buying team can be ticked, and any other person or organization can be searched for and added. The Activity panel shows who the selected activity is linked to. `Log Activity` gains an optional `Parties` input (metadata); without it the action behaves as before. (golive #408)
+- 4a3226a: Close and lock hardening: validate caller-supplied IDs and fail closed on loss-reason and deal-type lookup errors in `Sales.CloseDeal` and `Sales.ReopenDeal`; keep client-generated `ConcessionID` across discount-concession retries so a resend after a timeout is idempotent; return a specific refusal naming the deal and contract when a close or stale pre-close save hits an already-Won deal; and allow a closed deal whose persisted `AccountID` is blank to have its account set once without reopening.
+
+### Patch Changes
+
+- Updated dependencies [da41816]
+- Updated dependencies [4a3226a]
+- Updated dependencies [c4808fa]
+- Updated dependencies [c96a138]
+  - @mj-biz-apps/sales-entities@6.24.0
+
 ## 6.23.4
 
 ### Patch Changes
