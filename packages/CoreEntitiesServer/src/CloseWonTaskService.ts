@@ -42,6 +42,7 @@ import {
     LogStatus,
     RunView,
     type IMetadataProvider,
+    type IRunViewProvider,
     type UserInfo,
 } from '@memberjunction/core';
 import { TaskAssignmentService, TaskOrchestrationService } from '@mj-biz-apps/tasks-core';
@@ -745,6 +746,14 @@ export class CloseWonTaskService {
      * meant refusing, because the cost was booking against an open deal. Here the cost of not knowing
      * is a second row in a work queue that someone closes — far cheaper than a close that fails, or a
      * task finance never gets because a lookup had a bad day.
+     *
+     * BOTH READS GO THROUGH THE INJECTED PROVIDER, because the close calls this inside its own
+     * transaction. By the time the contract task is checked, the order-review task and its links are
+     * rows that transaction has written and not committed. `new RunView()` reads on the global
+     * provider's connection, which waits on those locks until the request timeout (30 s), fails, and
+     * returns null: every Close Won that raised both tasks stalled 30 s, and the browser saw a 504
+     * while the close went on to commit. The injected provider is the transaction's connection, so it
+     * sees its own rows, and a re-close still finds the task it raised.
      */
     private async existingTaskID(
         typeID: string,
@@ -773,7 +782,7 @@ export class CloseWonTaskService {
         const where = pairs
             .map((p) => `(EntityID = '${SafeText(p.id)}' AND RecordID = '${SafeText(p.record)}')`)
             .join(' OR ');
-        const links = await new RunView().RunView<{ TaskID: string }>(
+        const links = await new RunView(provider as unknown as IRunViewProvider).RunView<{ TaskID: string }>(
             {
                 EntityName: E_TASK_LINK,
                 ExtraFilter: where,
@@ -788,7 +797,7 @@ export class CloseWonTaskService {
         }
 
         const list = taskIDs.map((id) => `'${SafeText(id)}'`).join(', ');
-        const tasks = await new RunView().RunView<{ ID: string }>(
+        const tasks = await new RunView(provider as unknown as IRunViewProvider).RunView<{ ID: string }>(
             {
                 EntityName: E_TASK,
                 ExtraFilter: `ID IN (${list}) AND TypeID = '${SafeText(typeID)}'`,
