@@ -1,5 +1,19 @@
 # @mj-biz-apps/sales-ng
 
+## 6.24.2
+
+### Patch Changes
+
+- fa524d7: The deal's Activity grid no longer lists every activity in the system when the deal opens. The grid now loads only once the deal's activity filter is known (bc-aidp-next-golive#432).
+- d260a50: The deal line product picker now says when a search matches Draft products it does not offer, and
+  that they can be activated in Orders → Catalog (bc-aidp-next-golive#433).
+- b4c3d2e: The order header's From row names the contract by number and status, opens its executed agreement,
+  or says "Awaiting signed agreement" when the contract needs one and none is linked
+  (bc-aidp-next-golive#445). When the deal holds no `ContractID`, the contract its close created is
+  found by `CreatingRecordID`.
+- ddb39c7: A background re-read of the Deals section (after a deal save or a board drag) that takes longer than 30 seconds no longer replaces the board with a Retry panel. The board stays up and takes the new data when the slow reply lands. An explicit refresh still shows the Retry.
+  - @mj-biz-apps/sales-entities@6.24.2
+
 ## 6.24.1
 
 ### Patch Changes

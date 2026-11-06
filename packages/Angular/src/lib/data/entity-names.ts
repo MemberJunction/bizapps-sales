@@ -36,6 +36,13 @@ export const MJS_FOREIGN_ENTITIES = {
      * (golive#227), by reading the deal row.
      */
     Contract: 'MJ_BizApps_Contracts: Contracts',
+    /**
+     * MJ core's file table and its polymorphic record link. A contract's executed agreement is the
+     * file linked to it whose category is 'Executed Agreement' (golive#445); contracts ships no FK for
+     * it, so it is found the way `vwContracts.IsAwaitingDocument` finds it.
+     */
+    File: 'MJ: Files',
+    FileEntityRecordLink: 'MJ: File Entity Record Links',
     Activity: 'MJ_BizApps_Common: Activities',
     ActivityLink: 'MJ_BizApps_Common: Activity Links',
     /** Common's person/organization link. The only record of who works at an account (#301). */
