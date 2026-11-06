@@ -43,6 +43,7 @@ import { MJSSalesSectionComponent, SalesDealsSectionResource } from './lib/secti
 import './lib/custom/custom-forms.module';
 import { DealFormComponentExtended } from './lib/custom/deal-form.component';
 import { DealStageEventFormComponentExtended } from './lib/custom/deal-stage-event-form.component';
+import { SalesAccountFormComponentExtended, SalesContactFormComponentExtended } from './lib/custom/party-create-forms.component';
 import { MJSDealHeroPanel } from './lib/form-panels/deal-hero.panel';
 import { DealFormPolicy } from './lib/form-panels/deal-form.policy';
 import {
@@ -67,6 +68,7 @@ import {
 import { MJSOrderRelatedPanel } from './lib/form-panels/order-related.panel';
 import { MJSAccountContactsPanel } from './lib/form-panels/account-contacts.panel';
 import { MJSContactAccountsPanel } from './lib/form-panels/contact-accounts.panel';
+import { MJSAccountCreatePanel, MJSContactCreatePanel } from './lib/form-panels/party-create.panel';
 
 // Re-export for consumers
 export { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
@@ -115,6 +117,8 @@ export {
 export { MJSOrderRelatedPanel } from './lib/form-panels/order-related.panel';
 export { MJSAccountContactsPanel } from './lib/form-panels/account-contacts.panel';
 export { MJSContactAccountsPanel } from './lib/form-panels/contact-accounts.panel';
+export { MJSAccountCreatePanel, MJSContactCreatePanel } from './lib/form-panels/party-create.panel';
+export { SalesAccountFormComponentExtended, SalesContactFormComponentExtended } from './lib/custom/party-create-forms.component';
 export { AccountContactsWhere, ContactAccountsWhere } from './lib/form-panels/account-contacts';
 export {
     OrderRelatedLinks,
@@ -158,6 +162,8 @@ export function LoadBizAppsSalesClient(): void {
     // The symptom would be a Deal form that lets you edit a locked deal — a missing guard, not an error.
     void DealFormComponentExtended;
     void DealStageEventFormComponentExtended;
+    void SalesAccountFormComponentExtended;
+    void SalesContactFormComponentExtended;
     void MJSDealHeroPanel;
     void DealFormPolicy;
     void MJSDealOverviewPanel;
@@ -177,6 +183,8 @@ export function LoadBizAppsSalesClient(): void {
     void MJSPersonDealTeamPanel;
     void MJSAccountContactsPanel;
     void MJSContactAccountsPanel;
+    void MJSAccountCreatePanel;
+    void MJSContactCreatePanel;
     // The provenance row on the ORDER form. Contributed onto an entity this app does not own, so
     // nothing in orders imports it — this anchor is the only thing keeping it in the bundle.
     void MJSOrderRelatedPanel;
