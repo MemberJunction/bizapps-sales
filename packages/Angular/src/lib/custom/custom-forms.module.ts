@@ -4,7 +4,7 @@
  * A SEPARATE module from `GeneratedFormsModule` because that one is generated and CodeGen owns it —
  * adding declarations there would survive exactly until the next run.
  *
- * The three components reuse their generated siblings' TEMPLATES rather than forking them, which is the
+ * The components reuse their generated siblings' TEMPLATES rather than forking them, which is the
  * point: layout stays CodeGen's, and these classes contribute behaviour only. Reusing a template means
  * inheriting its directive dependencies, so this module imports the same set `GeneratedFormsModule`
  * does. Miss one and the failure is an `NG8002` naming a binding on a component that plainly exists —
@@ -22,10 +22,21 @@ import { LinkDirectivesModule } from '@memberjunction/ng-link-directives';
 
 import { DealFormComponentExtended } from './deal-form.component';
 import { DealStageEventFormComponentExtended } from './deal-stage-event-form.component';
+import { SalesAccountFormComponentExtended, SalesContactFormComponentExtended } from './party-create-forms.component';
 
 @NgModule({
-    declarations: [DealFormComponentExtended, DealStageEventFormComponentExtended],
+    declarations: [
+        DealFormComponentExtended,
+        DealStageEventFormComponentExtended,
+        SalesAccountFormComponentExtended,
+        SalesContactFormComponentExtended,
+    ],
     imports: [CommonModule, FormsModule, BaseFormsModule, EntityViewerModule, LinkDirectivesModule],
-    exports: [DealFormComponentExtended, DealStageEventFormComponentExtended],
+    exports: [
+        DealFormComponentExtended,
+        DealStageEventFormComponentExtended,
+        SalesAccountFormComponentExtended,
+        SalesContactFormComponentExtended,
+    ],
 })
 export class SalesCustomFormsModule {}

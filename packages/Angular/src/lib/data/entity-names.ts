@@ -40,4 +40,5 @@ export const MJS_FOREIGN_ENTITIES = {
     ActivityLink: 'MJ_BizApps_Common: Activity Links',
     /** Common's person/organization link. The only record of who works at an account (#301). */
     Relationship: 'MJ_BizApps_Common: Relationships',
+    RelationshipType: 'MJ_BizApps_Common: Relationship Types',
 } as const;

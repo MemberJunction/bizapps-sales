@@ -1,0 +1,16 @@
+[
+  {
+    "_comments": [
+      "bc-aidp-next-golive#435 (g435.2 A): Tax ID stays on the Sales Account form, under More details on a",
+      "new account, with this description shown as its help text. AutoUpdateDescription goes to false so",
+      "CodeGen keeps it."
+    ],
+    "fields": {
+      "Description": "Tax identification number (EIN, VAT number or similar). Only needed when finance sets the account up for invoicing or vendor payments; leave it blank otherwise.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=TaxID"
+    }
+  }
+]
