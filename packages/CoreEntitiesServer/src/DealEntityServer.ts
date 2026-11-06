@@ -64,6 +64,7 @@ import {
     type OrderStatus,
 } from '@mj-biz-apps/orders-entities';
 import {
+    AlreadyWonRefusal,
     DealCloseStampFields,
     DealFieldsEditableWhileLocked,
     DealFieldLabel,
@@ -522,7 +523,8 @@ export class DealEntityServer extends DealEntity {
          */
         const stampRefusal = this.closeStampEditRefusal();
         if (stampRefusal) {
-            return this.refuseSave(stampRefusal);
+            const wonRefusal = await this.staleWonSaveRefusal();
+            return this.refuseSave(wonRefusal ?? stampRefusal);
         }
 
         /**
@@ -612,6 +614,7 @@ export class DealEntityServer extends DealEntity {
          * try above, because this one may not refuse a save. See {@link defaultCurrencyOnCreate}.
          */
         await this.defaultCurrencyOnCreate();
+        this.defaultCreationDateOnCreate();
 
         /**
          * AFTER the company stamp, deliberately — and NOT AT ALL on a locked deal.
@@ -1619,7 +1622,7 @@ export class DealEntityServer extends DealEntity {
      */
     private async planStageDefaults(): Promise<StageDefaultsPlan | null> {
         const stageID = this.PipelineStageID;
-        if (!stageID) {
+        if (!stageID || !GUID_SHAPE.test(stageID)) {
             return null;
         }
         if (this.IsSaved) {
@@ -1683,7 +1686,7 @@ export class DealEntityServer extends DealEntity {
          */
         const stageStatusID = row.DealStatusTypeID ?? null;
         let derivableStatusID: string | null = null;
-        if (stageStatusID) {
+        if (stageStatusID && GUID_SHAPE.test(stageStatusID)) {
             const status = await view.RunView<{ LocksDeal: boolean }>(
                 {
                     EntityName: DEAL_STATUS_ENTITY,
@@ -1899,7 +1902,7 @@ export class DealEntityServer extends DealEntity {
 
     private async planStageOrderStatus(): Promise<StageOrderPlan | null> {
         const stageID = this.PipelineStageID;
-        if (!stageID) {
+        if (!stageID || !GUID_SHAPE.test(stageID)) {
             return null;
         }
         /**
@@ -2425,6 +2428,9 @@ export class DealEntityServer extends DealEntity {
 
     /** The deal's order, loaded only when the row on disk is a Draft dated before `today`. */
     private async staleDraftOrder(today: string) {
+        if (!this.OrderID || !GUID_SHAPE.test(this.OrderID)) {
+            return null;
+        }
         const view = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await view.RunView<{ Status: string; OrderDate: Date | string | null }>(
             {
@@ -2491,7 +2497,7 @@ export class DealEntityServer extends DealEntity {
      * Sales never sums lines itself. It copies the one number orders already stands behind.
      */
     private async refreshAmountFromOrder(): Promise<void> {
-        if (!this.OrderID) {
+        if (!this.OrderID || !GUID_SHAPE.test(this.OrderID)) {
             return;
         }
 
@@ -2711,8 +2717,8 @@ export class DealEntityServer extends DealEntity {
      * on the deal's outcome, so the outcome has to reach it. It used to be a flat `ReadonlySet` held in
      * a static, which is precisely how a caller ends up with the list and without the condition.
      */
-    private static lockEditableFields(isLost: boolean): ReadonlySet<string> {
-        return DealFieldsEditableWhileLocked(isLost);
+    private static lockEditableFields(isLost: boolean, accountBlank = false): ReadonlySet<string> {
+        return DealFieldsEditableWhileLocked(isLost, accountBlank);
     }
 
     /**
@@ -2949,8 +2955,16 @@ export class DealEntityServer extends DealEntity {
          * The outcome decides one field. golive#206: Loss Notes stays editable on a LOST deal and is
          * frozen on a won one, and the form asks the same function with the same flag — both take it
          * from the status ROW, never from a name.
+         *
+         * golive#306: A closed deal whose persisted `AccountID` is blank may have its account filled in
+         * once without reopening; changing an existing non-blank account or clearing it stays frozen.
          */
-        const editable = DealEntityServer.lockEditableFields(persisted.IsLost);
+        const accountField = this.GetFieldByName('AccountID');
+        const accountOld = accountField?.OldValue as string | null | undefined;
+        const accountWasBlank = !accountOld || String(accountOld).trim() === '';
+        const fillingBlankAccount =
+            accountWasBlank && !!this.AccountID && String(this.AccountID).trim() !== '';
+        const editable = DealEntityServer.lockEditableFields(persisted.IsLost, fillingBlankAccount);
 
         /**
          * `OwnerEmployeeID` IS FROZEN, AND IS STILL WRITTEN HERE WHEN THE ROSTER DRIVES IT.
@@ -3020,7 +3034,15 @@ export class DealEntityServer extends DealEntity {
 
         const all = [...changed, ...dirtyCollections];
         if (all.length === 0) {
+            if (fillingBlankAccount && accountField?.Dirty) {
+                this._orderStatusWarnings.push(
+                    "Account was set on this closed deal; its order's bill-to and any contract were left unchanged.",
+                );
+            }
             return null;
+        }
+        if (persisted.LocksDeal && persisted.IsWon && changed.includes('DealStatusTypeID') && !reopening) {
+            return await this.alreadyWonRefusal();
         }
         /**
          * golive#207 row 18, verbatim: "This deal is closed. {fields} cannot be changed until the
@@ -3111,14 +3133,17 @@ export class DealEntityServer extends DealEntity {
      */
     private async readStatusLockFlags(
         statusID: string,
-    ): Promise<{ LocksDeal: boolean; IsLost: boolean; Read: boolean; Absent: boolean }> {
+    ): Promise<{ LocksDeal: boolean; IsLost: boolean; IsWon: boolean; Read: boolean; Absent: boolean }> {
+        if (!GUID_SHAPE.test(statusID)) {
+            return { LocksDeal: true, IsLost: false, IsWon: false, Read: false, Absent: false };
+        }
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView(
             {
                 EntityName: DEAL_STATUS_ENTITY,
                 ExtraFilter: `ID = '${statusID}'`,
                 ResultType: 'simple',
-                Fields: ['LocksDeal', 'IsLost'],
+                Fields: ['LocksDeal', 'IsLost', 'IsWon'],
             },
             this.ContextCurrentUser,
         );
@@ -3126,10 +3151,58 @@ export class DealEntityServer extends DealEntity {
             LogError(
                 `DealEntityServer.readStatusLockFlags: could not read status ${statusID}: ${result.ErrorMessage}`,
             );
-            return { LocksDeal: true, IsLost: false, Read: false, Absent: false };
+            return { LocksDeal: true, IsLost: false, IsWon: false, Read: false, Absent: false };
         }
-        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean } | undefined;
-        return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true, Read: !!row, Absent: !row };
+        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean; IsWon?: boolean } | undefined;
+        return {
+            LocksDeal: row?.LocksDeal === true,
+            IsLost: row?.IsLost === true,
+            IsWon: row?.IsWon === true,
+            Read: !!row,
+            Absent: !row,
+        };
+    }
+
+    /**
+     * When a stale pre-close save hits a deal whose persisted status on disk is already Won, explain
+     * that the deal is already Won (and name the contract if one was created) instead of reporting the
+     * close-stamp edit refusal (golive#387).
+     */
+    private async staleWonSaveRefusal(): Promise<string | null> {
+        if (!this.IsSaved) return null;
+        const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
+        if (!persistedStatusID) return null;
+        const persisted = await this.readStatusLockFlags(persistedStatusID);
+        if (!persisted.LocksDeal || !persisted.IsWon) return null;
+        return this.alreadyWonRefusal();
+    }
+
+    private async alreadyWonRefusal(): Promise<string> {
+        const contractID =
+            (this.ContractID ?? (this.GetFieldByName('ContractID')?.OldValue as string | null | undefined)) ?? null;
+        let contractNumber: string | null = null;
+        if (contractID && GUID_SHAPE.test(String(contractID))) {
+            try {
+                const provider = this.ProviderToUse as unknown as IRunViewProvider | undefined;
+                if (provider?.RunView) {
+                    const result = await provider.RunView<{ ContractNumber: string | null }>(
+                        {
+                            EntityName: 'MJ_BizApps_Contracts: Contracts',
+                            ExtraFilter: `ID = '${contractID}'`,
+                            ResultType: 'simple',
+                            Fields: ['ContractNumber'],
+                        },
+                        this.ContextCurrentUser,
+                    );
+                    if (result?.Success) {
+                        contractNumber = (result.Results ?? [])[0]?.ContractNumber ?? null;
+                    }
+                }
+            } catch {
+                contractNumber = null;
+            }
+        }
+        return AlreadyWonRefusal(this.DealNumber || this.Name, contractNumber);
     }
 
     /* ── Parties ────────────────────────────────────────────────────────────── */
@@ -3271,6 +3344,9 @@ export class DealEntityServer extends DealEntity {
         if (!this.PipelineID) {
             return;
         }
+        if (!GUID_SHAPE.test(this.PipelineID)) {
+            throw new Error(`DealEntityServer: pipeline ${this.PipelineID} is not a valid ID.`);
+        }
 
         const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await viewProvider.RunView<PipelineCompanyRow>(
@@ -3338,6 +3414,12 @@ export class DealEntityServer extends DealEntity {
         const pipelineDirty = this.GetFieldByName('PipelineID')?.Dirty === true;
         if (this.IsSaved && !stageDirty && !pipelineDirty) {
             return null;
+        }
+        if (!GUID_SHAPE.test(stageID)) {
+            return 'the stage on this deal is not a valid ID.';
+        }
+        if (!GUID_SHAPE.test(pipelineID)) {
+            return 'the pipeline on this deal is not a valid ID.';
         }
 
         const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
@@ -3583,6 +3665,32 @@ export class DealEntityServer extends DealEntity {
         const currencyID = await this.currencyIDForCode(code);
         if (currencyID) {
             this.CurrencyID = currencyID;
+        }
+    }
+
+    /**
+     * Stamps `Deal.CreationDate` from the server's clock on create when the caller did not supply one (#532).
+     *
+     * `EntityField`'s constructor evaluates `DefaultValue = 'getutcdate()'` during `NewRecord()`, setting
+     * `Value = new Date()` at construction time while leaving `_NeverSet = true`. Any explicit assignment
+     * by a caller (an importer setting a historical creation date, or a check supplying a specific instant)
+     * flips `_NeverSet` to `false`.
+     *
+     * Re-stamping here when `_NeverSet` is still `true` (or when a caller cleared `CreationDate` to null
+     * before saving) ensures that:
+     *   1. A deal created without an explicit `CreationDate` gets the server's save-time clock rather than
+     *      the instant `NewRecord()` happened to run (or failing `Validate()` when `CreationDate` was nulled).
+     *   2. An importer or API caller that explicitly sets a historical `CreationDate` on a new deal keeps
+     *      the date it supplied.
+     *   3. Updates (`this.IsSaved`) are never touched, so an open deal's `CreationDate` remains editable.
+     */
+    private defaultCreationDateOnCreate(): void {
+        if (this.IsSaved) {
+            return;
+        }
+        const field = this.GetFieldByName('CreationDate') as unknown as { _NeverSet?: boolean } | undefined;
+        if (!this.CreationDate || field?._NeverSet === true) {
+            this.CreationDate = new Date();
         }
     }
 

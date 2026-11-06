@@ -33,6 +33,7 @@
  * @module @mj-biz-apps/sales-core-entities-server
  */
 import { type IMetadataProvider, type IRunViewProvider, type UserInfo } from '@memberjunction/core';
+import { EscapeSQLString } from '@memberjunction/global';
 import { ToCalendarDay } from '@mj-biz-apps/common-entities';
 import {
     OrdersReplacePaymentScheduleOperation,
@@ -85,7 +86,7 @@ export async function SendDealScheduleToOrder(
     const read = await (provider as unknown as IRunViewProvider).RunView<DealScheduleRowFacts>(
         {
             EntityName: DEAL_PAYMENT_SCHEDULE_ENTITY,
-            ExtraFilter: `DealID = '${dealID}'`,
+            ExtraFilter: `DealID = '${EscapeSQLString(dealID)}'`,
             OrderBy: 'PaymentDate ASC, DisplayOrder ASC',
             Fields: ['PaymentDate', 'Amount', 'Description'],
             ResultType: 'simple',
@@ -105,7 +106,7 @@ export async function SendDealScheduleToOrder(
      * so this does not change later.
      */
     const lines = await (provider as unknown as IRunViewProvider).RunView<{ ID: string }>(
-        { EntityName: ORDER_LINE_ENTITY, ExtraFilter: `OrderHeaderID = '${orderID}'`, Fields: ['ID'], MaxRows: 1, ResultType: 'simple', BypassCache: true },
+        { EntityName: ORDER_LINE_ENTITY, ExtraFilter: `OrderHeaderID = '${EscapeSQLString(orderID)}'`, Fields: ['ID'], MaxRows: 1, ResultType: 'simple', BypassCache: true },
         user,
     );
     if (!lines.Success) {
@@ -168,7 +169,7 @@ export async function WonDealOrderID(dealID: string, provider: IMetadataProvider
     if (!OrdersIsInstalled()) return null;
     const view = provider as unknown as IRunViewProvider;
     const deal = await view.RunView<{ OrderID: string | null; DealStatusTypeID: string | null }>(
-        { EntityName: DEAL_ENTITY, ExtraFilter: `ID = '${dealID}'`, Fields: ['OrderID', 'DealStatusTypeID'], ResultType: 'simple', BypassCache: true },
+        { EntityName: DEAL_ENTITY, ExtraFilter: `ID = '${EscapeSQLString(dealID)}'`, Fields: ['OrderID', 'DealStatusTypeID'], ResultType: 'simple', BypassCache: true },
         user,
     );
     if (!deal.Success) throw new Error(`the deal could not be read: ${deal.ErrorMessage ?? 'unknown error'}`);
@@ -180,7 +181,7 @@ export async function WonDealOrderID(dealID: string, provider: IMetadataProvider
 /** The status row's `IsWon` flag. A missing row answers false; a failed read throws. */
 export async function StatusIsWon(statusID: string, provider: IMetadataProvider, user: UserInfo): Promise<boolean> {
     const status = await (provider as unknown as IRunViewProvider).RunView<{ IsWon: boolean }>(
-        { EntityName: DEAL_STATUS_ENTITY, ExtraFilter: `ID = '${statusID}'`, Fields: ['IsWon'], ResultType: 'simple' },
+        { EntityName: DEAL_STATUS_ENTITY, ExtraFilter: `ID = '${EscapeSQLString(statusID)}'`, Fields: ['IsWon'], ResultType: 'simple' },
         user,
     );
     if (!status.Success) throw new Error(`the deal's status could not be read: ${status.ErrorMessage ?? 'unknown error'}`);
