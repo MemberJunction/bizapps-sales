@@ -60,6 +60,11 @@
     "collections on Deal. It is listed last because it depends on nothing, and because reading it last",
     "matches when it matters — CodeGen pass 2 is what consumes it. See its README."
   ],
+  "_comment_permissions": [
+    "authorizations and roles precede everything that looks them up: authorization-roles resolves both",
+    "by Name, and entity-permissions resolves the role. Both of those go last because entity-permissions",
+    "also looks up orders' entities, which only need to exist, and nothing here references either (golive#429)."
+  ],
   "directoryOrder": [
     "deal-status-types",
     "forecast-category-types",
@@ -84,10 +89,14 @@
     "actions",
     "scheduled-jobs",
     "activity-sync-extensions",
+    "authorizations",
+    "roles",
     "applications",
     "entity-fields",
     "user-views",
-    "entity-relationships"
+    "entity-relationships",
+    "entity-permissions",
+    "authorization-roles"
   ],
   "sqlLogging": {
     "enabled": true,
