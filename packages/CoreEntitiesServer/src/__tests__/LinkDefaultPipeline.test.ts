@@ -94,6 +94,15 @@ describe('failures', () => {
         expect(result.Issues[0]).toContain('the link did not save: refused by the database');
     });
 
+    it('reads only an active default pipeline, so an inactive one is never linked', async () => {
+        reads();
+        await LinkDefaultPipelineToCompanies(PROVIDER, USER);
+        const pipelineRead = runViews.mock.calls[0][0][0] as { EntityName: string; ExtraFilter: string };
+        expect(pipelineRead.EntityName).toBe('MJ_BizApps_Sales: Pipelines');
+        expect(pipelineRead.ExtraFilter).toMatch(/\bIsActive = 1\b/);
+        expect(pipelineRead.ExtraFilter).toMatch(/\bIsDefault = 1\b/);
+    });
+
     it('refuses when no pipeline is the default', async () => {
         reads({ defaults: [] });
         const result = await LinkDefaultPipelineToCompanies(PROVIDER, USER);
@@ -110,7 +119,8 @@ describe('failures', () => {
     it('refuses when a read fails', async () => {
         runViews.mockResolvedValue([{ Success: false, ErrorMessage: 'timeout', Results: [] }, { Success: true, Results: [] }, { Success: true, Results: [] }]);
         const result = await LinkDefaultPipelineToCompanies(PROVIDER, USER);
-        expect(result.Success).toBe(false);
+        expect(result).toMatchObject({ Success: false, Outcome: 'READ_FAILED', Linked: 0 });
         expect(result.Issues[0]).toContain('timeout');
+        expect(FakeLink.Saved).toHaveLength(0);
     });
 });

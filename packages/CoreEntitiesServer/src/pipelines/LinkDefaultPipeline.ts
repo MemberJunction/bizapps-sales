@@ -31,7 +31,11 @@ const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_PIPELINE_COMPANY = 'MJ_BizApps_Sales: Pipeline Companies';
 const E_COMPANY = 'MJ: Companies';
 
-export type PipelineLinkOutcome = 'LINKED' | 'NOTHING_TO_LINK' | 'NO_DEFAULT' | 'AMBIGUOUS_DEFAULT' | 'PARTIAL';
+/**
+ * `NO_DEFAULT`, `AMBIGUOUS_DEFAULT` and `READ_FAILED` stop before any link is attempted; `PARTIAL` means
+ * some companies were linked and some failed.
+ */
+export type PipelineLinkOutcome = 'LINKED' | 'NOTHING_TO_LINK' | 'NO_DEFAULT' | 'AMBIGUOUS_DEFAULT' | 'READ_FAILED' | 'PARTIAL';
 
 export interface PipelineLinkResult {
     Success: boolean;
@@ -91,7 +95,7 @@ async function readSource(user: UserInfo): Promise<SourceRead> {
     const [defaults, companies, links] = await new RunView().RunViews(params, user);
     const failed = [defaults, companies, links].find((r) => !r?.Success);
     if (failed) {
-        return refusal('PARTIAL', `Could not read pipelines, companies or links: ${failed?.ErrorMessage ?? 'no result'}`);
+        return refusal('READ_FAILED', `Could not read pipelines, companies or links: ${failed?.ErrorMessage ?? 'no result'}`);
     }
     if (defaults.Results.length === 0) {
         return refusal('NO_DEFAULT', 'No active pipeline is marked IsDefault, so there is nothing to link.');
