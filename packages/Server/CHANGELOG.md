@@ -1,5 +1,15 @@
 # @mj-biz-apps/sales-server
 
+## 6.24.1
+
+### Patch Changes
+
+- b4fca8a: Restore the Acronym field on Sales Accounts. Sales Accounts inherit it from Organization (Common 5.57+), and the 6.24.0 generated code dropped it, so every Sales Account form failed to load with "Cannot query field Acronym". Common is now required at 5.60.0 or later, the version AIDP Next runs, so CodeGen in this repo keeps the field.
+- Updated dependencies [b4fca8a]
+  - @mj-biz-apps/sales-entities@6.24.1
+  - @mj-biz-apps/sales-actions@6.24.1
+  - @mj-biz-apps/sales-core-entities-server@6.24.1
+
 ## 6.24.0
 
 ### Minor Changes
