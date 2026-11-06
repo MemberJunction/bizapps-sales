@@ -26,6 +26,12 @@ describe('CloseWonPolicyProblem', () => {
         expect(CloseWonPolicyProblem('{"CreateContract":false,"OneTimeLinesTo":"Order"}')).toBeNull();
     });
 
+    it('accepts RaiseOrderReviewTask, the switch the close reads to skip the order-review task', () => {
+        expect(CloseWonPolicyProblem('{"CloseWonTasks":{"RaiseOrderReviewTask":false}}')).toBeNull();
+        expect(CloseWonPolicyProblem('{"CloseWonTasks":{"DueInDays":5,"RaiseOrderReviewTask":true}}')).toBeNull();
+        expect(CloseWonPolicyProblem('{"CloseWonTasks":{"RaiseOrderReviewTask":"false"}}')).toContain('must be a boolean');
+    });
+
     it('refuses JSON that does not parse, and says so', () => {
         expect(CloseWonPolicyProblem('{ "CreateContract": true,')).toMatch(/^Close Won Policy is not valid JSON/);
     });

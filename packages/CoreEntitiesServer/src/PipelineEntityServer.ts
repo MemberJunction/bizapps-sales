@@ -52,6 +52,7 @@ const TASK_KEYS: Record<string, PolicyKey> = {
     AssigneeRecordID: { Kind: 'text' },
     AssigneeRoleID: { Kind: 'text' },
     DueInDays: { Kind: 'whole number' },
+    RaiseOrderReviewTask: { Kind: 'boolean' },
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
