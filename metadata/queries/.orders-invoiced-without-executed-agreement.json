@@ -1,0 +1,23 @@
+[
+  {
+    "_comments": [
+      "Finance control for bc-aidp-next-golive#443 (g443.1 A: report and warn, sending unchanged; g443.2 A: won-deal orders only).",
+      "The same rule drives the shared user view 'Sales: Orders Invoiced Without Executed Agreement' on Order Headers and the order header's warning chip; a unit test pins the three together."
+    ],
+    "fields": {
+      "Name": "Sales: Orders Invoiced Without Executed Agreement",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "Which confirmed or invoiced orders from won deals have no contract, or a contract still waiting for its signed agreement?",
+      "Description": "Confirmed or invoiced orders from won deals whose deal has no contract, or whose contract has no executed agreement linked. Invoices still send; this lists the orders for finance to follow up.",
+      "SQL": "@file:SQL/orders-invoiced-without-executed-agreement.sql",
+      "TechnicalDescription": "Grain: OrderHeader. Only the order a won deal names through Deal.OrderID (DealStatusType.IsWon). Invoiced is OrderHeader.Status = Confirmed or a Sent ExternalInvoice. The contract is Deal.ContractID, else a contract with CreatingEntity = MJ_BizApps_Sales: Deals and CreatingRecordID = the deal. Listed when no such contract has vwContracts.IsAwaitingDocument = 0; a contract type with RequiresExecutedDocument = 0 counts as covered. Contract columns show the newest candidate. No date filter; OrderDate and LastInvoiceSentAt are reported. Optional parameter: CompanyID.",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 3,
+      "UsesTemplate": true
+    },
+    "primaryKey": {
+      "ID": "546E09BF-29A0-4CEB-ADB7-1D5A618F1B16"
+    }
+  }
+]

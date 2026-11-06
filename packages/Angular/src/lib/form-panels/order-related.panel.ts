@@ -43,10 +43,11 @@ import {
     type OrderRelatedLinkState,
 } from './order-related-links';
 
-/** The one row this panel reads: the deal that names this order, and the contract it points at. */
+/** The one row this panel reads: the deal that names this order, its contract id and its status type. */
 interface DealProvenanceRow {
     ID: string;
     ContractID: string | null;
+    DealStatusTypeID: string | null;
 }
 
 @RegisterClassEx(BaseFormPanel, {
@@ -88,6 +89,14 @@ interface DealProvenanceRow {
                         <span class="bizapps-related__name">{{ chip.Name }}</span>
                     </button>
                 }
+                @if (ContractView.Warning; as warning) {
+                    <span class="mjs-order-related__warning" role="status" data-testid="order-related-no-agreement"
+                          [attr.title]="warning.Detail">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                        {{ warning.Label }}
+                        <span class="mjs-order-related__sr">{{ warning.Detail }}</span>
+                    </span>
+                }
                 @if (ContractView.AwaitingNote) {
                     <span class="mjs-order-related__note" data-testid="order-related-awaiting">
                         <i class="fa-solid fa-hourglass-half" aria-hidden="true"></i>
@@ -117,6 +126,26 @@ interface DealProvenanceRow {
                 text-transform: uppercase;
                 color: var(--mj-text-muted);
             }
+            .mjs-order-related__warning {
+                display: inline-flex;
+                align-items: center;
+                gap: var(--mj-space-1-5);
+                padding: var(--mj-space-1) var(--mj-space-3);
+                font-size: var(--mj-text-xs);
+                font-weight: var(--mj-font-semibold);
+                color: var(--mj-status-warning-text);
+                background: var(--mj-status-warning-bg);
+                border: 1px solid var(--mj-status-warning-border);
+                border-radius: var(--mj-radius-full);
+            }
+            .mjs-order-related__sr {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                overflow: hidden;
+                clip: rect(0 0 0 0);
+                white-space: nowrap;
+            }
             .mjs-order-related__note {
                 display: inline-flex;
                 align-items: center;
@@ -142,7 +171,7 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
     public Links: BizAppsRelatedLink[] = [];
 
     /** The contract chip, the agreement chip and the awaiting note. Rebuilt with {@link Links}. */
-    public ContractView: OrderContractView = { Chips: [], AwaitingNote: null };
+    public ContractView: OrderContractView = { Chips: [], AwaitingNote: null, Warning: null };
 
     /** The key the published links were built from. `null` until the first read completes. */
     private linksFor: string | null = null;
@@ -198,14 +227,16 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
         const dealOrderID = DealLookupOrderID(this.Record) ?? orderID;
         let state: OrderRelatedLinkState = {};
         try {
-            state = await this.readDeal(String(dealOrderID));
+            const deal = await this.readDeal(String(dealOrderID));
+            state = deal.State;
             if (state.DealID) {
-                state.Contract = await this.readContract(state);
+                state = { ...state, ...(await this.readContractAndStatus(state, deal.StatusTypeID)) };
                 state.Agreement = ShouldReadAgreement(state.Contract) ? await this.readAgreement(state.Contract.ID) : null;
             }
         } catch {
             // The deal's ids, once read, stay published: a failed contract read leaves the plain
-            // contract link to `bizapps-related-chips`, which applies its own refusal rules.
+            // contract link to `bizapps-related-chips`, which applies its own refusal rules, and no
+            // warning, since nothing was learned about the contract.
             state = { DealID: state.DealID, ContractID: state.ContractID };
         }
 
@@ -217,10 +248,10 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
     }
 
     /** The deal whose `OrderID` names this order. Empty state when there is none. */
-    private async readDeal(dealOrderID: string): Promise<OrderRelatedLinkState> {
+    private async readDeal(dealOrderID: string): Promise<{ State: OrderRelatedLinkState; StatusTypeID: string | null }> {
         const result = await this.runView.RunView<DealProvenanceRow>({
             EntityName: MJS_ENTITIES.Deal,
-            Fields: ['ID', 'ContractID'],
+            Fields: ['ID', 'ContractID', 'DealStatusTypeID'],
             ExtraFilter: `OrderID = '${EscapeSQLString(dealOrderID)}'`,
             // `Deal.OrderID` is documented as a 1:1 peer, but this is a REVERSE read and nothing in
             // the schema enforces the one. Ordering makes the row that wins the same row on every
@@ -230,26 +261,47 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
             ResultType: 'simple',
         });
         const row = result?.Success ? result.Results?.[0] : undefined;
-        return row ? { DealID: row.ID, ContractID: row.ContractID } : {};
+        return {
+            State: row ? { DealID: row.ID, ContractID: row.ContractID } : {},
+            StatusTypeID: row?.DealStatusTypeID ?? null,
+        };
     }
 
     /**
-     * The contract behind the deal, by `Deal.ContractID` or by the close's provenance pair
-     * (`ContractLookupFilter`). Newest first, so a deal whose close was re-run shows its latest.
-     * `null` when there is none or the read was refused.
+     * The contract behind the deal and whether the deal is won, in one batch: they are independent.
+     *
+     * The contract comes by `Deal.ContractID` or by the close's provenance pair
+     * (`ContractLookupFilter`), newest first, so a deal whose close was re-run shows its latest.
+     * `ContractRead` is set only when that read answered, so the warning never rests on a refusal.
+     * Won is `DealStatusType.IsWon`, never a status name.
      */
-    private async readContract(state: OrderRelatedLinkState): Promise<OrderContractRow | null> {
+    private async readContractAndStatus(state: OrderRelatedLinkState, statusID: string | null): Promise<Partial<OrderRelatedLinkState>> {
         const filter = ContractLookupFilter(state);
-        if (!filter) return null;
-        const result = await this.runView.RunView<OrderContractRow>({
-            EntityName: MJS_FOREIGN_ENTITIES.Contract,
-            Fields: ['ID', 'ContractNumber', 'State', 'IsAwaitingDocument'],
-            ExtraFilter: filter,
-            OrderBy: '__mj_CreatedAt DESC',
-            MaxRows: 1,
-            ResultType: 'simple',
-        });
-        return (result?.Success ? result.Results?.[0] : undefined) ?? null;
+        if (!filter) return {};
+        const [contracts, statuses] = await this.runView.RunViews([
+            {
+                EntityName: MJS_FOREIGN_ENTITIES.Contract,
+                Fields: ['ID', 'ContractNumber', 'State', 'IsAwaitingDocument'],
+                ExtraFilter: filter,
+                OrderBy: '__mj_CreatedAt DESC',
+                MaxRows: 1,
+                ResultType: 'simple',
+            },
+            {
+                EntityName: MJS_ENTITIES.DealStatusType,
+                Fields: ['ID', 'IsWon'],
+                ExtraFilter: statusID ? `ID = '${EscapeSQLString(statusID)}'` : '1 = 0',
+                MaxRows: 1,
+                ResultType: 'simple',
+            },
+        ]);
+        const contract = (contracts?.Success ? (contracts.Results?.[0] as OrderContractRow | undefined) : undefined) ?? null;
+        const status = statuses?.Success ? (statuses.Results?.[0] as { IsWon?: boolean } | undefined) : undefined;
+        return {
+            Contract: contract,
+            ContractRead: contracts?.Success === true,
+            DealIsWon: status ? status.IsWon === true : null,
+        };
     }
 
     /**
