@@ -3743,7 +3743,9 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
                 <div class="mjs-deal-activity">
                     <mjs-deal-activity-timeline #compose [DealID]="Record.ID" [ComposeOnly]="true"
                         (Logged)="OnLogged()"></mjs-deal-activity-timeline>
-                    @if (ActivityEntity) {
+                    <!-- Mounted only once the deal's view exists: with no view the viewer loads every
+                         activity, and a view bound during that load is dropped (golive#432). -->
+                    @if (ActivityEntity && ActivityView) {
                         <div class="mjs-deal-activity__viewer">
                             <!-- New goes to the compose form above: it is the only path that links the new
                                  activity to this deal. -->
