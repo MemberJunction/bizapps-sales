@@ -893,9 +893,10 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         if (product) {
             this.Working.CompanyID = product.CompanyID;
         }
-        // The previous product's default, named prices and subscription answer say nothing about this one.
+        // The previous product's default, named prices, holding and subscription answer say nothing about this one (#355).
         this.EngineDefault = undefined;
         this.Applicable = [];
+        this.Holding = null;
         this.Working.SubscriptionAction = null;
         void this.refreshApplicable();
         void this.refreshHolding();
@@ -933,11 +934,14 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         return this.ProductLockedByPrice ? null : this.DisplayUnitPrice;
     }
 
+    private applicableToken = 0;
+
     /**
      * The product's applicable named prices, asked of orders with the order's own parties and date —
      * the same context the order line's picker uses, so the two list the same rules.
      */
     private async refreshApplicable(): Promise<void> {
+        const token = (this.applicableToken = (this.applicableToken ?? 0) + 1);
         const line = this.Working;
         const order = this.Deal?.OrderID_Object;
         const user = Metadata.Provider.CurrentUser;
@@ -948,6 +952,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         // Not asked for a quantity the rep has not entered; Save is blocked until they do.
         if (this.QuantityInvalid) return;
         const productID = String(line.ProductID);
+        const quantity = Number(line.Quantity ?? 0);
         try {
             await LoadOrdersEngine(Metadata.Provider, user);
             const product = OrdersEngine.Instance.ProductByID(productID);
@@ -958,7 +963,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
                     ProductID: productID,
                     ProductCategoryID: product?.ProductCategoryID ?? null,
                     CompanyID: companyID,
-                    Quantity: Number(line.Quantity ?? 0),
+                    Quantity: quantity,
                     AsOf: AsDateValue(order.OrderDate) ?? TodayAsDateValue(),
                     OrganizationID: order.BillToOrganizationID ?? null,
                     PersonID: order.BillToPersonID ?? null,
@@ -980,10 +985,18 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
                 Metadata.Provider,
                 user,
             );
-            // A reply for a product the rep has since moved off is dropped rather than shown.
-            if (this.Working?.ProductID === productID) this.Applicable = applicable;
+            // A reply for a product or quantity the rep has since moved off is dropped rather than shown (#355).
+            if (
+                token === this.applicableToken &&
+                this.Working?.ProductID === productID &&
+                Number(this.Working?.Quantity ?? 0) === quantity
+            ) {
+                this.Applicable = applicable;
+            }
         } catch {
-            this.Applicable = [];
+            if (token === this.applicableToken) {
+                this.Applicable = [];
+            }
         } finally {
             this.cdr.detectChanges();
         }
@@ -1167,12 +1180,15 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
 
     /* ── The customer already holds this product (golive #318) ─────────────────────── */
 
+    private holdingToken = 0;
+
     /**
      * The subscription this line would extend at confirm, read with orders' rule so the deal and the
      * order screen ask about the same lines. Renewal lines and one-time products are not asked. A failed
      * read hides the question; Close Won still asks, because it reads the same rule on the server.
      */
     private async refreshHolding(): Promise<void> {
+        const token = (this.holdingToken = (this.holdingToken ?? 0) + 1);
         const line = this.Working;
         const subscriber = line ? HoldingSubscriberFor(line, this.Deal?.OrderID_Object ?? null) : null;
         if (!line?.ProductID || line.RenewsSubscriptionID || !this.SelectedProduct?.SubscriptionTypeID || !subscriber) {
@@ -1181,9 +1197,17 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             return;
         }
         const productID = String(line.ProductID);
-        const holding = await GetExistingHolding(productID, subscriber.OrganizationID, subscriber.PersonID);
-        // A reply for a product the rep has since moved off is dropped rather than shown.
-        if (this.Working?.ProductID === productID) this.Holding = holding;
+        try {
+            const holding = await GetExistingHolding(productID, subscriber.OrganizationID, subscriber.PersonID);
+            // A reply for a product the rep has since moved off is dropped rather than shown.
+            if (token === this.holdingToken && this.Working?.ProductID === productID) {
+                this.Holding = holding;
+            }
+        } catch {
+            if (token === this.holdingToken) {
+                this.Holding = null;
+            }
+        }
         this.cdr.detectChanges();
     }
 
@@ -1242,6 +1266,8 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     private pricePending = false;
     public PricingNote: string | null = null;
     private priceTimer: ReturnType<typeof setTimeout> | null = null;
+    private priceToken = 0;
+    private inFlightPrice: Promise<void> | null = null;
 
     /** Orders' answer when there is one, otherwise whatever the saved line already carries. */
     public get DisplayUnitPrice(): number | null {
@@ -1323,87 +1349,105 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      * because a pricing call timed out would not be.
      */
     private async refreshPrice(): Promise<void> {
-        const line = this.Working;
-        const companyID = this.Deal?.CompanyID as string | null | undefined;
-        const order = this.Deal?.OrderID_Object;
-        if (!line?.ProductID || !companyID) {
-            this.pricedUnit = null;
-            this.pricedTotal = null;
-            this.pricedDiscount = null;
-            this.EngineDefault = undefined;
+        const token = (this.priceToken = (this.priceToken ?? 0) + 1);
+        const run = async (): Promise<void> => {
+            const line = this.Working;
+            const companyID = this.Deal?.CompanyID as string | null | undefined;
+            const order = this.Deal?.OrderID_Object;
+            if (!line?.ProductID || !companyID) {
+                this.pricedUnit = null;
+                this.pricedTotal = null;
+                this.pricedDiscount = null;
+                this.EngineDefault = undefined;
+                this.PricingNote = null;
+                this.pricePending = false;
+                this.cdr.detectChanges();
+                return;
+            }
+            // No price for a quantity the rep did not enter: never a one-unit figure in its place.
+            if (this.QuantityInvalid) {
+                this.pricedUnit = null;
+                this.pricedTotal = null;
+                this.EngineDefault = undefined;
+                this.PricingNote = this.QuantityInvalidMessage;
+                this.cdr.detectChanges();
+                return;
+            }
+
+            this.Pricing = true;
             this.PricingNote = null;
-            this.pricePending = false;
             this.cdr.detectChanges();
-            return;
-        }
-        // No price for a quantity the rep did not enter: never a one-unit figure in its place.
-        if (this.QuantityInvalid) {
-            this.pricedUnit = null;
-            this.pricedTotal = null;
-            this.EngineDefault = undefined;
-            this.PricingNote = this.QuantityInvalidMessage;
-            this.cdr.detectChanges();
-            return;
-        }
+            try {
+                const router = Metadata.Provider as unknown as RemoteOperationRouter;
+                const envelope = await router.RouteOperation<PriceOrderInput, PriceOrderOutput>(
+                    'Orders.PriceOrder',
+                    {
+                        CompanyID: companyID,
+                        // The buyer and the date steer which rule is the default, so they are sent: without
+                        // them the picker's Default row could name a different rule than the order's save.
+                        BillToPersonID: order?.BillToPersonID ?? null,
+                        BillToOrganizationID: order?.BillToOrganizationID ?? null,
+                        OrderDate: this.IsoOrNull(order?.OrderDate),
+                        Lines: [{
+                            ProductID: String(line.ProductID),
+                            Quantity: Number(line.Quantity),
+                            // A picked price PINS the line, as it will on the order's save; otherwise orders
+                            // resolves it.
+                            UnitPrice: IsLinePriceOverridden(line, this.EngineDefault) ? Number(line.UnitPrice) : null,
+                            DiscountPct: (line.DiscountPct as number | null | undefined) ?? null,
+                            ServicePeriodStart: this.IsoOrNull(line.ServicePeriodStart),
+                            ServicePeriodEnd: this.IsoOrNull(line.ServicePeriodEnd),
+                        }],
+                    },
+                );
 
-        this.Pricing = true;
-        this.PricingNote = null;
-        this.cdr.detectChanges();
-        try {
-            const router = Metadata.Provider as unknown as RemoteOperationRouter;
-            const envelope = await router.RouteOperation<PriceOrderInput, PriceOrderOutput>(
-                'Orders.PriceOrder',
-                {
-                    CompanyID: companyID,
-                    // The buyer and the date steer which rule is the default, so they are sent: without
-                    // them the picker's Default row could name a different rule than the order's save.
-                    BillToPersonID: order?.BillToPersonID ?? null,
-                    BillToOrganizationID: order?.BillToOrganizationID ?? null,
-                    OrderDate: this.IsoOrNull(order?.OrderDate),
-                    Lines: [{
-                        ProductID: String(line.ProductID),
-                        Quantity: Number(line.Quantity),
-                        // A picked price PINS the line, as it will on the order's save; otherwise orders
-                        // resolves it.
-                        UnitPrice: IsLinePriceOverridden(line, this.EngineDefault) ? Number(line.UnitPrice) : null,
-                        DiscountPct: (line.DiscountPct as number | null | undefined) ?? null,
-                        ServicePeriodStart: this.IsoOrNull(line.ServicePeriodStart),
-                        ServicePeriodEnd: this.IsoOrNull(line.ServicePeriodEnd),
-                    }],
-                },
-            );
+                // Drop stale replies superseded by a newer pricing request (#355).
+                if (token !== this.priceToken) return;
 
-            /**
-             * TWO LAYERS OF SUCCESS. The envelope says the operation RAN; `Output.Success` says pricing
-             * worked. Checking only the outer one is a mistake this repo has already made once, on the
-             * contracts seam, where it reported a contract that was never written.
-             */
-            const priced = envelope.Success ? envelope.Output : null;
-            const row = priced?.Success ? priced.Lines?.[0] : null;
-            if (!row) {
+                /**
+                 * TWO LAYERS OF SUCCESS. The envelope says the operation RAN; `Output.Success` says pricing
+                 * worked. Checking only the outer one is a mistake this repo has already made once, on the
+                 * contracts seam, where it reported a contract that was never written.
+                 */
+                const priced = envelope.Success ? envelope.Output : null;
+                const row = priced?.Success ? priced.Lines?.[0] : null;
+                if (!row) {
+                    this.pricedUnit = null;
+                    this.pricedTotal = null;
+                    this.pricedDiscount = null;
+                    this.EngineDefault = undefined;
+                    this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
+                    return;
+                }
+                this.pricedUnit = row.UnitPrice;
+                this.pricedTotal = row.LineTotalNet;
+                this.pricedDiscount = row.DiscountAmount ?? 0;
+                this.EngineDefault = row.Default;
+                this.applyDiscountAmount();
+            } catch {
+                if (token !== this.priceToken) return;
                 this.pricedUnit = null;
                 this.pricedTotal = null;
                 this.pricedDiscount = null;
                 this.EngineDefault = undefined;
                 this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
-                return;
+            } finally {
+                if (token === this.priceToken) {
+                    this.Pricing = false;
+                    // A reprice scheduled while this one was in flight is still pending.
+                    this.pricePending = this.priceTimer != null;
+                    this.cdr.detectChanges();
+                }
             }
-            this.pricedUnit = row.UnitPrice;
-            this.pricedTotal = row.LineTotalNet;
-            this.pricedDiscount = row.DiscountAmount ?? 0;
-            this.EngineDefault = row.Default;
-            this.applyDiscountAmount();
-        } catch {
-            this.pricedUnit = null;
-            this.pricedTotal = null;
-            this.pricedDiscount = null;
-            this.EngineDefault = undefined;
-            this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
+        };
+        const p = run();
+        this.inFlightPrice = p;
+        try {
+            await p;
         } finally {
-            this.Pricing = false;
-            // A reprice scheduled while this one was in flight is still pending.
-            this.pricePending = this.priceTimer !== null;
-            this.cdr.detectChanges();
+            if (this.inFlightPrice === p) {
+                this.inFlightPrice = null;
+            }
         }
     }
 
@@ -1564,7 +1608,23 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     }
 
     public async Save(): Promise<void> {
-        if (!this.Working || !this.CanSave) return;
+        if (!this.Working) return;
+        // Flush any debounced or in-flight reprice before checking CanSave (#509): raising quantity on a
+        // discounted line raises the dollar discount above its covered concession value only once Orders
+        // has priced the new quantity, so saving during the 350ms debounce must wait for that answer first.
+        if (this.priceTimer != null || this.pricePending) {
+            if (this.priceTimer != null) {
+                clearTimeout(this.priceTimer);
+                this.priceTimer = null;
+            }
+            await this.refreshPrice();
+        } else if (this.inFlightPrice != null) {
+            await this.inFlightPrice;
+        }
+        if (!this.Working || !this.CanSave) {
+            this.cdr.detectChanges();
+            return;
+        }
         this.Saving = true;
         this.Error = null;
         this.cdr.detectChanges();
