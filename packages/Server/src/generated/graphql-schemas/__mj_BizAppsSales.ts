@@ -457,7 +457,7 @@ export class mjBizAppsSalesDealContactRole_ {
     @MaxLength(36)
     BuyingRoleTypeID?: string;
         
-    @Field(() => Float, {nullable: true}) 
+    @Field(() => Float, {nullable: true, description: "How much this contact sways the buying decision, from 0 (none) to 100 (decides alone). Up to two decimal places."}) 
     Influence?: number;
         
     @Field({nullable: true}) 
@@ -2235,6 +2235,9 @@ export class mjBizAppsSalesDeal_ {
     @MaxLength(500)
     LeadSourceDetail?: string;
         
+    @Field({nullable: true, description: "Date and Time the Deal was created, defaulted to the record creation date but editable by the User. Used for deal aging."}) 
+    CreationDate?: Date;
+        
     @Field({nullable: true}) 
     @MaxLength(200)
     Pipeline?: string;
@@ -2472,6 +2475,9 @@ export class CreatemjBizAppsSalesDealInput {
     @Field({ nullable: true })
     LeadSourceDetail: string | null;
 
+    @Field({ nullable: true })
+    CreationDate?: Date;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -2628,6 +2634,9 @@ export class UpdatemjBizAppsSalesDealInput {
 
     @Field({ nullable: true })
     LeadSourceDetail?: string | null;
+
+    @Field({ nullable: true })
+    CreationDate?: Date;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
@@ -3842,7 +3851,7 @@ export class mjBizAppsSalesPipelineStage_ {
     @MaxLength(20)
     OrderStatusOnEntry?: string;
         
-    @Field(() => Int, {nullable: true, description: "Days without activity before the board flags a deal in this stage as rotting."}) 
+    @Field(() => Int, {nullable: true, description: "Deals that stay in this stage longer than this many days are flagged on the Board. Empty means no flag."}) 
     RottingDays?: number;
         
     @Field({nullable: true}) 

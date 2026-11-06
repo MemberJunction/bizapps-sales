@@ -39,7 +39,7 @@
     "both, because the interesting failure is a bundle that registers 4 and runs 0."
   ],
   "bundles": {
-    "save-deal": { "count": 40, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD44" },
+    "save-deal": { "count": 41, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD45" },
     "close-deal": { "count": 42, "requires": "orders", "ids": "CD1-CD42" },
     "product-picker": { "count": 5, "requires": "orders", "ids": "PP1-PP5" },
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
@@ -63,7 +63,7 @@
       "should be able to find the reasoning rather than re-derive it."
     ],
     "close-won-tasks": { "count": 18, "requires": "tasks", "ids": "WT1-WT18" },
-    "activities": { "count": 21, "requires": "common", "ids": "AC1-AC14, AC16, AC18-AC23" },
+    "activities": { "count": 22, "requires": "common", "ids": "AC1-AC14, AC16, AC18-AC24" },
     "forecast": { "count": 15, "requires": null, "ids": "FS1-FS15" },
     "discount-concession": { "count": 5, "requires": "orders", "ids": "DC1-DC5 — a deal line's raised discount recorded as orders' Price concession through Sales.RecordDiscountConcession: decided inside authority, Pending outside it, orders' reason on refusal, and a second raise withdrawing the line's earlier concession, approved (DC4) or Pending (DC5) (golive#340)." },
     "term-start": { "count": 6, "requires": "orders", "ids": "TS1-TS6 — the term start a deal states for a subscription line (#32). TS1-TS4 are pure rule checks; TS5 reads the catalogue; TS6 round-trips OrderLine.ServicePeriodStart through a deal save." }

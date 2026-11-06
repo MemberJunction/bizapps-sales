@@ -95,23 +95,7 @@
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
-            FieldName="EntryCriteria"
-            Type="textarea"
-            [EditMode]="EditMode"
-            [FormContext]="formContext"
-        ></mj-form-field>
-        <mj-form-field 
-            [Record]="record"
-            [ShowLabel]="true"
             FieldName="ExitCriteria"
-            Type="textarea"
-            [EditMode]="EditMode"
-            [FormContext]="formContext"
-        ></mj-form-field>
-        <mj-form-field 
-            [Record]="record"
-            [ShowLabel]="true"
-            FieldName="RequiredFields"
             Type="textarea"
             [EditMode]="EditMode"
             [FormContext]="formContext"
@@ -157,10 +141,10 @@
          RELATED ENTITY PANELS
          ======================================== -->
 
-    <!-- Deal Stage Events (To Stage ID) Section -->
+    <!-- Deals Entering This Stage Section -->
     <mj-collapsible-panel
         SectionKey="mJBizAppsSalesDealStageEventsToStageID"
-        SectionName="Deal Stage Events (To Stage ID)"
+        SectionName="Deals Entering This Stage"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"
@@ -182,10 +166,10 @@
         }
     </mj-collapsible-panel>
 
-    <!-- Deal Stage Events (From Stage ID) Section -->
+    <!-- Deals Leaving This Stage Section -->
     <mj-collapsible-panel
         SectionKey="mJBizAppsSalesDealStageEventsFromStageID"
-        SectionName="Deal Stage Events (From Stage ID)"
+        SectionName="Deals Leaving This Stage"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"

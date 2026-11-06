@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { RunView } from '@memberjunction/core';
 import {
+    AlreadyWonRefusal,
     DealFieldsEditableWhileLocked,
     DealFieldLabel,
     DealFieldsListedAsEditable,
+    IsDealFieldEditableWhileLocked,
     JoinLabels,
+    ResolveDealLockState,
 } from '../close-lock';
 
 /**
@@ -134,21 +137,24 @@ describe('the sentence the user actually reads', () => {
         expect(listed).toMatch(/ and /);
     });
 
+    afterEach(() => vi.restoreAllMocks());
+
     /**
-     * The source of the notice itself, because assembling it needs a database read and standing one
-     * up would test the harness rather than the copy. golive#207 row 16 is specific about the two
-     * things that changed: the deal is "closed (Won)" rather than "closed and locked", and the way out
-     * is "set the status back to Open" rather than an operation name.
+     * Assembles the notice by calling `ResolveDealLockState` directly rather than regex-matching the
+     * source file (#398). golive#207 row 16 is specific about the two things that changed: the deal is
+     * "closed (Won)" rather than "closed and locked", and the way out is "set the status back to Open"
+     * rather than an operation name.
      */
     it('uses the tester wording and names no API operation', async () => {
-        const { readFileSync } = await import('node:fs');
-        const source = readFileSync(new URL('../close-lock.ts', import.meta.url), 'utf8');
-        // The LAST `Notice:` is the assignment; the earlier ones are the interface field and the
-        // unlocked-state literal. Slicing from the first would test the type declaration.
-        const notice = source.slice(source.lastIndexOf('Notice:'), source.lastIndexOf('Notice:') + 400);
+        vi.spyOn(RunView.prototype, 'RunView').mockResolvedValue({
+            Success: true,
+            Results: [{ LocksDeal: true, Name: 'Won', IsLost: false, IsWon: true }],
+        } as never);
+        const lock = await ResolveDealLockState('aaaaaaaa-0000-4000-8000-000000000002');
+        const notice = lock.Notice ?? '';
 
-        expect(notice).toMatch(/This deal is closed \(\$\{row\.Name\}\)\./);
-        expect(notice).toMatch(/set the status back to Open/);
+        expect(notice).toContain('This deal is closed (Won).');
+        expect(notice).toContain('set the status back to Open');
         expect(notice, 'row 16 replaced the operation name with the form action').not.toMatch(
             /Sales\.ReopenDeal/,
         );
@@ -169,27 +175,96 @@ describe('the sentence the user actually reads', () => {
  *   · the flag is read and then DROPPED by the unlocked early return, which is the exit an open deal
  *     and a won-but-non-locking status both take.
  *
- * Source-read for the same reason the notice test above is: assembling the state needs a database,
- * and standing one up would test the harness. Both claims are structural, so the source is where
- * they are visible.
+ * Tested by calling `ResolveDealLockState` with a mocked `RunView` (#398).
  */
 describe('#226 — the won flag survives the resolver', () => {
-    const source = readFileSync(new URL('../close-lock.ts', import.meta.url), 'utf8');
+    afterEach(() => vi.restoreAllMocks());
 
-    it('asks the status row for IsWon', () => {
-        const fields = source.slice(source.indexOf('Fields: ['), source.indexOf('Fields: [') + 120);
-        expect(fields, 'a flag that is never selected is always undefined, and undefined is not won')
-            .toMatch(/'IsWon'/);
+    it('asks the status row for IsWon', async () => {
+        const spy = vi.spyOn(RunView.prototype, 'RunView').mockResolvedValue({
+            Success: true,
+            Results: [{ LocksDeal: true, Name: 'Won', IsLost: false, IsWon: true }],
+        } as never);
+        await ResolveDealLockState('aaaaaaaa-0000-4000-8000-000000000002');
+
+        expect(
+            spy,
+            'a flag that is never selected is always undefined, and undefined is not won',
+        ).toHaveBeenCalledWith(
+            expect.objectContaining({
+                Fields: expect.arrayContaining(['LocksDeal', 'Name', 'IsLost', 'IsWon']),
+            }),
+            undefined,
+        );
     });
 
-    it('carries it out of the unlocked exit rather than resetting it', () => {
-        expect(source).toMatch(/if \(!row\?\.LocksDeal\) \{\s*return \{ \.\.\.open, IsWon: isWon \};/);
+    it('carries it out of the unlocked exit rather than resetting it', async () => {
+        vi.spyOn(RunView.prototype, 'RunView').mockResolvedValue({
+            Success: true,
+            Results: [{ LocksDeal: false, Name: 'Signed', IsLost: false, IsWon: true }],
+        } as never);
+        const lock = await ResolveDealLockState('aaaaaaaa-0000-4000-8000-000000000003');
+
+        expect(lock).toEqual({
+            IsLocked: false,
+            StatusName: null,
+            IsLost: false,
+            IsWon: true,
+            IsStatusMissing: false,
+            Notice: null,
+        });
     });
 
-    it('reads the flag and never a status name', () => {
-        // §3, enforced repo-wide by test:vocabulary-gate. Named here too because THIS is the file a
-        // shortcut would be taken in: `row.Name === 'Closed Won'` is one character shorter than the
-        // flag and works perfectly until a deployment calls its winning status "Signed".
-        expect(source).toMatch(/const isWon = row\?\.IsWon === true;/);
+    it('reads the flag and never a status name', async () => {
+        // §3, enforced repo-wide by test:vocabulary-gate: a status named "Signed" with IsWon: true
+        // reports IsWon: true, while a status named "Won" with IsWon: false reports IsWon: false.
+        const spy = vi.spyOn(RunView.prototype, 'RunView');
+        spy.mockResolvedValueOnce({
+            Success: true,
+            Results: [{ LocksDeal: true, Name: 'Signed', IsLost: false, IsWon: true }],
+        } as never);
+        expect((await ResolveDealLockState('aaaaaaaa-0000-4000-8000-000000000004')).IsWon).toBe(true);
+
+        spy.mockResolvedValueOnce({
+            Success: true,
+            Results: [{ LocksDeal: true, Name: 'Won', IsLost: false, IsWon: false }],
+        } as never);
+        expect((await ResolveDealLockState('aaaaaaaa-0000-4000-8000-000000000005')).IsWon).toBe(false);
+    });
+});
+
+describe('golive#306 — blank AccountID on a closed deal', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('allows AccountID only when the persisted account is blank', () => {
+        expect(DealFieldsEditableWhileLocked(false, false).has('AccountID')).toBe(false);
+        expect(DealFieldsEditableWhileLocked(false, true).has('AccountID')).toBe(true);
+        expect(IsDealFieldEditableWhileLocked('AccountID', false, false)).toBe(false);
+        expect(IsDealFieldEditableWhileLocked('AccountID', false, true)).toBe(true);
+    });
+
+    it('lists Account in the lock notice when the persisted account is blank', async () => {
+        vi.spyOn(RunView.prototype, 'RunView').mockResolvedValue({
+            Success: true,
+            Results: [{ LocksDeal: true, Name: 'Lost', IsLost: true, IsWon: false }],
+        } as never);
+        const withAccount = await ResolveDealLockState('aaaaaaaa-0000-4000-8000-000000000006', undefined, false);
+        const blankAccount = await ResolveDealLockState('aaaaaaaa-0000-4000-8000-000000000006', undefined, true);
+
+        expect(withAccount.Notice).not.toContain('Account');
+        expect(blankAccount.Notice).toContain('Account');
+    });
+});
+
+describe('golive#387 — AlreadyWonRefusal', () => {
+    it('names the deal and contract when a contract was created', () => {
+        expect(AlreadyWonRefusal('DEAL-0042', 'CON-0019')).toBe(
+            'DEAL-0042 is already Won; contract CON-0019 was created.',
+        );
+    });
+
+    it('omits the contract clause when no contract number is present', () => {
+        expect(AlreadyWonRefusal('DEAL-0042', null)).toBe('DEAL-0042 is already Won.');
+        expect(AlreadyWonRefusal(null, 'CON-0019')).toBe('This deal is already Won; contract CON-0019 was created.');
     });
 });

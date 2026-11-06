@@ -23,6 +23,7 @@ import {
     EntityViewerModule,
     type AfterDataLoadEventArgs,
     type RecordOpenedEvent,
+    type RecordSelectedEvent,
     type ViewRelatedRecordNavigation,
 } from '@memberjunction/ng-entity-viewer';
 import {
@@ -38,6 +39,7 @@ import {
     type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
+import { LinkedParties, type ActivityLinkFields, type LinkedParty } from '../activities/deal-activity-parties';
 import { RelatedRecordTarget, SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import {
@@ -788,11 +790,21 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         // The close stamps likewise, from the set the entity server refuses writes against (#252).
         if (IsDealCloseStamp(fieldName)) return false;
 
-        const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
+        const form = this.FormComponent as unknown as {
+            IsLocked?: boolean;
+            IsLost?: boolean;
+            IsPersistedAccountBlank?: boolean;
+        } | undefined;
         const locked = form?.IsLocked === true;
+        const recordAccountOld = this.Record?.GetFieldByName?.('AccountID')?.OldValue as string | null | undefined;
+        const accountBlank =
+            form?.IsPersistedAccountBlank !== undefined
+                ? form.IsPersistedAccountBlank
+                : this.Record !== undefined && (!recordAccountOld || String(recordAccountOld).trim() === '');
         // The outcome rides along with the lock, from the same resolver, because golive#206 keeps Loss
-        // Notes editable on a LOST deal and frozen on a won one.
-        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true);
+        // Notes editable on a LOST deal and frozen on a won one; golive#306 keeps Account editable when
+        // the closed deal was saved without one.
+        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true, accountBlank);
     }
 
     /**
@@ -2502,6 +2514,20 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
         { name: 'DealTypeID', type: 'textbox', link: 'Record' },
         { name: 'ForecastCategoryTypeID', type: 'textbox', link: 'Record' },
         { name: 'Probability', type: 'number' },
+        // The business creation date the deal ages from (#532). Beside the forecast fields, because
+        // aging is read alongside them. NOT a mirror of `__mj_CreatedAt`: that column is the immutable
+        // row stamp, and for an imported deal it holds import day rather than deal day. This one is the
+        // editable business fact, which is why it is offered here at all.
+        //
+        // `datepicker` RENDERS `<input type="date">`, SO EDITING DROPS THE TIME. `mj-form-field` reads
+        // the value through `DateInputValue` (`toISOString().split('T')[0]`) and writes it back through
+        // `OnDateChange` (`new Date('2026-11-04')`, i.e. midnight UTC), so a rep who edits this field
+        // collapses its stored time. Accepted deliberately: the `GETUTCDATE()` default stores full
+        // precision, only a manual edit coarsens it, and aging is day-grained either way. MJ's
+        // form-field has no date+time type on the 6.1 LTS line (its Type union ends at `numerictextbox`)
+        // and this app may not grow a second editable control for a field the shared one already owns.
+        // Revisit when an MJ `datetimepicker` lands.
+        { name: 'CreationDate', type: 'datepicker' },
         // Beside stage and probability, where a rep forecasting the deal looks for it. It sat in
         // Commercial, and a rep who could not find it typed the expected day into Actual Close Date
         // instead (#252). One binding: it is no longer in COMMERCIAL_FIELDS.
@@ -3724,10 +3750,30 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
                             <mj-entity-viewer
                                 [Entity]="ActivityEntity"
                                 [ViewEntity]="ActivityView"
+                                (RecordSelected)="OnActivitySelected($event)"
                                 (RecordOpened)="OnActivityOpened($event)"
                                 (OpenRelatedRecordRequested)="OnActivityRelatedRecord($event)"
                                 (CreateRecordRequested)="compose.FocusCompose()">
                             </mj-entity-viewer>
+                        </div>
+                        <!-- Who the selected activity is linked to (#408): the grid has no column for it. -->
+                        <div class="mjs-deal-activity__links">
+                            @if (!Linked) {
+                                <span class="mjs-deal-activity__hint">Select an activity to see who it is linked to.</span>
+                            } @else {
+                                <span class="mjs-deal-activity__hint">Linked to:</span>
+                                @for (party of Linked; track $index) {
+                                    <span class="mjs-deal-activity__party" [title]="party.Role">
+                                        <i class="fa-solid" aria-hidden="true"
+                                            [class.fa-user]="party.Icon === 'person'"
+                                            [class.fa-building]="party.Icon === 'organization'"
+                                            [class.fa-at]="party.Icon === 'other'"></i>
+                                        {{ party.Name }}
+                                    </span>
+                                } @empty {
+                                    <span>this deal only</span>
+                                }
+                            }
                         </div>
                     }
                 </div>
@@ -3742,6 +3788,12 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
             min-height: 420px; height: 480px;
             display: flex; flex-direction: column;
             border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-md); overflow: hidden;
+        }
+        .mjs-deal-activity__links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mj-space-2); font-size: 0.8125rem; color: var(--mj-text-primary); }
+        .mjs-deal-activity__hint { color: var(--mj-text-muted); }
+        .mjs-deal-activity__party {
+            display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+            border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-sm);
         }
         .mjs-deal-activity__viewer mj-entity-viewer {
             display: flex; flex-direction: column; flex: 1 1 auto; height: 100%; width: 100%;
@@ -3763,8 +3815,58 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
         void this.refreshView();
     }
 
+    /** The selected activity's links, or null when none is selected. */
+    public Linked: LinkedParty[] | null = null;
+    private selectedActivityID: string | null = null;
+
     public OnLogged(): void {
+        this.selectedActivityID = null;
+        this.Linked = null;
         void this.refreshView();
+    }
+
+    public async OnActivitySelected(event: RecordSelectedEvent): Promise<void> {
+        const id = String(event.compositeKey?.GetValueByFieldName('ID') ?? event.record?.['ID'] ?? '');
+        if (!id) return;
+        this.selectedActivityID = id;
+        const linked = await this.readLinkedParties(id);
+        if (this.selectedActivityID !== id) return; // a later click won
+        this.Linked = linked;
+        this.cdr.detectChanges();
+    }
+
+    /** One read of the activity's links, then one `RunViews` for the people's and organizations' names. */
+    private async readLinkedParties(activityID: string): Promise<LinkedParty[] | null> {
+        const md = new Metadata();
+        const idOf = (name: string): string => md.Entities.find((e) => e.Name === name)?.ID ?? '';
+        const ids = { Deal: idOf(MJS_ENTITIES.Deal), Person: idOf(MJS_FOREIGN_ENTITIES.Person), Organization: idOf(MJS_FOREIGN_ENTITIES.Organization) };
+        const rv = new RunView();
+        const links = await rv.RunView<ActivityLinkFields>({
+            EntityName: MJS_FOREIGN_ENTITIES.ActivityLink,
+            ExtraFilter: `ActivityID = '${activityID.replace(/'/g, "''")}'`,
+            Fields: ['Role', 'EntityID', 'RecordID', 'IdentityValue', 'Entity'],
+            OrderBy: 'Sequence',
+            ResultType: 'simple',
+        });
+        if (!links.Success) {
+            console.error('Deal activity: could not read the activity links', links.ErrorMessage);
+            return null;
+        }
+        const rows = links.Results ?? [];
+        const inList = (entityID: string): string =>
+            rows.filter((l) => l.EntityID?.toLowerCase() === entityID.toLowerCase() && l.RecordID)
+                .map((l) => `'${String(l.RecordID).replace(/'/g, "''")}'`).join(', ') || 'NULL';
+        const [people, orgs] = await rv.RunViews([
+            { EntityName: MJS_FOREIGN_ENTITIES.Person, ExtraFilter: `ID IN (${inList(ids.Person)})`, Fields: ['ID', 'DisplayName'], ResultType: 'simple' },
+            { EntityName: MJS_FOREIGN_ENTITIES.Organization, ExtraFilter: `ID IN (${inList(ids.Organization)})`, Fields: ['ID', 'Name'], ResultType: 'simple' },
+        ]);
+        for (const r of [people, orgs].filter((x) => !x?.Success)) {
+            console.error('Deal activity: could not read linked names; showing IDs', r?.ErrorMessage);
+        }
+        const names = new Map<string, string>();
+        for (const r of (people?.Results ?? []) as { ID: string; DisplayName: string }[]) names.set(r.ID.toLowerCase(), r.DisplayName);
+        for (const r of (orgs?.Results ?? []) as { ID: string; Name: string }[]) names.set(r.ID.toLowerCase(), r.Name);
+        return LinkedParties(rows, ids, String(this.Record.ID), names);
     }
 
     public OnActivityOpened(event: RecordOpenedEvent): void {

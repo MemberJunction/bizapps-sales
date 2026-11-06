@@ -57,4 +57,12 @@ describe('WithInheritedSubscriptionType', () => {
             WithInheritedSubscriptionType([{ SubscriptionTypeID: null, ProductTypeID: SUBSCRIPTION_TYPE }], provider([], true)),
         ).rejects.toThrow(/boom/);
     });
+
+    it('skips a non-GUID ProductTypeID without calling RunView', async () => {
+        const p = provider(types);
+        const products = [{ SubscriptionTypeID: null, ProductTypeID: 'short-id' }];
+        await WithInheritedSubscriptionType(products, p);
+        expect(p.RunView).not.toHaveBeenCalled();
+        expect(products[0].SubscriptionTypeID).toBeNull();
+    });
 });

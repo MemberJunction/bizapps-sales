@@ -50,6 +50,28 @@ describe('RecordDiscountConcession', () => {
         expect(outcome).toEqual({ Recorded: true, AwaitingApproval: false });
     });
 
+    it('forwards a client-generated ConcessionID so a retry after a timeout is idempotent (#512)', async () => {
+        const clientID = 'cccccccc-0000-4000-8000-000000000001';
+        const route = stubOperation({
+            Success: true,
+            Output: { Success: true, AwaitingApproval: true, ConcessionID: clientID },
+        });
+        const outcome = await RecordDiscountConcession({
+            OrderLineID: LINE,
+            ReasonCategory: 'Retention',
+            Reason: 'keep the account',
+            ConcessionID: clientID,
+        });
+
+        expect(route).toHaveBeenCalledWith('Sales.RecordDiscountConcession', {
+            OrderLineID: LINE,
+            ReasonCategory: 'Retention',
+            Reason: 'keep the account',
+            ConcessionID: clientID,
+        }, {});
+        expect(outcome).toEqual({ Recorded: true, AwaitingApproval: true });
+    });
+
     it('never creates the concession entity in the browser', async () => {
         stubOperation({ Success: true, Output: { Success: true, AwaitingApproval: false } });
         const create = vi.spyOn(Metadata.prototype, 'GetEntityObject');
