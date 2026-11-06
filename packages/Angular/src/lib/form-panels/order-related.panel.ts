@@ -239,6 +239,8 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
             // warning, since nothing was learned about the contract.
             state = { DealID: state.DealID, ContractID: state.ContractID };
         }
+        state.ViaReversedOrder = String(dealOrderID) !== String(orderID);
+        state.OrderVoided = this.Record.Status === 'Voided'; // vocabulary-grep-allow: orders' fixed lifecycle, no flag table behind it
 
         this.publish(generation, orderID, state);
     }

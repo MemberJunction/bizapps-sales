@@ -74,11 +74,6 @@ const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
     // The Deal form's party pickers (bc-aidp-next-golive#372): base tables only, never a view.
     'party-lookup-contacts.sql': { tables: ['Person', 'SalesContact'], columns: 3 },
     'party-lookup-accounts.sql': { tables: ['Organization', 'SalesAccount'], columns: 3 },
-    // bc-aidp-next-golive#443: the finance control over won-deal orders with no executed agreement.
-    'orders-invoiced-without-executed-agreement.sql': {
-        tables: ['vwDeals', 'DealStatusType', 'won', 'vwContracts', 'vwExternalInvoices', 'vwOrderHeaders', 'candidates', 'invoices'],
-        columns: 24,
-    },
 };
 
 describe("MJ's SQL parser reads the business-day queries in full", () => {

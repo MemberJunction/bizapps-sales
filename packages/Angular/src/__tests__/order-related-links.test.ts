@@ -295,6 +295,21 @@ describe('#443 — the "No executed agreement" warning', () => {
         expect(NoExecutedAgreementWarning({ DealIsWon: true, ContractRead: true, Contract: null })).toBeNull();
     });
 
+    /** The deal names the order a reversal reverses; the warning belongs on that order, not this one. */
+    it('says nothing for a reversal reached through the order it reverses', () => {
+        expect(NoExecutedAgreementWarning({ ...won, Contract: null, ViaReversedOrder: true })).toBeNull();
+    });
+
+    /** A voided order sends no invoice, so "Invoices still send" would be untrue. */
+    it('says nothing for a voided order', () => {
+        expect(NoExecutedAgreementWarning({ ...won, Contract: AWAITING, OrderVoided: true })).toBeNull();
+    });
+
+    it('moves the links key when the order becomes voided', () => {
+        const base = { ...won, Contract: null };
+        expect(OrderRelatedLinksKey('o', base)).not.toBe(OrderRelatedLinksKey('o', { ...base, OrderVoided: true }));
+    });
+
     /** A refused or thrown contract read is not evidence that the contract is missing. */
     it('says nothing when the contract lookup did not answer', () => {
         expect(NoExecutedAgreementWarning({ DealID: DEAL, DealIsWon: true, Contract: null })).toBeNull();
