@@ -1,5 +1,24 @@
 # @mj-biz-apps/sales-entities
 
+## 6.24.0
+
+### Minor Changes
+
+- da41816: Deals carry a `CreationDate` — the business creation date the deal ages from, defaulted to the
+  record's creation instant and editable afterwards (#532).
+
+  `__mj_CreatedAt` could not do this job: it records when the ROW was written, so an imported deal
+  carries import day rather than deal day, and it is not editable. Existing deals are backfilled from
+  the earliest evidence the deal existed — their row stamp, or their first stage transition when that
+  is earlier — the same rule `Sales: Deal Cycle Time` already infers at query time.
+
+  The field is on the deal form's Pipeline tab, beside the forecast fields. It is not offered while a
+  deal is unsaved, since the default is correct for a deal created here.
+
+- 4a3226a: Close and lock hardening: validate caller-supplied IDs and fail closed on loss-reason and deal-type lookup errors in `Sales.CloseDeal` and `Sales.ReopenDeal`; keep client-generated `ConcessionID` across discount-concession retries so a resend after a timeout is idempotent; return a specific refusal naming the deal and contract when a close or stale pre-close save hits an already-Won deal; and allow a closed deal whose persisted `AccountID` is blank to have its account set once without reopening.
+- c4808fa: Release seed for 6.24, second part: `V202611061600__v6.24.x__Metadata_Sync.sql` and its PostgreSQL counterpart create the optional `Parties` input on the "Log Deal Activity" action, so installed hosts can pass the people and organizations to link.
+- c96a138: Release seed for 6.24: `V202611061330__v6.24.x__Metadata_Sync.sql` and its PostgreSQL counterpart carry this release's metadata to hosts, which install by migration and never read `metadata/`: the `Sales.RecordDiscountConcession` remote operation's input type gains the optional `ConcessionID`, so a resend after a timeout finds the concession the first attempt wrote.
+
 ## 6.23.4
 
 ## 6.23.3
