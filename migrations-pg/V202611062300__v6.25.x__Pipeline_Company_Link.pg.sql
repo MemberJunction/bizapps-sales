@@ -1,5 +1,5 @@
 -- =============================================================================================
--- PostgreSQL counterpart of V202611051100__v6.25.x__Pipeline_Company_Link.sql
+-- PostgreSQL counterpart of V202611062300__v6.25.x__Pipeline_Company_Link.sql
 -- =============================================================================================
 -- `mj sql-convert --from tsql --to postgres --schema __mj_BizAppsSales` (MJ CLI 6.1.6) output,
 -- finished by hand. The converter reported 0 errors and 18 skipped objects.
