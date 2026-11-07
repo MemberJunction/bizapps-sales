@@ -256,6 +256,10 @@ describe('#445 — the panel renders the contract view', () => {
         expect(panel).toContain('ContractView.AwaitingNote');
         expect(panel).toContain('this.ContractView = OrderContractChips(state)');
     });
+    it('binds the no-executed-agreement warning', () => {
+        expect(panel).toContain('@if (ContractView.Warning; as warning)');
+        expect(panel).toContain('data-testid="order-related-no-agreement"');
+    });
 });
 
 /**

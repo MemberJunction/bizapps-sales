@@ -29,14 +29,14 @@ afterEach(() => {
 /**
  * A won deal names the order; the contract read answers with `contracts`. `Success: false` is a refusal.
  */
-function stubReads(contracts: { Success: boolean; Results: unknown[] }): void {
+function stubReads(contracts: { Success: boolean; Results: unknown[] }, isWon = true): void {
     RunView.prototype.RunView = (async () => ({
         Success: true,
         Results: [{ ID: DEAL, ContractID: null, DealStatusTypeID: WON }],
     })) as unknown as typeof RunView.prototype.RunView;
     RunView.prototype.RunViews = (async () => [
         contracts,
-        { Success: true, Results: [{ ID: WON, IsWon: true }] },
+        { Success: true, Results: [{ ID: WON, IsWon: isWon }] },
     ]) as unknown as typeof RunView.prototype.RunViews;
 }
 
@@ -53,6 +53,13 @@ describe('#443 — the panel feeds the warning only what it learned', () => {
         stubReads({ Success: true, Results: [] });
         const panel = await loadPanel({});
         expect(panel.ContractView.Warning?.Label).toBe('No executed agreement');
+    });
+
+    /** An open or lost deal has no agreement yet by design (g443.2 A), so only a won deal warns. */
+    it('says nothing when the deal is not won', async () => {
+        stubReads({ Success: true, Results: [] }, false);
+        const panel = await loadPanel({});
+        expect(panel.ContractView.Warning).toBeNull();
     });
 
     /** A refusal is not evidence the contract is missing: warning would tell finance something untrue. */
