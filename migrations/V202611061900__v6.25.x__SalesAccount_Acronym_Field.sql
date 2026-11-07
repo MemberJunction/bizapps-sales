@@ -7,11 +7,25 @@
 -- from migrations keeps the old view: the Sales Account form has no Acronym field and the
 -- view/field parity check fails.
 --
--- Everything below is CodeGen's output, unchanged, from a run against a database built from
--- migrations only (scripts/rebuild-db.sh: MJ core v6.1.6, bizapps-common, -tasks, -accounting,
--- -orders and -contracts at `next`, then this app), after `mj sync push --dir metadata`. A second
--- CodeGen pass wrote nothing.
+-- Everything below the first two DELETEs is CodeGen's output, unchanged, from a run against a
+-- database built from migrations only (scripts/rebuild-db.sh: MJ core v6.1.6, bizapps-common,
+-- -tasks, -accounting, -orders and -contracts at `next`, then this app), after
+-- `mj sync push --dir metadata`. A second CodeGen pass wrote nothing.
+--
+-- The DELETEs are written by hand. On a host where CodeGen (MJ Setup) has already run against
+-- Common 5.57+, an Acronym row for Sales Accounts exists under a CodeGen-chosen ID, and the
+-- fixed-ID INSERT below would fail on UQ_EntityField_EntityID_Name (bizapps-sales#531). On a
+-- fresh install they delete nothing. EntityFieldValue references EntityField without a cascade,
+-- so its rows go first; EntityFieldPermission rows go with the field (ON DELETE CASCADE).
 -- =============================================================================================
+
+DELETE efv
+FROM [${mjSchema}].[EntityFieldValue] efv
+INNER JOIN [${mjSchema}].[EntityField] ef ON ef.[ID] = efv.[EntityFieldID]
+WHERE ef.[EntityID] = '15A9B6F8-9566-4A37-8588-2D00E8F1CB9A' AND ef.[Name] = 'Acronym';
+
+DELETE FROM [${mjSchema}].[EntityField]
+WHERE [EntityID] = '15A9B6F8-9566-4A37-8588-2D00E8F1CB9A' AND [Name] = 'Acronym';
 
 /* Create IS-A parent field Acronym on MJ_BizApps_Sales: Sales Accounts */
 INSERT INTO [${mjSchema}].[EntityField] (

@@ -3,6 +3,7 @@
 -- =============================================================================================
 -- `mj sql-convert --from tsql --to postgres` (MJ CLI 6.1.6) output, finished by hand:
 --   * The view, the EntityField row and the grants are the converter's.
+--   * The two DELETEs before the EntityField INSERT are hand-written, matching the T-SQL file.
 --   * CodeGen's CRUD procedures (spCreate/spUpdate/spDelete) and its __mj_UpdatedAt trigger are
 --     NOT here: the converter cannot translate T-SQL procedures or triggers. A PostgreSQL host
 --     runs `mj codegen` after installing, which generates them natively. The converter's notes
@@ -213,6 +214,18 @@ $do$;
 
 
 -- ===================== Data (INSERT/UPDATE/DELETE) =====================
+
+-- Written by hand, as in the T-SQL file: a host where CodeGen already registered Acronym under its
+-- own ID would fail the fixed-ID INSERT on the (EntityID, Name) unique index. EntityFieldValue has
+-- no cascade, so its rows go first; EntityFieldPermission rows cascade with the field.
+DELETE FROM __mj."EntityFieldValue"
+WHERE "EntityFieldID" IN (
+    SELECT "ID" FROM __mj."EntityField"
+    WHERE "EntityID" = '15A9B6F8-9566-4A37-8588-2D00E8F1CB9A' AND "Name" = 'Acronym'
+);
+
+DELETE FROM __mj."EntityField"
+WHERE "EntityID" = '15A9B6F8-9566-4A37-8588-2D00E8F1CB9A' AND "Name" = 'Acronym';
 
 INSERT INTO __mj."EntityField" (
                   "ID", "EntityID", "Name", "Type", "AllowsNull",
