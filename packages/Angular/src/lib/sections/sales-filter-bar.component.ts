@@ -36,6 +36,8 @@ export interface SalesFilterBarState {
     Filters: DashboardFilters;
     /** The choices each list offers. */
     Options: Record<FilterKind, FilterOption[]>;
+    /** Lists the bar leaves out: the Pipeline list while the `HidePipelines` setting is on. */
+    HiddenKinds?: readonly FilterKind[];
     /** The signed-in user's employee record; "My deals" is hidden without one. */
     MyEmployeeID: string | null;
     /** Deals a Product company filter leaves out because they have no lines yet; 0 hides the chip. */
@@ -85,7 +87,11 @@ export class MJSSalesFilterBarComponent {
     @Output() public readonly MyDealsToggled = new EventEmitter<void>();
 
     public readonly PeriodOptions = PERIOD_OPTIONS;
-    public readonly Lists = FILTER_LISTS;
+    /** The lists shown, in order, less any the state hides. */
+    public get Lists(): readonly FilterList[] {
+        const hidden = this.State.HiddenKinds ?? [];
+        return FILTER_LISTS.filter((list) => !hidden.includes(list.Kind));
+    }
 
     /** True when "My deals" is exactly the owner filter. */
     public get MyDealsOn(): boolean {

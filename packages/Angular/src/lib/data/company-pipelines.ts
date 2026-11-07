@@ -121,6 +121,25 @@ export function PipelinesForCompany<T extends CompanyPipeline>(pipelines: readon
     return companyID ? ordered.filter((p) => sameID(p.CompanyID, companyID)) : DistinctPipelines(ordered);
 }
 
+/**
+ * The company's default pipeline: the first of its pipelines in picker order, so the `IsDefault`
+ * pipeline when it is linked to the company, else the lowest `DisplayRank`. Null when none is linked.
+ */
+export function CompanyDefaultPipeline<T extends CompanyPipeline>(pipelines: readonly T[], companyID: string | null): T | null {
+    return companyID ? (PipelinesForCompany(pipelines, companyID)[0] ?? null) : null;
+}
+
+/**
+ * The names of the companies a pipeline is linked to, joined: what names a pipeline where pipelines are
+ * hidden. Falls back to the pipeline's own name when it has no named company.
+ */
+export function PipelineCompanyNames(pipelines: readonly CompanyPipeline[], pipeline: Pick<CompanyPipeline, 'ID' | 'Name'>): string {
+    const names = OrderPipelinesByCompany(pipelines.filter((p) => sameID(p.ID, pipeline.ID)))
+        .map((p) => p.CompanyName)
+        .filter((name): name is string => !!name);
+    return names.length ? [...new Set(names)].join(', ') : pipeline.Name;
+}
+
 /** Whether `pipelineID` is linked to `companyID`. */
 export function PipelineServesCompany(
     pipelines: readonly CompanyPipeline[],

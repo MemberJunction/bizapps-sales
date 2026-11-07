@@ -151,12 +151,12 @@
                 <div class="funnel-pad">
                   @if (LookupsError) {
                     <!-- The stage names and pipeline tabs come from the lookups; the counts below do not. -->
-                    <p class="part-note" role="status">Pipeline names could not be loaded: {{ LookupsError }}</p>
+                    <p class="part-note" role="status">{{ HidePipelines ? 'Company' : 'Pipeline' }} names could not be loaded: {{ LookupsError }}</p>
                   }
                   <!-- One pipeline at a time: each numbers its own stages, and two may share a stage name.
                        One pipeline picked in the filter bar shows it with no tabs. -->
                   @if (FunnelPipelineOptions.length > 1) {
-                    <div class="period__pills funnel__tabs" role="tablist" aria-label="Pipeline">
+                    <div class="period__pills funnel__tabs" role="tablist" [attr.aria-label]="HidePipelines ? 'Company' : 'Pipeline'">
                       @for (pipeline of FunnelPipelineOptions; track pipeline.ID) {
                         <button
                           type="button"
@@ -165,7 +165,7 @@
                           [class.period__pill--on]="pipeline.ID === ActiveFunnelPipelineID"
                           [attr.aria-selected]="pipeline.ID === ActiveFunnelPipelineID"
                           (click)="SelectFunnelPipeline(pipeline.ID)">
-                          {{ pipeline.Name }}
+                          {{ FunnelTabLabel(pipeline) }}
                         </button>
                       }
                     </div>
@@ -373,6 +373,7 @@
               [CompanyIDs]="Filters.CompanyIDs"
               [PipelineIDs]="Filters.PipelineIDs"
               [SelectedPipelineID]="BoardPipelineID"
+              [HidePipelines]="HidePipelines"
               (SelectedPipelineIDChange)="OnBoardPipeline($event)"
               (DealOpened)="OpenDeal($event)"
               (StageMoved)="RefreshAfterSave()"></mjs-deal-board>

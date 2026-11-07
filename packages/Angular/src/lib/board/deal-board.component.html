@@ -14,9 +14,9 @@
   -->
   <div class="db-bar">
     @let tabs = TabPipelines;
-    <span class="db-bar__label">Pipeline</span>
+    <span class="db-bar__label">{{ HidePipelines ? 'Company' : 'Pipeline' }}</span>
     @if (tabs.length > 1) {
-      <div class="db-bar__pipes" role="tablist" aria-label="Pipeline" data-testid="db-pipeline-tabs">
+      <div class="db-bar__pipes" role="tablist" [attr.aria-label]="HidePipelines ? 'Company' : 'Pipeline'" data-testid="db-pipeline-tabs">
         @for (pipeline of tabs; track pipeline.ID) {
           <button
             type="button"
@@ -30,7 +30,7 @@
         }
       </div>
     } @else if (tabs.length === 1) {
-      <span class="db-bar__one" data-testid="db-pipeline-one">{{ tabs[0].Name }}</span>
+      <span class="db-bar__one" data-testid="db-pipeline-one">{{ HidePipelines ? TabLabel(tabs[0]) : tabs[0].Name }}</span>
     }
     @if (Moving) {
       <span class="db-bar__busy"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Moving…</span>
@@ -45,7 +45,7 @@
 
   @let columns = Columns;
   @if (columns.length === 0) {
-    <p class="db-empty">This pipeline has no stages yet.</p>
+    <p class="db-empty">{{ HidePipelines ? 'No stages are set up for this company yet.' : 'This pipeline has no stages yet.' }}</p>
   } @else {
     <div class="db-cols">
       @for (column of columns; track TrackColumn($index, column)) {
