@@ -383,25 +383,25 @@ $do$;
 
 -- SKIPPED: trigger (auto-conversion not supported)
 -- CREATE TRIGGER [__mj_BizAppsSales].trgUpdatePipeline
-ON "__mj_BizAppsSales"."Pipeline"
-AFTER UPDATE
-AS
-BEGIN
-    SET NOCOUNT ON;
-    UPDATE
-        "__mj_BizAppsSales"."Pipeline"
-    SET
-        __mj_
+-- ON "__mj_BizAppsSales"."Pipeline"
+-- AFTER UPDATE
+-- AS
+-- BEGIN
+--     SET NOCOUNT ON;
+--     UPDATE
+--         "__mj_BizAppsSales"."Pipeline"
+--     SET
+--         __mj_
 
 -- SKIPPED: trigger (auto-conversion not supported)
 -- CREATE TRIGGER [__mj_BizAppsSales].trgUpdatePipelineCompany
-ON "__mj_BizAppsSales"."PipelineCompany"
-AFTER UPDATE
-AS
-BEGIN
-    SET NOCOUNT ON;
-    UPDATE
-        "__mj_BizAppsSales"."PipelineCompany"
+-- ON "__mj_BizAppsSales"."PipelineCompany"
+-- AFTER UPDATE
+-- AS
+-- BEGIN
+--     SET NOCOUNT ON;
+--     UPDATE
+--         "__mj_BizAppsSales"."PipelineCompany"
 
 
 -- ===================== Data (INSERT/UPDATE/DELETE) =====================
@@ -460,16 +460,16 @@ INSERT INTO ${mjSchema}."Entity" (
          'PipelineCompany',
          'vwPipelineCompanies',
          '__mj_BizAppsSales',
-         1,
-         1,
-         0
-         , 1
-         , 0
-         , 0
-         , 0
-         , 1
-         , 1
-         , 1
+         TRUE,
+         TRUE,
+         FALSE
+         , TRUE
+         , FALSE
+         , FALSE
+         , FALSE
+         , TRUE
+         , TRUE
+         , TRUE
          , 1000
          , NOW()
          , NOW()
@@ -485,7 +485,7 @@ INSERT INTO ${mjSchema}."ApplicationEntity"
 
 INSERT INTO ${mjSchema}."EntityPermission"
                 ("EntityID", "RoleID", "Type", "CanRead", "CanCreate", "CanUpdate", "CanDelete", "__mj_CreatedAt", "__mj_UpdatedAt")
-              SELECT CAST('521b0001-bbdc-4e58-9140-84684053e091' AS UUID), CAST('E0AFCCEC-6A37-EF11-86D4-000D3A4E707E' AS UUID), 'Allow', 1, 0, 0, 0, NOW(), NOW()
+              SELECT CAST('521b0001-bbdc-4e58-9140-84684053e091' AS UUID), CAST('E0AFCCEC-6A37-EF11-86D4-000D3A4E707E' AS UUID), 'Allow', TRUE, FALSE, FALSE, FALSE, NOW(), NOW()
               WHERE NOT EXISTS (
                 SELECT 1 FROM ${mjSchema}."EntityPermission"
                 WHERE "EntityID" = CAST('521b0001-bbdc-4e58-9140-84684053e091' AS UUID) AND "RoleID" = CAST('E0AFCCEC-6A37-EF11-86D4-000D3A4E707E' AS UUID) AND "Type" = 'Allow'
@@ -495,7 +495,7 @@ INSERT INTO ${mjSchema}."EntityPermission"
 
 INSERT INTO ${mjSchema}."EntityPermission"
                 ("EntityID", "RoleID", "Type", "CanRead", "CanCreate", "CanUpdate", "CanDelete", "__mj_CreatedAt", "__mj_UpdatedAt")
-              SELECT CAST('521b0001-bbdc-4e58-9140-84684053e091' AS UUID), CAST('DEAFCCEC-6A37-EF11-86D4-000D3A4E707E' AS UUID), 'Allow', 1, 1, 1, 1, NOW(), NOW()
+              SELECT CAST('521b0001-bbdc-4e58-9140-84684053e091' AS UUID), CAST('DEAFCCEC-6A37-EF11-86D4-000D3A4E707E' AS UUID), 'Allow', TRUE, TRUE, TRUE, TRUE, NOW(), NOW()
               WHERE NOT EXISTS (
                 SELECT 1 FROM ${mjSchema}."EntityPermission"
                 WHERE "EntityID" = CAST('521b0001-bbdc-4e58-9140-84684053e091' AS UUID) AND "RoleID" = CAST('DEAFCCEC-6A37-EF11-86D4-000D3A4E707E' AS UUID) AND "Type" = 'Allow'
@@ -505,7 +505,7 @@ INSERT INTO ${mjSchema}."EntityPermission"
 
 INSERT INTO ${mjSchema}."EntityPermission"
                 ("EntityID", "RoleID", "Type", "CanRead", "CanCreate", "CanUpdate", "CanDelete", "__mj_CreatedAt", "__mj_UpdatedAt")
-              SELECT CAST('521b0001-bbdc-4e58-9140-84684053e091' AS UUID), CAST('DFAFCCEC-6A37-EF11-86D4-000D3A4E707E' AS UUID), 'Allow', 1, 1, 1, 1, NOW(), NOW()
+              SELECT CAST('521b0001-bbdc-4e58-9140-84684053e091' AS UUID), CAST('DFAFCCEC-6A37-EF11-86D4-000D3A4E707E' AS UUID), 'Allow', TRUE, TRUE, TRUE, TRUE, NOW(), NOW()
               WHERE NOT EXISTS (
                 SELECT 1 FROM ${mjSchema}."EntityPermission"
                 WHERE "EntityID" = CAST('521b0001-bbdc-4e58-9140-84684053e091' AS UUID) AND "RoleID" = CAST('DFAFCCEC-6A37-EF11-86D4-000D3A4E707E' AS UUID) AND "Type" = 'Allow'
@@ -578,20 +578,20 @@ BEGIN
         16,
         0,
         0,
-        0,
+        FALSE,
         'gen_random_uuid()',
-        0,
-        0,
-        0,
-        0,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
         NULL,
         NULL,
-        0,
-        0,
-        0,
-        0,
-        1,
-        1,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        TRUE,
+        TRUE,
         'Search',
         NOW(),
         NOW()
@@ -646,20 +646,20 @@ BEGIN
         16,
         0,
         0,
-        0,
+        FALSE,
         NULL,
-        0,
-        1,
-        0,
-        0,
+        FALSE,
+        TRUE,
+        FALSE,
+        FALSE,
         'F363D8C9-FBDE-4DF5-99C6-D1543D3BD3B2',
         'ID',
-        0,
-        0,
-        1,
-        0,
-        0,
-        1,
+        FALSE,
+        FALSE,
+        TRUE,
+        FALSE,
+        FALSE,
+        TRUE,
         'Search',
         NOW(),
         NOW()
@@ -714,20 +714,20 @@ BEGIN
         16,
         0,
         0,
-        0,
+        FALSE,
         NULL,
-        0,
-        1,
-        0,
-        0,
+        FALSE,
+        TRUE,
+        FALSE,
+        FALSE,
         'D4238F34-2837-EF11-86D4-6045BDEE16E6',
         'ID',
-        0,
-        0,
-        1,
-        0,
-        0,
-        1,
+        FALSE,
+        FALSE,
+        TRUE,
+        FALSE,
+        FALSE,
+        TRUE,
         'Search',
         NOW(),
         NOW()
@@ -782,20 +782,20 @@ BEGIN
         1,
         1,
         0,
-        0,
+        FALSE,
         '(1)',
-        0,
-        1,
-        0,
-        0,
+        FALSE,
+        TRUE,
+        FALSE,
+        FALSE,
         NULL,
         NULL,
-        0,
-        0,
-        0,
-        1,
-        0,
-        0,
+        FALSE,
+        FALSE,
+        FALSE,
+        TRUE,
+        FALSE,
+        FALSE,
         'Search',
         NOW(),
         NOW()
@@ -850,20 +850,20 @@ BEGIN
         10,
         34,
         7,
-        0,
+        FALSE,
         'NOW()',
-        0,
-        0,
-        0,
-        0,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
         NULL,
         NULL,
-        0,
-        0,
-        0,
-        1,
-        0,
-        0,
+        FALSE,
+        FALSE,
+        FALSE,
+        TRUE,
+        FALSE,
+        FALSE,
         'Search',
         NOW(),
         NOW()
@@ -918,20 +918,20 @@ BEGIN
         10,
         34,
         7,
-        0,
+        FALSE,
         'NOW()',
-        0,
-        0,
-        0,
-        0,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
         NULL,
         NULL,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
         'Search',
         NOW(),
         NOW()
@@ -986,20 +986,20 @@ BEGIN
         400,
         0,
         0,
-        1,
+        TRUE,
         NULL,
-        0,
-        0,
-        1,
-        0,
+        FALSE,
+        FALSE,
+        TRUE,
+        FALSE,
         NULL,
         NULL,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
         'Search',
         NOW(),
         NOW()
@@ -1054,20 +1054,20 @@ BEGIN
         400,
         0,
         0,
-        1,
+        TRUE,
         NULL,
-        0,
-        0,
-        1,
-        0,
+        FALSE,
+        FALSE,
+        TRUE,
+        FALSE,
         NULL,
         NULL,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
         'Search',
         NOW(),
         NOW()
@@ -1122,20 +1122,20 @@ BEGIN
         500,
         0,
         0,
-        1,
+        TRUE,
         NULL,
-        0,
-        0,
-        1,
-        0,
+        FALSE,
+        FALSE,
+        TRUE,
+        FALSE,
         NULL,
         NULL,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
         'Search',
         NOW(),
         NOW()
@@ -1149,7 +1149,7 @@ BEGIN
         SELECT 1 FROM ${mjSchema}."EntityRelationship" WHERE "ID" = '4333b452-b348-4c5d-a53b-7f62ad63768e'
     ) THEN
         INSERT INTO ${mjSchema}."EntityRelationship" ("ID", "EntityID", "RelatedEntityID", "RelatedEntityJoinField", "Type", "BundleInAPI", "DisplayInForm", "Sequence", "__mj_CreatedAt", "__mj_UpdatedAt")
-        VALUES ('4333b452-b348-4c5d-a53b-7f62ad63768e', 'D4238F34-2837-EF11-86D4-6045BDEE16E6', '521B0001-BBDC-4E58-9140-84684053E091', 'CompanyID', 'One To Many', 1, 1, 37, NOW(), NOW());
+        VALUES ('4333b452-b348-4c5d-a53b-7f62ad63768e', 'D4238F34-2837-EF11-86D4-6045BDEE16E6', '521B0001-BBDC-4E58-9140-84684053E091', 'CompanyID', 'One To Many', TRUE, TRUE, 37, NOW(), NOW());
     END IF;
 END $$;
 
@@ -1159,7 +1159,7 @@ BEGIN
         SELECT 1 FROM ${mjSchema}."EntityRelationship" WHERE "ID" = 'affbbcb7-1bea-4480-895e-fb5e08d17251'
     ) THEN
         INSERT INTO ${mjSchema}."EntityRelationship" ("ID", "EntityID", "RelatedEntityID", "RelatedEntityJoinField", "Type", "BundleInAPI", "DisplayInForm", "Sequence", "__mj_CreatedAt", "__mj_UpdatedAt")
-        VALUES ('affbbcb7-1bea-4480-895e-fb5e08d17251', 'F363D8C9-FBDE-4DF5-99C6-D1543D3BD3B2', '521B0001-BBDC-4E58-9140-84684053E091', 'PipelineID', 'One To Many', 1, 1, 5, NOW(), NOW());
+        VALUES ('affbbcb7-1bea-4480-895e-fb5e08d17251', 'F363D8C9-FBDE-4DF5-99C6-D1543D3BD3B2', '521B0001-BBDC-4E58-9140-84684053E091', 'PipelineID', 'One To Many', TRUE, TRUE, 5, NOW(), NOW());
     END IF;
 END $$;
 
@@ -1210,20 +1210,20 @@ BEGIN
         400,
         0,
         0,
-        0,
+        FALSE,
         NULL,
-        0,
-        0,
-        1,
-        0,
+        FALSE,
+        FALSE,
+        TRUE,
+        FALSE,
         NULL,
         NULL,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
         'Search',
         NOW(),
         NOW()
@@ -1278,20 +1278,20 @@ BEGIN
         100,
         0,
         0,
-        0,
+        FALSE,
         NULL,
-        0,
-        0,
-        1,
-        0,
+        FALSE,
+        FALSE,
+        TRUE,
+        FALSE,
         NULL,
         NULL,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
         'Search',
         NOW(),
         NOW()
