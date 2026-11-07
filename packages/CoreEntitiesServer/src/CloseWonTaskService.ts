@@ -890,7 +890,8 @@ export class CloseWonTaskService {
         if (!input.Assignee?.RecordID || !input.Assignee?.EntityName) {
             result.Issues.push(
                 `The ${kind} task was created but NOT routed: no finance assignee is configured. Set the `
-                    + "pipeline's Close Won Assignee (or CloseWonTasks.AssigneeRecordID in its CloseWonPolicy).",
+                    + "pipeline's Close Won Assignee or Close Won Assignee Role (or CloseWonTasks.AssigneeRecordID "
+                    + 'in its CloseWonPolicy).',
             );
             return null;
         }
