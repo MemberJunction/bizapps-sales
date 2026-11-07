@@ -32,8 +32,9 @@
  *                        shares one transaction with the stage-order writer and the deal counter; see
  *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters.
  *                        BD7 proves the event it appends then refuses an edit and a delete (#348)
- *   pipeline-copy        Every company gets its own copy of the default pipeline and all of its stages,
- *                        and a second run copies nothing (#327). Needs no sibling app: it saves no deal
+ *   pipeline-link        Every company ends linked to the default pipeline through PipelineCompany, no
+ *                        pipeline is created, and a second run links nothing (#327). Needs no sibling
+ *                        app: it saves no deal
  *   party-lookup         The Deal form's Account and Contact picker queries: prefix only, subtype rows
  *                        only, % and _ literal (bc-aidp-next-golive#372). Saves no deal
  *   discount-concession  A deal line's raised discount is recorded through Sales.RecordDiscountConcession,
@@ -93,7 +94,7 @@ import './checks/close-won-tasks.checks.js';
 import './checks/activities.checks.js';
 import './checks/forecast.checks.js';
 import './checks/term-start.checks.js';
-import './checks/pipeline-copy.checks.js';
+import './checks/pipeline-link.checks.js';
 import './checks/party-lookup.checks.js';
 import './checks/discount-concession.checks.js';
 
@@ -101,7 +102,7 @@ export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
 export { ProductPickerChecks } from './checks/product-picker.checks.js';
 export { TermStartChecks } from './checks/term-start.checks.js';
-export { PipelineCopyChecks } from './checks/pipeline-copy.checks.js';
+export { PipelineLinkChecks } from './checks/pipeline-link.checks.js';
 export { PartyLookupChecks } from './checks/party-lookup.checks.js';
 export { DiscountConcessionChecks } from './checks/discount-concession.checks.js';
 export { CloseWonOrderChecks } from './checks/close-won-order.checks.js';

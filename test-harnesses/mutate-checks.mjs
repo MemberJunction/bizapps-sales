@@ -181,9 +181,13 @@ const MUTATIONS = [
       from: "AND (AvailableTo IS NULL OR AvailableTo >= '${day}')",
       to: "AND (AvailableTo IS NULL OR AvailableTo >= '1900-01-01')" },
 
+    // RETARGETED when the pipeline stopped carrying a company: the server no longer stamps the deal's
+    // company from its pipeline, it refuses one the pipeline is not actively linked to. Accepting every
+    // company is the defect SD2 names.
     { id: 'M-SD2', file: DES, expect: ['SD2'],
-      from: '    private async stampCompanyFromPipeline(): Promise<void> {\n        if (!this.PipelineID) {',
-      to: '    private async stampCompanyFromPipeline(): Promise<void> {\n        if (true) { return; }\n        if (!this.PipelineID) {' },
+      from: "        if ((result.Results ?? []).length === 0) {\n            return 'the pipeline on this deal is not available to its company.",
+      to: "        if (false) {\n            return 'the pipeline on this deal is not available to its company.",
+      note: 'the link lookup still runs, but no answer refuses the save -- an unlinked company is stored' },
     { id: 'M-SD3', file: DES, expect: ['SD3'],
       from: '        this.OwnerEmployeeID = owner?.EmployeeID ?? null;',
       to: '        this.OwnerEmployeeID = null;' },

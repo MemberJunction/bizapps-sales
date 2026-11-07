@@ -67,8 +67,8 @@ export function BillComCustomerWarning(check: BillComCustomerCheck): string | nu
 /**
  * Reads the company's Bill.com provider rows and the account's External Customer rows under them.
  *
- * `companyID` is the deal's; a new deal has none until it is saved, so the pipeline's is read
- * instead, the same source the server stamps the deal's company from. Throws when a read fails.
+ * `companyID` is the deal's; a new deal may have none yet, so the pipeline's is read instead when the
+ * pipeline serves only one company. Throws when a read fails.
  */
 export async function CheckBillComCustomer(
     accountID: string | null,
@@ -114,16 +114,17 @@ export async function CheckBillComCustomer(
     return DecideBillComCustomer(providerRows, typeIDs, customers.Results.map((c) => c.PaymentProviderID));
 }
 
+/** The pipeline's company when it serves exactly one; with several, the deal's own company decides. */
 async function pipelineCompany(pipelineID: string | null): Promise<string | null> {
     if (!isSet(pipelineID)) return null;
     const result = await new RunView().RunView<{ CompanyID: string | null }>({
-        EntityName: MJS_ENTITIES.Pipeline,
-        ExtraFilter: `ID = '${guid(pipelineID)}'`,
+        EntityName: MJS_ENTITIES.PipelineCompany,
+        ExtraFilter: `PipelineID = '${guid(pipelineID)}' AND IsActive = 1`,
         Fields: ['CompanyID'],
         ResultType: 'simple',
     });
-    if (!result.Success) throw new Error(result.ErrorMessage || 'The pipeline could not be read.');
-    return result.Results[0]?.CompanyID ?? null;
+    if (!result.Success) throw new Error(result.ErrorMessage || "The pipeline's companies could not be read.");
+    return result.Results.length === 1 ? (result.Results[0].CompanyID ?? null) : null;
 }
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
