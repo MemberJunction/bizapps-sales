@@ -13,6 +13,8 @@ export const MJS_ENTITIES = {
     DealPaymentSchedule: 'MJ_BizApps_Sales: Deal Payment Schedules',
     /** Read to resolve the selling company a new deal must carry. See `company-from-pipeline.ts`. */
     Pipeline: 'MJ_BizApps_Sales: Pipelines',
+    /** Read for `IsWon`, so the order header warns only for an order a won deal names (golive#443). */
+    DealStatusType: 'MJ_BizApps_Sales: Deal Status Types',
     SalesAccount: 'MJ_BizApps_Sales: Sales Accounts',
     SalesContact: 'MJ_BizApps_Sales: Sales Contacts',
 } as const;

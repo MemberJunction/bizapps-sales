@@ -10,6 +10,7 @@ import {
     DealLookupOrderID,
     EXECUTED_AGREEMENT_FILE_CATEGORY,
     ExecutedAgreementFileFilter,
+    NoExecutedAgreementWarning,
     OrderContractChips,
     OrderRelatedLinks,
     OrderRelatedLinksKey,
@@ -219,8 +220,8 @@ describe('#445 — what the From row shows for the contract', () => {
     });
 
     it('draws no contract chip without a contract row or a deal', () => {
-        expect(OrderContractChips({ DealID: DEAL, ContractID: CONTRACT })).toEqual({ Chips: [], AwaitingNote: null });
-        expect(OrderContractChips({ Contract: ACTIVE })).toEqual({ Chips: [], AwaitingNote: null });
+        expect(OrderContractChips({ DealID: DEAL, ContractID: CONTRACT })).toEqual({ Chips: [], AwaitingNote: null, Warning: null });
+        expect(OrderContractChips({ Contract: ACTIVE })).toEqual({ Chips: [], AwaitingNote: null, Warning: null });
     });
 
     /** One contract chip, never two: with the row read, the shared row's plain contract link is dropped. */
@@ -254,5 +255,94 @@ describe('#445 — the panel renders the contract view', () => {
         expect(panel).toContain('ContractView.Chips');
         expect(panel).toContain('ContractView.AwaitingNote');
         expect(panel).toContain('this.ContractView = OrderContractChips(state)');
+    });
+    it('binds the no-executed-agreement warning', () => {
+        expect(panel).toContain('@if (ContractView.Warning; as warning)');
+        expect(panel).toContain('data-testid="order-related-no-agreement"');
+    });
+});
+
+/**
+ * bc-aidp-next-golive#443: an invoice could go to Bill.com for an order whose contract had no signed
+ * agreement, and nothing said so. g443.1 A: warn, sending unchanged. g443.2 A: won-deal orders only.
+ */
+describe('#443 — the "No executed agreement" warning', () => {
+    const won = { DealID: DEAL, DealIsWon: true, ContractRead: true };
+
+    it('warns for a won deal with no contract', () => {
+        const warning = NoExecutedAgreementWarning({ ...won, Contract: null });
+        expect(warning?.Label).toBe('No executed agreement');
+        expect(warning?.Detail).toContain('no contract');
+    });
+
+    it('warns for a won deal whose contract awaits its executed agreement', () => {
+        expect(NoExecutedAgreementWarning({ ...won, Contract: AWAITING })?.Label).toBe('No executed agreement');
+    });
+
+    it('says nothing when the executed agreement is linked', () => {
+        expect(NoExecutedAgreementWarning({ ...won, Contract: ACTIVE, Agreement: { ID: FILE, Name: 'x' } })).toBeNull();
+    });
+
+    /** Payment Link: its type needs no paper, so vwContracts never reports it awaiting. Counted as covered. */
+    it('treats a contract whose type needs no paper as covered', () => {
+        expect(NoExecutedAgreementWarning({ ...won, Contract: ACTIVE, Agreement: null })).toBeNull();
+    });
+
+    /** g443.2 A: an open or lost deal has no agreement to expect yet. */
+    it('says nothing for a deal that is not won, or whose status is unknown', () => {
+        expect(NoExecutedAgreementWarning({ ...won, DealIsWon: false, Contract: null })).toBeNull();
+        expect(NoExecutedAgreementWarning({ ...won, DealIsWon: null, Contract: null })).toBeNull();
+    });
+
+    /** Renewals, checkout orders and conversions reach the panel with no deal at all. */
+    it('says nothing for an order no deal names', () => {
+        expect(NoExecutedAgreementWarning({ DealIsWon: true, ContractRead: true, Contract: null })).toBeNull();
+    });
+
+    /** The deal names the order a reversal reverses; the warning belongs on that order, not this one. */
+    it('says nothing for a reversal reached through the order it reverses', () => {
+        expect(NoExecutedAgreementWarning({ ...won, Contract: null, ViaReversedOrder: true })).toBeNull();
+    });
+
+    /** A voided order sends no invoice, so "Invoices still send" would be untrue. */
+    it('says nothing for a voided order', () => {
+        expect(NoExecutedAgreementWarning({ ...won, Contract: AWAITING, OrderVoided: true })).toBeNull();
+    });
+
+    it('moves the links key when the order becomes voided', () => {
+        const base = { ...won, Contract: null };
+        expect(OrderRelatedLinksKey('o', base)).not.toBe(OrderRelatedLinksKey('o', { ...base, OrderVoided: true }));
+    });
+
+    /** A refused or thrown contract read is not evidence that the contract is missing. */
+    it('says nothing when the contract lookup did not answer', () => {
+        expect(NoExecutedAgreementWarning({ DealID: DEAL, DealIsWon: true, Contract: null })).toBeNull();
+    });
+
+    it('replaces the muted awaiting note with the warning, keeping the contract chip', () => {
+        const view = OrderContractChips({ ...won, ContractID: CONTRACT, Contract: AWAITING });
+        expect(view.Chips.map((c) => c.Key)).toEqual(['contract']);
+        expect(view.AwaitingNote).toBeNull();
+        expect(view.Warning?.Label).toBe('No executed agreement');
+    });
+
+    it('keeps the muted note for an awaiting contract on a deal that is not won', () => {
+        const view = OrderContractChips({ DealID: DEAL, DealIsWon: false, ContractRead: true, Contract: AWAITING });
+        expect(view.AwaitingNote).toBe('Awaiting signed agreement');
+        expect(view.Warning).toBeNull();
+    });
+
+    it('warns with no contract chip when the won deal has no contract', () => {
+        const view = OrderContractChips({ ...won, Contract: null });
+        expect(view.Chips).toEqual([]);
+        expect(view.Warning?.Label).toBe('No executed agreement');
+    });
+
+    it('moves the links key when the deal is won or the contract read answers', () => {
+        const base = { DealID: DEAL, Contract: null };
+        expect(OrderRelatedLinksKey('o', base)).not.toBe(OrderRelatedLinksKey('o', { ...base, DealIsWon: true }));
+        expect(OrderRelatedLinksKey('o', { ...base, DealIsWon: true })).not.toBe(
+            OrderRelatedLinksKey('o', { ...base, DealIsWon: true, ContractRead: true }),
+        );
     });
 });
