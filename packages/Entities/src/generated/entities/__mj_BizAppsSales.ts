@@ -1763,6 +1763,9 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Field Name: DefaultBillingContact
         * * Display Name: Default Billing Contact
         * * SQL Data Type: nvarchar(753)`),
+    Acronym: z.string().nullable().describe(`
+        * * Field Name: Acronym
+        * * SQL Data Type: nvarchar(20)`),
 });
 
 export type mjBizAppsSalesSalesAccountEntityType = z.infer<typeof mjBizAppsSalesSalesAccountSchema>;
@@ -7167,6 +7170,18 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     */
     get DefaultBillingContact(): string | null {
         return this.Get('DefaultBillingContact');
+    }
+
+    /**
+    * * Field Name: Acronym
+    * * SQL Data Type: nvarchar(20)
+    * * IS-A Source: Inherited from MJ_BizApps_Common: Organizations
+    */
+    get Acronym(): string | null {
+        return this.Get('Acronym');
+    }
+    set Acronym(value: string | null) {
+        this.Set('Acronym', value);
     }
 }
 
