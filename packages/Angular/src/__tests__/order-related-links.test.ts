@@ -1,6 +1,21 @@
 import '@angular/compiler';
 import { describe, it, expect } from 'vitest';
-import { DealLookupOrderID, OrderRelatedLinks, OrderRelatedLinksKey } from '../lib/form-panels/order-related-links';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import {
+    ContractChipName,
+    ContractFileLinksFilter,
+    ContractLookupFilter,
+    DealLookupOrderID,
+    EXECUTED_AGREEMENT_FILE_CATEGORY,
+    ExecutedAgreementFileFilter,
+    OrderContractChips,
+    OrderRelatedLinks,
+    OrderRelatedLinksKey,
+    ShouldReadAgreement,
+    type OrderContractRow,
+} from '../lib/form-panels/order-related-links';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../lib/data/entity-names';
 
 /**
@@ -115,5 +130,129 @@ describe('bizapps-orders#740 — a reversal finds the deal of the order it rever
     it('answers null for an order with no id yet', () => {
         expect(DealLookupOrderID({ ID: null, ReversesOrderHeaderID: null })).toBeNull();
         expect(DealLookupOrderID(null)).toBeNull();
+    });
+});
+
+/**
+ * bc-aidp-next-golive#445: reviewing an order meant going deal → contract → back, and the signed paper
+ * was never on the order at all. The From row now names the contract by number and status, opens its
+ * executed agreement, and says when the agreement is still missing.
+ */
+const FILE = 'F11E0000-0000-4000-8000-000000000003';
+const ACTIVE: OrderContractRow = { ID: CONTRACT, ContractNumber: 'CTR-000123', State: 'Active', IsAwaitingDocument: false };
+const AWAITING: OrderContractRow = { ...ACTIVE, State: 'Draft', IsAwaitingDocument: true };
+
+describe('#445 — finding the contract behind the deal', () => {
+    it('uses Deal.ContractID when the deal holds one', () => {
+        expect(ContractLookupFilter({ DealID: DEAL, ContractID: CONTRACT })).toBe(`ID = '${CONTRACT}'`);
+    });
+
+    /** The case the issue suspects: a contract the close created, with the deal's link never written. */
+    it('falls back to the contract the deal created when Deal.ContractID is empty', () => {
+        expect(ContractLookupFilter({ DealID: DEAL, ContractID: null })).toBe(
+            `CreatingEntity = '${MJS_ENTITIES.Deal}' AND CreatingRecordID = '${DEAL}'`,
+        );
+        expect(ContractLookupFilter({ DealID: DEAL, ContractID: '  ' })).toContain('CreatingRecordID');
+    });
+
+    it('looks for nothing without a deal', () => {
+        expect(ContractLookupFilter({})).toBeNull();
+    });
+
+    it('escapes quotes in the ids it embeds', () => {
+        expect(ContractLookupFilter({ DealID: "a'b" })).toContain("CreatingRecordID = 'a''b'");
+    });
+});
+
+describe('#445 — finding the executed agreement', () => {
+    it('lists the files linked to the contract by entity name and record', () => {
+        expect(ContractFileLinksFilter(CONTRACT)).toBe(`Entity = '${MJS_FOREIGN_ENTITIES.Contract}' AND RecordID = '${CONTRACT}'`);
+    });
+
+    it('picks the linked file in the Executed Agreement category', () => {
+        expect(ExecutedAgreementFileFilter([FILE, 'other'])).toBe(`Category = 'Executed Agreement' AND ID IN ('${FILE}','other')`);
+    });
+
+    it('reads no files when none is linked', () => {
+        expect(ExecutedAgreementFileFilter([])).toBeNull();
+        expect(ExecutedAgreementFileFilter(['  '])).toBeNull();
+    });
+
+    /** The view says awaiting exactly when no such file exists, so the two reads would find nothing. */
+    it('skips the file reads for a contract the view reports as awaiting', () => {
+        expect(ShouldReadAgreement(AWAITING)).toBe(false);
+        expect(ShouldReadAgreement(ACTIVE)).toBe(true);
+        expect(ShouldReadAgreement(null)).toBe(false);
+    });
+
+    /** Same spelling as contracts' seed and vwContracts, or every contract reads as having no agreement. */
+    it('spells the category as the contracts migration seeds it', () => {
+        expect(EXECUTED_AGREEMENT_FILE_CATEGORY).toBe('Executed Agreement');
+    });
+});
+
+describe('#445 — what the From row shows for the contract', () => {
+    it('names the contract by number and status', () => {
+        const view = OrderContractChips({ DealID: DEAL, ContractID: CONTRACT, Contract: ACTIVE });
+        const contract = view.Chips.find((c) => c.Key === 'contract');
+        expect(contract).toMatchObject({ EntityName: MJS_FOREIGN_ENTITIES.Contract, RecordID: CONTRACT, Label: 'Contract', Name: 'CTR-000123 · Active' });
+    });
+
+    it('opens the executed agreement file when one is linked', () => {
+        const view = OrderContractChips({ DealID: DEAL, Contract: ACTIVE, Agreement: { ID: FILE, Name: 'Signed SOW.pdf' } });
+        const agreement = view.Chips.find((c) => c.Key === 'agreement');
+        expect(agreement).toMatchObject({ EntityName: MJS_FOREIGN_ENTITIES.File, RecordID: FILE, Label: 'Executed agreement', Name: 'Signed SOW.pdf' });
+        expect(view.AwaitingNote).toBeNull();
+    });
+
+    it('says "Awaiting signed agreement" when the contract needs paper and has none', () => {
+        const view = OrderContractChips({ DealID: DEAL, Contract: AWAITING });
+        expect(view.Chips.map((c) => c.Key)).toEqual(['contract']);
+        expect(view.AwaitingNote).toBe('Awaiting signed agreement');
+    });
+
+    /** A Payment Link needs no paper: nothing is missing, so nothing is said. */
+    it('says nothing about an agreement the contract type does not require', () => {
+        const view = OrderContractChips({ DealID: DEAL, Contract: ACTIVE, Agreement: null });
+        expect(view.Chips.map((c) => c.Key)).toEqual(['contract']);
+        expect(view.AwaitingNote).toBeNull();
+    });
+
+    it('draws no contract chip without a contract row or a deal', () => {
+        expect(OrderContractChips({ DealID: DEAL, ContractID: CONTRACT })).toEqual({ Chips: [], AwaitingNote: null });
+        expect(OrderContractChips({ Contract: ACTIVE })).toEqual({ Chips: [], AwaitingNote: null });
+    });
+
+    /** One contract chip, never two: with the row read, the shared row's plain contract link is dropped. */
+    it('drops the plain contract link once the contract row is read', () => {
+        expect(OrderRelatedLinks({ DealID: DEAL, ContractID: CONTRACT, Contract: ACTIVE }).map((l) => l.Key)).toEqual(['deal']);
+    });
+
+    it('keeps the plain contract link when the contract row could not be read', () => {
+        expect(OrderRelatedLinks({ DealID: DEAL, ContractID: CONTRACT, Contract: null }).map((l) => l.Key)).toEqual(['deal', 'contract']);
+    });
+
+    it('shows a number alone, or a status alone, without a stray separator', () => {
+        expect(ContractChipName({ ...ACTIVE, State: null })).toBe('CTR-000123');
+        expect(ContractChipName({ ...ACTIVE, ContractNumber: null })).toBe('Active');
+    });
+
+    it('moves the links key when the contract status or agreement changes', () => {
+        const base = { DealID: DEAL, ContractID: CONTRACT, Contract: AWAITING };
+        expect(OrderRelatedLinksKey('order-1', base)).not.toBe(OrderRelatedLinksKey('order-1', { ...base, Contract: ACTIVE }));
+        expect(OrderRelatedLinksKey('order-1', { ...base, Contract: ACTIVE })).not.toBe(
+            OrderRelatedLinksKey('order-1', { ...base, Contract: ACTIVE, Agreement: { ID: FILE, Name: 'x' } }),
+        );
+    });
+});
+
+/** The panel template must reach these chips; pinned so a template edit cannot drop them silently. */
+describe('#445 — the panel renders the contract view', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const panel = readFileSync(resolve(here, '../lib/form-panels/order-related.panel.ts'), 'utf8');
+    it('binds the contract chips and the awaiting note', () => {
+        expect(panel).toContain('ContractView.Chips');
+        expect(panel).toContain('ContractView.AwaitingNote');
+        expect(panel).toContain('this.ContractView = OrderContractChips(state)');
     });
 });
