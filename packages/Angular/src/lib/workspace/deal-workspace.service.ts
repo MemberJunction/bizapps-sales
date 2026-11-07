@@ -34,7 +34,16 @@ import {
     type DealWorkspaceValidation,
 } from './deal-workspace.validation';
 import { BusinessTimeZoneEngine, CalendarDayIn, type CalendarDay } from '@mj-biz-apps/common-entities';
-import { E_ORDERS_PRODUCT, PRODUCT_LOOKUP_FIELDS, ProductFilterFor, type ProductLookup } from '@mj-biz-apps/sales-entities';
+import {
+    DRAFT_PRODUCT_FIELDS,
+    DraftProductFilterFor,
+    E_ORDERS_PRODUCT,
+    PRODUCT_LOOKUP_FIELDS,
+    ProductFilterFor,
+    WithInheritedSubscriptionType,
+    type DraftProductLookup,
+    type ProductLookup,
+} from '@mj-biz-apps/sales-entities';
 import {
     CALENDAR_YEAR_START,
     PeriodParameters,
@@ -293,6 +302,9 @@ export interface StageEventRow { DealID: string; ToStageID: string | null; Chang
 /** An open deal, as {@link DealWorkspaceService.LoadStageEntries} reads it. */
 export interface StageDealRow { ID: string; PipelineStageID: string | null; __mj_CreatedAt: string | Date }
 
+/** Which pipelines the Sales section lists (bc-aidp-next-golive#423). Exported for the test that pins it. */
+export const PIPELINE_LIST_FILTER = '(IsActive = 1 OR IncludeInForecast = 1)';
+
 const sameID = (a: string | null | undefined, b: string | null | undefined): boolean =>
     !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
@@ -385,8 +397,12 @@ function lookupRead<T>(params: RunViewParams, apply: (rows: T[], into: DealWorks
  * key array, so a position cannot drift between them.
  */
 const LOOKUP_READS: Record<LookupKey, LookupRead> = {
+    // Active OR counted in the forecast (bc-aidp-next-golive#423). `IsActive` decides whether a deal can
+    // be put in a pipeline; this list is the dashboard's and the board's, which still have to show a
+    // retired pipeline's won and lost deals. A retired pipeline kept in the forecast stays filterable
+    // here; one that is neither active nor in the forecast drops out.
     Pipelines: lookupRead<PipelineRow>(
-        { EntityName: E_PIPELINE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'] },
+        { EntityName: E_PIPELINE, ExtraFilter: PIPELINE_LIST_FILTER, OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'] },
         (rows, into) => {
             // Grouped by company, default company first (#327): the same order the form and the board use.
             into.Pipelines = OrderPipelinesByCompany(rows.map<PipelineLookup>((p) => ({
@@ -509,6 +525,41 @@ export const SECTION_LOOKUP_KEYS: readonly LookupKey[] = ['Pipelines', 'Stages',
  */
 // 'Lines' is NOT here: the deal holds none. Its order's lines arrive with the embedded order.
 const DEAL_COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
+
+/**
+ * Leaves out products orders marks as not sold new (golive#360): catch-all products a Business Central
+ * import books invoice lines to, and products kept only for converted subscriptions. They stay Active,
+ * because orders refuses to price a line whose product is not, so existing orders and renewals keep
+ * saving; only the picker stops offering them.
+ *
+ * Added only when the host's orders has the column. Sales installs alongside older orders releases, and
+ * filtering on a column the host lacks would fail the whole catalogue read.
+ */
+function sellableNewFilter(productFields: readonly string[]): string {
+    return productFields.includes('IsSellableNew') ? ' AND IsSellableNew = 1' : '';
+}
+
+/** What both product reads need: the business day, and the not-sold-new clause when the host has it. */
+interface ProductReadScope {
+    Day: CalendarDay;
+    SellableNew: string;
+}
+
+/**
+ * The scope of a read of orders' products, or null when orders is not installed — a supported state,
+ * checked in metadata first for the reason {@link DealWorkspaceService.LoadProducts} gives.
+ */
+async function productReadScope(asOfDay: CalendarDay | undefined): Promise<ProductReadScope | null> {
+    const productEntity = new Metadata().Entities.find((e) => e.Name === E_ORDERS_PRODUCT);
+    if (!productEntity) {
+        return null;
+    }
+    await BusinessTimeZoneEngine.Instance.Config(false);
+    return {
+        Day: asOfDay ?? BusinessTimeZoneEngine.Instance.Today(),
+        SellableNew: sellableNewFilter(productEntity.Fields.map((f) => f.Name)),
+    };
+}
 
 @Injectable({ providedIn: 'root' })
 export class DealWorkspaceService {
@@ -785,19 +836,15 @@ export class DealWorkspaceService {
          *
          * So the entity is checked in metadata FIRST, and its absence simply means no picker.
          */
-        const md = new Metadata();
-        const known = md.Entities.some((e) => e.Name === E_ORDERS_PRODUCT);
-        if (!known) {
+        const scope = await productReadScope(asOfDay);
+        if (!scope) {
             return [];
         }
-
-        await BusinessTimeZoneEngine.Instance.Config(false);
-        const day = asOfDay ?? BusinessTimeZoneEngine.Instance.Today();
 
         const rv = new RunView();
         const result = await rv.RunView<ProductLookup>({
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(day),
+            ExtraFilter: ProductFilterFor(scope.Day) + scope.SellableNew,
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             // Shared with the check that guards it, so the two cannot drift — see PRODUCT_LOOKUP_FIELDS.
@@ -807,6 +854,34 @@ export class DealWorkspaceService {
             const reason = result?.ErrorMessage || 'no reason was given';
             LogError(`The product catalogue could not be loaded - ${reason}`);
             throw new Error(`The product catalogue could not be loaded: ${reason}`);
+        }
+        // A product naming no subscription type inherits its product type's, as confirm does (golive #339).
+        return WithInheritedSubscriptionType(result.Results ?? []);
+    }
+
+    /**
+     * The Draft products the picker would offer once activated, so it can say when a search matches
+     * products it is hiding (bc-aidp-next-golive#433). Same window and not-sold-new rule as
+     * {@link LoadProducts}; only the status differs.
+     *
+     * Read ONCE per dialog, beside the catalogue rather than per keystroke: the search runs in the
+     * browser, so the Draft rows are matched there with the same ranking. A failed read logs and
+     * returns no rows, because the note is a hint and must never cost the rep the picker.
+     */
+    public async LoadDraftProducts(asOfDay?: CalendarDay): Promise<DraftProductLookup[]> {
+        const scope = await productReadScope(asOfDay);
+        if (!scope) {
+            return [];
+        }
+        const result = await new RunView().RunView<DraftProductLookup>({
+            EntityName: E_ORDERS_PRODUCT,
+            ExtraFilter: DraftProductFilterFor(scope.Day) + scope.SellableNew,
+            ResultType: 'simple',
+            Fields: [...DRAFT_PRODUCT_FIELDS],
+        });
+        if (!result?.Success) {
+            LogError(`Draft products could not be read for the picker note - ${result?.ErrorMessage || 'no reason was given'}`);
+            return [];
         }
         return result.Results ?? [];
     }

@@ -457,7 +457,7 @@ export class mjBizAppsSalesDealContactRole_ {
     @MaxLength(36)
     BuyingRoleTypeID?: string;
         
-    @Field(() => Float, {nullable: true}) 
+    @Field(() => Float, {nullable: true, description: "How much this contact sways the buying decision, from 0 (none) to 100 (decides alone). Up to two decimal places."}) 
     Influence?: number;
         
     @Field({nullable: true}) 
@@ -2231,6 +2231,13 @@ export class mjBizAppsSalesDeal_ {
     @Field({nullable: true, description: "Timestamp when the deal was last scored by the predictive deal win propensity model."}) 
     PredictedWinScoredAt?: Date;
         
+    @Field({nullable: true, description: "The specific source within the deal's lead source type, such as the event, campaign or referring person. Free text; empty when not recorded."}) 
+    @MaxLength(500)
+    LeadSourceDetail?: string;
+        
+    @Field({nullable: true, description: "Date and Time the Deal was created, defaulted to the record creation date but editable by the User. Used for deal aging."}) 
+    CreationDate?: Date;
+        
     @Field({nullable: true}) 
     @MaxLength(200)
     Pipeline?: string;
@@ -2465,6 +2472,12 @@ export class CreatemjBizAppsSalesDealInput {
     @Field({ nullable: true })
     PredictedWinScoredAt: Date | null;
 
+    @Field({ nullable: true })
+    LeadSourceDetail: string | null;
+
+    @Field({ nullable: true })
+    CreationDate?: Date;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -2618,6 +2631,12 @@ export class UpdatemjBizAppsSalesDealInput {
 
     @Field({ nullable: true })
     PredictedWinScoredAt?: Date | null;
+
+    @Field({ nullable: true })
+    LeadSourceDetail?: string | null;
+
+    @Field({ nullable: true })
+    CreationDate?: Date;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
@@ -3832,7 +3851,7 @@ export class mjBizAppsSalesPipelineStage_ {
     @MaxLength(20)
     OrderStatusOnEntry?: string;
         
-    @Field(() => Int, {nullable: true, description: "Days without activity before the board flags a deal in this stage as rotting."}) 
+    @Field(() => Int, {nullable: true, description: "Deals that stay in this stage longer than this many days are flagged on the Board. Empty means no flag."}) 
     RottingDays?: number;
         
     @Field({nullable: true}) 
@@ -4127,6 +4146,10 @@ export class mjBizAppsSalesPipeline_ {
     @Field(() => Boolean, {nullable: true, description: "Whether open deals in this pipeline count toward open and weighted pipeline, the forecast buckets and the dashboard's open-deal figures. Set to 0 for a pipeline that only holds historical deals. Closed deals count toward bookings, win rate and other history regardless."}) 
     IncludeInForecast?: boolean;
         
+    @Field({nullable: true, description: "Person who receives the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Takes precedence over CloseWonTasks.AssigneeRecordID in Close Won Policy. Empty means that policy value is used, and when both are empty the tasks are created but not assigned."}) 
+    @MaxLength(36)
+    CloseWonAssigneePersonID?: string;
+        
     @Field({nullable: true}) 
     @MaxLength(50)
     Company?: string;
@@ -4138,6 +4161,10 @@ export class mjBizAppsSalesPipeline_ {
     @Field({nullable: true}) 
     @MaxLength(200)
     DefaultForecastCategoryType?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(250)
+    CloseWonAssigneePerson?: string;
         
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
@@ -4188,6 +4215,9 @@ export class CreatemjBizAppsSalesPipelineInput {
     @Field(() => Boolean, { nullable: true })
     IncludeInForecast?: boolean;
 
+    @Field({ nullable: true })
+    CloseWonAssigneePersonID: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -4236,6 +4266,9 @@ export class UpdatemjBizAppsSalesPipelineInput {
 
     @Field(() => Boolean, { nullable: true })
     IncludeInForecast?: boolean;
+
+    @Field({ nullable: true })
+    CloseWonAssigneePersonID?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
@@ -4471,6 +4504,10 @@ export class mjBizAppsSalesSalesAccount_ {
     @MaxLength(753)
     DefaultBillingContact?: string;
         
+    @Field({nullable: true}) 
+    @MaxLength(20)
+    Acronym?: string;
+        
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
         
@@ -4565,6 +4602,9 @@ export class CreatemjBizAppsSalesSalesAccountInput {
     @Field({ nullable: true })
     Status?: string;
 
+    @Field({ nullable: true })
+    Acronym: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -4658,6 +4698,9 @@ export class UpdatemjBizAppsSalesSalesAccountInput {
 
     @Field({ nullable: true })
     Status?: string;
+
+    @Field({ nullable: true })
+    Acronym?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

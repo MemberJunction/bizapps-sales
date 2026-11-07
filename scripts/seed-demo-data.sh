@@ -447,22 +447,19 @@ UPDATE __mj_BizAppsSales.Pipeline SET CompanyID = @co2 WHERE ID = @pipe2 AND Com
 -- unrouted because unrouted says so. The app now ships `AssigneeRecordID: null` and reports an
 -- unrouted task naming the key to set.
 --
--- Which leaves the demo to say who ITS assignee is, and it cannot do that through the INSERTs
--- above: both are guarded by IF NOT EXISTS and a metadata push has already created these rows, so
--- on every host that has one the INSERT never fires. The repoints only move the company. Without
--- the statement below the demo would raise close-won tasks that route nowhere, and the thing this
--- seed exists to demonstrate would quietly stop demonstrating it.
+-- Which leaves the demo to say who ITS assignee is, and it says so on the pipeline's
+-- CloseWonAssigneePersonID column rather than in the policy JSON. The INSERTs above cannot do it:
+-- both are guarded by IF NOT EXISTS and a metadata push has already created these rows, so on every
+-- host that has one the INSERT never fires. And the JSON would not keep it: the next metadata push
+-- writes the shipped policy, assignee null, back over these rows. The column is not in the metadata
+-- files, so a push leaves it alone, and the close takes it over the JSON.
 --
--- MATCHED ON `null`, not applied unconditionally: a host that has already configured a real
--- finance assignee keeps the one it chose. The spacing matches what the metadata ships -- the
--- INSERTs above write the same key without a space, and those rows already carry the id.
+-- ONLY WHERE IT IS EMPTY: a host that has already configured a real finance assignee keeps the one
+-- it chose.
 UPDATE __mj_BizAppsSales.Pipeline
-   SET CloseWonPolicy = REPLACE(
-           CloseWonPolicy,
-           '"AssigneeRecordID": null',
-           '"AssigneeRecordID": "C0111111-0000-4000-A000-000000000004"')
+   SET CloseWonAssigneePersonID = @c4
  WHERE ID IN (@pipe1, @pipe2)
-   AND CloseWonPolicy LIKE '%"AssigneeRecordID": null%';
+   AND CloseWonAssigneePersonID IS NULL;
 
 DECLARE @t1 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000001';
 DECLARE @t2 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000002';
@@ -583,9 +580,9 @@ INSERT INTO __mj_BizAppsSales.Deal (ID, DealNumber, Name, PipelineID, PipelineSt
 -- this deal negotiate payment terms?" is therefore a row count, not arithmetic.
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealPaymentSchedule WHERE DealID=@d1)
 INSERT INTO __mj_BizAppsSales.DealPaymentSchedule (DealID, PaymentDate, Amount, Description, DisplayOrder) VALUES
- (@d1, '2026-10-01', 80400.0000,  N'40% on execution',                    10),
- (@d1, '2027-01-01', 60300.0000,  N'30% on completion of Phase 1 rollout', 20),
- (@d1, '2027-04-01', 60300.0000,  N'30% on final acceptance',              30);
+ (@d1, '2026-10-01', 49760.0000,  N'40% on execution',                    10),
+ (@d1, '2027-01-01', 37320.0000,  N'30% on completion of Phase 1 rollout', 20),
+ (@d1, '2027-04-01', 37320.0000,  N'30% on final acceptance',              30);
 
 -- ============================ DEAL TEAM — including the D-6 partner rep ============================
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealTeamMember WHERE DealID=@d1)
@@ -675,6 +672,19 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealStageEvent WHERE DealID=@d5)
 INSERT INTO __mj_BizAppsSales.DealStageEvent (DealID, FromStageID, ToStageID, FromDealStatusTypeID, ToDealStatusTypeID,
    ChangedAt, DaysInPreviousStage, AmountAtTransition, ProbabilityAtTransition, Notes) VALUES
  (@d5, @s4, @s5, @stOpen, @stWon, '2026-07-28T16:40:00Z', 12, 64000.0000, 100, N'Signed. A closing status with LocksDeal=1 freezes the deal from here.');
+
+-- Back-date CreationDate from the earliest pre-__mj_CreatedAt stage event when this seed runs
+-- AFTER V202611041530 (every fresh rebuild): DEAL-9001 and DEAL-9005 are inserted above with
+-- CreationDate = GETUTCDATE() before their historical DealStageEvent rows exist.
+UPDATE d
+   SET d.CreationDate = ISNULL(
+           (SELECT MIN(e.ChangedAt)
+              FROM __mj_BizAppsSales.DealStageEvent e
+             WHERE e.DealID = d.ID
+               AND e.ChangedAt < d.__mj_CreatedAt),
+           d.__mj_CreatedAt)
+  FROM __mj_BizAppsSales.Deal d
+ WHERE d.ID IN (@d1, @d2, @d3, @d4, @d5, @d6, @d7);
 
 -- ============================ POINT-IN-TIME FORECAST ============================
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.ForecastSnapshot WHERE SnapshotJSON LIKE '%"demo":true%')

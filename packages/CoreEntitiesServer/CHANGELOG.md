@@ -1,5 +1,86 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.24.1
+
+### Patch Changes
+
+- Updated dependencies [b4fca8a]
+  - @mj-biz-apps/sales-entities@6.24.1
+
+## 6.24.0
+
+### Minor Changes
+
+- 4a3226a: Close and lock hardening: validate caller-supplied IDs and fail closed on loss-reason and deal-type lookup errors in `Sales.CloseDeal` and `Sales.ReopenDeal`; keep client-generated `ConcessionID` across discount-concession retries so a resend after a timeout is idempotent; return a specific refusal naming the deal and contract when a close or stale pre-close save hits an already-Won deal; and allow a closed deal whose persisted `AccountID` is blank to have its account set once without reopening.
+
+### Patch Changes
+
+- Updated dependencies [da41816]
+- Updated dependencies [4a3226a]
+- Updated dependencies [c4808fa]
+- Updated dependencies [c96a138]
+  - @mj-biz-apps/sales-entities@6.24.0
+
+## 6.23.4
+
+### Patch Changes
+
+- 3c7b6da: A new deal's default owner is now the person creating it. The account's owner is used only when the creator has no linked Employee (the importer, an agent, `System`). (golive #415)
+  - @mj-biz-apps/sales-entities@6.23.4
+
+## 6.23.3
+
+### Patch Changes
+
+- @mj-biz-apps/sales-entities@6.23.3
+
+## 6.23.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-entities@6.23.2
+
+## 6.23.1
+
+### Patch Changes
+
+- @mj-biz-apps/sales-entities@6.23.1
+
+## 6.23.0
+
+### Patch Changes
+
+- Updated dependencies [62e89d6]
+  - @mj-biz-apps/sales-entities@6.23.0
+
+## 6.22.1
+
+### Patch Changes
+
+- 9e6d67e: Deal line: picking a revenue band for a buyer whose revenue is unknown no longer demands a price override reason. Orders 5.40.0 treats that pick as the rules' price and hides its reason box, but the deal line still asked for a reason, so the line could not be saved. Requires Orders 5.40.0.
+- Updated dependencies [9e6d67e]
+  - @mj-biz-apps/sales-entities@6.22.1
+
+## 6.22.0
+
+### Minor Changes
+
+- df7d0bb: A pipeline names the person its close-won tasks go to, and an upgrade keeps it.
+
+  The Order Review and Contract Processing tasks raised when a deal closes Won were routed to `CloseWonTasks.AssigneeRecordID` inside the pipeline's Close Won Policy. The default pipelines ship that policy in metadata with the assignee empty, and installing the app writes the shipped policy back over the database, so an assignee a deployment set there was lost on the next upgrade.
+
+  Pipelines now have a `CloseWonAssigneePersonID` column, a foreign key to People, shown on the pipeline form. The app's metadata never sets it, so an upgrade leaves it alone, and the database refuses a person who does not exist. A won close uses it ahead of the policy's assignee; when it is empty the policy value is used as before, and when both are empty the tasks are created and reported as not routed.
+
+  The demo seed sets its partner rep on the new column instead of in the policy JSON.
+
+### Patch Changes
+
+- f5dbce2: A deal's payment schedule now reaches its order. At Close Won the deal's rows are sent to orders' `Orders.ReplacePaymentSchedule`, which writes one order instalment per deal row, numbered by due date; a deal with no rows leaves the order's schedule alone. If orders refuses (a row with no date or amount, or rows that do not add up to the order) the close is refused with orders' message. After Won, every change to the deal's schedule is sent again, whether it is saved with the deal or as a single row from the form's grid. Instalments the order has already invoiced cannot change: a deal edit that changes or removes one is rolled back with a message naming it. While the deal's rows are incomplete or do not add up to the order, the deal edit is kept, the order keeps its previous schedule, and the save says so; the order updates as soon as the rows tie again. Requires bizapps-orders 5.39.0 or later, the first release with `Orders.ReplacePaymentSchedule`.
+- Updated dependencies [a279840]
+- Updated dependencies [7761d34]
+- Updated dependencies [df7d0bb]
+  - @mj-biz-apps/sales-entities@6.22.0
+
 ## 6.21.0
 
 ### Minor Changes

@@ -35,7 +35,8 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import type { BizAppsRelatedLink } from '@mj-biz-apps/common-ng';
+import { EscapeSQLString } from '@memberjunction/global';
+import type { BizAppsRelatedLink, ResolvedRelatedChip } from '@mj-biz-apps/common-ng';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 
 /**
@@ -54,7 +55,45 @@ export interface OrderRelatedLinkState {
     DealID?: string | null;
     /** That deal's `ContractID` — the contract the win produced, reached THROUGH the deal. */
     ContractID?: string | null;
+    /**
+     * The contract row the panel read (golive#445): `Deal.ContractID`'s, or the one found by
+     * {@link ContractLookupFilter}'s fallback. Absent when no read was made, the read failed, or no
+     * contract exists. When present, the panel draws the contract chip itself, with number and status.
+     */
+    Contract?: OrderContractRow | null;
+    /** The contract's executed-agreement file, when one is linked and readable. */
+    Agreement?: OrderAgreementFile | null;
 }
+
+/** The columns of `vwContracts` the order header shows. */
+export interface OrderContractRow {
+    ID: string;
+    ContractNumber: string | null;
+    /** `vwContracts.State`: Draft, Executed, Active, Expired, Superseded or Terminated. */
+    State: string | null;
+    /**
+     * `vwContracts.IsAwaitingDocument`: the contract's type requires executed paper and no file in the
+     * Executed Agreement category is linked. Always false for a type that needs no paper (Payment Link).
+     */
+    IsAwaitingDocument: boolean | null;
+}
+
+/** The `MJ: Files` row that holds a contract's executed agreement. */
+export interface OrderAgreementFile {
+    ID: string;
+    Name: string;
+}
+
+/**
+ * The file category that marks a contract's executed agreement. Spelled exactly as contracts seeds it
+ * (`V202609010100__v0.2.x__IsAwaitingDocument_executed_agreement.sql`) and as `vwContracts` matches it.
+ * Sales does not depend on `@mj-biz-apps/contracts-entities`, which exports the same constant, so the
+ * spelling is repeated here and pinned by a test.
+ */
+export const EXECUTED_AGREEMENT_FILE_CATEGORY = 'Executed Agreement';
+
+/** The entity name contracts stamps in `CreatingEntityID` for a contract a deal's close created. */
+const DEAL_ENTITY_NAME = MJS_ENTITIES.Deal;
 
 /** `true` for a value that actually names a record. */
 function holds(id: string | null | undefined): id is string {
@@ -116,7 +155,7 @@ export function OrderRelatedLinks(state: OrderRelatedLinkState): BizAppsRelatedL
      * frequently absent: a deal that has not closed has produced no contract, and one closed by a
      * route that raises no agreement never will.
      */
-    if (holds(state.ContractID)) {
+    if (holds(state.ContractID) && !state.Contract) {
         links.push({
             Key: 'contract',
             EntityName: MJS_FOREIGN_ENTITIES.Contract,
@@ -142,5 +181,105 @@ export function OrderRelatedLinks(state: OrderRelatedLinkState): BizAppsRelatedL
  * first order's chips, offering a click that opens the provenance of a record the reader has left.
  */
 export function OrderRelatedLinksKey(recordID: string | null | undefined, state: OrderRelatedLinkState): string {
-    return [recordID ?? '', state.DealID ?? '', state.ContractID ?? ''].join(':');
+    const contract = state.Contract;
+    return [
+        recordID ?? '',
+        state.DealID ?? '',
+        state.ContractID ?? '',
+        contract?.ID ?? '',
+        contract?.ContractNumber ?? '',
+        contract?.State ?? '',
+        contract?.IsAwaitingDocument ? '1' : '0',
+        state.Agreement?.ID ?? '',
+    ].join(':');
+}
+
+/**
+ * The filter that finds the contract behind a deal (golive#445).
+ *
+ * `Deal.ContractID` first: it is the link the close wrote. When it is empty, the contract the deal's
+ * close created is still findable by its polymorphic provenance pair, `CreatingEntity` = Deals and
+ * `CreatingRecordID` = the deal (`LiveContractsSeam` stamps both). An empty `ContractID` with a contract
+ * behind it is a deal whose link was never written, which is the case the issue suspects for
+ * ORD-004297. `null` when there is no deal to look by.
+ */
+export function ContractLookupFilter(deal: { DealID?: string | null; ContractID?: string | null }): string | null {
+    if (holds(deal.ContractID)) {
+        return `ID = '${EscapeSQLString(deal.ContractID)}'`;
+    }
+    if (!holds(deal.DealID)) {
+        return null;
+    }
+    return `CreatingEntity = '${EscapeSQLString(DEAL_ENTITY_NAME)}' AND CreatingRecordID = '${EscapeSQLString(deal.DealID)}'`;
+}
+
+/** The filter on `MJ: File Entity Record Links` that lists the files linked to one contract. */
+export function ContractFileLinksFilter(contractID: string): string {
+    return `Entity = '${EscapeSQLString(MJS_FOREIGN_ENTITIES.Contract)}' AND RecordID = '${EscapeSQLString(contractID)}'`;
+}
+
+/**
+ * The filter on `MJ: Files` that picks the executed agreement among a contract's linked files, or
+ * `null` when nothing is linked and no read is needed. Matches the category by NAME, as the view does.
+ */
+export function ExecutedAgreementFileFilter(fileIDs: readonly string[]): string | null {
+    const ids = fileIDs.filter(holds);
+    if (ids.length === 0) {
+        return null;
+    }
+    const list = ids.map((id) => `'${EscapeSQLString(id)}'`).join(',');
+    return `Category = '${EscapeSQLString(EXECUTED_AGREEMENT_FILE_CATEGORY)}' AND ID IN (${list})`;
+}
+
+/**
+ * Whether the panel needs to look for the agreement file at all. A contract the view reports as
+ * awaiting has, by the view's own definition, no such file, so the two reads are skipped.
+ */
+export function ShouldReadAgreement(contract: OrderContractRow | null | undefined): contract is OrderContractRow {
+    return !!contract && contract.IsAwaitingDocument !== true;
+}
+
+/** What the header shows for the contract and its executed agreement. */
+export interface OrderContractView {
+    /** The contract chip, then the agreement chip when a file is linked. Opened like any related chip. */
+    Chips: ResolvedRelatedChip[];
+    /** "Awaiting signed agreement" when the contract's type needs paper and none is linked; else null. */
+    AwaitingNote: string | null;
+}
+
+/** The contract chip's text: its number and status, e.g. `CTR-000123 · Active`. */
+export function ContractChipName(contract: OrderContractRow): string {
+    return [contract.ContractNumber, contract.State].filter(holds).join(' · ');
+}
+
+/**
+ * The contract part of the From row (golive#445).
+ *
+ * Built here rather than by `bizapps-related-chips` because the chip has to say the contract's number
+ * AND status, and the shared row shows only the record's name field. The panel already read the row
+ * to learn `IsAwaitingDocument`, so nothing is re-read. Both chips exist only for rows the reader's
+ * own read returned, so neither can point at a record they cannot open.
+ *
+ * The agreement opens the `MJ: Files` record, whose form previews the file and offers it to download.
+ *
+ * A contract that needs no paper (its type's `RequiresExecutedDocument = 0`, a Payment Link) and has
+ * none linked shows neither the agreement chip nor the note: nothing is missing.
+ */
+export function OrderContractChips(state: OrderRelatedLinkState): OrderContractView {
+    const contract = state.Contract;
+    if (!holds(state.DealID) || !contract) {
+        return { Chips: [], AwaitingNote: null };
+    }
+    const name = ContractChipName(contract) || 'Open';
+    const chips: ResolvedRelatedChip[] = [chip('contract', 'Contract', name, 'fa-solid fa-file-contract', MJS_FOREIGN_ENTITIES.Contract, contract.ID)];
+    const agreement = state.Agreement;
+    if (agreement && holds(agreement.ID)) {
+        chips.push(chip('agreement', 'Executed agreement', agreement.Name || 'Open', 'fa-solid fa-file-signature', MJS_FOREIGN_ENTITIES.File, agreement.ID));
+    }
+    const awaiting = contract.IsAwaitingDocument === true && !agreement;
+    return { Chips: chips, AwaitingNote: awaiting ? 'Awaiting signed agreement' : null };
+}
+
+function chip(key: string, label: string, name: string, icon: string, entityName: string, recordID: string): ResolvedRelatedChip {
+    return { Key: key, Label: label, Name: name, Icon: icon, EntityName: entityName, PrimaryKeyField: 'ID', RecordID: recordID, AriaLabel: `Open ${label} ${name}` };
 }

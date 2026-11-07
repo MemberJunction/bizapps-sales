@@ -3,7 +3,7 @@
 ---
 
 The Deal form's Account picker finds a sales account by its acronym as a starts-with match, and shows
-the acronym next to the website domain under the name ("NAR · nar.realtor"). Sales now requires
-bizapps-common 5.57.0 or later (Organization.Acronym), in `mj-app.json` and in every package's common
-peer range. Migration `V202610301300` refreshes the Sales Account view and procedures to carry the
-inherited Acronym and registers its field, so the Sales Account form shows it.
+the acronym next to the website domain under the name ("NAR · nar.realtor"). Migration
+`V202611061900` refreshes `vwSalesAccounts` and the Sales Account procedures to carry the Acronym
+inherited from Organization (Common 5.57+) and registers its field, so saving a Sales Account no
+longer fails with "Cannot query field Acronym".

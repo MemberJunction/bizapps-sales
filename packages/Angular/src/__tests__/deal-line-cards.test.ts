@@ -29,6 +29,9 @@ function line(over: Partial<DealLineCardRow> = {}): DealLineCardRow {
         PriceOverrideReason: null,
         ProductPrice: null,
         ServicePeriodStart: null,
+        OrderHeaderID: 'order-1',
+        ProductPriceID: null,
+        RenewsSubscriptionID: null,
         ...over,
     };
 }
@@ -137,5 +140,36 @@ describe('the cards compute no money (rule 1)', () => {
         expect(template).toContain('Money(line.UnitPrice)');
         expect(template).toContain('Money(line.LineTotalNet)');
         expect(template).not.toMatch(/Quantity\s*\*|\*\s*line\.UnitPrice/);
+    });
+});
+
+describe('the concession line on a discounted card (golive#340)', () => {
+    function withState(state: string | null) {
+        const c = cards([PRODUCT]);
+        Object.defineProperty(c, 'concessionStates', { value: new Map(state ? [['line-1', state]] : []), writable: true });
+        return c;
+    }
+
+    it('says a concession waits for approval, with no retry', () => {
+        expect(withState('Pending').ConcessionBadge(line({ DiscountPct: 0.1 }))).toMatchObject({ Retry: false, Tone: 'pending' });
+    });
+
+    it('offers Record again for a rejected or unrecorded discount', () => {
+        expect(withState('Rejected').ConcessionBadge(line({ DiscountPct: 0.1 }))).toMatchObject({ Label: 'Discount rejected', Retry: true });
+        expect(withState('NotRecorded').ConcessionBadge(line({ DiscountPct: 0.1 }))).toMatchObject({ Retry: true });
+    });
+
+    it('says nothing for an approved discount, a line orders does not value, or an unknown one', () => {
+        for (const state of ['Approved', 'NotNeeded', 'Unknown', null]) {
+            expect(withState(state).ConcessionBadge(line({ DiscountPct: 0.1 }))).toBeNull();
+        }
+    });
+
+    it('Record again opens the editor on the line', () => {
+        const c = withState('Rejected');
+        const opened: string[] = [];
+        Object.defineProperty(c, 'Edit', { value: { emit: (id: string) => opened.push(id) } });
+        c.RecordAgain(line());
+        expect(opened).toEqual(['line-1']);
     });
 });

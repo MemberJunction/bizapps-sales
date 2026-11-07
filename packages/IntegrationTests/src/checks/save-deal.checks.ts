@@ -2515,6 +2515,131 @@ export const SaveDealChecks: NamedCheck[] = [
                 AssertEqual(deal.OrderStatusWarnings.length, 0, `no warning expected — got ${deal.OrderStatusWarnings.join(' | ')}`);
             }),
     },
+    {
+        Id: 'save-deal.SD45',
+        Name: 'SD45: CreationDate defaults to the server save clock on create, preserves explicit values, and honours the backfill rule (#532)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                // 1. Default CreationDate on create: stamped at save time on the server clock (not NewRecord() time).
+                const f = await ResolveSalesFixture(ctx);
+                const defaulted = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD45 default CreationDate';
+                });
+                await new Promise((resolve) => setTimeout(resolve, 20));
+                const beforeSave = Date.now();
+                await saveOk(defaulted, 'create with default CreationDate');
+                const afterSave = Date.now();
+
+                Assert(
+                    defaulted.CreationDate instanceof Date && !Number.isNaN(defaulted.CreationDate.getTime()),
+                    `a new deal saved without setting CreationDate must land a valid Date — got ${String(defaulted.CreationDate)}`,
+                );
+                Assert(
+                    defaulted.CreationDate.getTime() >= beforeSave && defaulted.CreationDate.getTime() <= afterSave,
+                    `DealEntityServer must stamp CreationDate at Save() time (${beforeSave}..${afterSave}), not keep the earlier NewRecord() timestamp — got ${defaulted.CreationDate.getTime()}`,
+                );
+
+                const reloadedDefault = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await reloadedDefault.Load(defaulted.ID), 'reloading defaulted deal');
+                AssertEqual(
+                    reloadedDefault.CreationDate.toISOString(),
+                    defaulted.CreationDate.toISOString(),
+                    'reloaded CreationDate must match the saved server timestamp',
+                );
+
+                // Also verify a caller that explicitly clears CreationDate to null before saving gets a server stamp.
+                const nulled = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD45 nulled CreationDate';
+                    d.CreationDate = null as unknown as Date;
+                });
+                await saveOk(nulled, 'create with nulled CreationDate');
+                Assert(
+                    nulled.CreationDate instanceof Date && nulled.CreationDate.getTime() >= beforeSave,
+                    'a create with CreationDate cleared to null must still be stamped by DealEntityServer',
+                );
+
+                // 2. Explicit CreationDate survives create (e.g. an importer) and open-deal update (a rep correcting it).
+                const historical = new Date('2024-03-15T14:30:00.000Z');
+                const imported = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD45 explicit historical CreationDate';
+                    d.CreationDate = historical;
+                });
+                await saveOk(imported, 'create with explicit historical CreationDate');
+
+                const reloadedImported = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await reloadedImported.Load(imported.ID), 'reloading imported deal');
+                AssertEqual(
+                    reloadedImported.CreationDate.toISOString(),
+                    historical.toISOString(),
+                    'an explicit CreationDate on create must survive Save() without being overwritten by the server default',
+                );
+
+                const corrected = new Date('2024-04-01T09:15:00.000Z');
+                reloadedImported.CreationDate = corrected;
+                await saveOk(reloadedImported, 'update CreationDate on open deal');
+
+                const afterEdit = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await afterEdit.Load(imported.ID), 'reloading deal after CreationDate edit');
+                AssertEqual(
+                    afterEdit.CreationDate.toISOString(),
+                    corrected.toISOString(),
+                    'editing CreationDate on an open deal must persist',
+                );
+
+                // 3. Backfill rule: earliest pre-__mj_CreatedAt DealStageEvent.ChangedAt, else __mj_CreatedAt.
+                // Seed a historical stage event (2023) and a post-creation event (2030) on `imported`, and
+                // only a post-creation event (2030) on `defaulted`, then run the migration's backfill UPDATE
+                // scoped to those two deals and verify both branches of the rule.
+                const earliestEvent = '2023-06-10T11:20:00.000Z';
+                const laterPreEvent = '2023-09-01T08:00:00.000Z';
+                const postCreateEvent = '2030-01-01T00:00:00.000Z';
+                await TxOne(
+                    ctx,
+                    `INSERT INTO ${SALES_SCHEMA}.DealStageEvent
+                        (DealID, FromStageID, ToStageID, FromDealStatusTypeID, ToDealStatusTypeID, ChangedAt)
+                     VALUES
+                        ('${imported.ID}', NULL, '${f.StageID}', NULL, '${f.OpenStatusID}', '${earliestEvent}'),
+                        ('${imported.ID}', NULL, '${f.StageID}', NULL, '${f.OpenStatusID}', '${laterPreEvent}'),
+                        ('${imported.ID}', NULL, '${f.StageID}', NULL, '${f.OpenStatusID}', '${postCreateEvent}'),
+                        ('${defaulted.ID}', NULL, '${f.StageID}', NULL, '${f.OpenStatusID}', '${postCreateEvent}');
+
+                     UPDATE d
+                        SET d.CreationDate = ISNULL(
+                                (SELECT MIN(e.ChangedAt)
+                                   FROM ${SALES_SCHEMA}.DealStageEvent e
+                                  WHERE e.DealID = d.ID
+                                    AND e.ChangedAt < d.__mj_CreatedAt),
+                                d.__mj_CreatedAt)
+                       FROM ${SALES_SCHEMA}.Deal d
+                      WHERE d.ID IN ('${imported.ID}', '${defaulted.ID}');
+
+                     SELECT 1 AS Ok;`,
+                );
+
+                const backfilledImported = await TxOne<{ CreationDate: Date }>(
+                    ctx,
+                    `SELECT CreationDate FROM ${SALES_SCHEMA}.Deal WHERE ID = '${imported.ID}'`,
+                );
+                AssertEqual(
+                    new Date(backfilledImported.CreationDate).toISOString(),
+                    earliestEvent,
+                    'backfill must pick MIN(DealStageEvent.ChangedAt) when events predate __mj_CreatedAt',
+                );
+
+                const backfilledNative = await TxOne<{ MatchesCreatedAt: number }>(
+                    ctx,
+                    `SELECT CASE WHEN CreationDate = __mj_CreatedAt THEN 1 ELSE 0 END AS MatchesCreatedAt
+                       FROM ${SALES_SCHEMA}.Deal
+                      WHERE ID = '${defaulted.ID}'`,
+                );
+                AssertEqual(
+                    Number(backfilledNative.MatchesCreatedAt),
+                    1,
+                    'backfill must fall back to __mj_CreatedAt when no stage event predates __mj_CreatedAt',
+                );
+            }),
+    },
 ];
 
 for (const check of SaveDealChecks) {

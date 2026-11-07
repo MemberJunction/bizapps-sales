@@ -1,5 +1,91 @@
 # @mj-biz-apps/sales-integration-tests
 
+## 6.24.1
+
+### Patch Changes
+
+- Updated dependencies [b4fca8a]
+  - @mj-biz-apps/sales-entities@6.24.1
+  - @mj-biz-apps/sales-server@6.24.1
+  - @mj-biz-apps/sales-core-entities-server@6.24.1
+
+## 6.24.0
+
+### Patch Changes
+
+- Updated dependencies [da41816]
+- Updated dependencies [1ceea58]
+- Updated dependencies [4a3226a]
+- Updated dependencies [c4808fa]
+- Updated dependencies [c96a138]
+  - @mj-biz-apps/sales-entities@6.24.0
+  - @mj-biz-apps/sales-server@6.24.0
+  - @mj-biz-apps/sales-core-entities-server@6.24.0
+
+## 6.23.4
+
+### Patch Changes
+
+- Updated dependencies [3c7b6da]
+  - @mj-biz-apps/sales-core-entities-server@6.23.4
+  - @mj-biz-apps/sales-entities@6.23.4
+  - @mj-biz-apps/sales-server@6.23.4
+
+## 6.23.3
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.23.3
+- @mj-biz-apps/sales-entities@6.23.3
+- @mj-biz-apps/sales-server@6.23.3
+
+## 6.23.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.23.2
+- @mj-biz-apps/sales-entities@6.23.2
+- @mj-biz-apps/sales-server@6.23.2
+
+## 6.23.1
+
+### Patch Changes
+
+- Updated dependencies [f616af3]
+  - @mj-biz-apps/sales-server@6.23.1
+  - @mj-biz-apps/sales-core-entities-server@6.23.1
+  - @mj-biz-apps/sales-entities@6.23.1
+
+## 6.23.0
+
+### Patch Changes
+
+- Updated dependencies [62e89d6]
+  - @mj-biz-apps/sales-entities@6.23.0
+  - @mj-biz-apps/sales-core-entities-server@6.23.0
+  - @mj-biz-apps/sales-server@6.23.0
+
+## 6.22.1
+
+### Patch Changes
+
+- Updated dependencies [9e6d67e]
+  - @mj-biz-apps/sales-entities@6.22.1
+  - @mj-biz-apps/sales-core-entities-server@6.22.1
+  - @mj-biz-apps/sales-server@6.22.1
+
+## 6.22.0
+
+### Patch Changes
+
+- Updated dependencies [f5dbce2]
+- Updated dependencies [a279840]
+- Updated dependencies [7761d34]
+- Updated dependencies [df7d0bb]
+  - @mj-biz-apps/sales-core-entities-server@6.22.0
+  - @mj-biz-apps/sales-entities@6.22.0
+  - @mj-biz-apps/sales-server@6.22.0
+
 ## 6.21.0
 
 ### Patch Changes

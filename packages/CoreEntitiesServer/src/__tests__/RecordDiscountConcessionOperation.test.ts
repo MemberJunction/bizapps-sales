@@ -116,6 +116,13 @@ describe('Sales.RecordDiscountConcession', () => {
         expect(get).not.toHaveBeenCalled();
     });
 
+    it('refuses a line ID that is not a UUID before reading or deleting anything', async () => {
+        const { provider, get, runView } = providerReturning(concession(true, null));
+        expect(await run({ OrderLineID: "x' OR '1'='1" }, provider)).toMatchObject({ Success: false });
+        expect(runView).not.toHaveBeenCalled();
+        expect(get).not.toHaveBeenCalled();
+    });
+
     it('refuses on a host without orders', async () => {
         vi.mocked(OrdersIsInstalled).mockReturnValue(false);
         const { provider, get } = providerReturning(concession(true, null));
@@ -171,6 +178,56 @@ describe('Sales.RecordDiscountConcession', () => {
             expect(await run({}, provider)).toMatchObject({ Success: false });
             expect(entity.Save).not.toHaveBeenCalled();
             expect(rollback).toHaveBeenCalled();
+        });
+
+        it('stamps a client-generated ConcessionID onto a newly created concession (#512)', async () => {
+            const clientID = 'cccccccc-0000-4000-8000-000000000001';
+            const entity = concession(true, null);
+            const { provider } = providerReturning(entity);
+            const out = await run({ ConcessionID: clientID }, provider);
+
+            expect(entity.ID).toBe(clientID);
+            expect(out).toEqual({
+                Success: true,
+                ConcessionID: clientID,
+                AwaitingApproval: true,
+                Message: null,
+            });
+        });
+
+        it('returns the existing concession without withdrawing or recreating on a retry with the same ConcessionID (#512)', async () => {
+            const clientID = 'cccccccc-0000-4000-8000-000000000001';
+            const log: string[] = [];
+            const alreadyRecorded = {
+                ...earlier(clientID, true, log),
+                DecidedByUserID: null,
+            };
+            const entity = concession(true, null);
+            const { provider, get } = providerReturning(entity, [alreadyRecorded], log);
+
+            const out = await run({ ConcessionID: clientID.toUpperCase() }, provider);
+
+            expect(out).toEqual({
+                Success: true,
+                ConcessionID: clientID,
+                AwaitingApproval: true,
+                Message: null,
+            });
+            expect(log).toEqual(['begin', 'commit']);
+            expect(alreadyRecorded.Delete).not.toHaveBeenCalled();
+            expect(get).not.toHaveBeenCalled();
+        });
+
+        it('refuses a malformed ConcessionID before opening a transaction (#512)', async () => {
+            const { provider, runView, get } = providerReturning(concession(true, null));
+            const out = await run({ ConcessionID: 'not-a-uuid' }, provider);
+
+            expect(out).toMatchObject({
+                Success: false,
+                Message: 'A discount concession needs a valid concession ID.',
+            });
+            expect(runView).not.toHaveBeenCalled();
+            expect(get).not.toHaveBeenCalled();
         });
     });
 });

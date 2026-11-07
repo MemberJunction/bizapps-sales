@@ -1,5 +1,5 @@
 -- =============================================================================================
--- PostgreSQL counterpart of V202610301300__v6.22.x__SalesAccount_Acronym_Field.sql
+-- PostgreSQL counterpart of V202611061900__v6.25.x__SalesAccount_Acronym_Field.sql
 -- =============================================================================================
 -- `mj sql-convert --from tsql --to postgres` (MJ CLI 6.1.6) output, finished by hand:
 --   * The view, the EntityField row and the grants are the converter's.

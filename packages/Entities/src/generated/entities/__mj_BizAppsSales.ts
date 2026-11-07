@@ -150,7 +150,8 @@ export const mjBizAppsSalesDealContactRoleSchema = z.object({
     Influence: z.number().nullable().describe(`
         * * Field Name: Influence
         * * Display Name: Influence
-        * * SQL Data Type: decimal(5, 2)`),
+        * * SQL Data Type: decimal(5, 2)
+        * * Description: How much this contact sways the buying decision, from 0 (none) to 100 (decides alone). Up to two decimal places.`),
     Notes: z.string().nullable().describe(`
         * * Field Name: Notes
         * * Display Name: Notes
@@ -175,7 +176,7 @@ export const mjBizAppsSalesDealContactRoleSchema = z.object({
         * * SQL Data Type: nvarchar(753)`),
     BuyingRoleType: z.string().nullable().describe(`
         * * Field Name: BuyingRoleType
-        * * Display Name: Buying Role Type
+        * * Display Name: Buying Role
         * * SQL Data Type: nvarchar(200)`),
 });
 
@@ -373,7 +374,7 @@ export const mjBizAppsSalesDealStageEventSchema = z.object({
         * * Description: When the stage change happened. For imported deals this is the original date, not the import date.`),
     DaysInPreviousStage: z.number().nullable().describe(`
         * * Field Name: DaysInPreviousStage
-        * * Display Name: Days In Previous Stage
+        * * Display Name: Days in Previous Stage
         * * SQL Data Type: int`),
     AmountAtTransition: z.number().nullable().describe(`
         * * Field Name: AmountAtTransition
@@ -417,15 +418,15 @@ export const mjBizAppsSalesDealStageEventSchema = z.object({
         * * SQL Data Type: nvarchar(200)`),
     FromDealStatusType: z.string().nullable().describe(`
         * * Field Name: FromDealStatusType
-        * * Display Name: From Deal Status Type
+        * * Display Name: Previous Status
         * * SQL Data Type: nvarchar(200)`),
     ToDealStatusType: z.string().nullable().describe(`
         * * Field Name: ToDealStatusType
-        * * Display Name: To Deal Status Type
+        * * Display Name: New Status
         * * SQL Data Type: nvarchar(200)`),
     ChangedByUser: z.string().nullable().describe(`
         * * Field Name: ChangedByUser
-        * * Display Name: Changed By User
+        * * Display Name: Changed By
         * * SQL Data Type: nvarchar(100)`),
 });
 
@@ -536,7 +537,7 @@ export const mjBizAppsSalesDealTeamMemberSchema = z.object({
         * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Roles (vwDealRoles.ID)`),
     AttributionPct: z.number().nullable().describe(`
         * * Field Name: AttributionPct
-        * * Display Name: Attribution Pct
+        * * Display Name: Attribution (%)
         * * SQL Data Type: decimal(5, 2)
         * * Description: This member's share of the deal for by-rep rollups. When any member of a deal has a value set, the app validates that active members sum to 100. Leave NULL to fall back to owner-role attribution.`),
     StartDate: z.date().nullable().describe(`
@@ -824,12 +825,12 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Description: Whether the resulting agreement renews automatically at the end of its term.`),
     AnnualIncreasePctOverride: z.number().nullable().describe(`
         * * Field Name: AnnualIncreasePctOverride
-        * * Display Name: Annual Increase Pct Override
+        * * Display Name: Annual Increase Override (%)
         * * SQL Data Type: decimal(5, 2)
         * * Description: Annual price increase agreed for this deal, as a percent. Leave empty to use the contract type's standard increase.`),
     CancellationNoticeDaysOverride: z.number().nullable().describe(`
         * * Field Name: CancellationNoticeDaysOverride
-        * * Display Name: Cancellation Notice Days Override
+        * * Display Name: Cancellation Notice Override (Days)
         * * SQL Data Type: int
         * * Description: Cancellation notice period agreed for this deal, in days. Leave empty to use the contract type's standard notice period.`),
     PaymentMethod: z.string().nullable().describe(`
@@ -840,7 +841,7 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Description: How the customer expects to pay, for example ACH. For reference only.`),
     StandardAgreementModified: z.boolean().describe(`
         * * Field Name: StandardAgreementModified
-        * * Display Name: Standard Agreement Modified
+        * * Display Name: Agreement Modified
         * * SQL Data Type: bit
         * * Default Value: 0
         * * Description: Whether the deal moved off the standard agreement. Copied to the contract when the deal is won, where it tells finance to review the changes.`),
@@ -908,6 +909,17 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Display Name: Predicted Win Scored At
         * * SQL Data Type: datetimeoffset
         * * Description: Timestamp when the deal was last scored by the predictive deal win propensity model.`),
+    LeadSourceDetail: z.string().nullable().describe(`
+        * * Field Name: LeadSourceDetail
+        * * Display Name: Lead Source Detail
+        * * SQL Data Type: nvarchar(500)
+        * * Description: The specific source within the deal's lead source type, such as the event, campaign or referring person. Free text; empty when not recorded.`),
+    CreationDate: z.date().describe(`
+        * * Field Name: CreationDate
+        * * Display Name: Creation Date
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()
+        * * Description: Date and Time the Deal was created, defaulted to the record creation date but editable by the User. Used for deal aging.`),
     Pipeline: z.string().describe(`
         * * Field Name: Pipeline
         * * Display Name: Pipeline
@@ -942,7 +954,7 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * SQL Data Type: nvarchar(50)`),
     OwnerEmployee: z.string().nullable().describe(`
         * * Field Name: OwnerEmployee
-        * * Display Name: Owner Employee
+        * * Display Name: Owner
         * * SQL Data Type: nvarchar(81)`),
     ForecastCategoryType: z.string().nullable().describe(`
         * * Field Name: ForecastCategoryType
@@ -954,7 +966,7 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * SQL Data Type: nvarchar(200)`),
     LeadSourceType: z.string().nullable().describe(`
         * * Field Name: LeadSourceType
-        * * Display Name: Lead Source Type
+        * * Display Name: Lead Source
         * * SQL Data Type: nvarchar(200)`),
     ClosedByUser: z.string().nullable().describe(`
         * * Field Name: ClosedByUser
@@ -1139,7 +1151,7 @@ export const mjBizAppsSalesForecastSnapshotSchema = z.object({
         * * SQL Data Type: nvarchar(200)`),
     OwnerEmployee: z.string().nullable().describe(`
         * * Field Name: OwnerEmployee
-        * * Display Name: Owner Employee
+        * * Display Name: Owner
         * * SQL Data Type: nvarchar(81)`),
 });
 
@@ -1380,7 +1392,7 @@ export const mjBizAppsSalesPipelineStageSchema = z.object({
         * * Field Name: RottingDays
         * * Display Name: Rotting Days
         * * SQL Data Type: int
-        * * Description: Days without activity before the board flags a deal in this stage as rotting.`),
+        * * Description: Deals that stay in this stage longer than this many days are flagged on the Board. Empty means no flag.`),
     EntryCriteria: z.string().nullable().describe(`
         * * Field Name: EntryCriteria
         * * Display Name: Entry Criteria
@@ -1420,7 +1432,7 @@ export const mjBizAppsSalesPipelineStageSchema = z.object({
         * * SQL Data Type: nvarchar(200)`),
     ForecastCategoryType: z.string().nullable().describe(`
         * * Field Name: ForecastCategoryType
-        * * Display Name: Forecast Category Type
+        * * Display Name: Forecast Category
         * * SQL Data Type: nvarchar(200)`),
     DealStatusType: z.string().nullable().describe(`
         * * Field Name: DealStatusType
@@ -1510,6 +1522,12 @@ export const mjBizAppsSalesPipelineSchema = z.object({
         * * SQL Data Type: bit
         * * Default Value: 1
         * * Description: Whether open deals in this pipeline count toward open and weighted pipeline, the forecast buckets and the dashboard's open-deal figures. Set to 0 for a pipeline that only holds historical deals. Closed deals count toward bookings, win rate and other history regardless.`),
+    CloseWonAssigneePersonID: z.string().nullable().describe(`
+        * * Field Name: CloseWonAssigneePersonID
+        * * Display Name: Close Won Assignee
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
+        * * Description: Person who receives the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Takes precedence over CloseWonTasks.AssigneeRecordID in Close Won Policy. Empty means that policy value is used, and when both are empty the tasks are created but not assigned.`),
     Company: z.string().describe(`
         * * Field Name: Company
         * * Display Name: Company
@@ -1522,6 +1540,10 @@ export const mjBizAppsSalesPipelineSchema = z.object({
         * * Field Name: DefaultForecastCategoryType
         * * Display Name: Default Forecast Category Type
         * * SQL Data Type: nvarchar(200)`),
+    CloseWonAssigneePerson: z.string().nullable().describe(`
+        * * Field Name: CloseWonAssigneePerson
+        * * Display Name: Close Won Assignee Name
+        * * SQL Data Type: nvarchar(250)`),
 });
 
 export type mjBizAppsSalesPipelineEntityType = z.infer<typeof mjBizAppsSalesPipelineSchema>;
@@ -1608,13 +1630,13 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Default Value: getutcdate()`),
     DefaultPrimaryContactID: z.string().nullable().describe(`
         * * Field Name: DefaultPrimaryContactID
-        * * Display Name: Default Primary Contact ID
+        * * Display Name: Default Primary Contact
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
         * * Description: Contact a new deal for this account starts with as its Primary Contact. Copied onto a deal only when the deal's Primary Contact is empty; the deal's value stays editable.`),
     DefaultBillingContactID: z.string().nullable().describe(`
         * * Field Name: DefaultBillingContactID
-        * * Display Name: Default Billing Contact ID
+        * * Display Name: Default Billing Contact
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
         * * Description: Contact a new deal for this account starts with as its Billing Contact. Copied onto a deal only when the deal's Billing Contact is empty; the deal's value stays editable. Empty means the deal's billing contact follows its primary contact.`),
@@ -1692,6 +1714,9 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Field Name: DefaultBillingContact
         * * Display Name: Default Billing Contact
         * * SQL Data Type: nvarchar(753)`),
+    Acronym: z.string().nullable().describe(`
+        * * Field Name: Acronym
+        * * SQL Data Type: nvarchar(20)`),
 });
 
 export type mjBizAppsSalesSalesAccountEntityType = z.infer<typeof mjBizAppsSalesSalesAccountSchema>;
@@ -1817,7 +1842,7 @@ export const mjBizAppsSalesSalesContactSchema = z.object({
         * * SQL Data Type: nvarchar(50)`),
     SeniorityLevelID: z.string().nullable().describe(`
         * * Field Name: SeniorityLevelID
-        * * Display Name: Seniority Level
+        * * Display Name: Seniority
         * * SQL Data Type: uniqueidentifier`),
     OwnerEmployee: z.string().nullable().describe(`
         * * Field Name: OwnerEmployee
@@ -2261,6 +2286,7 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
     * * Field Name: Influence
     * * Display Name: Influence
     * * SQL Data Type: decimal(5, 2)
+    * * Description: How much this contact sways the buying decision, from 0 (none) to 100 (decides alone). Up to two decimal places.
     */
     get Influence(): number | null {
         return this.Get('Influence');
@@ -2321,7 +2347,7 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
 
     /**
     * * Field Name: BuyingRoleType
-    * * Display Name: Buying Role Type
+    * * Display Name: Buying Role
     * * SQL Data Type: nvarchar(200)
     */
     get BuyingRoleType(): string | null {
@@ -2874,7 +2900,7 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * * Field Name: DaysInPreviousStage
-    * * Display Name: Days In Previous Stage
+    * * Display Name: Days in Previous Stage
     * * SQL Data Type: int
     */
     get DaysInPreviousStage(): number | null {
@@ -2983,7 +3009,7 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * * Field Name: FromDealStatusType
-    * * Display Name: From Deal Status Type
+    * * Display Name: Previous Status
     * * SQL Data Type: nvarchar(200)
     */
     get FromDealStatusType(): string | null {
@@ -2992,7 +3018,7 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * * Field Name: ToDealStatusType
-    * * Display Name: To Deal Status Type
+    * * Display Name: New Status
     * * SQL Data Type: nvarchar(200)
     */
     get ToDealStatusType(): string | null {
@@ -3001,7 +3027,7 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * * Field Name: ChangedByUser
-    * * Display Name: Changed By User
+    * * Display Name: Changed By
     * * SQL Data Type: nvarchar(100)
     */
     get ChangedByUser(): string | null {
@@ -3303,7 +3329,7 @@ export class mjBizAppsSalesDealTeamMemberEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * * Field Name: AttributionPct
-    * * Display Name: Attribution Pct
+    * * Display Name: Attribution (%)
     * * SQL Data Type: decimal(5, 2)
     * * Description: This member's share of the deal for by-rep rollups. When any member of a deal has a value set, the app validates that active members sum to 100. Leave NULL to fall back to owner-role attribution.
     */
@@ -4106,7 +4132,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: AnnualIncreasePctOverride
-    * * Display Name: Annual Increase Pct Override
+    * * Display Name: Annual Increase Override (%)
     * * SQL Data Type: decimal(5, 2)
     * * Description: Annual price increase agreed for this deal, as a percent. Leave empty to use the contract type's standard increase.
     */
@@ -4119,7 +4145,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: CancellationNoticeDaysOverride
-    * * Display Name: Cancellation Notice Days Override
+    * * Display Name: Cancellation Notice Override (Days)
     * * SQL Data Type: int
     * * Description: Cancellation notice period agreed for this deal, in days. Leave empty to use the contract type's standard notice period.
     */
@@ -4146,7 +4172,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: StandardAgreementModified
-    * * Display Name: Standard Agreement Modified
+    * * Display Name: Agreement Modified
     * * SQL Data Type: bit
     * * Default Value: 0
     * * Description: Whether the deal moved off the standard agreement. Copied to the contract when the deal is won, where it tells finance to review the changes.
@@ -4313,6 +4339,33 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
+    * * Field Name: LeadSourceDetail
+    * * Display Name: Lead Source Detail
+    * * SQL Data Type: nvarchar(500)
+    * * Description: The specific source within the deal's lead source type, such as the event, campaign or referring person. Free text; empty when not recorded.
+    */
+    get LeadSourceDetail(): string | null {
+        return this.Get('LeadSourceDetail');
+    }
+    set LeadSourceDetail(value: string | null) {
+        this.Set('LeadSourceDetail', value);
+    }
+
+    /**
+    * * Field Name: CreationDate
+    * * Display Name: Creation Date
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    * * Description: Date and Time the Deal was created, defaulted to the record creation date but editable by the User. Used for deal aging.
+    */
+    get CreationDate(): Date {
+        return this.Get('CreationDate');
+    }
+    set CreationDate(value: Date) {
+        this.Set('CreationDate', value);
+    }
+
+    /**
     * * Field Name: Pipeline
     * * Display Name: Pipeline
     * * SQL Data Type: nvarchar(200)
@@ -4386,7 +4439,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: OwnerEmployee
-    * * Display Name: Owner Employee
+    * * Display Name: Owner
     * * SQL Data Type: nvarchar(81)
     */
     get OwnerEmployee(): string | null {
@@ -4413,7 +4466,7 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * * Field Name: LeadSourceType
-    * * Display Name: Lead Source Type
+    * * Display Name: Lead Source
     * * SQL Data Type: nvarchar(200)
     */
     get LeadSourceType(): string | null {
@@ -4899,7 +4952,7 @@ export class mjBizAppsSalesForecastSnapshotEntity extends BaseEntity<mjBizAppsSa
 
     /**
     * * Field Name: OwnerEmployee
-    * * Display Name: Owner Employee
+    * * Display Name: Owner
     * * SQL Data Type: nvarchar(81)
     */
     get OwnerEmployee(): string | null {
@@ -5558,7 +5611,7 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
     * * Field Name: RottingDays
     * * Display Name: Rotting Days
     * * SQL Data Type: int
-    * * Description: Days without activity before the board flags a deal in this stage as rotting.
+    * * Description: Deals that stay in this stage longer than this many days are flagged on the Board. Empty means no flag.
     */
     get RottingDays(): number | null {
         return this.Get('RottingDays');
@@ -5661,7 +5714,7 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
 
     /**
     * * Field Name: ForecastCategoryType
-    * * Display Name: Forecast Category Type
+    * * Display Name: Forecast Category
     * * SQL Data Type: nvarchar(200)
     */
     get ForecastCategoryType(): string | null {
@@ -5900,6 +5953,20 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
     }
 
     /**
+    * * Field Name: CloseWonAssigneePersonID
+    * * Display Name: Close Won Assignee
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
+    * * Description: Person who receives the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Takes precedence over CloseWonTasks.AssigneeRecordID in Close Won Policy. Empty means that policy value is used, and when both are empty the tasks are created but not assigned.
+    */
+    get CloseWonAssigneePersonID(): string | null {
+        return this.Get('CloseWonAssigneePersonID');
+    }
+    set CloseWonAssigneePersonID(value: string | null) {
+        this.Set('CloseWonAssigneePersonID', value);
+    }
+
+    /**
     * * Field Name: Company
     * * Display Name: Company
     * * SQL Data Type: nvarchar(50)
@@ -5924,6 +5991,15 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
     */
     get DefaultForecastCategoryType(): string | null {
         return this.Get('DefaultForecastCategoryType');
+    }
+
+    /**
+    * * Field Name: CloseWonAssigneePerson
+    * * Display Name: Close Won Assignee Name
+    * * SQL Data Type: nvarchar(250)
+    */
+    get CloseWonAssigneePerson(): string | null {
+        return this.Get('CloseWonAssigneePerson');
     }
 }
 
@@ -6158,7 +6234,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: DefaultPrimaryContactID
-    * * Display Name: Default Primary Contact ID
+    * * Display Name: Default Primary Contact
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
     * * Description: Contact a new deal for this account starts with as its Primary Contact. Copied onto a deal only when the deal's Primary Contact is empty; the deal's value stays editable.
@@ -6172,7 +6248,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: DefaultBillingContactID
-    * * Display Name: Default Billing Contact ID
+    * * Display Name: Default Billing Contact
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
     * * Description: Contact a new deal for this account starts with as its Billing Contact. Copied onto a deal only when the deal's Billing Contact is empty; the deal's value stays editable. Empty means the deal's billing contact follows its primary contact.
@@ -6394,6 +6470,18 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     */
     get DefaultBillingContact(): string | null {
         return this.Get('DefaultBillingContact');
+    }
+
+    /**
+    * * Field Name: Acronym
+    * * SQL Data Type: nvarchar(20)
+    * * IS-A Source: Inherited from MJ_BizApps_Common: Organizations
+    */
+    get Acronym(): string | null {
+        return this.Get('Acronym');
+    }
+    set Acronym(value: string | null) {
+        this.Set('Acronym', value);
     }
 }
 
@@ -6762,7 +6850,7 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * * Field Name: SeniorityLevelID
-    * * Display Name: Seniority Level
+    * * Display Name: Seniority
     * * SQL Data Type: uniqueidentifier
     * * IS-A Source: Inherited from MJ_BizApps_Common: People
     */

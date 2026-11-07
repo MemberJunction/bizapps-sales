@@ -23,6 +23,7 @@ import {
     EntityViewerModule,
     type AfterDataLoadEventArgs,
     type RecordOpenedEvent,
+    type RecordSelectedEvent,
     type ViewRelatedRecordNavigation,
 } from '@memberjunction/ng-entity-viewer';
 import {
@@ -38,6 +39,7 @@ import {
     type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
+import { LinkedParties, type ActivityLinkFields, type LinkedParty } from '../activities/deal-activity-parties';
 import { RelatedRecordTarget, SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import {
@@ -55,6 +57,7 @@ import { MJSDealLineCardsComponent } from './deal-line-cards.component';
 import { BusinessDayOf, DealCloseDay } from './deal-close-day';
 import { WeightedAmount } from './deal-weighted-amount';
 import { FormatDealMoney } from './deal-money';
+import { ExplainDealScheduleGap, ReadDealScheduleTotal, type DealScheduleRowFigures, type DealScheduleTotal } from './deal-schedule-total';
 import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './deal-stage-preview';
 import { IsFieldReadable } from './field-readable';
 import { SelectableStages } from '../data/selectable-stages';
@@ -120,8 +123,11 @@ async function LoadEmployees(): Promise<EmployeeOption[] | null> {
     return (result.Results ?? []).map((e) => ({ ID: String(e.ID), Name: e.FirstLast ?? '(unnamed employee)' }));
 }
 
-/** One pipeline the deal may sit in, with the company it sells as (#327). */
-export type PipelineOption = CompanyPipeline;
+/**
+ * One pipeline the deal may sit in, with the company it sells as (#327), and whether it is active: an
+ * inactive one is offered only to the deal already in it (bc-aidp-next-golive#423).
+ */
+export type PipelineOption = CompanyPipeline & { IsActive: boolean };
 
 /**
  * One stage, carrying the pipeline that owns it — the whole point of the list — and the defaults a
@@ -134,7 +140,12 @@ export interface PipelineStageOption extends StageDefaults {
 }
 
 /**
- * Every active pipeline, for the picker that also decides which stages are offered.
+ * Every pipeline, active or not, for the picker that also decides which stages are offered.
+ *
+ * INACTIVE ONES ARE LOADED TOO (bc-aidp-next-golive#423). Deactivating a pipeline takes it off the
+ * picker for new choices, but a deal already in it still has to name it: with active-only rows a won
+ * deal in a retired pipeline showed "—" for its pipeline, and its select fell back to "— choose —".
+ * `PipelineOptions` offers an inactive pipeline only to the deal that sits in it.
  *
  * ORDERED THE WAY THE WORKSPACE ORDERS THEM, which is `DisplayRank` first.
  *
@@ -153,10 +164,9 @@ export interface PipelineStageOption extends StageDefaults {
 async function LoadPipelines(): Promise<PipelineOption[]> {
     const result = await new RunView().RunView<PipelineRow>({
         EntityName: MJS_ENTITIES.Pipeline,
-        ExtraFilter: 'IsActive = 1',
         OrderBy: 'DisplayRank ASC, Name ASC',
         ResultType: 'simple',
-        Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'],
+        Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank', 'IsActive'],
     });
     if (!result?.Success) return [];
     return OrderPipelinesByCompany((result.Results ?? []).map(ToPipelineOption));
@@ -171,6 +181,7 @@ interface PipelineRow {
     Company: string | null;
     IsDefault: boolean;
     DisplayRank: number;
+    IsActive: boolean;
 }
 
 function ToPipelineOption(r: PipelineRow): PipelineOption {
@@ -182,6 +193,7 @@ function ToPipelineOption(r: PipelineRow): PipelineOption {
         CompanyName: r.Company ?? null,
         IsDefault: !!r.IsDefault,
         DisplayRank: Number(r.DisplayRank ?? 0),
+        IsActive: !!r.IsActive,
     };
 }
 
@@ -778,11 +790,21 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         // The close stamps likewise, from the set the entity server refuses writes against (#252).
         if (IsDealCloseStamp(fieldName)) return false;
 
-        const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
+        const form = this.FormComponent as unknown as {
+            IsLocked?: boolean;
+            IsLost?: boolean;
+            IsPersistedAccountBlank?: boolean;
+        } | undefined;
         const locked = form?.IsLocked === true;
+        const recordAccountOld = this.Record?.GetFieldByName?.('AccountID')?.OldValue as string | null | undefined;
+        const accountBlank =
+            form?.IsPersistedAccountBlank !== undefined
+                ? form.IsPersistedAccountBlank
+                : this.Record !== undefined && (!recordAccountOld || String(recordAccountOld).trim() === '');
         // The outcome rides along with the lock, from the same resolver, because golive#206 keeps Loss
-        // Notes editable on a LOST deal and frozen on a won one.
-        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true);
+        // Notes editable on a LOST deal and frozen on a won one; golive#306 keeps Account editable when
+        // the closed deal was saved without one.
+        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true, accountBlank);
     }
 
     /**
@@ -874,8 +896,11 @@ const CREATION_PARTY_CONTACT_FIELDS: readonly string[] = ['PrimaryContactID', 'B
  * what this subset existed to arrange for them. *
  * `ExpectedCloseDate` is here because it moved into `PIPELINE_FIELDS` (#252) and was already offered
  * on a new deal from the Commercial panel; leaving it out would have dropped it from creation.
+ *
+ * `LeadSourceTypeID` and `LeadSourceDetail` are here because where a deal came from is known when it
+ * is created. Without them a rep had to save the deal and edit it again just to record its source.
  */
-const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID', 'ExpectedCloseDate'];
+const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID', 'ExpectedCloseDate', 'LeadSourceTypeID', 'LeadSourceDetail'];
 
 /**
  * Every field the party panel owns, at module scope rather than as an instance initializer.
@@ -1934,12 +1959,18 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
 
     /** The selected company's pipelines, in picker order (#327). */
     public get PipelineOptions(): PipelineOption[] {
-        return PipelinesForCompany(this.pipelines(), this.SelectedCompanyID);
+        return PipelinesForCompany(this.offeredPipelines, this.SelectedCompanyID);
     }
 
     /** Every company that owns a pipeline, default company first. */
     public get CompanyOptions(): PipelineCompany[] {
-        return PipelineCompanies(this.pipelines());
+        return PipelineCompanies(this.offeredPipelines);
+    }
+
+    /** The active pipelines, plus the deal's own when it is inactive (bc-aidp-next-golive#423). */
+    private get offeredPipelines(): PipelineOption[] {
+        const id = String(this.Record?.PipelineID ?? '').toLowerCase();
+        return this.pipelines().filter((p) => p.IsActive || (!!id && p.ID.toLowerCase() === id));
     }
 
     /**
@@ -1947,12 +1978,12 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
      * company also chooses its pipeline, so the pipeline always says which company is selected.
      */
     public get SelectedCompanyID(): string | null {
-        return InitialCompanyID(this.pipelines(), this.Record?.PipelineID ?? null);
+        return InitialCompanyID(this.offeredPipelines, this.Record?.PipelineID ?? null);
     }
 
     /** Moves the deal to the company's first pipeline, which clears a stage the old one owned. */
     public SetCompany(companyID: string | null): void {
-        const first = PipelinesForCompany(this.pipelines(), companyID)[0];
+        const first = PipelinesForCompany(this.offeredPipelines, companyID)[0];
         if (first) this.SetPipeline(first.ID);
     }
 
@@ -2483,10 +2514,29 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
         { name: 'DealTypeID', type: 'textbox', link: 'Record' },
         { name: 'ForecastCategoryTypeID', type: 'textbox', link: 'Record' },
         { name: 'Probability', type: 'number' },
+        // The business creation date the deal ages from (#532). Beside the forecast fields, because
+        // aging is read alongside them. NOT a mirror of `__mj_CreatedAt`: that column is the immutable
+        // row stamp, and for an imported deal it holds import day rather than deal day. This one is the
+        // editable business fact, which is why it is offered here at all.
+        //
+        // `datepicker` RENDERS `<input type="date">`, SO EDITING DROPS THE TIME. `mj-form-field` reads
+        // the value through `DateInputValue` (`toISOString().split('T')[0]`) and writes it back through
+        // `OnDateChange` (`new Date('2026-11-04')`, i.e. midnight UTC), so a rep who edits this field
+        // collapses its stored time. Accepted deliberately: the `GETUTCDATE()` default stores full
+        // precision, only a manual edit coarsens it, and aging is day-grained either way. MJ's
+        // form-field has no date+time type on the 6.1 LTS line (its Type union ends at `numerictextbox`)
+        // and this app may not grow a second editable control for a field the shared one already owns.
+        // Revisit when an MJ `datetimepicker` lands.
+        { name: 'CreationDate', type: 'datepicker' },
         // Beside stage and probability, where a rep forecasting the deal looks for it. It sat in
         // Commercial, and a rep who could not find it typed the expected day into Actual Close Date
         // instead (#252). One binding: it is no longer in COMMERCIAL_FIELDS.
         { name: 'ExpectedCloseDate', type: 'datepicker' },
+        // Where the deal came from, with the pipeline fields rather than in Motion, where sales did not
+        // look for it. The detail is the specific event, campaign or person within that channel, free
+        // text carried over from the CRM the deals were imported from.
+        { name: 'LeadSourceTypeID', type: 'textbox', link: 'Record' },
+        { name: 'LeadSourceDetail', type: 'textbox' },
 ];
 
 @RegisterClassEx(BaseFormPanel, {
@@ -2510,7 +2560,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                             <!-- THE OWNER IS CHANGED THROUGH THE DEAL TEAM, never typed. The column is a
                                  server-maintained stamp; SetOwner swaps the owner-role team row and the
                                  server derives the stamp from it on save. Saved deals only: a new deal
-                                 takes the account owner by default, and SetOwner reads the team first. -->
+                                 takes its creator as owner by default, and SetOwner reads the team first. -->
                             <div class="mj-forms-field mj-forms-field--editing">
                                 <label class="mj-forms-field-label" for="mjs-deal-owner">{{ OwnerLabel }}</label>
                                 <select id="mjs-deal-owner" data-testid="deal-owner-picker"
@@ -2598,7 +2648,7 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
     /**
      * Whether the owner field renders as the picker rather than as the read-only stamp.
      *
-     * SAVED DEALS ONLY: a new deal takes the account owner by default when it is first saved, and
+     * SAVED DEALS ONLY: a new deal takes its creator as owner by default when it is first saved, and
      * `SetOwner` loads the deal team before changing it. NOT GATED ON THE LOCK: reassigning a rep after
      * close is record-keeping (golive#206), and the server allows it when the team drives the save.
      */
@@ -2981,7 +3031,6 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
     public readonly Fields: DealFieldSpec[] = [
         { name: 'NextStep', type: 'textbox', span: true },
         { name: 'NextStepDate', type: 'datepicker' },
-        { name: 'LeadSourceTypeID', type: 'textbox', link: 'Record' },
         { name: 'OrderID', type: 'textbox', noLink: true, serverMaintained: true },
         { name: 'ContractID', type: 'textbox', link: 'Record' },
         { name: 'RenewsContractID', type: 'textbox', link: 'Record' },
@@ -3694,17 +3743,39 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
                 <div class="mjs-deal-activity">
                     <mjs-deal-activity-timeline #compose [DealID]="Record.ID" [ComposeOnly]="true"
                         (Logged)="OnLogged()"></mjs-deal-activity-timeline>
-                    @if (ActivityEntity) {
+                    <!-- Mounted only once the deal's view exists: with no view the viewer loads every
+                         activity, and a view bound during that load is dropped (golive#432). -->
+                    @if (ActivityEntity && ActivityView) {
                         <div class="mjs-deal-activity__viewer">
                             <!-- New goes to the compose form above: it is the only path that links the new
                                  activity to this deal. -->
                             <mj-entity-viewer
                                 [Entity]="ActivityEntity"
                                 [ViewEntity]="ActivityView"
+                                (RecordSelected)="OnActivitySelected($event)"
                                 (RecordOpened)="OnActivityOpened($event)"
                                 (OpenRelatedRecordRequested)="OnActivityRelatedRecord($event)"
                                 (CreateRecordRequested)="compose.FocusCompose()">
                             </mj-entity-viewer>
+                        </div>
+                        <!-- Who the selected activity is linked to (#408): the grid has no column for it. -->
+                        <div class="mjs-deal-activity__links">
+                            @if (!Linked) {
+                                <span class="mjs-deal-activity__hint">Select an activity to see who it is linked to.</span>
+                            } @else {
+                                <span class="mjs-deal-activity__hint">Linked to:</span>
+                                @for (party of Linked; track $index) {
+                                    <span class="mjs-deal-activity__party" [title]="party.Role">
+                                        <i class="fa-solid" aria-hidden="true"
+                                            [class.fa-user]="party.Icon === 'person'"
+                                            [class.fa-building]="party.Icon === 'organization'"
+                                            [class.fa-at]="party.Icon === 'other'"></i>
+                                        {{ party.Name }}
+                                    </span>
+                                } @empty {
+                                    <span>this deal only</span>
+                                }
+                            }
                         </div>
                     }
                 </div>
@@ -3719,6 +3790,12 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
             min-height: 420px; height: 480px;
             display: flex; flex-direction: column;
             border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-md); overflow: hidden;
+        }
+        .mjs-deal-activity__links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mj-space-2); font-size: 0.8125rem; color: var(--mj-text-primary); }
+        .mjs-deal-activity__hint { color: var(--mj-text-muted); }
+        .mjs-deal-activity__party {
+            display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+            border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-sm);
         }
         .mjs-deal-activity__viewer mj-entity-viewer {
             display: flex; flex-direction: column; flex: 1 1 auto; height: 100%; width: 100%;
@@ -3740,8 +3817,58 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
         void this.refreshView();
     }
 
+    /** The selected activity's links, or null when none is selected. */
+    public Linked: LinkedParty[] | null = null;
+    private selectedActivityID: string | null = null;
+
     public OnLogged(): void {
+        this.selectedActivityID = null;
+        this.Linked = null;
         void this.refreshView();
+    }
+
+    public async OnActivitySelected(event: RecordSelectedEvent): Promise<void> {
+        const id = String(event.compositeKey?.GetValueByFieldName('ID') ?? event.record?.['ID'] ?? '');
+        if (!id) return;
+        this.selectedActivityID = id;
+        const linked = await this.readLinkedParties(id);
+        if (this.selectedActivityID !== id) return; // a later click won
+        this.Linked = linked;
+        this.cdr.detectChanges();
+    }
+
+    /** One read of the activity's links, then one `RunViews` for the people's and organizations' names. */
+    private async readLinkedParties(activityID: string): Promise<LinkedParty[] | null> {
+        const md = new Metadata();
+        const idOf = (name: string): string => md.Entities.find((e) => e.Name === name)?.ID ?? '';
+        const ids = { Deal: idOf(MJS_ENTITIES.Deal), Person: idOf(MJS_FOREIGN_ENTITIES.Person), Organization: idOf(MJS_FOREIGN_ENTITIES.Organization) };
+        const rv = new RunView();
+        const links = await rv.RunView<ActivityLinkFields>({
+            EntityName: MJS_FOREIGN_ENTITIES.ActivityLink,
+            ExtraFilter: `ActivityID = '${activityID.replace(/'/g, "''")}'`,
+            Fields: ['Role', 'EntityID', 'RecordID', 'IdentityValue', 'Entity'],
+            OrderBy: 'Sequence',
+            ResultType: 'simple',
+        });
+        if (!links.Success) {
+            console.error('Deal activity: could not read the activity links', links.ErrorMessage);
+            return null;
+        }
+        const rows = links.Results ?? [];
+        const inList = (entityID: string): string =>
+            rows.filter((l) => l.EntityID?.toLowerCase() === entityID.toLowerCase() && l.RecordID)
+                .map((l) => `'${String(l.RecordID).replace(/'/g, "''")}'`).join(', ') || 'NULL';
+        const [people, orgs] = await rv.RunViews([
+            { EntityName: MJS_FOREIGN_ENTITIES.Person, ExtraFilter: `ID IN (${inList(ids.Person)})`, Fields: ['ID', 'DisplayName'], ResultType: 'simple' },
+            { EntityName: MJS_FOREIGN_ENTITIES.Organization, ExtraFilter: `ID IN (${inList(ids.Organization)})`, Fields: ['ID', 'Name'], ResultType: 'simple' },
+        ]);
+        for (const r of [people, orgs].filter((x) => !x?.Success)) {
+            console.error('Deal activity: could not read linked names; showing IDs', r?.ErrorMessage);
+        }
+        const names = new Map<string, string>();
+        for (const r of (people?.Results ?? []) as { ID: string; DisplayName: string }[]) names.set(r.ID.toLowerCase(), r.DisplayName);
+        for (const r of (orgs?.Results ?? []) as { ID: string; Name: string }[]) names.set(r.ID.toLowerCase(), r.Name);
+        return LinkedParties(rows, ids, String(this.Record.ID), names);
     }
 
     public OnActivityOpened(event: RecordOpenedEvent): void {
@@ -3871,15 +3998,71 @@ export const SCHEDULE_DATE_ORDER = 'CASE WHEN PaymentDate IS NULL THEN 0 ELSE 1 
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+                <!-- Shown whenever there are rows, not only when they are off: a rep adding instalments
+                     watches the remainder fall to zero. -->
+                @if (Total && Total.RowCount > 0) {
+                    <div class="mjs-deal-schedule-total" [class.mjs-deal-schedule-total--off]="!Total.Ties">
+                        <span><strong>{{ Money(Total.Scheduled) }}</strong> scheduled</span>
+                        @if (Total.Remainder !== null) {
+                            <span>of {{ Money(Total.DealAmount) }}</span>
+                            <span>{{ RemainderLabel }}</span>
+                        }
+                        @if (GapSentence) { <span class="mjs-deal-schedule-total__why">{{ GapSentence }}</span> }
+                    </div>
+                }
             } @else {
                 <p class="mjs-deal-empty">Save the deal first. Payments are scheduled against it once it exists.</p>
             }
         </mj-collapsible-panel>
     `,
-    styles: [EMPTY_STATE_STYLES],
+    styles: [EMPTY_STATE_STYLES, `
+        .mjs-deal-schedule-total {
+            display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--mj-space-1) var(--mj-space-3);
+            margin: var(--mj-space-3) 0 0; padding: var(--mj-space-2) var(--mj-space-3);
+            border-radius: var(--mj-radius-sm); background: var(--mj-bg-surface-sunken);
+            font-size: var(--mj-text-sm); color: var(--mj-text-secondary);
+        }
+        .mjs-deal-schedule-total--off {
+            background: var(--mj-status-warning-bg); color: var(--mj-status-warning-text);
+            border-left: 3px solid var(--mj-status-warning);
+        }
+        .mjs-deal-schedule-total__why { flex-basis: 100%; }
+    `],
 })
 export class MJSDealSchedulePanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealPaymentSchedule;
+    private readonly cdr = inject(ChangeDetectorRef);
+
+    /**
+     * The deal's instalments as last read, for the running total under the grid (bc-aidp-next-golive#290).
+     * Null before the first read and after a failed one: the panel then says nothing rather than
+     * asserting a total it cannot see.
+     */
+    public Rows: DealScheduleRowFigures[] | null = null;
+
+    /** Scheduled total and remainder against the deal's current amount, or null with no rows read. */
+    public get Total(): DealScheduleTotal | null {
+        return this.Rows ? ReadDealScheduleTotal(this.Rows, this.Record?.Amount ?? null) : null;
+    }
+
+    /** "Remaining $0.01", "Nothing remaining" or "Over by $0.50". */
+    public get RemainderLabel(): string {
+        const remainder = this.Total?.Remainder ?? null;
+        if (remainder === null) return '';
+        if (remainder === 0) return 'Nothing remaining';
+        return remainder > 0 ? `Remaining ${this.Money(remainder)}` : `Over by ${this.Money(-remainder)}`;
+    }
+
+    /** One sentence on why the schedule does not tie, or null when it does. */
+    public get GapSentence(): string | null {
+        const total = this.Total;
+        return total ? ExplainDealScheduleGap(total, (n) => this.Money(n)) : null;
+    }
+
+    /** A figure in the deal's currency, to the cent. */
+    public Money(amount: number | null): string {
+        return FormatDealMoney(amount, this.Record?.CurrencyID ?? null, 'cents');
+    }
 
     /**
      * Instalments by payment date, then by DisplayOrder within a date (bizapps-sales#314).
@@ -3900,5 +4083,26 @@ export class MJSDealSchedulePanel extends BaseFormPanel<DealEntity> {
 
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
         this.FormComponent.SetSectionRowCount('payment-schedule', event.totalRowCount);
+        void this.readRows();
+    }
+
+    /**
+     * Read the rows again rather than sum the grid: the load event carries counts, not rows, and the
+     * grid pages, so its rows would be one page of a long schedule.
+     */
+    private async readRows(): Promise<void> {
+        const dealID = this.Record?.ID;
+        if (!dealID) {
+            this.Rows = null;
+            return;
+        }
+        const read = await new RunView().RunView<DealScheduleRowFigures>({
+            EntityName: this.Entity,
+            ExtraFilter: `DealID='${String(dealID).replace(/'/g, "''")}'`,
+            Fields: ['Amount', 'PaymentDate'],
+            ResultType: 'simple',
+        });
+        this.Rows = read.Success ? read.Results ?? [] : null;
+        this.cdr.detectChanges();
     }
 }

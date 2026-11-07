@@ -1,5 +1,64 @@
 # @mj-biz-apps/sales-entities
 
+## 6.24.1
+
+### Patch Changes
+
+- b4fca8a: Restore the Acronym field on Sales Accounts. Sales Accounts inherit it from Organization (Common 5.57+), and the 6.24.0 generated code dropped it, so every Sales Account form failed to load with "Cannot query field Acronym". Common is now required at 5.60.0 or later, the version AIDP Next runs, so CodeGen in this repo keeps the field.
+
+## 6.24.0
+
+### Minor Changes
+
+- da41816: Deals carry a `CreationDate` — the business creation date the deal ages from, defaulted to the
+  record's creation instant and editable afterwards (#532).
+
+  `__mj_CreatedAt` could not do this job: it records when the ROW was written, so an imported deal
+  carries import day rather than deal day, and it is not editable. Existing deals are backfilled from
+  the earliest evidence the deal existed — their row stamp, or their first stage transition when that
+  is earlier — the same rule `Sales: Deal Cycle Time` already infers at query time.
+
+  The field is on the deal form's Pipeline tab, beside the forecast fields. It is not offered while a
+  deal is unsaved, since the default is correct for a deal created here.
+
+- 4a3226a: Close and lock hardening: validate caller-supplied IDs and fail closed on loss-reason and deal-type lookup errors in `Sales.CloseDeal` and `Sales.ReopenDeal`; keep client-generated `ConcessionID` across discount-concession retries so a resend after a timeout is idempotent; return a specific refusal naming the deal and contract when a close or stale pre-close save hits an already-Won deal; and allow a closed deal whose persisted `AccountID` is blank to have its account set once without reopening.
+- c4808fa: Release seed for 6.24, second part: `V202611061600__v6.24.x__Metadata_Sync.sql` and its PostgreSQL counterpart create the optional `Parties` input on the "Log Deal Activity" action, so installed hosts can pass the people and organizations to link.
+- c96a138: Release seed for 6.24: `V202611061330__v6.24.x__Metadata_Sync.sql` and its PostgreSQL counterpart carry this release's metadata to hosts, which install by migration and never read `metadata/`: the `Sales.RecordDiscountConcession` remote operation's input type gains the optional `ConcessionID`, so a resend after a timeout finds the concession the first attempt wrote.
+
+## 6.23.4
+
+## 6.23.3
+
+## 6.23.2
+
+## 6.23.1
+
+## 6.23.0
+
+### Minor Changes
+
+- 62e89d6: Deal: new Lead Source Detail field, the specific event, campaign or person behind the deal's lead source, as free text. The Deal form now shows Lead Source and Lead Source Detail on the Pipeline section instead of Motion. Adds a migration (Deal.LeadSourceDetail).
+
+## 6.22.1
+
+### Patch Changes
+
+- 9e6d67e: Deal line: picking a revenue band for a buyer whose revenue is unknown no longer demands a price override reason. Orders 5.40.0 treats that pick as the rules' price and hides its reason box, but the deal line still asked for a reason, so the line could not be saved. Requires Orders 5.40.0.
+
+## 6.22.0
+
+### Minor Changes
+
+- a279840: A discounted deal line now says where its concession stands: awaiting approval, rejected, or not recorded, with Record again on the last two, which opens the line editor to record a new one. The editor asks for a discount reason when orders' priced discount for the line is worth more than the largest Pending or Approved concession on it, instead of when the percent rose over the saved percent, so it asks again after a refused concession and when the quantity or price rises at the same percent. It asks nothing, and shows no "cannot be confirmed" notice, for a line orders records no price concession on (a product no rule prices, a renewal line). New exports from `sales-entities`: `LineDiscountNeedsConcession`, `LargestStandingConcessionValue`, `ResolveLineConcessionState`, `LoadLineConcessionRows`, `ConcessionIsPending`, `ConcessionWasRejected`. `DealLineCardRow` gains `OrderHeaderID`, `ProductPriceID` and `RenewsSubscriptionID`.
+- 7761d34: A deal line for a product that names no subscription type of its own, but inherits one from its product type, is now treated as a subscription, as orders' confirm treats it. The line editor shows Term start and asks whether the line is the next term of a subscription the customer already holds, and the line cards show its term start. `sales-entities` adds `WithInheritedSubscriptionType` and `E_ORDERS_PRODUCT_TYPE`, and `ProductLookup` gains `ProductTypeID` (also in `PRODUCT_LOOKUP_FIELDS`).
+- df7d0bb: A pipeline names the person its close-won tasks go to, and an upgrade keeps it.
+
+  The Order Review and Contract Processing tasks raised when a deal closes Won were routed to `CloseWonTasks.AssigneeRecordID` inside the pipeline's Close Won Policy. The default pipelines ship that policy in metadata with the assignee empty, and installing the app writes the shipped policy back over the database, so an assignee a deployment set there was lost on the next upgrade.
+
+  Pipelines now have a `CloseWonAssigneePersonID` column, a foreign key to People, shown on the pipeline form. The app's metadata never sets it, so an upgrade leaves it alone, and the database refuses a person who does not exist. A won close uses it ahead of the policy's assignee; when it is empty the policy value is used as before, and when both are empty the tasks are created and reported as not routed.
+
+  The demo seed sets its partner rep on the new column instead of in the policy JSON.
+
 ## 6.21.0
 
 ### Minor Changes

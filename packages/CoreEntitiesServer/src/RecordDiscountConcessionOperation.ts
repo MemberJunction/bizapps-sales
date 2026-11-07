@@ -41,7 +41,7 @@ import {
     LogError,
     UserInfo,
 } from '@memberjunction/core';
-import { RegisterClass } from '@memberjunction/global';
+import { RegisterClass, UUIDsEqual } from '@memberjunction/global';
 import type { mjBizAppsOrdersOrderConcessionEntity } from '@mj-biz-apps/orders-entities';
 import {
     CONCESSION_REFUSED_WITHOUT_REASON,
@@ -53,6 +53,10 @@ import {
 } from '@mj-biz-apps/sales-entities';
 
 import { OrdersIsInstalled } from './orders-availability.js';
+
+// The line ID goes into a RunView filter, and the rows that filter returns are deleted, so anything else
+// is refused before the transaction opens.
+const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function refused(Message: string): SalesRecordDiscountConcessionOutput {
     return { Success: false, AwaitingApproval: false, ConcessionID: null, Message };
@@ -66,9 +70,14 @@ export class RecordDiscountConcessionOperation extends SalesRecordDiscountConces
         user: UserInfo,
     ): Promise<SalesRecordDiscountConcessionOutput> {
         if (!input?.OrderLineID) return refused('A discount concession needs the saved line it is on.');
+        if (!UUID.test(input.OrderLineID)) return refused('A discount concession needs the ID of a saved line.');
         const reason = input.Reason?.trim() ?? '';
         if (!reason) return refused('A discount needs a reason before it can be recorded.');
         if (!input.ReasonCategory) return refused('A discount needs a reason category before it can be recorded.');
+        const concessionID = input.ConcessionID?.trim() || null;
+        if (concessionID && !UUID.test(concessionID)) {
+            return refused('A discount concession needs a valid concession ID.');
+        }
         if (!OrdersIsInstalled()) return refused('Orders is not installed on this host, so the discount cannot be recorded.');
 
         const db = provider as unknown as DatabaseProviderBase;
@@ -76,8 +85,18 @@ export class RecordDiscountConcessionOperation extends SalesRecordDiscountConces
         try {
             await db.BeginTransaction();
             transactionOpen = true;
-            await this.withdrawSuperseded(input.OrderLineID, provider, user);
-            const outcome = await this.record(input, reason, provider, user);
+            const existing = await this.withdrawSuperseded(input.OrderLineID, concessionID, provider, user);
+            if (existing) {
+                await db.CommitTransaction();
+                transactionOpen = false;
+                return {
+                    Success: true,
+                    ConcessionID: existing.ID,
+                    AwaitingApproval: !existing.DecidedByUserID,
+                    Message: null,
+                };
+            }
+            const outcome = await this.record(input, reason, concessionID, provider, user);
             if (outcome.Success) await db.CommitTransaction();
             else await db.RollbackTransaction();
             transactionOpen = false;
@@ -94,8 +113,17 @@ export class RecordDiscountConcessionOperation extends SalesRecordDiscountConces
      * Withdraws the line's earlier line-price concessions: every Price or Scope one on the line that names
      * no term (an amount change names the term it lowers, and is a different concession). Orders' `Delete`
      * refuses one an approver decided; that one is left in place, and the refusal is logged, not returned.
+     *
+     * When the caller supplies `concessionID` and a concession with that ID already sits on the line, a
+     * prior attempt with the same client-generated ID already wrote it (#512): return it untouched so a
+     * retry after a timeout does not withdraw and recreate the concession it already recorded.
      */
-    private async withdrawSuperseded(orderLineID: string, provider: IMetadataProvider, user: UserInfo): Promise<void> {
+    private async withdrawSuperseded(
+        orderLineID: string,
+        concessionID: string | null,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<mjBizAppsOrdersOrderConcessionEntity | null> {
         const result = await (provider as unknown as IRunViewProvider).RunView<mjBizAppsOrdersOrderConcessionEntity>(
             {
                 EntityName: ORDER_CONCESSION_ENTITY,
@@ -105,7 +133,12 @@ export class RecordDiscountConcessionOperation extends SalesRecordDiscountConces
             user,
         );
         if (!result.Success) throw new Error(`The line's earlier concessions could not be read: ${result.ErrorMessage}`);
-        for (const earlier of result.Results ?? []) {
+        const earlierRows = result.Results ?? [];
+        if (concessionID) {
+            const matching = earlierRows.find((earlier) => UUIDsEqual(earlier.ID, concessionID));
+            if (matching) return matching;
+        }
+        for (const earlier of earlierRows) {
             if (!(await earlier.Delete())) {
                 LogError(
                     `Sales.RecordDiscountConcession kept concession ${earlier.ID} on order line ${orderLineID}: ` +
@@ -113,16 +146,19 @@ export class RecordDiscountConcessionOperation extends SalesRecordDiscountConces
                 );
             }
         }
+        return null;
     }
 
     private async record(
         input: SalesRecordDiscountConcessionInput,
         reason: string,
+        concessionID: string | null,
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<SalesRecordDiscountConcessionOutput> {
         const concession = await provider.GetEntityObject<mjBizAppsOrdersOrderConcessionEntity>(ORDER_CONCESSION_ENTITY, user);
         concession.NewRecord();
+        if (concessionID) concession.ID = concessionID;
         concession.OrderLineID = input.OrderLineID;
         concession.DeliveryForm = 'Price';
         // Orders' CHECK constraint and its subclass judge the category; sales passes it through.
