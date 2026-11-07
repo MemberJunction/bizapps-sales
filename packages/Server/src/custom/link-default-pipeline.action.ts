@@ -52,7 +52,7 @@ export class LinkDefaultPipelineToCompaniesAction extends BaseAction {
         setOutput(params, 'AlreadyLinked', result.AlreadyLinked);
         setOutput(params, 'Issues', JSON.stringify(result.Issues));
 
-        const refused = result.Outcome === 'NO_DEFAULT' || result.Outcome === 'AMBIGUOUS_DEFAULT';
+        const refused = result.Outcome === 'NO_DEFAULT' || result.Outcome === 'AMBIGUOUS_DEFAULT' || result.Outcome === 'READ_FAILED';
         return {
             Success: result.Success,
             ResultCode: result.Outcome,
