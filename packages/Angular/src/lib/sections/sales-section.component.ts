@@ -49,6 +49,7 @@ import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
 import { EntityViewerModule, type RecordOpenedEvent, type ViewRelatedRecordNavigation } from '@memberjunction/ng-entity-viewer';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import {
+    DealFiltersWhere,
     DealInListWhere,
     DealPipelineViewWith,
     InspectCriteriaWhere,
@@ -378,6 +379,8 @@ export class MJSSalesSectionComponent implements OnInit {
     public ContactEntityInfo: EntityInfo | null = null;
     public InspectView: MJUserViewEntityExtended | null = null;
     public AllDealsView: MJUserViewEntityExtended | null = null;
+    /** Identifies the newest All Deals view, so a slower superseded one cannot apply late. */
+    private allDealsToken = 0;
     /**
      * The shared pipeline view, read once per `Refresh()`. Both grids, and every deal list click, take a
      * copy of it instead of reading it again (bizapps-sales#261). Null when the Deals entity is not in
@@ -514,6 +517,9 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Period = period;
         this.CustomStart = url.PeriodStart;
         this.CustomEnd = url.PeriodEnd;
+        if (filtersChanged) {
+            this.reloadAllDeals();
+        }
         if (filtersChanged || periodChanged) {
             // The figures re-read also re-reads the Board's deals and re-filters the deal list.
             void this.reloadFigures();
@@ -1038,9 +1044,11 @@ export class MJSSalesSectionComponent implements OnInit {
                 PipelineIDs: this.PipelineOptions,
                 OwnerEmployeeIDs: this.OwnerOptions,
             },
+            // All Deals lists every deal, so it has no period, and the summary's no-lines count is the period's.
+            HidePeriod: this.Page === 'list',
             HiddenKinds: this.HidePipelines ? ['PipelineIDs'] : [],
             MyEmployeeID: this.MyEmployeeID,
-            NoLinesLeftOut: this.NoLinesLeftOut,
+            NoLinesLeftOut: this.Page === 'list' ? 0 : this.NoLinesLeftOut,
         };
     }
 
@@ -1071,6 +1079,7 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Filters = filters;
         this.emitUrlState();
         void this.reloadFigures();
+        this.reloadAllDeals();
     }
 
     /**
@@ -1298,14 +1307,28 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /**
      * All deals takes the saved view's sort: open deals first (no ClosedAt), then soonest expected close
-     * (bizapps-sales#371).
+     * (bizapps-sales#371), narrowed by the filter bar's lists and never by the period
+     * (bc-aidp-next-golive#453). With no list set it keeps the saved view's own filter.
      */
     private async refreshAllDealsView(): Promise<void> {
+        const token = ++this.allDealsToken;
         try {
-            this.AllDealsView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView) : null;
+            const where = DealFiltersWhere(this.Filters, tableOf(E_ORDER_LINE)) || undefined;
+            const view = this.pipelineView ? await DealPipelineViewWith(this.pipelineView, where) : null;
+            // Two filter changes in quick succession: only the latest one's view is shown.
+            if (token === this.allDealsToken) {
+                this.AllDealsView = view;
+            }
         } catch (e) {
-            this.ViewError = reasonOf(e);
+            if (token === this.allDealsToken) {
+                this.ViewError = reasonOf(e);
+            }
         }
+    }
+
+    /** Re-derives All Deals for a filter change, then re-renders. */
+    private reloadAllDeals(): void {
+        void this.refreshAllDealsView().then(() => this.cdr.detectChanges());
     }
 
     public OnAllDealsOpened(event: RecordOpenedEvent): void {

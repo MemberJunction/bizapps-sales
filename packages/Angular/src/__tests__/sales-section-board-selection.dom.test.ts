@@ -179,7 +179,8 @@ describe('the filter bar carries over between the Dashboard and the Board (bc-ai
 
         fixture.componentInstance.OnNav({ id: 'list' } as MJLeftNavItem);
         fixture.detectChanges();
-        expect(fixture.nativeElement.querySelectorAll('mjs-sales-filter-bar'), 'All deals keeps its grid filters').toHaveLength(0);
+        expect(fixture.nativeElement.querySelectorAll('mjs-sales-filter-bar'), 'All deals has its own copy (bc-aidp-next-golive#453)').toHaveLength(1);
+        expect(visiblePage(fixture).querySelector('mjs-sales-filter-bar')).not.toBeNull();
     });
 });
 

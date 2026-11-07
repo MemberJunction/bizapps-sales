@@ -9,7 +9,8 @@
  * switching pages never resets a filter.
  *
  * What each page does with the selection is the page's business: the Dashboard bounds its figures by
- * the period, the Board bounds its closed columns by it. See `MJSSalesSectionComponent`.
+ * the period, the Board bounds its closed columns by it, and All Deals shows the lists without the
+ * period (bc-aidp-next-golive#453). See `MJSSalesSectionComponent`.
  *
  * @module @mj-biz-apps/sales-ng
  */
@@ -36,6 +37,11 @@ export interface SalesFilterBarState {
     Filters: DashboardFilters;
     /** The choices each list offers. */
     Options: Record<FilterKind, FilterOption[]>;
+    /**
+     * Leaves out the Period dropdown, its dates and the custom range: All Deals lists every deal,
+     * whatever the period (bc-aidp-next-golive#453).
+     */
+    HidePeriod?: boolean;
     /** Lists the bar leaves out: the Pipeline list while the `HidePipelines` setting is on. */
     HiddenKinds?: readonly FilterKind[];
     /** The signed-in user's employee record; "My deals" is hidden without one. */
