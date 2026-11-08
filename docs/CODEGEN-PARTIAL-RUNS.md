@@ -39,34 +39,36 @@ rows, therefore run CodeGen" — and it is wrong for a reason that is not obviou
 **CodeGen is not a metadata-repair tool. It is a whole-schema regeneration tool that happens to write
 metadata as part of its output.** Pointing it at a one-column gap asks it to regenerate everything, and
 everything includes objects whose current definition it may not be able to reproduce — because the app
-capture is stale, because a sibling app's entities are not loaded, or because an IsA relationship resolves
-differently on the second pass than the first.
+capture is stale, or because a sibling app's entities are not loaded.
 
-This repository's own `CLAUDE.md` already records a measured instance of that last case: a second full
-CodeGen pass regenerated `vwDeals` with eleven virtual lookup columns where the first produced ten, without
-adding the matching `EntityField` row — leaving every Deal insert failing on a column-count mismatch. Same
-family: a tool that is correct end-to-end and destructive when interrupted or misfed.
+A run can also stop one pass short. The pass that adds a column to a view registers that column's
+`EntityField` row only on the next pass (`docs/KNOWN-ISSUES.md` KI-7), so stopping after it leaves every
+insert on the entity failing on a column-count mismatch. Same family: a tool that is correct end-to-end and
+destructive when interrupted or misfed.
 
 ---
 
 ## What to do instead
 
-**For a missing `EntityField` row, write the INSERT.** It is a dozen lines of SQL in a migration, it is
-reviewable, it changes exactly one thing, and it cannot drop an object. The generated `EntityField` INSERTs
-already in the migration set are the template.
+**For a missing `EntityField` row, run CodeGen under the preconditions below; do not hand-write the
+INSERT.** `CLAUDE.md` ("CodeGen output must be reproducible from this repo") rules that metadata CodeGen
+creates ships in a migration as CodeGen wrote it, and that generated output is never written by hand. A
+hand-written row is not what this repo's toolchain produces from its migrations, so the next CodeGen run
+on any host drifts from it. An earlier version of this page said to write the INSERT; that advice is
+withdrawn.
 
 **For a stale view or procedure, regenerate that object alone**, from the migration that owns it, rather
 than regenerating the schema.
 
-**If CodeGen genuinely is the right tool** — a real schema change, many entities, a rebuild — then the
-preconditions from `CLAUDE.md` are not optional and the reason each exists is now demonstrated rather than
-theoretical:
+**Whenever CodeGen runs**, the preconditions from `CLAUDE.md` are not optional and the reason each exists
+is now demonstrated rather than theoretical:
 
 * Take a `COPY_ONLY` backup first, and verify it with `RESTORE VERIFYONLY … WITH CHECKSUM`. `COPY_ONLY`
   specifically, if anyone else is working against the host: a normal full backup resets their differential
   base.
 * Run it against a database you own, never a shared host.
-* One pass, not two. Pass 2 must be `--skipdb`.
+* Run it until it reports `success: true` and every entity's field count matches its view (KI-7). One
+  pass is not always enough, and a `success: false` pass leaves the database inconsistent.
 * Confirm every sibling app's entities are loaded before starting, since an unresolved sibling is what
   makes the capture incomplete.
 
@@ -91,10 +93,10 @@ on anybody noticing an error message.
 
 ## The general lesson, stated plainly
 
-**A tool whose failure mode is "removes things and stops" must never be aimed at a small problem.** The
-blast radius is not proportional to the goal — it is proportional to what the tool regenerates, which is
-everything. Three incidents is enough evidence that the instinct to reach for it needs to be treated as
-the warning sign, not the plan.
+**A tool whose failure mode is "removes things and stops" must never be aimed at a small problem without
+a verified restore point.** The blast radius is not proportional to the goal — it is proportional to what
+the tool regenerates, which is everything. Three incidents is enough evidence that a small gap is no reason
+to skip the preconditions above.
 
 The question worth asking before running it is not "will this fix the gap?" but **"what does this drop on
 the way in, and do I have a verified restore point?"**

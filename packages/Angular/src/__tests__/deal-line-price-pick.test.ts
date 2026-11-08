@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Metadata } from '@memberjunction/core';
+import { MJOLinePricePickerComponent } from '@mj-biz-apps/orders-ng';
 import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.component';
 
 /**
@@ -11,7 +12,8 @@ import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.
  *
  * The deal line hosts orders' shared `mjo-line-price-picker`, so a rep with an override grant can put
  * the line on one of the product's named prices. What sales adds around it is small, and these pin it:
- * the picker never offers a typed amount (D-DL2), a picked price reaches `Orders.PriceOrder` pinned,
+ * the picker allows a typed amount, which it offers only to an `OverrideAny` holder (D-DL2, revised),
+ * a picked or typed price reaches `Orders.PriceOrder` pinned,
  * a pick without a reason cannot be saved, and each product in the list names its catalog price.
  */
 
@@ -86,9 +88,19 @@ const REAL_PROVIDER = Metadata.Provider;
 afterEach(() => { Metadata.Provider = REAL_PROVIDER; });
 
 describe('the price picker on a deal line', () => {
-    it('never offers a typed amount (D-DL2)', () => {
+    it('allows a typed amount, which the picker offers only to an OverrideAny holder (D-DL2, revised)', () => {
         const tag = SOURCE.slice(SOURCE.indexOf('<mjo-line-price-picker'), SOURCE.indexOf('</mjo-line-price-picker>'));
-        expect(tag).toContain('[AllowCustomAmount]="false"');
+        expect(tag).toContain('[AllowCustomAmount]="true"');
+        expect(tag).toContain('[OverrideKind]="OverrideKind"');
+    });
+
+    it('offers the custom amount to an OverrideAny holder and not to an OverrideList holder', () => {
+        const picker = Object.create(MJOLinePricePickerComponent.prototype) as MJOLinePricePickerComponent;
+        picker.AllowCustomAmount = true;
+        picker.OverrideKind = 'any';
+        expect(picker.CustomAmountOffered).toBe(true);
+        picker.OverrideKind = 'list';
+        expect(picker.CustomAmountOffered).toBe(false);
     });
 
     it('is offered on an open deal to a rep holding an override grant', () => {
@@ -130,6 +142,21 @@ describe('a picked price needs a reason', () => {
         expect(e.BlockedReason).toBe('Enter a reason for the price override.');
     });
 
+    it('applies to a typed amount too: pinned to Orders, and refused without a reason', async () => {
+        const typed = () => {
+            const l = line({ overridden: true, reason: null, unitPrice: 2500 });
+            (l.GetFieldByName('ProductPriceID') as { Value: unknown }).Value = null;
+            return l;
+        };
+        const blocked = editor({ overrideKind: 'any', working: typed() }).e;
+        expect(blocked.CanSave).toBe(false);
+        expect(blocked.BlockedReason).toBe('Enter a reason for the price override.');
+
+        const { e, routed } = editor({ overrideKind: 'any', working: typed() });
+        await e['refreshPrice']();
+        expect(routed[0].input.Lines[0].UnitPrice).toBe(2500);
+    });
+
     it('can be saved once it has one', () => {
         const { e } = editor({ working: line({ overridden: true, reason: 'Band 2', unitPrice: 80 }) });
         expect(e.CanSave).toBe(true);
@@ -138,6 +165,60 @@ describe('a picked price needs a reason', () => {
     it('locks the product while the price is off its default', () => {
         expect(editor({ working: line({ overridden: true, reason: 'Band 2', unitPrice: 80 }) }).e.ProductLockedByPrice).toBe(true);
         expect(editor().e.ProductLockedByPrice).toBe(false);
+    });
+
+    /**
+     * #408: a rep without an override grant has no price picker, so "put the price back on Default"
+     * named a control they do not have. They are told the line has a special price and who can change it.
+     */
+    it('names the remedy only to a rep who has the picker', () => {
+        const overridden = () => line({ overridden: true, reason: 'Band 2', unitPrice: 80 });
+        expect(editor({ overrideKind: 'list', working: overridden() }).e.ProductSelectTitle)
+            .toBe('Put the price back on Default before changing the product.');
+        const withoutGrant = editor({ overrideKind: 'none', working: overridden() }).e.ProductSelectTitle;
+        expect(withoutGrant).toContain('special price');
+        expect(withoutGrant).toContain('Someone who can override prices');
+        expect(withoutGrant).not.toContain('Put the price back');
+    });
+
+    it('lets the lock outrank the price, and says nothing extra on a line at its default', () => {
+        const overridden = line({ overridden: true, reason: 'Band 2', unitPrice: 80 });
+        const locked = editor({ locked: true, working: overridden }).e;
+        expect(locked.ProductSelectTitle).toBe(locked.BlockedReason);
+        const plain = editor().e;
+        expect(plain.ProductSelectTitle).toBe(plain.BlockedReason);
+    });
+
+    /**
+     * A product priced by revenue band, for a buyer whose revenue is unknown: Orders gives no default,
+     * so the rep picks the band. That pick is the rules' price, not an override, and the picker hides
+     * its reason box for it, so the editor must not ask for a reason the rep has nowhere to enter.
+     */
+    it('asks no reason for a revenue band the rules could not choose', async () => {
+        const bandLine = () => {
+            const l = line({ unitPrice: 80 });
+            const pick = l.GetFieldByName('ProductPriceID') as { Value: unknown; Dirty: boolean };
+            pick.Value = NAMED_PRICE;
+            pick.Dirty = true;
+            return { ...l, ProductPriceID: NAMED_PRICE };
+        };
+        const band = { ID: NAMED_PRICE, Name: 'Band 2', UnitPrice: 80, BandUndecided: true };
+
+        const { e, routed } = editor({ working: bandLine() });
+        e.Applicable = [band] as typeof e.Applicable;
+        expect(e.BlockedReason).not.toBe('Enter a reason for the price override.');
+        expect(e.CanSave).toBe(true);
+        expect(e.ProductLockedByPrice).toBe(false);
+
+        // The band is still sent pinned: with no default, Orders cannot choose it on its own.
+        await e['refreshPrice']();
+        expect(routed[0].input.Lines[0].UnitPrice).toBe(80);
+    });
+
+    it('binds the product box title to that rule', () => {
+        const at = SOURCE.indexOf('data-testid="line-product"');
+        const box = SOURCE.slice(at, SOURCE.indexOf('/>', at));
+        expect(box).toContain('[title]="ProductSelectTitle"');
     });
 });
 

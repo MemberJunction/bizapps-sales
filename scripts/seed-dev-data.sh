@@ -14,10 +14,11 @@
 #
 # WHY IT IS NEEDED AT ALL — two hard stops discovered standing up S1:
 #
-#   1. `mj migrate` seeds ZERO companies and ZERO employees. But Pipeline.CompanyID is NOT NULL with
-#      a foreign key to __mj.Company (L-14, and the decision that makes every rollup sliceable by
-#      company for free). With no Company row, no Pipeline can be created — and since Deal.PipelineID
-#      is also NOT NULL, no Deal either. The app is uncreatable until a Company exists.
+#   1. `mj migrate` seeds ZERO companies and ZERO employees. But Deal.CompanyID is NOT NULL with a
+#      foreign key to __mj.Company (L-14, and the decision that makes every rollup sliceable by
+#      company for free), and the deal's company must be actively linked to its pipeline through
+#      PipelineCompany. With no Company row there is nothing to link a pipeline to, so no Deal can be
+#      saved. The app is uncreatable until a Company exists.
 #
 #   2. MJ core seeds only the 'System' and 'Anonymous' users. MJ Explorer authenticates against the
 #      MSAL tenant and then resolves the authenticated email to a __mj.User row; with no matching row
@@ -71,7 +72,9 @@ ROLE_DEVELOPER='DEAFCCEC-6A37-EF11-86D4-000D3A4E707E'
 ROLE_UI='E0AFCCEC-6A37-EF11-86D4-000D3A4E707E'
 ROLE_INTEGRATION='DFAFCCEC-6A37-EF11-86D4-000D3A4E707E'
 
-SQLCMD="sqlcmd -S ${DB_HOST},${DB_PORT:-1433} -U ${DB_USERNAME} -P ${DB_PASSWORD} -C -N o -b"
+# -I turns QUOTED_IDENTIFIER on. sqlcmd leaves it off, and SQL Server refuses any insert into a table
+# with a filtered index while it is off (Msg 1934), which the current schema has.
+SQLCMD="sqlcmd -S ${DB_HOST},${DB_PORT:-1433} -U ${DB_USERNAME} -P ${DB_PASSWORD} -C -N o -b -I"
 
 say() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 
@@ -80,13 +83,13 @@ say "Seeding dev records into ${DB_DATABASE} for ${DEV_EMAIL}"
 $SQLCMD -d "${DB_DATABASE}" -Q "
 SET NOCOUNT ON;
 
--- 1. A Company. Pipeline.CompanyID needs one; without it the app cannot hold a pipeline.
+-- 1. A Company. A pipeline is linked to companies (PipelineCompany) and a deal needs one; without it the app cannot hold a deal.
 IF NOT EXISTS (SELECT 1 FROM __mj.Company WHERE ID = '${COMPANY_ID}')
 BEGIN
     EXEC __mj.spCreateCompany
         @ID          = '${COMPANY_ID}',
         @Name        = N'Blue Cypress (Local Dev)',
-        @Description = N'Local development company. Created by scripts/seed-dev-data.sh so pipelines and deals have an owning company — NOT app metadata, and not intended for any real environment.',
+        @Description = N'Local development company. Created by scripts/seed-dev-data.sh so deals have a selling company and pipelines a company to link to — NOT app metadata, and not intended for any real environment.',
         @Domain      = N'bluecypress.io',
         @Website     = N'https://bluecypress.io';
     PRINT '  + Company created';
@@ -188,8 +191,8 @@ SELECT 'apps=' + STRING_AGG(a.Name, ', ')
 
 cat <<'NEXT'
 
-Seeded. A pipeline can now be created (Pipeline.CompanyID has a target), and the developer's
-email resolves to a User with entity permissions.
+Seeded. A pipeline can now be linked to a company (PipelineCompany has a target), and the
+developer's email resolves to a User with entity permissions.
 
 NOTE this is LOCAL DEV DATA. It is not in metadata/, not referenced by mj-app.json, and must never
 be treated as part of the app.

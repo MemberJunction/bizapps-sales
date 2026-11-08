@@ -20,7 +20,7 @@ const pool = await new sql.ConnectionPool({
 const { setupSQLServerClient, SQLServerProviderConfigData } = await import('@memberjunction/sqlserver-dataprovider');
 const { UserCache } = await import('@memberjunction/generic-database-provider');
 const provider = await setupSQLServerClient(new SQLServerProviderConfigData(pool, process.env.MJ_CORE_SCHEMA || '__mj'));
-await UserCache.Instance.Refresh(pool);
+await UserCache.Instance.Refresh(provider);
 const user = UserCache.Users.find(u => u?.Type?.trim().toLowerCase() === 'owner') ?? UserCache.Users[0];
 
 await import('@mj-biz-apps/sales-server').then(m => m.LoadBizAppsSalesServer?.());
@@ -40,7 +40,11 @@ console.log(`\n  database: ${DB}${SKIP_ORDERS ? '   [SKIP_ORDERS: orders server 
 
 const rv = new RunView();
 const pipe = (await rv.RunView({ EntityName: 'MJ_BizApps_Sales: Pipelines', ExtraFilter: 'IsActive = 1',
-    ResultType: 'simple', Fields: ['ID', 'Code', 'CompanyID'] }, user)).Results?.[0];
+    ResultType: 'simple', Fields: ['ID', 'Code'] }, user)).Results?.[0];
+// The deal sells as a company its pipeline is actively linked to; the server refuses any other.
+const link = pipe && (await rv.RunView({ EntityName: 'MJ_BizApps_Sales: Pipeline Companies',
+    ExtraFilter: `PipelineID = '${pipe.ID}' AND IsActive = 1`,
+    ResultType: 'simple', Fields: ['CompanyID'] }, user)).Results?.[0];
 const stage = (await rv.RunView({ EntityName: 'MJ_BizApps_Sales: Pipeline Stages',
     ExtraFilter: `PipelineID = '${pipe.ID}' AND IsActive = 1`, OrderBy: 'DisplayOrder ASC',
     ResultType: 'simple', Fields: ['ID'] }, user)).Results?.[0];
@@ -50,7 +54,7 @@ const status = (await rv.RunView({ EntityName: 'MJ_BizApps_Sales: Deal Status Ty
     ExtraFilter: 'IsOpen = 1 AND IsActive = 1', ResultType: 'simple', Fields: ['ID'] }, user)).Results?.[0];
 const account = (await rv.RunView({ EntityName: 'MJ_BizApps_Sales: Sales Accounts', ExtraFilter: 'IsActive = 1',
     ResultType: 'simple', Fields: ['ID'] }, user)).Results?.[0];
-if (!pipe || !stage || !dtype || !status) { console.error('    PRECONDITION: seeds missing'); process.exit(2); }
+if (!pipe || !link || !stage || !dtype || !status) { console.error('    PRECONDITION: seeds missing'); process.exit(2); }
 ck(true, 'fixture discovered by FLAG, never by name', `pipeline ${pipe.Code}`);
 
 const ordersBefore = (await pool.request().query(
@@ -65,6 +69,7 @@ deal.PipelineStageID = stage.ID;
 deal.DealTypeID = dtype.ID;
 deal.DealStatusTypeID = status.ID;
 deal.AccountID = account?.ID ?? null;
+deal.CompanyID = link.CompanyID;
 ck(!deal.OrderID, 'a new deal has no OrderID before saving', String(deal.OrderID));
 
 const saved = await deal.Save();
@@ -87,8 +92,8 @@ ck(!!row, 'the order row is IN THE DATABASE');
 ck(row && !!row.OrderNumber, 'orders minted its OrderNumber', row?.OrderNumber);
 ck(row && row.Status === 'Draft', 'it is in Draft — nothing fires at creation', row?.Status);
 ck(row && row.OrderType === 'Sale', 'OrderType is Sale', row?.OrderType);
-ck(row && String(row.CompanyID).toLowerCase() === String(pipe.CompanyID).toLowerCase(),
-   'CompanyID came from the PIPELINE, via the deal stamp', row?.CompanyID);
+ck(row && String(row.CompanyID).toLowerCase() === String(link.CompanyID).toLowerCase(),
+   'CompanyID came from the DEAL, a company linked to its pipeline', row?.CompanyID);
 if (account) {
     ck(row && String(row.BillToOrganizationID).toLowerCase() === String(account.ID).toLowerCase(),
        'bill-to organization is the deal account');

@@ -63,8 +63,24 @@ export default defineConfig({
   testDir: '.',
   globalSetup: './lib/global-setup.ts',
   globalTeardown: './lib/global-teardown.ts',
+  /**
+   * Files may run in parallel; tests WITHIN a file stay ordered, because several specs build state
+   * across their own steps and reordering them would be a different test.
+   */
   fullyParallel: false,
-  workers: 1,
+  /**
+   * PW_WORKERS raises the worker count for an experiment without changing the default.
+   *
+   * Measured reason to try it: 72% of a 34-minute isolated run is spent inside FAILING specs waiting
+   * out timeouts, and the global prefix sweep that looked like a parallel-safety blocker turns out to
+   * run only in global-setup/teardown, not between specs. Specs name their own rows with a run-unique
+   * prefix (`PW-LIFE-<base36 time>`), so row collisions are unlikely.
+   *
+   * The REAL hazard is specs that mutate SHARED SEEDED data rather than their own -- 20-demo-tour and
+   * 80-board-drag both work against seeded deals. If a spec fails under parallelism but passes alone,
+   * that is the reason to suspect first.
+   */
+  workers: Number(process.env.PW_WORKERS ?? 1),
   retries: 0,
   forbidOnly: !!process.env.CI,
   reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]],

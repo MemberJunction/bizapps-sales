@@ -18,7 +18,7 @@
  *
  * 40 proves the rows landed. Reopening is where the form can fail in ways nothing else sees:
  *
- *   · the lines grid never loads, so a saved deal opens showing no products and the rep re-adds them;
+ *   · the lines never load, so a saved deal opens showing no products and the rep re-adds them;
  *   · a date comes back as a `Date` and the `<input type="date">` renders BLANK — no error, and the
  *     next save writes the blank over a real value;
  *   · a removal takes the row off the screen but not off the order — the editor removes through
@@ -27,15 +27,22 @@
  *
  * Every one of those looks like a working screen. The only way to catch them is to leave and come back.
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { CloseDb, OrderLinesForDeal, QueryAll } from '../lib/db';
 import { AddLines, ComposeDeal, PurgeDeal, ReopenRecord } from '../lib/deal-flow';
-import { DealForm, EditDeal, Field, OpenSection, SaveDeal, SetText } from '../lib/deal-form';
+import { DealForm, EditDeal, Field, OpenSection, RevealInForm, SaveDeal, SetText } from '../lib/deal-form';
 import { captureConsoleErrors, expectOnlyKnownErrors, KNOWN_POST_DELETE_ERRORS, shot } from '../lib/explorer';
 
 const RUN_TAG = `RT-${Date.now().toString(36).toUpperCase()}`;
-const DEAL_NAME = `Round trip ${RUN_TAG}`;
+/**
+ * THE PREFIX GOES FIRST, for the same reason cleanup.mjs records against its own history: every
+ * sweep and every count uses an ANCHORED LIKE, so a tag in the middle of the name is invisible to
+ * them. AssertBaseline then counts this deal as SEEDED and fails the baseline for whichever spec is
+ * running beside this one.
+ */
+const DEAL_NAME = `${RUN_TAG} round trip`;
 
 /**
  * Cleanup by name, handed to `PurgeDeal`, which removes children first. `PurgeByPrefix` refuses any
@@ -60,15 +67,15 @@ interface LineKey {
     Quantity: number;
 }
 
-/** The AG Grid rows of the "What's being sold" panel on the active form. */
+/** The line cards of the "What's being sold" panel on the active form. */
 function lineRows(page: Page): Locator {
     return DealForm(page)
         .locator('.mj-forms-panel[data-section-key="lines"]')
-        .locator('.ag-center-cols-container .ag-row:visible');
+        .locator('[data-testid="deal-line"]:visible');
 }
 
 /**
- * Opens a saved line in the restricted line editor by double-clicking its grid row.
+ * Opens a saved line in the restricted line editor by double-clicking its card.
  *
  * Local to this spec (and duplicated in 40) because `lib/deal-form.ts` has no row-level line helper
  * yet. Waits for the product select, which renders only once the editor has loaded the line.
@@ -92,18 +99,16 @@ async function cancelLineEditor(editor: Locator): Promise<void> {
 /**
  * The product ID the open editor has bound, lowercased.
  *
- * Read from the select's VALUE, not its label: labels are catalogue text, the ID is what the line
- * references. Angular's `[ngValue]` writes the DOM value as `"<index>: <value>"`, so the ID is the part
- * after the separator. Polled, because the binding lands after the catalogue loads, and until then the
- * value is the placeholder's `null`.
+ * Read from the product box's `data-product-id`, not its text: the text is catalogue wording, the ID is
+ * what the line references. Polled, because the binding lands after the catalogue loads.
  */
 async function boundProductID(editor: Locator): Promise<string> {
-    const select = editor.locator('[data-testid="line-product"]');
+    const box = editor.locator('[data-testid="line-product"]');
     let id = '';
     await expect
         .poll(
             async () => {
-                id = ((await select.inputValue()).split(': ').pop() ?? '').trim().toLowerCase();
+                id = ((await box.getAttribute('data-product-id')) ?? '').trim().toLowerCase();
                 return /^[0-9a-f-]{36}$/.test(id);
             },
             { timeout: 20_000, message: 'the line editor must bind the saved line\'s product' },
@@ -113,10 +118,10 @@ async function boundProductID(editor: Locator): Promise<string> {
 }
 
 /**
- * Every grid row's product and quantity, read through the editor each row opens.
+ * Every line card's product and quantity, read through the editor each card opens.
  *
- * Found by opening each row rather than by reading grid text: which columns the lines grid shows is
- * view configuration, and a product label is not an identity. The editor loads the saved line, so what
+ * Found by opening each card rather than by reading card text: what a card shows is display
+ * choice, and a product label is not an identity. The editor loads the saved line, so what
  * it binds is what the database returned.
  */
 async function linesOnScreen(page: Page): Promise<LineKey[]> {
@@ -177,7 +182,15 @@ test.describe('deal form — the round trip', () => {
         await test.step('reopening brings back both lines, each with its product and quantity', async () => {
             await ReopenRecord(page, DEAL_NAME);
             await OpenSection(page, 'lines');
-            await expect(lineRows(page), 'both lines must come back — an empty grid means the lines never loaded')
+        // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+        // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+        // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+        await RevealInForm(page, lineRows(page).first());
+            // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+            // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+            // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+            await RevealInForm(page, lineRows(page).first());
+            await expect(lineRows(page), 'both lines must come back — no cards means the lines never loaded')
                 .toHaveCount(2, { timeout: 30_000 });
 
             const shown = await linesOnScreen(page);
@@ -208,6 +221,14 @@ test.describe('deal form — the round trip', () => {
         await test.step('removing a saved line through the line editor takes it off the order', async () => {
             await ReopenRecord(page, DEAL_NAME);
             await OpenSection(page, 'lines');
+        // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+        // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+        // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+        await RevealInForm(page, lineRows(page).first());
+            // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+            // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+            // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+            await RevealInForm(page, lineRows(page).first());
             await expect(lineRows(page), 'the two saved lines are the starting point').toHaveCount(2, {
                 timeout: 30_000,
             });
@@ -221,7 +242,7 @@ test.describe('deal form — the round trip', () => {
             await editor.locator('[data-testid="line-remove-confirm"]').click();
             await expect(editor, 'the editor must close once the removal saves').toBeHidden({ timeout: 30_000 });
 
-            await expect(lineRows(page), 'the grid must drop to one line').toHaveCount(1, { timeout: 30_000 });
+            await expect(lineRows(page), 'the cards must drop to one line').toHaveCount(1, { timeout: 30_000 });
             await shot(page, '41-04-removed');
         });
 
@@ -239,6 +260,14 @@ test.describe('deal form — the round trip', () => {
 
             await ReopenRecord(page, DEAL_NAME);
             await OpenSection(page, 'lines');
+        // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+        // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+        // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+        await RevealInForm(page, lineRows(page).first());
+            // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and lineRows
+            // filters on :visible, so a hidden lines section reads as zero rows. A reopen resets
+            // the rail -- which is why 78 passes without this, since AddLines leaves it on lines.
+            await RevealInForm(page, lineRows(page).first());
             await expect(lineRows(page), 'exactly one line must come back — two means the removal only hid the row')
                 .toHaveCount(1, { timeout: 30_000 });
             expect(await linesOnScreen(page), 'and it must be the kept line, with its quantity').toEqual(kept);

@@ -2,8 +2,8 @@
  * @fileoverview Deal form body — Overview plus organized rail sections.
  *
  * Replaces the generated `details` dump (one accordion of every column) with:
- *   Overview (exec briefing) · Pipeline · Account · Commercial · What's being sold
- *   Motion · Close · Internal team · Buying team · Activity · Stage history · Payment schedule
+ *   Overview (exec briefing) · Pipeline · What's being sold · Payment schedule · Account · Commercial
+ *   Close · Buying team · Internal team · Motion · Activity · Stage history
  *
  * `replacesSectionKey: 'details'` hides the generated field list. `contributionKey` equals each
  * panel's `SectionKey` so left-nav rail items attach. Overview is the only `inclusion: 'Primary'`
@@ -14,35 +14,61 @@
 import { ChangeDetectorRef, Component, ViewChild, ViewEncapsulation, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions } from '@memberjunction/core';
+import { CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions, type RunViewParams } from '@memberjunction/core';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
-import { BaseFormPanel, BaseFormsModule, ExplorerEntityDataGridComponent } from '@memberjunction/ng-base-forms';
+import { PartyFieldComponent, type PartyKind } from '@mj-biz-apps/common-ng';
+import { BaseFormPanel, BaseFormsModule, type FormContext } from '@memberjunction/ng-base-forms';
 import {
     EntityViewerModule,
     type AfterDataLoadEventArgs,
-    type AfterRowDoubleClickEventArgs,
     type RecordOpenedEvent,
+    type RecordSelectedEvent,
+    type ViewRelatedRecordNavigation,
 } from '@memberjunction/ng-entity-viewer';
 import {
     DealEntity,
+    IsDealCloseStamp,
     IsDealFieldEditableWhileLocked,
     LoadDealStatusOptions,
     type DealStatusOption,
     type SalesCloseDealInput,
     type SalesCloseDealOutput,
+    type SalesCloseIssue,
     type SalesReopenDealInput,
     type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
-import { SyntheticActivityView } from '../pages/deal-views';
+import { LinkedParties, type ActivityLinkFields, type LinkedParty } from '../activities/deal-activity-parties';
+import { RelatedRecordTarget, SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
+import {
+    CompanyLabel,
+    InitialCompanyID,
+    OrderPipelinesByCompany,
+    PipelineCompanies,
+    PipelineLabel,
+    PipelineServesCompany,
+    PipelinesForCompany,
+    type CompanyPipeline,
+    type PipelineCompany,
+} from '../data/company-pipelines';
 import { MJSDealLineEditorComponent } from './deal-line-editor.component';
+import { MJSDealLineCardsComponent } from './deal-line-cards.component';
+import { BusinessDayOf, DealCloseDay } from './deal-close-day';
+import { WeightedAmount } from './deal-weighted-amount';
+import { FormatDealMoney } from './deal-money';
+import { ExplainDealScheduleGap, ReadDealScheduleTotal, type DealScheduleRowFigures, type DealScheduleTotal } from './deal-schedule-total';
+import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './deal-stage-preview';
+import { IsFieldReadable } from './field-readable';
+import { SelectableStages } from '../data/selectable-stages';
+import { BillComCustomerWarning, CheckBillComCustomer } from '../data/billcom-customer';
 
 const E = MJS_ENTITIES.Deal;
 
 /** Sales' loss-reason table. Named here so the close action has one spelling of it. */
 const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
+const E_PIPELINE_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
 
 /** One pickable loss reason, with the flag that decides whether notes are mandatory. */
 export interface LossReasonOption {
@@ -76,6 +102,165 @@ async function LoadLossReasons(): Promise<LossReasonOption[]> {
     }));
 }
 
+/** One employee the owner picker offers. */
+export interface EmployeeOption {
+    ID: string;
+    Name: string;
+}
+
+/**
+ * Active employees for the Party panel's owner picker, ordered and labelled the way the deal workspace
+ * lists them. Null when the read fails, so the panel can say so rather than offer an empty list.
+ */
+async function LoadEmployees(): Promise<EmployeeOption[] | null> {
+    const result = await new RunView().RunView<{ ID: string; FirstLast: string | null }>({
+        EntityName: MJS_FOREIGN_ENTITIES.Employee,
+        ExtraFilter: 'Active = 1',
+        OrderBy: 'LastName ASC',
+        ResultType: 'simple',
+        Fields: ['ID', 'FirstLast'],
+    });
+    if (!result?.Success) return null;
+    return (result.Results ?? []).map((e) => ({ ID: String(e.ID), Name: e.FirstLast ?? '(unnamed employee)' }));
+}
+
+/**
+ * One pipeline the deal may sit in, as served by one of its linked companies (#327), with whether the
+ * pipeline and that link are active: an inactive one is offered only to the deal already in it
+ * (bc-aidp-next-golive#423).
+ */
+export type PipelineOption = CompanyPipeline & { IsActive: boolean; LinkIsActive: boolean };
+
+/**
+ * One stage, carrying the pipeline that owns it — the whole point of the list — and the defaults a
+ * save applies when a deal arrives in it, so the form can say so before the save (sales#247).
+ */
+export interface PipelineStageOption extends StageDefaults {
+    PipelineID: string;
+    /** The status the stage points at, so the Stage list can leave out the stages a close puts a deal in. */
+    DealStatusTypeID?: string | null;
+}
+
+/**
+ * Every pipeline, active or not, for the picker that also decides which stages are offered.
+ *
+ * INACTIVE ONES ARE LOADED TOO (bc-aidp-next-golive#423). Deactivating a pipeline takes it off the
+ * picker for new choices, but a deal already in it still has to name it: with active-only rows a won
+ * deal in a retired pipeline showed "—" for its pipeline, and its select fell back to "— choose —".
+ * `PipelineOptions` offers an inactive pipeline only to the deal that sits in it.
+ *
+ * ORDERED THE WAY THE WORKSPACE ORDERS THEM, which is `DisplayRank` first.
+ *
+ * This listed them alphabetically, so the same two lists could disagree on a host where rank and
+ * alphabet do not coincide — the form offering D2C above B2B while the workspace offered the reverse,
+ * for a rep who uses both. `DisplayRank` exists to let the seed say which pipeline a team reaches for
+ * first, and an alphabetical list silently discards that.
+ *
+ * Every other vocabulary list in this file and in `deal-workspace.service.ts` already reads
+ * `DisplayRank ASC, Name ASC` — loss reasons, deal types, status types, forecast categories. This was
+ * the one that did not.
+ *
+ * Grouped by company on top of that (#327): `OrderPipelinesByCompany` is the order the workspace and
+ * the board use too, so the three lists still agree.
+ */
+async function LoadPipelines(): Promise<PipelineOption[]> {
+    const [pipelines, links] = await new RunView().RunViews([
+        {
+            EntityName: MJS_ENTITIES.Pipeline,
+            OrderBy: 'DisplayRank ASC, Name ASC',
+            ResultType: 'simple',
+            Fields: ['ID', 'Name', 'Code', 'IsDefault', 'DisplayRank', 'IsActive'],
+        },
+        {
+            // Inactive links too, for the same reason as inactive pipelines: a deal on a retired link
+            // still has to show its company.
+            EntityName: MJS_ENTITIES.PipelineCompany,
+            ResultType: 'simple',
+            Fields: ['PipelineID', 'CompanyID', 'Company', 'IsActive'],
+        },
+    ]);
+    if (!pipelines?.Success || !links?.Success) return [];
+    return OrderPipelinesByCompany(ToPipelineOptions(pipelines.Results as PipelineRow[], links.Results as PipelineLinkRow[]));
+}
+
+/** A pipeline row as `ResultType: 'simple'` returns it. */
+interface PipelineRow {
+    ID: string;
+    Name: string;
+    Code: string;
+    IsDefault: boolean;
+    DisplayRank: number;
+    IsActive: boolean;
+}
+
+/** A `PipelineCompany` row as `ResultType: 'simple'` returns it. */
+interface PipelineLinkRow {
+    PipelineID: string;
+    CompanyID: string;
+    Company: string | null;
+    IsActive: boolean;
+}
+
+/** One option per (pipeline, linked company). A pipeline with no link offers no company, so no option. */
+function ToPipelineOptions(pipelines: readonly PipelineRow[], links: readonly PipelineLinkRow[]): PipelineOption[] {
+    const options: PipelineOption[] = [];
+    for (const r of pipelines) {
+        const id = String(r.ID).toLowerCase();
+        for (const link of links.filter((l) => String(l.PipelineID).toLowerCase() === id)) {
+            options.push({
+                ID: String(r.ID),
+                Name: String(r.Name),
+                Code: String(r.Code ?? ''),
+                CompanyID: String(link.CompanyID),
+                CompanyName: link.Company ?? null,
+                IsDefault: !!r.IsDefault,
+                DisplayRank: Number(r.DisplayRank ?? 0),
+                IsActive: !!r.IsActive,
+                LinkIsActive: !!link.IsActive,
+            });
+        }
+    }
+    return options;
+}
+
+/**
+ * Every active stage ACROSS every pipeline, filtered for display by `StagesForCurrentPipeline`.
+ *
+ * Loaded whole rather than re-queried per pipeline: the list is small, the pipeline can change while
+ * the form is open, and a fetch inside the change handler would make an empty dropdown read as a
+ * timeout rather than as a pipeline with no stages configured. `deal-workspace.service.ts` loads it
+ * the same way for the same reason.
+ *
+ * `DisplayOrder` first, because a sales process has an order and sorting by name would present it
+ * alphabetically -- Discovery, Lost, Negotiation, Proposal, Qualification, Signed.
+ */
+async function LoadPipelineStages(): Promise<PipelineStageOption[]> {
+    const result = await new RunView().RunView<{
+        ID: string; Name: string; PipelineID: string;
+        Probability: number | null; ForecastCategoryTypeID: string | null; ForecastCategoryType: string | null;
+        DealStatusTypeID: string | null;
+    }>({
+        EntityName: E_PIPELINE_STAGE,
+        ExtraFilter: 'IsActive = 1',
+        OrderBy: 'DisplayOrder ASC, Name ASC',
+        ResultType: 'simple',
+        Fields: [
+            'ID', 'Name', 'PipelineID', 'Probability', 'ForecastCategoryTypeID', 'ForecastCategoryType',
+            'DealStatusTypeID',
+        ],
+    });
+    if (!result?.Success) return [];
+    return (result.Results ?? []).map((r) => ({
+        ID: String(r.ID),
+        Name: String(r.Name),
+        PipelineID: String(r.PipelineID),
+        Probability: r.Probability == null ? null : Number(r.Probability),
+        ForecastCategoryTypeID: r.ForecastCategoryTypeID ?? null,
+        ForecastCategoryType: r.ForecastCategoryType ?? null,
+        DealStatusTypeID: r.DealStatusTypeID ?? null,
+    }));
+}
+
 /**
  * `RouteOperation` is on the SQL Server / GraphQL provider, not on the `IMetadataProvider` interface
  * `Metadata.Provider` is declared as, so it has to be narrowed. Declared as a precise shape rather
@@ -94,6 +279,31 @@ interface ReopenOutcome {
     ok: boolean;
     message: string;
     issues: string[];
+    /** `info` issues: something pending that needs no action. Shown apart so they don't read as problems. */
+    notes: string[];
+}
+
+/** The operation's issues as display strings, with `info` notes kept apart from the problems. */
+function splitIssues(issues: SalesCloseIssue[] | null | undefined): { issues: string[]; notes: string[] } {
+    const all = issues ?? [];
+    return {
+        issues: all.filter((i) => i.Severity !== 'info').map((i) => i.Message),
+        notes: all.filter((i) => i.Severity === 'info').map((i) => i.Message),
+    };
+}
+
+/**
+ * A REFUSED close or reopen, split for display: the first problem is the headline and the list holds
+ * the rest, so the headline is not repeated as the list's first line. Info notes never become the
+ * headline; when there is no problem to name, `fallback` is.
+ */
+function splitRefusal(
+    issues: SalesCloseIssue[] | null | undefined,
+    fallback: string,
+): { message: string; issues: string[]; notes: string[] } {
+    const split = splitIssues(issues);
+    const [first, ...rest] = split.issues;
+    return { message: first ?? fallback, issues: rest, notes: split.notes };
 }
 
 /**
@@ -109,6 +319,9 @@ interface ReopenOutcome {
  * an order the deal cannot be worked from, and that list is the only thing between the rep and a live deal
  * pointing at a dead order.
  */
+/** Counts field panel instances, for {@link MJSDealFieldPanel.FieldIdPrefix}. */
+let dealFieldPanelInstances = 0;
+
 /**
  * Whether a close has everything `Sales.CloseDeal` will demand of it.
  *
@@ -125,11 +338,26 @@ function CloseDetailComplete(
     lossNotes: string,
     reasons: LossReasonOption[],
 ): boolean {
-    if (!target) return false;
-    if (!target.IsLost) return true;
-    if (!lossReasonID) return false;
+    return CloseDetailMissing(target, lossReasonID, lossNotes, reasons) === null;
+}
+
+/**
+ * What a close still needs, as the sentence shown under the disabled confirm button, or null when it
+ * is complete (#371 item 6). The same checks as {@link CloseDetailComplete}, which is defined by it,
+ * so the button and its explanation cannot disagree.
+ */
+function CloseDetailMissing(
+    target: DealStatusOption | null,
+    lossReasonID: string | null,
+    lossNotes: string,
+    reasons: LossReasonOption[],
+): string | null {
+    if (!target) return 'Choose an outcome to close the deal.';
+    if (!target.IsLost) return null;
+    if (!lossReasonID) return `Choose a loss reason to close as ${target.Name}.`;
     const needsNotes = reasons.find((r) => r.ID === lossReasonID)?.RequiresNotes === true;
-    return !needsNotes || lossNotes.trim().length > 0;
+    if (needsNotes && lossNotes.trim().length === 0) return 'Add loss notes; the chosen reason requires them.';
+    return null;
 }
 
 /** What a close needs from whichever surface collected it. */
@@ -162,12 +390,11 @@ async function RunClose(req: CloseRequest): Promise<ReopenOutcome> {
             },
         );
         if (!envelope.Success) {
-            return { ok: false, message: envelope.ErrorMessage ?? 'Sales.CloseDeal could not be reached.', issues: [] };
+            return { ok: false, message: envelope.ErrorMessage ?? 'Sales.CloseDeal could not be reached.', issues: [], notes: [] };
         }
         const out = envelope.Output;
         if (!out?.Success) {
-            const issues = (out?.Issues ?? []).map((i) => i.Message);
-            return { ok: false, message: issues[0] ?? 'The deal could not be closed.', issues };
+            return { ok: false, ...splitRefusal(out?.Issues, 'The deal could not be closed.') };
         }
         // WARNINGS ON A SUCCESSFUL CLOSE are the interesting ones -- a stubbed downstream, a finance
         // task that could not be routed, an order status orders refused. Reporting only failures would
@@ -175,13 +402,14 @@ async function RunClose(req: CloseRequest): Promise<ReopenOutcome> {
         return {
             ok: true,
             message: `Deal closed as ${req.target.Name}.`,
-            issues: (out.Issues ?? []).map((i) => i.Message),
+            ...splitIssues(out.Issues),
         };
     } catch (err) {
         return {
             ok: false,
             message: `The close did not complete: ${err instanceof Error ? err.message : String(err)}`,
             issues: [],
+            notes: [],
         };
     }
 }
@@ -225,23 +453,23 @@ async function RunReopen(dealID: string, reason: string, targetStatusID: string 
             { DealID: dealID, Reason: reason.trim(), DealStatusTypeID: targetStatusID },
         );
         if (!envelope.Success) {
-            return { ok: false, message: envelope.ErrorMessage ?? 'Sales.ReopenDeal could not be reached.', issues: [] };
+            return { ok: false, message: envelope.ErrorMessage ?? 'Sales.ReopenDeal could not be reached.', issues: [], notes: [] };
         }
         const out = envelope.Output;
         if (!out?.Success) {
-            const issues = (out?.Issues ?? []).map((i) => i.Message);
-            return { ok: false, message: issues[0] ?? 'The deal could not be reopened.', issues };
+            return { ok: false, ...splitRefusal(out?.Issues, 'The deal could not be reopened.') };
         }
         return {
             ok: true,
             message: 'Deal reopened. The close event remains in its history.',
-            issues: (out.Issues ?? []).map((i) => i.Message),
+            ...splitIssues(out.Issues),
         };
     } catch (err) {
         return {
             ok: false,
             message: `The reopen did not complete: ${err instanceof Error ? err.message : String(err)}`,
             issues: [],
+            notes: [],
         };
     }
 }
@@ -262,11 +490,13 @@ const CLOSE_ACTION_STYLES = `
     .mjs-close-action__hint { color: var(--mj-text-muted); font-size: 0.78rem; }
     .mjs-close-action__form { display: flex; flex-direction: column; gap: var(--mj-space-3); max-width: 520px; }
     .mjs-close-action__row { display: flex; gap: var(--mj-space-4); align-items: center; }
+    .mjs-close-action__outcome { border: 0; margin: 0; padding: 0; min-width: 0; }
+    .mjs-close-action__legend { padding: 0; margin-bottom: 4px; font-size: 0.78rem; color: var(--mj-text-muted); }
     .mjs-close-action__field { display: flex; flex-direction: column; gap: 4px; }
     .mjs-close-action__field > span { font-size: 0.78rem; color: var(--mj-text-muted); }
     .mjs-close-action__confirm {
         cursor: pointer; padding: 6px 14px; border-radius: var(--mj-radius-sm);
-        border: 1px solid var(--mj-brand-primary); background: var(--mj-brand-primary); color: var(--mj-text-on-brand);
+        border: 1px solid var(--mj-brand-primary); background: var(--mj-brand-primary); color: var(--mj-brand-on-primary);
         font-weight: 600;
     }
     .mjs-close-action__confirm:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -277,33 +507,28 @@ const CLOSE_ACTION_STYLES = `
     .mjs-close-action__msg { font-size: 0.82rem; color: var(--mj-status-success); }
     .mjs-close-action__msg.is-error { color: var(--mj-status-warning); font-weight: 500; }
     .mjs-close-action__issue { font-size: 0.78rem; color: var(--mj-status-warning); }
+    .mjs-close-action__note { font-size: 0.78rem; color: var(--mj-text-muted); }
 `;
 
-function money(n: number | null | undefined): string {
-    if (n == null || !Number.isFinite(Number(n))) return '—';
-    return Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+/**
+ * A deal's money on this form: cents, in the deal's own currency, '—' when there is none.
+ *
+ * ONE PRECISION BELOW THE HEADER (#371 item 5). The Overview used to round to whole units while the
+ * Commercial section, the line cards and the line editor showed cents, so the same amount read two
+ * ways a click apart. Only the hero, which is a glance-at briefing, shows whole units now; every
+ * figure here keeps its cents.
+ *
+ * THE DEAL'S CURRENCY, NOT USD (#371 item 4). `CurrencyID` resolves to a code through accounting's
+ * currencies, read once per session; with accounting absent, or no currency on the deal, the code is
+ * the display default. See deal-money.ts.
+ */
+function money(n: number | null | undefined, currencyID: string | null | undefined): string {
+    return FormatDealMoney(n, currencyID, 'cents') || '—';
 }
 
-/**
- * Money as a FIELD rather than as a headline — cents kept.
- *
- * A sibling of {@link money} rather than a parameter on it, because the two answer different
- * questions. `money()` rounds to whole units on purpose: it feeds the Overview's summary figures,
- * where four more characters of precision buy nothing. A rep reading MRR on the Commercial section is
- * reading the number that goes on an invoice.
- *
- * USD IS THIS APP'S STANDING ASSUMPTION, not a new one introduced here — every money string the deal
- * form renders already hardcodes it. It is worth naming now because the currency field beside these
- * ones became real in the same change (bc-aidp-next-golive#259 item 3), so the assumption is visibly
- * an assumption for the first time: a deal denominated in GBP will show its MRR with a dollar sign.
- * Fixing that means resolving `CurrencyID` to a code before formatting, which is a lookup this panel
- * does not do today; it is deliberately left rather than half-done.
- */
-function moneyExact(n: number | null | undefined): string {
-    if (n == null || !Number.isFinite(Number(n))) return '';
-    return Number(n).toLocaleString(undefined, {
-        style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
-    });
+/** As {@link money}, but '' when there is nothing to show, so a self-drawn field row can hide. */
+function moneyExact(n: number | null | undefined, currencyID: string | null | undefined): string {
+    return FormatDealMoney(n, currencyID, 'cents');
 }
 
 /**
@@ -348,8 +573,10 @@ function daysFrom(d: Date | string | null | undefined): number | null {
  * SEPARATE FROM {@link daysFrom}, which measures against TODAY. A sales cycle and a close variance are
  * both statements about two dates in the record, and expressing either through a today-relative helper
  * would make the number change every day after the deal closed — a figure about the past that keeps
- * moving. Everything stored is UTC (CLAUDE.md), so both sides are floored to a UTC day before
- * subtracting; using local getters here shifts the answer by a day either side of midnight.
+ * moving. Both sides are read by their UTC parts, which is how a `DATE` column and a `YYYY-MM-DD` day
+ * both carry their day; using local getters here shifts the answer by a day either side of midnight.
+ * An INSTANT must not be passed straight in — its UTC day is not its business day. Convert it with
+ * {@link BusinessDayOf} first (golive#168).
  */
 function daysBetween(
     from: Date | string | null | undefined,
@@ -421,40 +648,136 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
     public abstract readonly Fields: DealFieldSpec[];
 
     /**
+     * A prefix unique to this panel instance, for the ids that tie a label to its control and a
+     * button to the text explaining it (#371 items 6 and 8). Two deal forms can be open at once, and a
+     * fixed id would point both labels at whichever control came first.
+     */
+    public readonly FieldIdPrefix = `mjs-deal-panel-${++dealFieldPanelInstances}`;
+
+    /**
      * Whether a `currency` field should be drawn by the panel rather than by `mj-form-field`.
      *
      * Only ever true while READING. The moment the field is editable the shared control takes it back,
      * so there is exactly one editable implementation of every field on this form.
      */
+    /**
+     * The `FormContext` a field renders with: the form's own, or a copy with record links off for a
+     * `noLink` field.
+     *
+     * The copy is cached against the context it was made from. The template reads this on every
+     * change-detection pass, and a fresh object each pass would hand `mj-form-field` a new input
+     * every time.
+     */
+    public FieldFormContext(f: DealFieldSpec): FormContext | undefined {
+        if (!f.noLink || !this.FormContext) return this.FormContext;
+        if (this.noLinkContextSource !== this.FormContext) {
+            this.noLinkContextSource = this.FormContext;
+            this.noLinkContext = { ...this.FormContext, enableRecordLinks: false };
+        }
+        return this.noLinkContext;
+    }
+    private noLinkContextSource?: FormContext;
+    private noLinkContext?: FormContext;
+
+    /**
+     * ── CHOOSING AN ACCOUNT FILLS THE DEAL'S EMPTY CONTACTS FROM IT (#254) ────────────────────────
+     *
+     * `mj-form-field` writes the account through `Record.Set` and then emits `ValueChange`, so the
+     * deal already holds the new account when this runs. The rule and the read live on the entity
+     * (`DealEntity.FillContactsFromAccount`), which the deal workspace calls too.
+     *
+     * A failed read leaves the contacts as they were and says so under the fields; the account the rep
+     * chose stays chosen.
+     */
+    public async OnFieldValueChange(change: { FieldName: string }): Promise<void> {
+        if (change.FieldName !== 'AccountID' || !this.Record) {
+            return;
+        }
+        this.AccountDefaultsError.set(null);
+        const billCom = this.CheckBillComCustomer();
+        try {
+            const filled = await this.Record.FillContactsFromAccount();
+            if (filled.length > 0) {
+                this.contactRenderKey.update((k) => k + 1);
+            }
+        } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            this.AccountDefaultsError.set(`The account's default contacts were not filled in: ${reason}`);
+        }
+        await billCom;
+    }
+
+    /**
+     * Warns when the account has no Bill.com customer under the deal's selling company, which means
+     * its first Bill.com invoice creates a new customer there. See `billcom-customer.ts`.
+     *
+     * A warning, not a refusal: most accounts get their Bill.com customer from that first invoice.
+     * Re-run when the pipeline changes, since that changes the company. Only the latest check's
+     * answer is shown, so a slow read for an account the rep has since replaced cannot overwrite it.
+     */
+    public async CheckBillComCustomer(): Promise<void> {
+        const run = ++this.billComCheckRun;
+        const rec = this.Record;
+        let warning: string | null = null;
+        try {
+            const check = await CheckBillComCustomer(rec?.AccountID ?? null, rec?.CompanyID ?? null, rec?.PipelineID ?? null);
+            warning = BillComCustomerWarning(check);
+        } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            warning = `Could not check whether this account has a Bill.com customer ID: ${reason}`;
+        }
+        if (run === this.billComCheckRun) this.BillComCustomerWarning.set(warning);
+    }
+    private billComCheckRun = 0;
+
+    /**
+     * The `@for` track key. Contact fields carry a counter that a fill bumps.
+     *
+     * WHY THE FIELDS ARE REBUILT. `mj-form-field` is OnPush and does not watch its record, so a value
+     * written in code after an async read leaves the control showing the old one: its inputs did not
+     * change and nothing marked it. A new track key gives the contact fields new instances, which read
+     * the record afresh. Only the contact fields, so the account control the rep just used is left as
+     * it is.
+     */
+    public FieldTrackKey(f: DealFieldSpec): string {
+        return CREATION_PARTY_CONTACT_FIELDS.includes(f.name) ? `${f.name}:${this.contactRenderKey()}` : f.name;
+    }
+
+    /**
+     * Signals for the reason the Pipeline panel's lists are signals: the host is OnPush, and a signal
+     * read in the template marks this panel without `inject()`, which would stop tests constructing it.
+     */
+    public readonly AccountDefaultsError = signal<string | null>(null);
+    public readonly BillComCustomerWarning = signal<string | null>(null);
+    private readonly contactRenderKey = signal(0);
+
     public DrawsOwnMoney(f: DealFieldSpec): boolean {
         return f.currency === true && !(this.EditMode && this.FieldEditable(f.name));
     }
 
     /**
      * Whether a self-drawn money row appears at all: it hides while empty, exactly as every other
-     * empty field hides in read mode (`HideWhenEmptyInReadOnlyMode`, which defaults to true).
+     * empty field hides in read mode (`HideWhenEmptyInReadOnlyMode`, which defaults to true), and it
+     * hides for a viewer field-level security will not let read it, exactly as `mj-form-field` does.
      *
-     * ── WHY THERE IS NO FIELD-SECURITY CHECK HERE, WHICH IS WORTH STATING ──────────────────────
-     *
-     * Drawing a field ourselves means inheriting the shared control's responsibilities, not just its
-     * markup — so the first version of this asked `EntityInfo.IsFieldReadableByUser` before printing
-     * a value. THAT METHOD DOES NOT EXIST IN THE MJ VERSION THIS APP PINS. It was read from a local
-     * MJ checkout sitting on a much newer branch; `@memberjunction/core@6.1.0-edge.5` has only
-     * entity-level `GetUserPermisions`, and the published `mj-form-field` of the same version carries
-     * no per-field read check either — verified by unpacking both tarballs, not inferred.
-     *
-     * So its absence here is not a gap against the shared control: at this version the two agree, and
-     * a check against an API that is not there would only have failed to compile. Per-field read
-     * security arrived in `6.1.0-edge.7`. WHEN THE PIN MOVES PAST IT, PUT THE CHECK BACK — this row
-     * prints a value, and a field somebody may not read is the one thing it must not print.
+     * `MoneyValue` answers '' for a field the viewer may not read, before it reads anything, because
+     * `BaseEntity.Get()` throws for a denied field (#403). The check was left out when the pinned MJ
+     * had no per-field read security; that version is long gone.
      */
     public ShowsMoney(f: DealFieldSpec): boolean {
         return this.MoneyValue(f) !== '';
     }
 
+    /** Field-level read security for the rows this panel draws itself. See `field-readable.ts`. */
+    public FieldReadable(fieldName: string): boolean {
+        const provider = this.FormComponent?.ProviderToUse ?? Metadata.Provider;
+        return IsFieldReadable(this.Record?.EntityInfo, fieldName, provider?.CurrentUser);
+    }
+
     /** The formatted value, or '' when there is nothing to show. */
     public MoneyValue(f: DealFieldSpec): string {
-        return moneyExact(this.Record?.Get(f.name) as number | null | undefined);
+        if (!this.FieldReadable(f.name)) return '';
+        return moneyExact(this.Record?.Get(f.name) as number | null | undefined, this.Record?.CurrencyID);
     }
 
     /** The field's label, read from metadata so it tracks the same rows every other label does. */
@@ -479,23 +802,35 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         /**
          * SERVER-MAINTAINED STAMPS ARE NEVER EDITABLE, on an open deal or a closed one.
          *
-         * Checked BEFORE the lock, because the lock is not the reason: `stampCompanyFromPipeline()`
-         * overwrites a supplied CompanyID from the pipeline's company, and `ownerStampEditRefusal()`
+         * Checked BEFORE the lock, because the lock is not the reason: `ownerStampEditRefusal()`
          * REFUSES a supplied OwnerEmployeeID outright -- the owner comes from the deal team via
-         * `stampOwnerFromTeam()`. Offering either as an editable control invites a rep to choose a
-         * value the save then discards or rejects, which is the "accepts typing, refuses on save"
-         * behaviour golive#206 item 3 exists to delete.
+         * `stampOwnerFromTeam()`. CompanyID is chosen with Company on the Pipeline panel, which offers
+         * only companies linked to a pipeline; a free lookup here would offer any company and the save
+         * would refuse one the pipeline does not serve. Offering either as an editable control invites
+         * the "accepts typing, refuses on save" behaviour golive#206 item 3 exists to delete.
          *
          * They stay RENDERED and keep `link: 'Record'`, so the company and the owner are still
          * visible and still navigable. What goes away is the invitation to type into them.
          */
         if (this.Fields?.find((f) => f.name === fieldName)?.serverMaintained === true) return false;
+        // The close stamps likewise, from the set the entity server refuses writes against (#252).
+        if (IsDealCloseStamp(fieldName)) return false;
 
-        const form = this.FormComponent as unknown as { IsLocked?: boolean; IsLost?: boolean } | undefined;
+        const form = this.FormComponent as unknown as {
+            IsLocked?: boolean;
+            IsLost?: boolean;
+            IsPersistedAccountBlank?: boolean;
+        } | undefined;
         const locked = form?.IsLocked === true;
+        const recordAccountOld = this.Record?.GetFieldByName?.('AccountID')?.OldValue as string | null | undefined;
+        const accountBlank =
+            form?.IsPersistedAccountBlank !== undefined
+                ? form.IsPersistedAccountBlank
+                : this.Record !== undefined && (!recordAccountOld || String(recordAccountOld).trim() === '');
         // The outcome rides along with the lock, from the same resolver, because golive#206 keeps Loss
-        // Notes editable on a LOST deal and frozen on a won one.
-        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true);
+        // Notes editable on a LOST deal and frozen on a won one; golive#306 keeps Account editable when
+        // the closed deal was saved without one.
+        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true, accountBlank);
     }
 
     /**
@@ -559,6 +894,9 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
  */
 const CREATION_PARTY_FIELDS: readonly string[] = ['AccountID', 'PrimaryContactID', 'BillingContactID'];
 
+/** The contact fields an account's defaults fill (#254), which the panels rebuild after a fill. */
+const CREATION_PARTY_CONTACT_FIELDS: readonly string[] = ['PrimaryContactID', 'BillingContactID'];
+
 /**
  * The PIPELINE fields a rep chooses while creating, borrowed by the Overview the same way.
  *
@@ -578,7 +916,17 @@ const CREATION_PARTY_FIELDS: readonly string[] = ['AccountID', 'PrimaryContactID
  * The status control stays out too — it routes to close/reopen, meaningless on a deal that does not
  * exist yet.
  */
-const CREATION_PIPELINE_FIELDS: readonly string[] = ['PipelineID', 'PipelineStageID', 'DealTypeID'];
+/**
+ * Pipeline and stage are no longer in `PIPELINE_FIELDS`, so naming them here would filter for fields
+ * that are not in the list. The dedicated controls render on a new deal unconditionally, which is
+ * what this subset existed to arrange for them. *
+ * `ExpectedCloseDate` is here because it moved into `PIPELINE_FIELDS` (#252) and was already offered
+ * on a new deal from the Commercial panel; leaving it out would have dropped it from creation.
+ *
+ * `LeadSourceTypeID` and `LeadSourceDetail` are here because where a deal came from is known when it
+ * is created. Without them a rep had to save the deal and edit it again just to record its source.
+ */
+const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID', 'ExpectedCloseDate', 'LeadSourceTypeID', 'LeadSourceDetail'];
 
 /**
  * Every field the party panel owns, at module scope rather than as an instance initializer.
@@ -589,18 +937,25 @@ const CREATION_PIPELINE_FIELDS: readonly string[] = ['PipelineID', 'PipelineStag
  * module constant has neither problem.
  */
 const PARTY_FIELDS: readonly DealFieldSpec[] = [
-    { name: 'AccountID', type: 'textbox', link: 'Record' },
-    // Derived by stampCompanyFromPipeline() / stampOwnerFromTeam(); see serverMaintained.
+    { name: 'AccountID', type: 'textbox', link: 'Record', party: { Kind: 'Organization', QueryName: 'Sales: Party Lookup Accounts' } },
+    // CompanyID is set by the Pipeline panel's Company picker; OwnerEmployeeID by stampOwnerFromTeam(). See serverMaintained.
     { name: 'CompanyID', type: 'textbox', link: 'Record', serverMaintained: true },
     { name: 'OwnerEmployeeID', type: 'textbox', link: 'Record', serverMaintained: true },
-    { name: 'PrimaryContactID', type: 'textbox', link: 'Record' },
-    { name: 'BillingContactID', type: 'textbox', link: 'Record' },
+    { name: 'PrimaryContactID', type: 'textbox', link: 'Record', party: { Kind: 'Person', QueryName: 'Sales: Party Lookup Contacts' } },
+    { name: 'BillingContactID', type: 'textbox', link: 'Record', party: { Kind: 'Person', QueryName: 'Sales: Party Lookup Contacts' } },
 ];
 
 interface DealFieldSpec {
     name: string;
     type: DealFieldType;
     link?: 'Record';
+    /**
+     * Draw this foreign key with common's `bizapps-party-field` instead of `mj-form-field`
+     * (bc-aidp-next-golive#372): nothing listed until two characters, then one prefix search on indexed
+     * base columns. `QueryName` is sales' own query, restricted to rows with the SalesAccount /
+     * SalesContact subtype the Deal's FK points at.
+     */
+    party?: { Kind: PartyKind; QueryName: string };
     span?: boolean;
     /**
      * A SERVER-MAINTAINED STAMP: rendered, navigable, never editable.
@@ -612,6 +967,15 @@ interface DealFieldSpec {
      * Never hand-set them."
      */
     serverMaintained?: boolean;
+    /**
+     * RENDERED AS PLAIN TEXT, NEVER AS A LINK — even though the field is a foreign key.
+     *
+     * `link` cannot express this. `mj-form-field` draws any foreign key with a mapped name field as a
+     * link in read mode, and the only thing that turns that off is `FormContext.enableRecordLinks`;
+     * `LinkType` is not consulted on that branch. So a spec that merely omits `link` still links.
+     * This flag hands the field a context with record links off (see `FieldFormContext`).
+     */
+    noLink?: boolean;
     /**
      * A MONEY COLUMN: shown formatted as currency when reading, edited as a plain number.
      *
@@ -653,23 +1017,30 @@ const FIELD_STYLES = `
        this component and both hints rendered as unstyled body text. FIELD_STYLES is a template
        literal, so no backticks in here. */
     .mjs-field__hint { display: block; margin-top: var(--mj-space-1); color: var(--mj-text-muted); font-size: 0.78rem; }
+    /* Spans both columns of the field grid, so it does not push the next field down a row. */
+    .mjs-hint--warning {
+        grid-column: 1 / -1; padding: var(--mj-space-2) var(--mj-space-3);
+        border: 1px solid var(--mj-status-warning-border); border-radius: var(--mj-radius-sm);
+        background: var(--mj-status-warning-bg); color: var(--mj-status-warning-text); font-size: 0.82rem;
+    }
     .mjs-reopen { display: flex; flex-direction: column; gap: var(--mj-space-2); margin-top: var(--mj-space-2); }
     .mjs-reopen__field { display: flex; flex-direction: column; gap: var(--mj-space-1); font-size: 0.82rem; }
     .mjs-reopen__field textarea { width: 100%; font: inherit; }
     .mjs-reopen__row { display: flex; gap: var(--mj-space-2); }
     .mjs-reopen__confirm {
         border: 1px solid var(--mj-brand-primary); background: var(--mj-brand-primary);
-        color: var(--mj-text-on-brand); border-radius: var(--mj-radius-sm);
+        color: var(--mj-brand-on-primary); border-radius: var(--mj-radius-sm);
         padding: var(--mj-space-1) var(--mj-space-3); cursor: pointer; font: inherit;
     }
     .mjs-reopen__confirm:disabled { opacity: 0.55; cursor: not-allowed; }
     .mjs-reopen__cancel {
-        border: 1px solid var(--mj-border-default); background: transparent; color: var(--mj-text-default);
+        border: 1px solid var(--mj-border-default); background: transparent; color: var(--mj-text-primary);
         border-radius: var(--mj-radius-sm); padding: var(--mj-space-1) var(--mj-space-3); cursor: pointer; font: inherit;
     }
     .mjs-reopen__msg { font-size: 0.82rem; color: var(--mj-status-success); }
     .mjs-reopen__msg.is-error { color: var(--mj-status-warning); font-weight: 500; }
     .mjs-reopen__issue { font-size: 0.78rem; color: var(--mj-status-warning); }
+    .mjs-reopen__note { font-size: 0.78rem; color: var(--mj-text-muted); }
     .mjs-field .mj-forms-field {
         display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 0;
     }
@@ -718,6 +1089,17 @@ const FIELD_STYLES = `
        let you change -- the Status select is disabled whenever the deal is locked. */
     .mjs-field select:disabled, .mjs-reopen__field select:disabled {
         opacity: 0.7; cursor: not-allowed;
+    }
+    /* A required field left empty (#416). The Pipeline control carries MJ's required-empty modifier,
+       but MJ styles that modifier only on its own input classes, so on this native select it drew
+       nothing and the rep learned the field was required when the save failed. Same colour and focus
+       tint as the shared control's rule. */
+    .mjs-field .mj-forms-field--required-empty select {
+        border-bottom-color: var(--mj-status-error);
+    }
+    .mjs-field .mj-forms-field--required-empty select:focus {
+        border-bottom-color: var(--mj-status-error);
+        background: color-mix(in srgb, var(--mj-status-error) 5%, var(--mj-bg-surface));
     }
     /* A money field the panel drew itself. It carries .mj-forms-field-value too, so the size, colour
        and row height are the shared control's rather than a second opinion about them; this adds only
@@ -871,19 +1253,20 @@ const FIELD_STYLES = `
                             }
                         </div>
                     </article>
+                    <!-- Only when there is a next step (#371). A missing one is already reported in
+                         the attention list above, under the same conditions, so an empty card here
+                         said "No next step recorded." a second time. -->
+                    @if (Record.NextStep) {
                     <article class="mjs-ov-card mjs-ov-card--wide">
                         <header><i class="fa-solid fa-person-walking"></i> Next move</header>
-                        @if (Record.NextStep) {
-                            <p class="mjs-ov-next">{{ Record.NextStep }}</p>
-                            @if (Record.NextStepDate) {
-                                <div class="muted">Due {{ Record.NextStepDate | date: 'd MMM y' }}
-                                    @if (NextStepOverdue) { · overdue }
-                                </div>
-                            }
-                        } @else if (!IsClosed) {
-                            <p class="mjs-ov-empty">No next step recorded.</p>
+                        <p class="mjs-ov-next">{{ Record.NextStep }}</p>
+                        @if (Record.NextStepDate) {
+                            <div class="muted">Due {{ Record.NextStepDate | date: 'd MMM y' : 'UTC' }}
+                                @if (NextStepOverdue) { · overdue }
+                            </div>
                         }
                     </article>
+                    }
                 </div>
                 }
             </div>
@@ -1011,12 +1394,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         const v = this.Record?.Get?.(field);
         return v == null || v === '' ? '' : String(v);
     }
-    public get Money(): string { return money(this.Record?.Amount); }
+    public get Money(): string { return money(this.Record?.Amount, this.Record?.CurrencyID); }
     public get Weighted(): string {
-        const a = Number(this.Record?.Amount);
-        const p = Number(this.Record?.Probability);
-        if (!Number.isFinite(a) || !Number.isFinite(p)) return '—';
-        return money(a * p / 100);
+        return money(WeightedAmount(this.Record?.Amount, this.Record?.Probability), this.Record?.CurrencyID);
     }
     public get Prob(): string {
         const p = this.Record?.Probability;
@@ -1073,11 +1453,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         // (or missed) is advice on a decision nobody can take any more.
         if (this.IsClosed) {
             return {
-                label: this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt),
+                // The business close day, the same one the variance and the cycle count from (golive#168).
+                label: this.DateLabel(this.closeDay),
                 tone: this.IsLost ? 'muted' : 'success',
             };
         }
-        if (this.Record?.ActualCloseDate) return { label: 'Closed', tone: 'success' };
         if (n === null) return { label: 'No close date', tone: 'muted' };
         // SPELLED OUT, not "12d" / "3d past" (golive#231). The tile is read at a glance by someone who
         // is not holding the convention in their head, and "3d past" has to be decoded.
@@ -1117,9 +1497,14 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         return this.G('DealStatusType') || 'No status set';
     }
 
-    /** "Won" / "Lost" once decided, "Closes" while it is still ahead. */
+    /**
+     * "Won" / "Lost" once decided, "Expected close" while it is still ahead.
+     *
+     * Says EXPECTED (#252): the date under an open deal's label is a forecast, and "Closes" read as
+     * a statement of fact to a rep deciding which close date to fill in.
+     */
     public get CloseTileLabel(): string {
-        if (!this.IsClosed) return 'Closes';
+        if (!this.IsClosed) return 'Expected close';
         if (this.IsWon) return 'Won';
         if (this.IsLost) return 'Lost';
         return 'Closed';
@@ -1143,7 +1528,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
      * expectation would be a claim nobody made.
      */
     public get CloseVariance(): string {
-        const n = daysBetween(this.Record?.ExpectedCloseDate, this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
+        const n = daysBetween(this.Record?.ExpectedCloseDate, this.closeDay);
         if (n === null) return '';
         if (n === 0) return 'on time';
         return n < 0 ? `${dayCount(Math.abs(n))} early` : `${dayCount(n)} late`;
@@ -1156,9 +1541,18 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         return 'Closed';
     }
 
-    /** The day it closed. */
+    /** The day it closed — the business day, as {@link closeDay} defines it. */
     public get ClosedDateLabel(): string {
-        return this.DateLabel(this.Record?.ActualCloseDate ?? this.Record?.ClosedAt);
+        return this.DateLabel(this.closeDay);
+    }
+
+    /**
+     * The business day the deal closed on. See {@link DealCloseDay}: every close figure on this panel and
+     * on the hero reads it, so a legacy `ClosedAt`-only row cannot show one day in its label and count
+     * from another in its variance (golive#168).
+     */
+    private get closeDay(): Date | string | null {
+        return DealCloseDay(this.Record);
     }
 
     /**
@@ -1166,9 +1560,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
      * reported anywhere. Measured from `__mj_CreatedAt`, which is the only creation stamp there is.
      */
     public get SalesCycleLabel(): string {
+        // Both ends are business days: the creation instant's day in the business zone, and
+        // ActualCloseDate, which is stamped in it (golive#168). See BusinessDayOf.
         const n = daysBetween(
-            this.Record?.Get?.('__mj_CreatedAt') as Date | string | null | undefined,
-            this.Record?.ActualCloseDate ?? this.Record?.ClosedAt,
+            BusinessDayOf(this.Record?.Get?.('__mj_CreatedAt') as Date | string | null | undefined, this.Record?.CompanyID),
+            this.closeDay,
         );
         // A close back-dated before the deal was created is data, not an error to hide -- but it is not
         // a sales cycle either, and "-4 days" reads as a bug. Say nothing rather than something wrong.
@@ -1262,19 +1658,128 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     selector: 'mjs-deal-pipeline-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule],
+    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent],
     styles: [FIELD_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="pipeline" SectionName="Pipeline" Icon="fa-solid fa-diagram-project"
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
-                @for (f of Fields; track f.name) {
+                @for (f of Fields; track FieldTrackKey(f)) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
-                        <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
-                            (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                        @if (f.party) {
+                            <bizapps-party-field [Record]="Record" [FieldName]="f.name" [Kind]="f.party.Kind" [QueryName]="f.party.QueryName"
+                                [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext"
+                                (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></bizapps-party-field>
+                        } @else {
+                            <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
+                                [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                                (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                        }
+                        <!-- What a save will write here from the stage just picked (sales#247). Text
+                             only: the server stays the one writer of these two fields. -->
+                        @if (EditMode && StageMoveHint(f.name); as hint) {
+                            <small class="mjs-field__hint" [attr.data-testid]="'stage-move-hint-' + f.name">{{ hint }}</small>
+                        }
                     </div>
                 }
+                @if (AccountDefaultsError()) {
+                    <div class="mjs-hint" data-testid="account-defaults-error">{{ AccountDefaultsError() }}</div>
+                }
+                @if (BillComCustomerWarning()) {
+                    <div class="mjs-hint mjs-hint--warning" role="status" data-testid="account-billcom-warning">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ BillComCustomerWarning() }}
+                    </div>
+                }
+
+                <!-- PIPELINE AND STAGE ARE NOT GENERIC FIELDS HERE, for the reason Status is not:
+                     <mj-form-field> renders a foreign key as an unfiltered dropdown off the related
+                     entity. Stage therefore listed EVERY stage in the system — D2C's three and sixteen
+                     legacy pipelines' alongside B2B's six — so a B2B deal could be positioned in D2C's
+                     process, and the server then took that stage's probability, forecast category and
+                     status from it (bc-aidp-next-golive#291).
+
+                     Pipeline is here too because choosing one chooses which stages exist; a plain
+                     binding gives nowhere to clear a stage that has just become meaningless. The deal
+                     workspace has always done both, which is why testers were told to use it. -->
+                <!-- COMPANY FIRST, then its pipelines (#327). Writes Deal.CompanyID and narrows the
+                     Pipeline list to the pipelines linked to that company; a current pipeline the
+                     company does not use moves to its first one. Hidden when one company has every
+                     pipeline, where it would offer no choice and SetPipeline fills the company. -->
+                @if (EditMode && FieldEditable('PipelineID') && CompanyOptions.length > 1) {
+                    <div class="mjs-field" data-field="PipelineCompany">
+                        <div class="mj-forms-field mj-forms-field--editing">
+                            <label class="mj-forms-field-label" [attr.for]="FieldIdPrefix + '-company'">Company</label>
+                            <select [id]="FieldIdPrefix + '-company'" [ngModel]="SelectedCompanyID" data-testid="deal-pipeline-company"
+                                    (ngModelChange)="SetCompany($event)"
+                                    [compareWith]="CompareID">
+                                @for (c of CompanyOptions; track c.CompanyID) {
+                                    <option [ngValue]="c.CompanyID">{{ CompanyText(c) }}</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                }
+
+                <div class="mjs-field" data-field="PipelineID">
+                    <!-- The editing modifier class is MJ's own marker for a field it is currently
+                         letting you edit, and FieldIsEditable in the Explorer harness reads exactly
+                         that. A dedicated control that omits it reports frozen while perfectly
+                         editable, which turns a lock assertion into one that cannot fail. -->
+                    <!-- The required-empty modifier, for the same reason as the editing one:
+                         Deal.PipelineID is NOT NULL, and base-forms STYLES that modifier on the
+                         input, so a dedicated control that omits it shows a required field as
+                         though it were optional and the rep finds out at save time. The condition
+                         mirrors MJ's own IsRequiredEmpty getter: required, editing, and no value.
+                         No backticks in here -- this whole template is a backtick string. -->
+                    <div class="mj-forms-field"
+                         [class.mj-forms-field--editing]="EditMode && FieldEditable('PipelineID')"
+                         [class.mj-forms-field--required-empty]="EditMode && FieldEditable('PipelineID') && !Record.PipelineID">
+                        <label class="mj-forms-field-label" [attr.for]="EditMode && FieldEditable('PipelineID') ? FieldIdPrefix + '-pipeline' : null">Pipeline</label>
+                        @if (EditMode && FieldEditable('PipelineID')) {
+                            <select [id]="FieldIdPrefix + '-pipeline'" [ngModel]="Record.PipelineID" data-testid="deal-pipeline"
+                                    (ngModelChange)="SetPipeline($event)"
+                                    [compareWith]="CompareID">
+                                <option [ngValue]="null" [disabled]="Record.IsSaved">— choose —</option>
+                                @for (p of PipelineOptions; track p.ID) {
+                                    <option [ngValue]="p.ID">{{ PipelineText(p) }}</option>
+                                }
+                            </select>
+                        } @else {
+                            <div class="mj-forms-field-value">{{ CurrentPipelineName ?? '—' }}</div>
+                        }
+                    </div>
+                </div>
+
+                <div class="mjs-field" data-field="PipelineStageID">
+                    <!-- The editing modifier class is MJ's own marker for a field it is currently
+                         letting you edit, and FieldIsEditable in the Explorer harness reads exactly
+                         that. A dedicated control that omits it reports frozen while perfectly
+                         editable, which turns a lock assertion into one that cannot fail. -->
+                    <div class="mj-forms-field"
+                         [class.mj-forms-field--editing]="EditMode && FieldEditable('PipelineStageID')">
+                        <label class="mj-forms-field-label" [attr.for]="EditMode && FieldEditable('PipelineStageID') ? FieldIdPrefix + '-stage' : null">Pipeline Stage</label>
+                        @if (EditMode && FieldEditable('PipelineStageID')) {
+                            <select [id]="FieldIdPrefix + '-stage'" [ngModel]="Record.PipelineStageID" data-testid="deal-stage"
+                                    (ngModelChange)="SetStage($event)"
+                                    [compareWith]="CompareID"
+                                    [disabled]="!StageIsEditable">
+                                <option [ngValue]="null">— choose —</option>
+                                @for (st of StagesForCurrentPipeline; track st.ID) {
+                                    <option [ngValue]="st.ID">{{ st.Name }}</option>
+                                }
+                            </select>
+                            @if (!StageIsEditable) {
+                                <!-- Says which of the two it is. An empty disabled control otherwise
+                                     reads as "broken" whether the pipeline is unset or has no stages. -->
+                                <div class="mjs-hint" data-testid="stage-hint">
+                                    {{ Record.PipelineID ? 'This pipeline has no active stages.' : 'Choose a pipeline first.' }}
+                                </div>
+                            }
+                        } @else {
+                            <div class="mj-forms-field-value">{{ CurrentStageName ?? '—' }}</div>
+                        }
+                    </div>
+                </div>
 
                 <!-- STATUS IS NOT A GENERIC FIELD HERE, and the reason is the whole of golive#205.
                      MJ's <mj-form-field> renders a foreign key as an unfiltered dropdown off the related
@@ -1284,9 +1789,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                      one. -->
                 <div class="mjs-field" data-field="DealStatusTypeID">
                     <div class="mj-forms-field">
-                        <label class="mj-forms-field-label">Status</label>
+                        <label class="mj-forms-field-label" [attr.for]="EditMode ? FieldIdPrefix + '-status' : null">Status</label>
                         @if (EditMode) {
-                            <select [ngModel]="Record.DealStatusTypeID" data-testid="deal-status"
+                            <select [ngModel]="Record.DealStatusTypeID" [id]="FieldIdPrefix + '-status'" data-testid="deal-status"
                                     (ngModelChange)="SetStatus($event)"
                                     [compareWith]="CompareStatus"
                                     [disabled]="!StatusIsEditable">
@@ -1309,9 +1814,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                 <div class="mjs-reopen" data-testid="status-close-panel">
                                     @if (PendingCloseStatus?.IsLost) {
                                         <label class="mjs-reopen__field">
-                                            <span>Loss reason</span>
+                                            <span>Loss reason <em>(required)</em></span>
                                             <select data-testid="status-close-loss-reason" [(ngModel)]="LossReasonID" (ngModelChange)="OnLossReasonChange()"
-                                                    [disabled]="Busy">
+                                                    required aria-required="true" [disabled]="Busy">
                                                 <option [ngValue]="null">— choose —</option>
                                                 @for (r of LossReasons(); track r.ID) {
                                                     <option [ngValue]="r.ID">{{ r.Name }}</option>
@@ -1331,12 +1836,16 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                     </label>
                                     <div class="mjs-reopen__row">
                                         <button type="button" class="mjs-reopen__confirm" data-testid="status-close-confirm"
-                                                [disabled]="!CanConfirmClose" (click)="ConfirmClose()">
+                                                [disabled]="!CanConfirmClose" (click)="ConfirmClose()"
+                                                [attr.aria-describedby]="CloseBlockedReason ? FieldIdPrefix + '-close-blocked' : null">
                                             {{ Busy ? 'Closing\u2026' : 'Close as ' + PendingCloseStatusName }}
                                         </button>
                                         <button type="button" class="mjs-reopen__cancel"
                                                 [disabled]="Busy" (click)="CancelClose()">Cancel</button>
                                     </div>
+                                    @if (CloseBlockedReason; as why) {
+                                        <div class="mjs-reopen__note" data-testid="status-close-blocked" [id]="FieldIdPrefix + '-close-blocked'">{{ why }}</div>
+                                    }
                                 </div>
                             }
                             @if (PendingReopenStatusID) {
@@ -1375,8 +1884,16 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                  second route to describe, only a second door.
 
                                  A CLOSING STATUS, never a list of names: a deployment can rename Won,
-                                 and this one already has TWO losing statuses. -->
-                            @if (CurrentStatusIsClosing && !PendingReopenStatusID) {
+                                 and this one already has TWO losing statuses.
+
+                                 AN UNSAVED DEAL GETS ITS OWN HINT: it has no status yet, the server
+                                 gives it an open one on save, and the Close panel offers Close only
+                                 after that first save. -->
+                            @if (!Record.IsSaved) {
+                                <small class="mjs-field__hint">No status yet. The deal saves as open; close it after saving.</small>
+                            } @else if (StatusIsMissing) {
+                                <small class="mjs-field__hint">Missing. This deal's status no longer exists. Pick an open status and save to repair it.</small>
+                            } @else if (CurrentStatusIsClosing && !PendingReopenStatusID) {
                                 <small class="mjs-field__hint">Closed. Pick an open status to reopen it, or use Reopen on the Close panel.</small>
                             } @else if (!CurrentStatusIsClosing) {
                                 <small class="mjs-field__hint">Open. Pick a closing status to close the deal, or use Close on the Close panel.</small>
@@ -1401,6 +1918,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                         @for (i of ActionIssues; track $index) {
                             <div class="mjs-reopen__issue">{{ i }}</div>
                         }
+                        @for (n of ActionInfoNotes; track $index) {
+                            <div class="mjs-reopen__note" data-testid="action-note">
+                                <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ n }}
+                            </div>
+                        }
                     </div>
                 </div>
             </div>
@@ -1420,10 +1942,19 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
      */
     private readonly statuses = signal<DealStatusOption[]>([]);
 
+    /** Signals for the same reason `statuses` is one — see the note above it. */
+    private readonly pipelines = signal<PipelineOption[]>([]);
+    private readonly stages = signal<PipelineStageOption[]>([]);
+
     public async ngOnInit(): Promise<void> {
         // BaseFormPanel declares no lifecycle hook, so there is nothing to chain to. Angular calls this
         // on the component regardless of whether the base class has one.
-        const settled = await Promise.allSettled([LoadDealStatusOptions(), LoadLossReasons()]);
+        const settled = await Promise.allSettled([
+            LoadDealStatusOptions(),
+            LoadLossReasons(),
+            LoadPipelines(),
+            LoadPipelineStages(),
+        ]);
         const valueOf = <T>(r: PromiseSettledResult<T>): T | null =>
             r.status === 'fulfilled' ? r.value : null; // vocabulary-grep-allow: PromiseSettledResult discriminant, not a domain status
         const loadedStatuses = valueOf(settled[0] as PromiseSettledResult<DealStatusOption[]>);
@@ -1434,10 +1965,190 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         if (loadedReasons) {
             this.LossReasons.set(loadedReasons);
         }
-        if (!loadedStatuses || !loadedReasons) {
+
+        const loadedPipelines = valueOf(settled[2] as PromiseSettledResult<PipelineOption[]>);
+        const loadedStages = valueOf(settled[3] as PromiseSettledResult<PipelineStageOption[]>);
+        if (loadedPipelines) {
+            this.pipelines.set(loadedPipelines);
+        }
+        if (loadedStages) {
+            this.stages.set(loadedStages);
+        }
+
+        if (!loadedStatuses || !loadedReasons || !loadedPipelines || !loadedStages) {
             this.ActionFailed = true;
             this.ActionMessage = 'Some of this panel could not load. Reload the page before closing this deal.';
         }
+    }
+
+    /* ── Pipeline and stage (bc-aidp-next-golive#291) ───────────────────────── */
+
+    /** The selected company's pipelines, in picker order (#327). */
+    public get PipelineOptions(): PipelineOption[] {
+        return PipelinesForCompany(this.offeredPipelines, this.SelectedCompanyID);
+    }
+
+    /** Every company with a pipeline linked to it, default company first. */
+    public get CompanyOptions(): PipelineCompany[] {
+        return PipelineCompanies(this.offeredPipelines);
+    }
+
+    /**
+     * The active pipelines on active links, plus the deal's own pipeline and company when either is
+     * retired (bc-aidp-next-golive#423).
+     */
+    private get offeredPipelines(): PipelineOption[] {
+        const id = String(this.Record?.PipelineID ?? '').toLowerCase();
+        const company = String(this.Record?.CompanyID ?? '').toLowerCase();
+        const isDealsOwn = (p: PipelineOption): boolean =>
+            !!id && p.ID.toLowerCase() === id && p.CompanyID.toLowerCase() === company;
+        return this.pipelines().filter((p) => (p.IsActive && p.LinkIsActive) || isDealsOwn(p));
+    }
+
+    /**
+     * The deal's company, else the default company. The company is the rep's choice and is chosen
+     * first; a pipeline serves several companies, so it cannot say which one is selected.
+     */
+    public get SelectedCompanyID(): string | null {
+        return InitialCompanyID(this.offeredPipelines, this.Record?.CompanyID ?? null);
+    }
+
+    /**
+     * Sets the deal's company, and moves the deal to the company's first pipeline when its current one
+     * does not serve that company (which clears a stage the old pipeline owned).
+     */
+    public SetCompany(companyID: string | null): void {
+        if (!this.Record || !companyID) return;
+        this.Record.CompanyID = companyID;
+        if (!PipelineServesCompany(this.offeredPipelines, this.Record.PipelineID ?? null, companyID)) {
+            const first = PipelinesForCompany(this.offeredPipelines, companyID)[0];
+            if (first) this.SetPipeline(first.ID);
+        }
+        // The Bill.com customer is per company.
+        if (this.Record.AccountID) void this.CheckBillComCustomer();
+    }
+
+    public PipelineText(pipeline: PipelineOption): string {
+        return PipelineLabel(pipeline);
+    }
+
+    public CompanyText(company: PipelineCompany): string {
+        return CompanyLabel(company);
+    }
+
+    /**
+     * The stages of the deal's CURRENT pipeline, and nothing else.
+     *
+     * MJ's `<mj-form-field>` renders a foreign key as an unfiltered dropdown off the related entity,
+     * so Stage listed every stage in the system — D2C's three and sixteen legacy pipelines' alongside
+     * B2B's six. A deal could be positioned in another pipeline's process, and the server then took
+     * that stage's probability, forecast category and status. Same defect as golive#205's status
+     * dropdown, same answer: a control that offers only what is valid.
+     *
+     * Empty until a pipeline is chosen, which is what keeps the control disabled on a new deal — the
+     * workspace behaves the same way and it is the reason testers were told to use it instead.
+     *
+     * Stages whose status locks the deal are left out, as on the board: picking one left the deal open
+     * at a closing stage. Closing goes through the Close action. See `SelectableStages`.
+     */
+    public get StagesForCurrentPipeline(): PipelineStageOption[] {
+        const pipelineID = this.Record?.PipelineID;
+        if (!pipelineID) return [];
+        const key = String(pipelineID).toLowerCase();
+        const inPipeline = this.stages().filter((s) => s.PipelineID.toLowerCase() === key);
+        return SelectableStages(inPipeline, this.statuses(), this.Record?.PipelineStageID);
+    }
+
+    /** No pipeline, or a pipeline whose stages have not loaded, leaves nothing to pick from. */
+    public get StageIsEditable(): boolean {
+        return this.StagesForCurrentPipeline.length > 0;
+    }
+
+    /**
+     * Choosing a pipeline also chooses which stages exist, so it cannot be a plain field binding.
+     *
+     * The deal keeps its company. The picker offers only the selected company's pipelines, so they
+     * agree; the one case they do not is a deal with no company yet (a new deal, or the Company picker
+     * hidden because one company has every pipeline), which takes the selected company.
+     * `DealEntityServer` refuses a company the pipeline is not linked to.
+     */
+    public SetPipeline(pipelineID: string | null): void {
+        if (!this.Record) return;
+        this.Record.PipelineID = pipelineID as string;
+        const company = this.SelectedCompanyID;
+        if (!this.Record.CompanyID && company && PipelineServesCompany(this.offeredPipelines, pipelineID, company)) {
+            this.Record.CompanyID = company;
+        }
+
+        // A stage from the previous pipeline is meaningless now. Cleared rather than remapped: there
+        // is no honest translation from one pipeline's process to another's, which is the same
+        // reasoning that makes the server REFUSE a mismatch instead of correcting it.
+        const stages = this.StagesForCurrentPipeline;
+        if (!stages.some((st) => st.ID.toLowerCase() === String(this.Record?.PipelineStageID ?? '').toLowerCase())) {
+            this.Record.PipelineStageID = null as unknown as string;
+        }
+        // The Bill.com check reads the deal's pipeline too.
+        if (this.Record.AccountID) void this.CheckBillComCustomer();
+    }
+
+    /**
+     * The stage's `Probability` and `ForecastCategoryTypeID` are the SERVER's to apply, and this does
+     * not write them — `applyStageDefaults` guards a rep-typed probability that this would destroy
+     * before the server ever saw it. `OnStageChange` in the workspace records the same decision.
+     */
+    public SetStage(stageID: string | null): void {
+        if (!this.Record) return;
+        this.Record.PipelineStageID = stageID as unknown as string;
+    }
+
+    /**
+     * The line under Probability or Forecast category after a saved deal moves stage, saying what the
+     * save will write there (sales#247). Null for every other field and whenever the save writes nothing.
+     */
+    public StageMoveHint(fieldName: string): string | null {
+        if (fieldName !== 'Probability' && fieldName !== 'ForecastCategoryTypeID') return null;
+        return this.StageMoveHints[fieldName];
+    }
+
+    public get StageMoveHints(): StageMoveHints {
+        const rec = this.Record;
+        if (!rec) return { Probability: null, ForecastCategoryTypeID: null };
+        return StageMoveHintsFor(
+            {
+                IsSaved: rec.IsSaved,
+                PipelineStageID: rec.PipelineStageID ?? null,
+                LoadedStageID: (rec.GetFieldByName('PipelineStageID')?.OldValue as string | null | undefined) ?? null,
+                ProbabilityEdited: !!rec.GetFieldByName('Probability')?.Dirty,
+                ForecastCategoryEdited: !!rec.GetFieldByName('ForecastCategoryTypeID')?.Dirty,
+                Probability: rec.Probability ?? null,
+                ForecastCategoryTypeID: rec.ForecastCategoryTypeID ?? null,
+            },
+            this.stages(),
+        );
+    }
+
+    /** Ids round-trip through JSON in both cases, so the select compares them the way the rest does. */
+    public CompareID = (a: unknown, b: unknown): boolean =>
+        String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
+
+    /**
+     * What the read-only rendering shows. Resolved from the loaded lists rather than from the record's
+     * virtual name column, so a stage belonging to ANOTHER pipeline still reads as its own name rather
+     * than as a blank — a deal in that state is exactly the one whose stage a reader needs to see.
+     */
+    public get CurrentPipelineName(): string | null {
+        const id = String(this.Record?.PipelineID ?? '').toLowerCase();
+        if (!id) return null;
+        const company = String(this.Record?.CompanyID ?? '').toLowerCase();
+        const rows = this.pipelines().filter((p) => p.ID.toLowerCase() === id);
+        const pipeline = rows.find((p) => p.CompanyID.toLowerCase() === company) ?? rows[0];
+        return pipeline ? PipelineLabel(pipeline) : null;
+    }
+
+    public get CurrentStageName(): string | null {
+        const id = String(this.Record?.PipelineStageID ?? '').toLowerCase();
+        if (!id) return null;
+        return this.stages().find((st) => st.ID.toLowerCase() === id)?.Name ?? null;
     }
 
     /**
@@ -1478,7 +2189,9 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public get SelectableStatuses(): DealStatusOption[] {
         // A CLOSED deal may only move to a non-locking status, and that move is a reopen. Offering it
         // another closing status would be neither a close nor a reopen, and the server has no path for it.
-        if (this.CurrentStatusIsClosing) {
+        // A deal whose status row is gone may only move to an open one too: the server refuses a close
+        // from a status it cannot read (#402).
+        if (this.CurrentStatusIsClosing || this.StatusIsMissing) {
             return this.statuses().filter((s) => !s.LocksDeal);
         }
         return this.statuses();
@@ -1494,11 +2207,6 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         return this.currentStatus?.LocksDeal === true;
     }
 
-    /**
-     * A closed deal's status is not editable here. Reopening is the audited way back, and offering the
-     * field would be the mirror of the defect this change closes: a status write that unlocks a deal
-     * without the reopen having run.
-     */
     /**
      * EDITABLE ON A LOCKED DEAL TOO, which is golive#205 D9 and #206 item 3 asking for the same thing:
      * "Deal Status should stay editable so the deal can be set back to Open, which is how a closed deal
@@ -1519,8 +2227,22 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public get StatusIsEditable(): boolean {
         if (this.Busy) return false;                               // one in flight
         if (this.statuses().length === 0) return false;                 // list never resolved
+        if (this.StatusIsMissing) return true;                          // the repair, see below
         if (this.Record?.IsSaved && !this.currentStatus) return false;  // status not in the active list
         return true;
+    }
+
+    /**
+     * The deal's status row no longer exists, as the form's lock resolver reports it (#402).
+     *
+     * The deal is locked and the notice says to set the status to an open one. The server allows
+     * exactly that write (`DealEntityServer.checkCloseLock`'s status repair), so the control is
+     * offered with the open statuses only. Not to be confused with a status the list merely does not
+     * contain -- a DEACTIVATED row still exists, says whether it locks, and stays read-only here.
+     */
+    public get StatusIsMissing(): boolean {
+        const form = this.FormComponent as unknown as { IsStatusMissing?: boolean } | undefined;
+        return this.Record?.IsSaved === true && form?.IsStatusMissing === true;
     }
 
     public SetStatus(id: string | null): void {
@@ -1545,6 +2267,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
             this.ReopenReason = '';
             this.ActionMessage = '';
             this.ActionIssues = [];
+            this.ActionInfoNotes = [];
             this.ActionFailed = false;
             return;
         }
@@ -1566,6 +2289,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
             this.CloseNotes = '';
             this.ActionMessage = '';
             this.ActionIssues = [];
+            this.ActionInfoNotes = [];
             this.ActionFailed = false;
             return;
         }
@@ -1601,6 +2325,12 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         return CloseDetailComplete(this.PendingCloseStatus, this.LossReasonID, this.LossNotes, this.LossReasons());
     }
 
+    /** Why the close button is disabled, shown under it; null while it is enabled or busy (#371 item 6). */
+    public get CloseBlockedReason(): string | null {
+        if (this.Busy) return null;
+        return CloseDetailMissing(this.PendingCloseStatus, this.LossReasonID, this.LossNotes, this.LossReasons());
+    }
+
     /** A reason that no longer needs notes must not carry the old ones into the close. */
     public OnLossReasonChange(): void {
         if (!this.LossReasonRequiresNotes) {
@@ -1615,6 +2345,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         this.CloseNotes = '';
         this.ActionMessage = '';
         this.ActionIssues = [];
+        this.ActionInfoNotes = [];
         this.ActionFailed = false;
     }
 
@@ -1624,6 +2355,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         this.Busy = true;
         this.ActionMessage = '';
         this.ActionIssues = [];
+        this.ActionInfoNotes = [];
         try {
             /**
              * UNSAVED EDITS ARE SAVED FIRST. A close routes the deal's lines, so closing the persisted
@@ -1648,6 +2380,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
             this.ActionFailed = !result.ok;
             this.ActionMessage = result.message;
             this.ActionIssues = result.issues;
+            this.ActionInfoNotes = result.notes;
             if (result.ok) {
                 this.CancelPendingOnly();
                 await this.refreshQuietly();
@@ -1684,6 +2417,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public ActionMessage = '';
     public ActionFailed = false;
     public ActionIssues: string[] = [];
+    public ActionInfoNotes: string[] = [];
 
     public get PendingReopenStatusName(): string {
         const id = String(this.PendingReopenStatusID ?? '').toLowerCase();
@@ -1712,6 +2446,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         this.ReopenReason = '';
         this.ActionMessage = '';
         this.ActionIssues = [];
+        this.ActionInfoNotes = [];
         this.ActionFailed = false;
     }
 
@@ -1720,6 +2455,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         this.Busy = true;
         this.ActionMessage = '';
         this.ActionIssues = [];
+        this.ActionInfoNotes = [];
         try {
             /**
              * WHAT THE USER TYPED IS SAVED FIRST -- see {@link MJSDealFieldPanel.SaveBeforeReload} for
@@ -1750,6 +2486,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
             this.ActionFailed = !result.ok;
             this.ActionMessage = result.message;
             this.ActionIssues = result.issues;
+            this.ActionInfoNotes = result.notes;
             if (result.ok) {
                 this.PendingReopenStatusID = null;
                 this.ReopenReason = '';
@@ -1819,11 +2556,35 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
         // renders Name as an editable field in edit mode, and shows DealNumber beneath the title once
         // the server has assigned one. Listing them again gave the form two inputs bound to the same
         // column, and offered an empty textbox for a value the user does not get to choose.
-        { name: 'PipelineID', type: 'textbox', link: 'Record' },
-        { name: 'PipelineStageID', type: 'textbox', link: 'Record' },
+        // PipelineID and PipelineStageID are NOT here: both are rendered as dedicated controls in
+        // the template above, for the reason stated there (golive#291). Listing them here too would
+        // give the panel two controls bound to one column, the way Name and DealNumber once were.
         { name: 'DealTypeID', type: 'textbox', link: 'Record' },
         { name: 'ForecastCategoryTypeID', type: 'textbox', link: 'Record' },
         { name: 'Probability', type: 'number' },
+        // The business creation date the deal ages from (#532). Beside the forecast fields, because
+        // aging is read alongside them. NOT a mirror of `__mj_CreatedAt`: that column is the immutable
+        // row stamp, and for an imported deal it holds import day rather than deal day. This one is the
+        // editable business fact, which is why it is offered here at all.
+        //
+        // `datepicker` RENDERS `<input type="date">`, SO EDITING DROPS THE TIME. `mj-form-field` reads
+        // the value through `DateInputValue` (`toISOString().split('T')[0]`) and writes it back through
+        // `OnDateChange` (`new Date('2026-11-04')`, i.e. midnight UTC), so a rep who edits this field
+        // collapses its stored time. Accepted deliberately: the `GETUTCDATE()` default stores full
+        // precision, only a manual edit coarsens it, and aging is day-grained either way. MJ's
+        // form-field has no date+time type on the 6.1 LTS line (its Type union ends at `numerictextbox`)
+        // and this app may not grow a second editable control for a field the shared one already owns.
+        // Revisit when an MJ `datetimepicker` lands.
+        { name: 'CreationDate', type: 'datepicker' },
+        // Beside stage and probability, where a rep forecasting the deal looks for it. It sat in
+        // Commercial, and a rep who could not find it typed the expected day into Actual Close Date
+        // instead (#252). One binding: it is no longer in COMMERCIAL_FIELDS.
+        { name: 'ExpectedCloseDate', type: 'datepicker' },
+        // Where the deal came from, with the pipeline fields rather than in Motion, where sales did not
+        // look for it. The detail is the specific event, campaign or person within that channel, free
+        // text carried over from the CRM the deals were imported from.
+        { name: 'LeadSourceTypeID', type: 'textbox', link: 'Record' },
+        { name: 'LeadSourceDetail', type: 'textbox' },
 ];
 
 @RegisterClassEx(BaseFormPanel, {
@@ -1835,17 +2596,54 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
     selector: 'mjs-deal-party-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, BaseFormsModule],
+    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent],
     styles: [FIELD_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="party" SectionName="Account &amp; people" Icon="fa-solid fa-building"
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
-                @for (f of Fields; track f.name) {
+                @for (f of Fields; track FieldTrackKey(f)) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
-                        <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
-                            (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                        @if (ShowsOwnerPicker(f)) {
+                            <!-- THE OWNER IS CHANGED THROUGH THE DEAL TEAM, never typed. The column is a
+                                 server-maintained stamp; SetOwner swaps the owner-role team row and the
+                                 server derives the stamp from it on save. Saved deals only: a new deal
+                                 takes its creator as owner by default, and SetOwner reads the team first. -->
+                            <div class="mj-forms-field mj-forms-field--editing">
+                                <label class="mj-forms-field-label" for="mjs-deal-owner">{{ OwnerLabel }}</label>
+                                <select id="mjs-deal-owner" data-testid="deal-owner-picker"
+                                        [ngModel]="Record.OwnerEmployeeID" (ngModelChange)="OnOwnerChange($event)"
+                                        [compareWith]="CompareID">
+                                    <option [ngValue]="null">— choose —</option>
+                                    @for (e of OwnerOptions(); track e.ID) {
+                                        <option [ngValue]="e.ID">{{ e.Name }}</option>
+                                    }
+                                </select>
+                                <small class="mjs-field__hint">Recorded on the deal team as owner.</small>
+                                @if (OwnerError()) {
+                                    <small class="mjs-field__hint" data-testid="deal-owner-error">{{ OwnerError() }}</small>
+                                }
+                            </div>
+                        } @else if (f.party) {
+                            <bizapps-party-field [Record]="Record" [FieldName]="f.name" [Kind]="f.party.Kind" [QueryName]="f.party.QueryName"
+                                [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext"
+                                (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></bizapps-party-field>
+                        } @else {
+                            <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
+                                [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                                (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                            @if (EditMode && f.name === 'CompanyID') {
+                                <small class="mjs-field__hint" data-testid="deal-company-hint">Change it with Company on the Pipeline panel.</small>
+                            }
+                        }
+                    </div>
+                }
+                @if (AccountDefaultsError()) {
+                    <div class="mjs-hint" data-testid="account-defaults-error">{{ AccountDefaultsError() }}</div>
+                }
+                @if (BillComCustomerWarning()) {
+                    <div class="mjs-hint mjs-hint--warning" role="status" data-testid="account-billcom-warning">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ BillComCustomerWarning() }}
                     </div>
                 }
             </div>
@@ -1878,6 +2676,55 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
         if (!this.Record || this.Record.IsSaved) return [...PARTY_FIELDS];
         return PARTY_FIELDS.filter((f) => !CREATION_PARTY_FIELDS.includes(f.name));
     }
+
+    /* ── Owner picker (#253) ───────────────────────────────────────────────── */
+
+    /** Active employees for the owner picker. A signal for the reason the Pipeline panel's lists are. */
+    public readonly OwnerOptions = signal<EmployeeOption[]>([]);
+    /** Why the last owner change did not apply, or null. */
+    public readonly OwnerError = signal<string | null>(null);
+
+    public async ngOnInit(): Promise<void> {
+        const loaded = await LoadEmployees();
+        if (loaded) {
+            this.OwnerOptions.set(loaded);
+        } else {
+            this.OwnerError.set('The employee list could not load. Reload the page to change the owner.');
+        }
+    }
+
+    /**
+     * Whether the owner field renders as the picker rather than as the read-only stamp.
+     *
+     * SAVED DEALS ONLY: a new deal takes its creator as owner by default when it is first saved, and
+     * `SetOwner` loads the deal team before changing it. NOT GATED ON THE LOCK: reassigning a rep after
+     * close is record-keeping (golive#206), and the server allows it when the team drives the save.
+     */
+    public ShowsOwnerPicker(f: DealFieldSpec): boolean {
+        return f.name === 'OwnerEmployeeID' && this.EditMode && this.Record?.IsSaved === true;
+    }
+
+    /** The owner field's label, read from metadata like every other label. */
+    /** "Owner", as the deal hero says. The column's own display name is "Owner Employee ID". */
+    public readonly OwnerLabel = 'Owner';
+
+    /**
+     * Records the new owner through the deal team, never by writing `OwnerEmployeeID`: `SetOwner` swaps
+     * the owner-role team row, and the server derives the stamp from it when the deal is saved.
+     */
+    public async OnOwnerChange(employeeID: string | null): Promise<void> {
+        if (!this.Record) return;
+        this.OwnerError.set(null);
+        try {
+            await this.Record.SetOwner(employeeID);
+        } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            this.OwnerError.set(`The owner was not changed: ${reason}`);
+        }
+    }
+
+    public CompareID = (a: unknown, b: unknown): boolean =>
+        String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
 }
 
 /**
@@ -1899,7 +2746,6 @@ const COMMERCIAL_FIELDS: DealFieldSpec[] = [
     { name: 'EstimatedProjectWeeks', type: 'number' },
     { name: 'MRR', type: 'number', currency: true },
     { name: 'ARR', type: 'number', currency: true },
-    { name: 'ExpectedCloseDate', type: 'datepicker' },
     { name: 'StartDate', type: 'datepicker' },
     { name: 'ExecutionDate', type: 'datepicker' },
     { name: 'AutoRenew', type: 'checkbox' },
@@ -1952,79 +2798,35 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-lines',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-related', sortKey: 68, contributionKey: 'lines' },
+    metadata: { entity: E, slot: 'after-related', sortKey: 89, contributionKey: 'lines' },
 })
 @Component({
     selector: 'mjs-deal-lines-panel',
     standalone: true,
-    imports: [CommonModule, BaseFormsModule, MJSDealLineEditorComponent],
+    imports: [CommonModule, BaseFormsModule, MJSDealLineEditorComponent, MJSDealLineCardsComponent],
     template: `
         <mj-collapsible-panel SectionKey="lines" SectionName="What's being sold" Icon="fa-solid fa-boxes-stacked"
             Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="!Record.IsSaved"
             [BadgeCount]="FormComponent.GetSectionRowCount('lines')">
             @if (Record.IsSaved && Record.OrderID) {
-                <!-- OUR OWN ADD BUTTON, because the grid's New opened the generic Order Line form
-                     (golive#229). Hidden on a locked deal for the same reason the grid's New was. -->
-                @if (!IsLocked) {
-                    <div class="mjs-deal-lines__bar">
-                        <button type="button" class="mjs-deal-lines__add" data-testid="lines-add" (click)="AddLine()">
-                            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add a product
-                        </button>
-                    </div>
-                } @else {
-                    <!-- SAYS WHY, where the control used to be. Hiding Add told a rep nothing, and the
-                         row double-click is now refused as well (golive#206 item 1) — so without this
-                         the panel would simply stop responding with no account of itself. One sentence,
-                         the same one the server's refusal and the deal workspace use. -->
+                <!-- ONE CARD PER LINE, laid out like the order form's line cards, in place of the
+                     Order Line grid. Add and the per-line edit open the restricted editor, never the
+                     generic Order Line form (golive#229); on a locked deal the cards render without
+                     either and the sentence below says why (golive#206 item 1). Hiding a control is
+                     not the lock: the server refuses the line save whichever path it arrives by. -->
+                @if (IsLocked) {
                     <p class="mjs-deal-empty">
                         <i class="fa-solid fa-lock" aria-hidden="true"></i>
                         {{ LineEditBlockedReason }}
                     </p>
                 }
-                <!-- NEW IS HIDDEN ON A LOCKED DEAL (bc-aidp-next-golive#206 item 1). The tester added a
-                     line to a Won deal through this toolbar and it saved: "the grid should hide its New
-                     and delete buttons when the deal is locked".
-
-                     DELETE IS NOT BOUND HERE ON PURPOSE. ShowDeleteButton defaults to FALSE, so the
-                     toolbar never offers delete on any deal; binding it to !IsLocked would START showing
-                     it on open ones, which is the opposite of what the issue asks. Stage history sets it
-                     to false explicitly for the same reason it sets New to false: there, both are off on
-                     every deal.
-
-                     THIS IS THE FORM HALF ONLY. The server half -- refusing the line save whichever path
-                     it arrives by -- needs the order-line veto from bizapps-orders#206, which is not
-                     published yet. Hiding a button is not a lock, and this comment is here so nobody
-                     reads it as one. -->
-
-                <!-- NEW IS HIDDEN ON A LOCKED DEAL (bc-aidp-next-golive#206 item 1). The tester added a
-                     line to a Won deal through this toolbar and it saved: "the grid should hide its New
-                     and delete buttons when the deal is locked".
-
-                     DELETE IS NOT BOUND HERE ON PURPOSE. ShowDeleteButton defaults to FALSE, so the
-                     toolbar never offers delete on any deal; binding it to !IsLocked would START showing
-                     it on open ones, which is the opposite of what the issue asks. Stage history sets it
-                     to false explicitly for the same reason it sets New to false: there, both are off on
-                     every deal.
-
-                     THIS IS THE FORM HALF ONLY. The server half -- refusing the line save whichever path
-                     it arrives by -- needs the order-line veto from bizapps-orders#206, which is not
-                     published yet. Hiding a button is not a lock, and this comment is here so nobody
-                     reads it as one. -->
-                <!-- ShowNewButton and NavigateOnDoubleClick are BOTH off, and that pair is the fix
-                     (golive#229). Either one left on re-opens the generic Order Line form, which
-                     renders Unit Price as a plain editable field and lets a rep type any price with no
-                     discount recorded — the thing D-DL2 says must be impossible. A row double-click now
-                     opens the restricted editor instead; Navigate is left unbound because with
-                     NavigateOnDoubleClick off the grid never emits it. -->
-                <mj-explorer-entity-data-grid
-                    [Params]="Params"
-                    [AllowLoad]="FormComponent.IsSectionExpanded('lines')"
-                    [ShowToolbar]="true"
-                    [ShowNewButton]="false"
-                    [NavigateOnDoubleClick]="false"
-                    (AfterRowDoubleClick)="EditLine($event)"
-                    (AfterDataLoad)="OnDataLoad($event)">
-                </mj-explorer-entity-data-grid>
+                <mjs-deal-line-cards
+                    [Deal]="Record"
+                    [Locked]="IsLocked"
+                    (Add)="AddLine()"
+                    (Edit)="EditLine($event)"
+                    (Loaded)="OnLinesLoaded($event)">
+                </mjs-deal-line-cards>
             } @else if (!Record.IsSaved) {
                 <!-- THE CASE THE HINT EXISTS FOR (bc-aidp-next-golive#216). This branch used to be
                      gated on Record.IsSaved, so it told a SAVED deal to save and showed a brand-new
@@ -2043,6 +2845,13 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
                 <p class="mjs-deal-empty">This deal has no order, so there is nothing to add products to.</p>
             }
 
+            @if (AmountRefreshError()) {
+                <p class="mjs-deal-empty" data-testid="deal-amount-refresh-error">
+                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    {{ AmountRefreshError() }}
+                </p>
+            }
+
             @if (EditorOpen) {
                 <mjs-deal-line-editor
                     [Deal]="Record"
@@ -2055,14 +2864,6 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
     `,
     styles: [`
         .mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); display: flex; gap: 8px; align-items: baseline; }
-        .mjs-deal-lines__bar { display: flex; padding: var(--mj-space-3) var(--mj-space-5) 0; }
-        .mjs-deal-lines__add {
-            display: inline-flex; align-items: center; gap: 6px;
-            padding: 6px 12px; border-radius: var(--mj-radius-md, 8px); cursor: pointer;
-            border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface);
-            color: var(--mj-text-default); font: inherit; font-weight: 600;
-        }
-        .mjs-deal-lines__add:hover { background: var(--mj-bg-surface-hover); }
     `],
 })
 export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
@@ -2089,26 +2890,9 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
         return (this.FormComponent as unknown as { IsLocked?: boolean } | undefined)?.IsLocked === true;
     }
 
-    public get Params() {
-        const id = this.Record?.OrderID;
-        if (!id) return null;
-        return {
-            EntityName: MJS_FOREIGN_ENTITIES.OrderLine,
-            ExtraFilter: `OrderHeaderID = '${String(id).replace(/'/g, "''")}'`,
-            /**
-             * IN LINE-NUMBER ORDER, because without it the view's order is arbitrary and a rep saw
-             * 2, 3, 1 after adding three products.
-             *
-             * `LineNumber` rather than a created-at stamp: orders STAMPS it through the collection's
-             * `applySequence()` and re-stamps by array index when lines move, so it is the order the
-             * order itself considers the lines to be in. Sorting by creation time would show a
-             * resequenced order in the sequence it was typed rather than the sequence it now has.
-             */
-            OrderBy: 'LineNumber',
-        };
-    }
-    public OnDataLoad(event: AfterDataLoadEventArgs): void {
-        this.FormComponent.SetSectionRowCount('lines', event.totalRowCount);
+    /** The line count, for the section badge, after each load of the cards. */
+    public OnLinesLoaded(count: number): void {
+        this.FormComponent.SetSectionRowCount('lines', count);
     }
 
     /* ── The restricted line editor (bc-aidp-next-golive#229) ─────────────────────────────────── */
@@ -2118,8 +2902,8 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
     /** The line being edited; null means a new one. */
     public EditingLineID: string | null = null;
 
-    /** The grid itself, so a saved line can make it re-read rather than leaving it stale. */
-    @ViewChild(ExplorerEntityDataGridComponent) private linesGrid?: ExplorerEntityDataGridComponent;
+    /** The cards, so a saved line can make them re-read rather than leaving them stale. */
+    @ViewChild(MJSDealLineCardsComponent) private lineCards?: MJSDealLineCardsComponent;
 
     public AddLine(): void {
         this.EditingLineID = null;
@@ -2127,35 +2911,15 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
     }
 
     /**
-     * Opens the restricted editor for a row.
+     * Opens the restricted editor for a line.
      *
-     * The grid hands back the ROW, not an entity, so the primary key is read off it. A row without an
-     * ID is not a click that can be honoured — silently doing nothing beats opening an empty editor
-     * that would save a second, unrelated line.
+     * A CLOSED DEAL DOES NOT OPEN IT (golive#206 item 1). The cards already offer no edit control on a
+     * locked deal; this guard keeps any other path in (a double-click) refused as well, and the panel
+     * says why where the Add control would be.
      */
-    public EditLine(event: AfterRowDoubleClickEventArgs): void {
-        /**
-         * A CLOSED DEAL DOES NOT OPEN THE EDITOR (golive#206 item 1).
-         *
-         * The grid renders OUTSIDE this panel's `@if (!IsLocked)` block — deliberately, because a
-         * locked deal must still show what was sold — so the Add button disappearing did not take the
-         * double-click with it. A rep could open a Won deal's line and type into all four fields; the
-         * refusal arrived from the server veto after they pressed Save.
-         *
-         * Nothing is lost by refusing: the grid already displays product, quantity, discount and the
-         * priced figures, so the editor offers no READING this panel does not. That is the difference
-         * from the workspace's full line detail, which carries fields with no other surface and so
-         * opens read-only instead of not at all.
-         *
-         * The reason is already on screen — the panel renders it where the Add button would be — so a
-         * double-click that does nothing is explained rather than silent.
-         */
-        if (this.IsLocked) return;
-
-        const row = event?.row as Record<string, unknown> | undefined;
-        const id = row?.['ID'];
-        if (!id) return;
-        this.EditingLineID = String(id);
+    public EditLine(lineID: string): void {
+        if (this.IsLocked || !lineID) return;
+        this.EditingLineID = lineID;
         this.EditorOpen = true;
     }
 
@@ -2165,14 +2929,14 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
     }
 
     /**
-     * A saved line must change the GRID, not just close the dialog.
+     * A saved line must change the CARDS, not just close the dialog.
      *
      * Without the re-read the rep saves a product and the panel still shows the old set — which reads
      * exactly like a save that silently did nothing, the failure mode the Explorer harness exists to
      * catch.
      */
     /**
-     * A SAVED LINE MUST CHANGE THE DEAL, NOT JUST THE GRID.
+     * A SAVED LINE MUST CHANGE THE DEAL, NOT JUST THE CARDS.
      *
      * The dialog saves the ORDER. `Deal.Amount` is a cached copy of that order's `TotalGross`, and it is
      * only ever refreshed during a DEAL save — so adding a product left the deal reading no amount and
@@ -2194,13 +2958,16 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
      * composing — they are adding products to a deal they are building — and it is the honest cost of
      * the figure appearing straight away rather than after some later unrelated save.
      *
-     * A FAILED SAVE IS NOT SWALLOWED, but it does not undo the line either: the order is already
-     * committed, so the product genuinely is on the deal. The form reports the failure through its own
-     * path, and the amount catches up on the next successful save.
+     * A FAILED SAVE IS REPORTED HERE, beside the products, and does not undo the line: the order is
+     * already committed, so the product genuinely is on the deal. Nothing else reports it -- this path
+     * bypasses `SaveRecord`, so the form raises no save event -- and the amount catches up on the next
+     * successful deal save, which clears the message. A successful save tells the form, so its lock and
+     * stale-amount notices (and the hero's) re-check against the new amount (#271).
      */
     public async OnLineSaved(): Promise<void> {
         this.CloseEditor();
-        void this.linesGrid?.Refresh();
+        this.AmountRefreshError.set(null);
+        void this.lineCards?.Refresh();
 
         /**
          * `IgnoreDirtyState`, AND IT IS THE WHOLE REASON THIS WORKS.
@@ -2219,16 +2986,41 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
          * server, the same lock checks, the same stamps — which is what refreshes `Amount` from the
          * order and keeps that figure's single author.
          */
+        const record = this.Record;
+        if (!record) return;
         const options = new EntitySaveOptions();
         options.IgnoreDirtyState = true;
-        await this.Record?.Save(options);
+        if (!(await record.Save(options))) {
+            const reason = (record.LatestResult?.CompleteMessage || 'the save was refused').trim().replace(/\.$/, '');
+            this.AmountRefreshError.set(
+                `The product is saved, but the deal amount could not be updated: ${reason}. Fix the deal's fields and save it.`,
+            );
+            return;
+        }
+        await (this.FormComponent as unknown as { RefreshDealState?: () => Promise<void> } | undefined)?.RefreshDealState?.();
+    }
+
+    /**
+     * Why the deal's amount did not follow the last product save, or null. A signal so the OnPush host
+     * repaints when it is set after the save returns.
+     */
+    public readonly AmountRefreshError = signal<string | null>(null);
+
+    /** A deal save the form ran clears the message: that save refreshed the amount too. */
+    public ngOnInit(): void {
+        this.recordSavedSubscription = this.FormComponent?.RecordSaved?.subscribe(() => this.AmountRefreshError.set(null));
+    }
+    private recordSavedSubscription?: { unsubscribe(): void };
+
+    public ngOnDestroy(): void {
+        this.recordSavedSubscription?.unsubscribe();
     }
 }
 
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-motion',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 60, contributionKey: 'motion' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 48, contributionKey: 'motion' },
 })
 @Component({
     selector: 'mjs-deal-motion-panel',
@@ -2243,7 +3035,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
                 @for (f of Fields; track f.name) {
                     <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
-                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
+                            [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FieldFormContext(f)" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                     </div>
                 }
@@ -2261,6 +3053,13 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
      * row is where that now happens because only it knows the outcome. The row stays as a READ of
      * the order's name — the provenance is worth showing — it is just not a way in.
      *
+     * Omitting `link` was not enough, and the first version of this relied on it: `mj-form-field`
+     * links any foreign key with a mapped name field regardless of `LinkType`, so the order stayed
+     * one click away on every open deal (bc-aidp-next-golive#331). `noLink` is what removes it.
+     * `serverMaintained` keeps it out of edit mode too: `DealEntityServer` provisions the order and
+     * owns the id, so an FK search that lets a rep re-point the deal at another order is the same
+     * way in by a different door.
+     *
      * Deliberately not gated on `IsWon` here instead: a link that appears and disappears from a
      * field list is harder to reason about than one place that owns the rule, and the hero already
      * owns it.
@@ -2272,13 +3071,15 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
      * `LinkType='Record'` resolve the contract number here AND gives the field an FK search in edit
      * mode instead of asking a rep to paste a UUID. The chips cannot serve this: `RenewsContractID`
      * has to be SET on a renewal deal, and a chip is a link.
+     *
+     * **`CampaignID` IS NOT SHOWN** (#371 item 1). No campaign entity exists for it to point at, so it
+     * rendered as a text box asking for a raw GUID. The column and its metadata stay; the field
+     * returns here once there is a campaign to pick.
      */
     public readonly Fields: DealFieldSpec[] = [
         { name: 'NextStep', type: 'textbox', span: true },
         { name: 'NextStepDate', type: 'datepicker' },
-        { name: 'LeadSourceTypeID', type: 'textbox', link: 'Record' },
-        { name: 'CampaignID', type: 'textbox' },
-        { name: 'OrderID', type: 'textbox' },
+        { name: 'OrderID', type: 'textbox', noLink: true, serverMaintained: true },
         { name: 'ContractID', type: 'textbox', link: 'Record' },
         { name: 'RenewsContractID', type: 'textbox', link: 'Record' },
         { name: 'ContractVariances', type: 'textarea', span: true },
@@ -2288,7 +3089,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-close',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 52, contributionKey: 'close' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 60, contributionKey: 'close' },
 })
 @Component({
     selector: 'mjs-deal-close-panel',
@@ -2322,21 +3123,32 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                                  this one has two: Lost and Abandoned both carry IsLost, so resolving
                                  the target with find(IsLost) picked whichever sorted first and left
                                  Abandoned unreachable from the form entirely. -->
+                            <!-- A fieldset, so a screen reader announces the group's name with each
+                                 radio (#371 item 8). -->
+                            <fieldset class="mjs-close-action__outcome">
+                            <legend class="mjs-close-action__legend">Outcome</legend>
                             <div class="mjs-close-action__row">
                                 @for (s of ClosingStatuses; track s.ID) {
                                     <label>
+                                        <!-- data-status-id is an ATTRIBUTE binding on purpose. The value binding here
+                                             feeds Angular's radio value accessor, which declares its own value input, so
+                                             the id never reaches the DOM property -- anything reading input.value sees
+                                             the browser default "on". The attribute is how a test names WHICH status this
+                                             is without keying on the label, which is vocabulary. -->
                                         <input type="radio" name="dealCloseTarget" data-testid="close-target" [value]="s.ID"
+                                               [attr.data-status-id]="s.ID"
                                                [(ngModel)]="TargetStatusID" (ngModelChange)="OnTargetChange()"
                                                [disabled]="Closing" /> {{ s.Name }}
                                     </label>
                                 }
                             </div>
+                            </fieldset>
 
                             @if (SelectedStatus?.IsLost) {
                                 <label class="mjs-close-action__field">
-                                    <span>Loss reason</span>
+                                    <span>Loss reason <em>(required)</em></span>
                                     <select data-testid="close-loss-reason" [(ngModel)]="LossReasonID" (ngModelChange)="OnLossReasonChange()"
-                                            [disabled]="Closing">
+                                            required aria-required="true" [disabled]="Closing">
                                         <option [ngValue]="null">— choose —</option>
                                         @for (r of LossReasons(); track r.ID) {
                                             <option [ngValue]="r.ID">{{ r.Name }}</option>
@@ -2358,12 +3170,16 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
 
                             <div class="mjs-close-action__row">
                                 <button type="button" class="mjs-close-action__confirm" data-testid="close-confirm"
-                                        [disabled]="!CanConfirm" (click)="ConfirmClose()">
+                                        [disabled]="!CanConfirm" (click)="ConfirmClose()"
+                                        [attr.aria-describedby]="CloseBlockedReason ? FieldIdPrefix + '-close-blocked' : null">
                                     {{ Closing ? 'Closing…' : 'Close deal' }}
                                 </button>
                                 <button type="button" class="mjs-close-action__cancel"
                                         [disabled]="Closing" (click)="CancelClose()">Cancel</button>
                             </div>
+                            @if (CloseBlockedReason; as why) {
+                                <div class="mjs-close-action__note" data-testid="close-blocked" [id]="FieldIdPrefix + '-close-blocked'">{{ why }}</div>
+                            }
                         </div>
                     }
 
@@ -2411,7 +3227,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                  or whose finance task could not be routed reported NOTHING. golive#205 asks for exactly
                  the opposite: "Any downstream step that did not happen ... should show on the form
                  after the save." -->
-            @if (Message || Issues.length) {
+            @if (Message || Issues.length || InfoNotes.length) {
                 <div class="mjs-close-action">
                     @if (Message) {
                         <div class="mjs-close-action__msg" data-testid="close-message" [class.is-error]="MessageIsError">{{ Message }}</div>
@@ -2421,6 +3237,11 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                          itself is a duplicate-key error. -->
                     @for (i of Issues; track $index) {
                         <div class="mjs-close-action__issue">{{ i }}</div>
+                    }
+                    @for (n of InfoNotes; track $index) {
+                        <div class="mjs-close-action__note" data-testid="close-note">
+                            <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ n }}
+                        </div>
                     }
                 </div>
             }
@@ -2456,6 +3277,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
     public Message = '';
     public MessageIsError = false;
     public Issues: string[] = [];
+    public InfoNotes: string[] = [];
     /** Signals for the same reason the Pipeline panel uses them -- see the note on `statuses` there. */
     public readonly LossReasons = signal<LossReasonOption[]>([]);
 
@@ -2525,13 +3347,6 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
     }
 
     /**
-     * `Sales.ReopenDeal` REQUIRES a reason — §7.3 makes undoing a lock explainable, and CD10 pins it.
-     *
-     * Worth stating because golive#205 asks for the opposite ("No reopen reason should be required in
-     * this path"). Refusing here rather than letting the operation refuse keeps the round trip off a
-     * request that cannot succeed, and matches how the workspace's reopen behaves.
-     */
-    /**
      * Confirmable as soon as the panel is open. The reason is NOT part of this test, for the same
      * reason it is not on the Pipeline panel -- see the module-level {@link ReopenReasonOrDefault}.
      * This panel used to demand one while that one did not, which a user saw as the same button
@@ -2590,13 +3405,13 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
      */
     public get CanConfirm(): boolean {
         if (this.Closing) return false;
-        const target = this.SelectedStatus;
-        if (!target) return false;
-        if (target.IsLost) {
-            if (!this.LossReasonID) return false;
-            if (this.LossReasonRequiresNotes && !this.LossNotes.trim()) return false;
-        }
-        return true;
+        return CloseDetailComplete(this.SelectedStatus, this.LossReasonID, this.LossNotes, this.LossReasons());
+    }
+
+    /** Why "Close deal" is disabled, shown under it; null while it is enabled or closing (#371 item 6). */
+    public get CloseBlockedReason(): string | null {
+        if (this.Closing) return null;
+        return CloseDetailMissing(this.SelectedStatus, this.LossReasonID, this.LossNotes, this.LossReasons());
     }
 
     public OpenPanel(): void {
@@ -2607,12 +3422,14 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         this.Notes = '';
         this.Message = '';
         this.Issues = [];
+        this.InfoNotes = [];
     }
 
     public CancelClose(): void {
         this.PanelOpen = false;
         this.Message = '';
         this.Issues = [];
+        this.InfoNotes = [];
     }
 
     /**
@@ -2638,6 +3455,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         this.Closing = true;
         this.Message = '';
         this.Issues = [];
+        this.InfoNotes = [];
         try {
             /**
              * `true` ENDS EDIT MODE, and that is load-bearing rather than cosmetic.
@@ -2677,8 +3495,9 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
             }
             const out = envelope.Output;
             if (!out?.Success) {
-                this.Issues = (out?.Issues ?? []).map((i) => i.Message);
-                this.Fail(out?.Issues?.[0]?.Message ?? 'The deal could not be closed.');
+                const refusal = splitRefusal(out?.Issues, 'The deal could not be closed.');
+                ({ issues: this.Issues, notes: this.InfoNotes } = refusal);
+                this.Fail(refusal.message);
                 return;
             }
 
@@ -2688,7 +3507,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
             // WARNINGS ON A SUCCESSFUL CLOSE are the interesting ones -- a stubbed downstream, a finance
             // task that could not be routed, an order status orders refused. Reporting only failures
             // would call a half-done close clean.
-            this.Issues = (out.Issues ?? []).map((i) => i.Message);
+            ({ issues: this.Issues, notes: this.InfoNotes } = splitIssues(out.Issues));
             // OUTSIDE the try that wraps the operation. The close is committed by this point, and a
             // reload that throws afterwards is a display problem -- letting it reach the catch below
             // replaced "Deal closed as Won." with "The close did not complete", on a deal that closed.
@@ -2706,6 +3525,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         this.Message = '';
         this.MessageIsError = false;
         this.Issues = [];
+        this.InfoNotes = [];
     }
 
     public CancelReopen(): void {
@@ -2714,6 +3534,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         this.Message = '';
         this.MessageIsError = false;
         this.Issues = [];
+        this.InfoNotes = [];
     }
 
     /**
@@ -2751,6 +3572,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
         this.Closing = true;
         this.Message = '';
         this.Issues = [];
+        this.InfoNotes = [];
         try {
             // Before the operation, never after: the record still holds the CLOSED status afterwards,
             // so a save then would write it back over the reopened row. Same reasoning as the Pipeline
@@ -2765,6 +3587,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
             // operation applies its own default.
             const result = await RunReopen(this.Record.ID, this.ResolvedReopenReason(), null);
             this.Issues = result.issues;
+            this.InfoNotes = result.notes;
             if (!result.ok) {
                 this.Fail(result.message);
                 return;
@@ -2852,6 +3675,60 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealTeamMember;
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
         this.FormComponent.SetSectionRowCount('internal-team', event.totalRowCount);
+        void this.refreshOwnerIfTheRosterMovedIt();
+    }
+
+    /**
+     * Bring the page's owner up to date after the grid changed the roster.
+     *
+     * Saving an Owner / AE row re-derives `Deal.OwnerEmployeeID` on the SERVER
+     * (`DealTeamMemberEntityServer`). The open page knew nothing about it, so the hero kept saying
+     * "No owner assigned." while the database disagreed — and before the save path was changed to
+     * override rather than refuse, the next edit to any field sent that stale value back and lost the
+     * user's work to a refusal. The override fixed the damage; this fixes the staleness.
+     *
+     * ── THREE GUARDS, AND EACH ONE EARNS ITS PLACE ──────────────────────────────────────────────
+     *
+     * NEVER OVER A DIRTY RECORD. `Load()` discards unsaved edits. A user who typed a Next Step and
+     * then touched the team grid must not lose it to a refresh they did not ask for — so a dirty
+     * record is left exactly alone, and the override on the server already makes its save safe.
+     *
+     * ONLY WHEN THE STORED VALUE ACTUALLY DIFFERS. This also makes it TERMINATE: `AfterDataLoad`
+     * fires on every grid load including the first, and a `Load()` that re-renders the panel can load
+     * the grid again. Reloading only on a real difference means the second pass matches and stops.
+     * One narrow field read is the price, and it is paid only while the section is open.
+     *
+     * READ, NOT ASSUMED. The owner is derived from the roster by rules this panel does not own
+     * (the Owner / AE role, oldest-row-wins, the single-holder refusal). Re-deriving it here would be
+     * a second implementation that agrees with the first until it does not; asking the database for
+     * the answer it already computed cannot drift.
+     */
+    private async refreshOwnerIfTheRosterMovedIt(): Promise<void> {
+        const record = this.Record;
+        if (!record?.IsSaved || record.Dirty) {
+            return;
+        }
+        const id = record.ID;
+        if (!id) {
+            return;
+        }
+
+        const read = await new RunView().RunView<{ OwnerEmployeeID: string | null }>({
+            EntityName: MJS_ENTITIES.Deal,
+            ExtraFilter: `ID = '${id}'`,
+            ResultType: 'simple',
+            Fields: ['OwnerEmployeeID'],
+        });
+        if (!read.Success) {
+            return;   // a failed read is not evidence the owner moved; leave the page as it is
+        }
+
+        const stored = String((read.Results ?? [])[0]?.OwnerEmployeeID ?? '').toLowerCase();
+        const shown = String(record.OwnerEmployeeID ?? '').toLowerCase();
+        if (stored === shown) {
+            return;
+        }
+        await record.Load(id);
     }
 }
 
@@ -2859,7 +3736,7 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-buying-team',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 48, contributionKey: 'buying-team',
+        entity: E, slot: 'after-related', sortKey: 52, contributionKey: 'buying-team',
         relatedEntity: MJS_ENTITIES.DealContactRole, relatedJoinField: 'DealID',
     },
 })
@@ -2898,7 +3775,7 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-activity',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 88, contributionKey: 'activity',
+        entity: E, slot: 'after-related', sortKey: 46, contributionKey: 'activity',
         relatedEntity: MJS_FOREIGN_ENTITIES.ActivityLink, relatedJoinField: 'RecordID',
     },
 })
@@ -2912,15 +3789,41 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
             Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="true">
             @if (Record.IsSaved) {
                 <div class="mjs-deal-activity">
-                    <mjs-deal-activity-timeline [DealID]="Record.ID" [ComposeOnly]="true"
+                    <mjs-deal-activity-timeline #compose [DealID]="Record.ID" [ComposeOnly]="true"
                         (Logged)="OnLogged()"></mjs-deal-activity-timeline>
-                    @if (ActivityEntity) {
+                    <!-- Mounted only once the deal's view exists: with no view the viewer loads every
+                         activity, and a view bound during that load is dropped (golive#432). -->
+                    @if (ActivityEntity && ActivityView) {
                         <div class="mjs-deal-activity__viewer">
+                            <!-- New goes to the compose form above: it is the only path that links the new
+                                 activity to this deal. -->
                             <mj-entity-viewer
                                 [Entity]="ActivityEntity"
                                 [ViewEntity]="ActivityView"
-                                (RecordOpened)="OnActivityOpened($event)">
+                                (RecordSelected)="OnActivitySelected($event)"
+                                (RecordOpened)="OnActivityOpened($event)"
+                                (OpenRelatedRecordRequested)="OnActivityRelatedRecord($event)"
+                                (CreateRecordRequested)="compose.FocusCompose()">
                             </mj-entity-viewer>
+                        </div>
+                        <!-- Who the selected activity is linked to (#408): the grid has no column for it. -->
+                        <div class="mjs-deal-activity__links">
+                            @if (!Linked) {
+                                <span class="mjs-deal-activity__hint">Select an activity to see who it is linked to.</span>
+                            } @else {
+                                <span class="mjs-deal-activity__hint">Linked to:</span>
+                                @for (party of Linked; track $index) {
+                                    <span class="mjs-deal-activity__party" [title]="party.Role">
+                                        <i class="fa-solid" aria-hidden="true"
+                                            [class.fa-user]="party.Icon === 'person'"
+                                            [class.fa-building]="party.Icon === 'organization'"
+                                            [class.fa-at]="party.Icon === 'other'"></i>
+                                        {{ party.Name }}
+                                    </span>
+                                } @empty {
+                                    <span>this deal only</span>
+                                }
+                            }
                         </div>
                     }
                 </div>
@@ -2935,6 +3838,12 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
             min-height: 420px; height: 480px;
             display: flex; flex-direction: column;
             border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-md); overflow: hidden;
+        }
+        .mjs-deal-activity__links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mj-space-2); font-size: 0.8125rem; color: var(--mj-text-primary); }
+        .mjs-deal-activity__hint { color: var(--mj-text-muted); }
+        .mjs-deal-activity__party {
+            display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+            border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-sm);
         }
         .mjs-deal-activity__viewer mj-entity-viewer {
             display: flex; flex-direction: column; flex: 1 1 auto; height: 100%; width: 100%;
@@ -2956,8 +3865,58 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
         void this.refreshView();
     }
 
+    /** The selected activity's links, or null when none is selected. */
+    public Linked: LinkedParty[] | null = null;
+    private selectedActivityID: string | null = null;
+
     public OnLogged(): void {
+        this.selectedActivityID = null;
+        this.Linked = null;
         void this.refreshView();
+    }
+
+    public async OnActivitySelected(event: RecordSelectedEvent): Promise<void> {
+        const id = String(event.compositeKey?.GetValueByFieldName('ID') ?? event.record?.['ID'] ?? '');
+        if (!id) return;
+        this.selectedActivityID = id;
+        const linked = await this.readLinkedParties(id);
+        if (this.selectedActivityID !== id) return; // a later click won
+        this.Linked = linked;
+        this.cdr.detectChanges();
+    }
+
+    /** One read of the activity's links, then one `RunViews` for the people's and organizations' names. */
+    private async readLinkedParties(activityID: string): Promise<LinkedParty[] | null> {
+        const md = new Metadata();
+        const idOf = (name: string): string => md.Entities.find((e) => e.Name === name)?.ID ?? '';
+        const ids = { Deal: idOf(MJS_ENTITIES.Deal), Person: idOf(MJS_FOREIGN_ENTITIES.Person), Organization: idOf(MJS_FOREIGN_ENTITIES.Organization) };
+        const rv = new RunView();
+        const links = await rv.RunView<ActivityLinkFields>({
+            EntityName: MJS_FOREIGN_ENTITIES.ActivityLink,
+            ExtraFilter: `ActivityID = '${activityID.replace(/'/g, "''")}'`,
+            Fields: ['Role', 'EntityID', 'RecordID', 'IdentityValue', 'Entity'],
+            OrderBy: 'Sequence',
+            ResultType: 'simple',
+        });
+        if (!links.Success) {
+            console.error('Deal activity: could not read the activity links', links.ErrorMessage);
+            return null;
+        }
+        const rows = links.Results ?? [];
+        const inList = (entityID: string): string =>
+            rows.filter((l) => l.EntityID?.toLowerCase() === entityID.toLowerCase() && l.RecordID)
+                .map((l) => `'${String(l.RecordID).replace(/'/g, "''")}'`).join(', ') || 'NULL';
+        const [people, orgs] = await rv.RunViews([
+            { EntityName: MJS_FOREIGN_ENTITIES.Person, ExtraFilter: `ID IN (${inList(ids.Person)})`, Fields: ['ID', 'DisplayName'], ResultType: 'simple' },
+            { EntityName: MJS_FOREIGN_ENTITIES.Organization, ExtraFilter: `ID IN (${inList(ids.Organization)})`, Fields: ['ID', 'Name'], ResultType: 'simple' },
+        ]);
+        for (const r of [people, orgs].filter((x) => !x?.Success)) {
+            console.error('Deal activity: could not read linked names; showing IDs', r?.ErrorMessage);
+        }
+        const names = new Map<string, string>();
+        for (const r of (people?.Results ?? []) as { ID: string; DisplayName: string }[]) names.set(r.ID.toLowerCase(), r.DisplayName);
+        for (const r of (orgs?.Results ?? []) as { ID: string; Name: string }[]) names.set(r.ID.toLowerCase(), r.Name);
+        return LinkedParties(rows, ids, String(this.Record.ID), names);
     }
 
     public OnActivityOpened(event: RecordOpenedEvent): void {
@@ -2968,6 +3927,14 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
             EntityName: MJS_FOREIGN_ENTITIES.Activity,
             PrimaryKey: CompositeKey.FromID(id),
         });
+    }
+
+    /** A linked cell in the Activity grid, opened the way a row double-click is. */
+    public OnActivityRelatedRecord(nav: ViewRelatedRecordNavigation): void {
+        const target = RelatedRecordTarget(nav);
+        if (target) {
+            this.FormComponent.OnFormNavigate({ Kind: 'record', EntityName: target.EntityName, PrimaryKey: target.Key });
+        }
     }
 
     private async refreshView(): Promise<void> {
@@ -3051,11 +4018,14 @@ export class MJSDealHistoryPanel extends BaseFormPanel<DealEntity> {
     }
 }
 
+/** Undated instalments first on every platform, then by date, then by DisplayOrder within a date. */
+export const SCHEDULE_DATE_ORDER = 'CASE WHEN PaymentDate IS NULL THEN 0 ELSE 1 END, PaymentDate ASC, DisplayOrder ASC';
+
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-related-payment-schedule',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 42, contributionKey: 'payment-schedule',
+        entity: E, slot: 'after-related', sortKey: 88, contributionKey: 'payment-schedule',
         relatedEntity: MJS_ENTITIES.DealPaymentSchedule, relatedJoinField: 'DealID',
     },
 })
@@ -3069,23 +4039,118 @@ export class MJSDealHistoryPanel extends BaseFormPanel<DealEntity> {
             [BadgeCount]="FormComponent.GetSectionRowCount('payment-schedule')">
             @if (Record.IsSaved) {
                 <mj-explorer-entity-data-grid
-                    [Params]="FormComponent.BuildRelationshipViewParamsByEntityName(Entity, 'DealID')"
+                    [Params]="ScheduleParams"
                     [NewRecordValues]="FormComponent.NewRecordValues(Entity, 'DealID')"
                     [AllowLoad]="FormComponent.IsSectionExpanded('payment-schedule')"
                     [ShowToolbar]="true"
                     (Navigate)="FormComponent.OnFormNavigate($event)"
                     (AfterDataLoad)="OnDataLoad($event)">
                 </mj-explorer-entity-data-grid>
+                <!-- Shown whenever there are rows, not only when they are off: a rep adding instalments
+                     watches the remainder fall to zero. -->
+                @if (Total && Total.RowCount > 0) {
+                    <div class="mjs-deal-schedule-total" [class.mjs-deal-schedule-total--off]="!Total.Ties">
+                        <span><strong>{{ Money(Total.Scheduled) }}</strong> scheduled</span>
+                        @if (Total.Remainder !== null) {
+                            <span>of {{ Money(Total.DealAmount) }}</span>
+                            <span>{{ RemainderLabel }}</span>
+                        }
+                        @if (GapSentence) { <span class="mjs-deal-schedule-total__why">{{ GapSentence }}</span> }
+                    </div>
+                }
             } @else {
                 <p class="mjs-deal-empty">Save the deal first. Payments are scheduled against it once it exists.</p>
             }
         </mj-collapsible-panel>
     `,
-    styles: [EMPTY_STATE_STYLES],
+    styles: [EMPTY_STATE_STYLES, `
+        .mjs-deal-schedule-total {
+            display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--mj-space-1) var(--mj-space-3);
+            margin: var(--mj-space-3) 0 0; padding: var(--mj-space-2) var(--mj-space-3);
+            border-radius: var(--mj-radius-sm); background: var(--mj-bg-surface-sunken);
+            font-size: var(--mj-text-sm); color: var(--mj-text-secondary);
+        }
+        .mjs-deal-schedule-total--off {
+            background: var(--mj-status-warning-bg); color: var(--mj-status-warning-text);
+            border-left: 3px solid var(--mj-status-warning);
+        }
+        .mjs-deal-schedule-total__why { flex-basis: 100%; }
+    `],
 })
 export class MJSDealSchedulePanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealPaymentSchedule;
+    private readonly cdr = inject(ChangeDetectorRef);
+
+    /**
+     * The deal's instalments as last read, for the running total under the grid (bc-aidp-next-golive#290).
+     * Null before the first read and after a failed one: the panel then says nothing rather than
+     * asserting a total it cannot see.
+     */
+    public Rows: DealScheduleRowFigures[] | null = null;
+
+    /** Scheduled total and remainder against the deal's current amount, or null with no rows read. */
+    public get Total(): DealScheduleTotal | null {
+        return this.Rows ? ReadDealScheduleTotal(this.Rows, this.Record?.Amount ?? null) : null;
+    }
+
+    /** "Remaining $0.01", "Nothing remaining" or "Over by $0.50". */
+    public get RemainderLabel(): string {
+        const remainder = this.Total?.Remainder ?? null;
+        if (remainder === null) return '';
+        if (remainder === 0) return 'Nothing remaining';
+        return remainder > 0 ? `Remaining ${this.Money(remainder)}` : `Over by ${this.Money(-remainder)}`;
+    }
+
+    /** One sentence on why the schedule does not tie, or null when it does. */
+    public get GapSentence(): string | null {
+        const total = this.Total;
+        return total ? ExplainDealScheduleGap(total, (n) => this.Money(n)) : null;
+    }
+
+    /** A figure in the deal's currency, to the cent. */
+    public Money(amount: number | null): string {
+        return FormatDealMoney(amount, this.Record?.CurrencyID ?? null, 'cents');
+    }
+
+    /**
+     * Instalments by payment date, then by DisplayOrder within a date (bizapps-sales#314).
+     *
+     * The relationship params carry no sort, and with none the grid sends no ORDER BY, so rows came
+     * back in storage order. Undated rows ("on execution") sort first, and the CASE says so rather
+     * than relying on NULL placement: SQL Server puts NULL first ascending, PostgreSQL puts it last.
+     * DisplayOrder is only the tie-break; rows added through this grid skip the collection's
+     * sequencer and save it as 0. The deal workspace keeps entry order on purpose. A rep can still
+     * re-sort by clicking a column header.
+     */
+    public get ScheduleParams(): RunViewParams {
+        const params = this.FormComponent.BuildRelationshipViewParamsByEntityName(this.Entity, 'DealID');
+        // No relationship found, or one bound to a saved view that carries its own sort.
+        if (!params.EntityName) return params;
+        return { ...params, OrderBy: SCHEDULE_DATE_ORDER };
+    }
+
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
         this.FormComponent.SetSectionRowCount('payment-schedule', event.totalRowCount);
+        void this.readRows();
+    }
+
+    /**
+     * Read the rows again rather than sum the grid: the load event carries counts, not rows, and the
+     * grid pages, so its rows would be one page of a long schedule.
+     */
+    private async readRows(): Promise<void> {
+        const dealID = this.Record?.ID;
+        if (!dealID) {
+            this.Rows = null;
+            return;
+        }
+        const read = await new RunView().RunView<DealScheduleRowFigures>({
+            EntityName: this.Entity,
+            ExtraFilter: `DealID='${String(dealID).replace(/'/g, "''")}'`,
+            Fields: ['Amount', 'PaymentDate'],
+            ResultType: 'simple',
+        });
+        this.Rows = read.Success ? read.Results ?? [] : null;
+        this.cdr.detectChanges();
     }
 }

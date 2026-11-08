@@ -40,7 +40,7 @@ make_repo() {
   # the guard in `check`, silently running the gate against the real repository instead.
   for p in Entities Server; do
     mkdir -p "$dir/packages/$p"
-    echo "{\"name\":\"@mj-biz-apps/forms-$p\"}" > "$dir/packages/$p/package.json"
+    echo "{\"name\":\"@fixture/$p\"}" > "$dir/packages/$p/package.json"
   done
   # `settings:` after the block matters — the parser reads from `importers:` to the next
   # column-0 key, so without a following key the sed range would run to end-of-file.

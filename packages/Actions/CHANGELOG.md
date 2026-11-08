@@ -1,5 +1,228 @@
 # @mj-biz-apps/sales-actions
 
+## 6.24.1
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.24.1
+
+## 6.24.0
+
+### Patch Changes
+
+- Updated dependencies [4a3226a]
+  - @mj-biz-apps/sales-core-entities-server@6.24.0
+
+## 6.23.4
+
+### Patch Changes
+
+- Updated dependencies [3c7b6da]
+  - @mj-biz-apps/sales-core-entities-server@6.23.4
+
+## 6.23.3
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.23.3
+
+## 6.23.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.23.2
+
+## 6.23.1
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.23.1
+
+## 6.23.0
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.23.0
+
+## 6.22.1
+
+### Patch Changes
+
+- Updated dependencies [9e6d67e]
+  - @mj-biz-apps/sales-core-entities-server@6.22.1
+
+## 6.22.0
+
+### Patch Changes
+
+- Updated dependencies [f5dbce2]
+- Updated dependencies [df7d0bb]
+  - @mj-biz-apps/sales-core-entities-server@6.22.0
+
+## 6.21.0
+
+### Patch Changes
+
+- Updated dependencies [f2ed582]
+- Updated dependencies [9daffcf]
+- Updated dependencies [f5aacda]
+  - @mj-biz-apps/sales-core-entities-server@6.21.0
+
+## 6.20.0
+
+### Patch Changes
+
+- Updated dependencies [4f5fddd]
+  - @mj-biz-apps/sales-core-entities-server@6.20.0
+
+## 6.19.0
+
+### Patch Changes
+
+- Updated dependencies [9510fd9]
+- Updated dependencies [3717a22]
+  - @mj-biz-apps/sales-core-entities-server@6.19.0
+
+## 6.18.0
+
+### Patch Changes
+
+- 7041a49: Dependency ranges are caret: `zod` is `^3.24.4` instead of `~3.24.4`.
+- Updated dependencies [6e77e8f]
+- Updated dependencies [20e1899]
+- Updated dependencies [7c5daa9]
+  - @mj-biz-apps/sales-core-entities-server@6.18.0
+
+## 6.17.0
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.17.0
+
+## 6.16.0
+
+### Patch Changes
+
+- Updated dependencies [17ff470]
+- Updated dependencies [966e18b]
+- Updated dependencies [fc1f0aa]
+- Updated dependencies [c8c11b3]
+- Updated dependencies [e475d61]
+- Updated dependencies [3929ba8]
+- Updated dependencies [5623093]
+- Updated dependencies [0b93b39]
+- Updated dependencies [a43114c]
+  - @mj-biz-apps/sales-core-entities-server@6.16.0
+
+## 6.15.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.15.2
+
+## 6.15.1
+
+### Patch Changes
+
+- 19ecdc2: The packages' dependencies on each other are caret ranges (`^6.15.0`) instead of exact versions. A host that pins or overrides one package of this app at a later compatible version no longer forces an exact-match copy of its siblings. Changesets keeps the caret and moves its floor on each release.
+- Updated dependencies [19ecdc2]
+  - @mj-biz-apps/sales-core-entities-server@6.15.1
+
+## 6.15.0
+
+### Patch Changes
+
+- Updated dependencies [dbacb4c]
+  - @mj-biz-apps/sales-core-entities-server@6.15.0
+
+## 6.14.0
+
+### Patch Changes
+
+- b3691c6: Requires bizapps-orders 5.30.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.30.0`, `mj-app.json` `>=5.30.0`). That release exports `FindUnansweredHeldLines` and `HoldingSubscriberFor`, which the Close Won check uses. orders 5.30.0 needs MemberJunction 6.1.5, so the `@memberjunction/*` ranges and `mjVersionRange` floor at 6.1.5. The lockfile resolves bizapps-accounting 0.22.0, which orders-ng 5.30.0 requires.
+- Updated dependencies [ed649bb]
+- Updated dependencies [089e4d7]
+- Updated dependencies [900cdb0]
+- Updated dependencies [bb6025d]
+- Updated dependencies [ced96e0]
+- Updated dependencies [b3691c6]
+- Updated dependencies [c5d7b0b]
+- Updated dependencies [5d4c5f3]
+  - @mj-biz-apps/sales-core-entities-server@6.14.0
+
+## 6.13.0
+
+### Patch Changes
+
+- 2e66781: MemberJunction and other BizApps packages are peer dependencies with caret ranges (nothing in `dependencies`), so a host keeps one copy of each. The common, orders and tasks packages moved from `dependencies` to `peerDependencies`; every such peer has an exact `devDependencies` anchor for local builds. Adds `check-dependency-model` to CI.
+- Updated dependencies [29675ee]
+- Updated dependencies [2e66781]
+  - @mj-biz-apps/sales-core-entities-server@6.13.0
+
+## 6.12.3
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.12.3
+
+## 6.12.2
+
+### Patch Changes
+
+- 01fa1e0: Requires MemberJunction 6.1.5, the 6.1 LTS release AIDP Next runs. Every `@memberjunction/*` range is `^6.1.5` and `mj-app.json` declares `>=6.1.5 <7.0.0`. 6.1.5 carries the CodeGen fix for MemberJunction/MJ#4603. Generated code regenerated on 6.1.5 from a database built from migrations is unchanged.
+- Updated dependencies [01fa1e0]
+- Updated dependencies [a316f32]
+  - @mj-biz-apps/sales-core-entities-server@6.12.2
+
+## 6.12.1
+
+### Patch Changes
+
+- 016a740: Raise the MemberJunction floor to the 6.1 LTS release (`^6.1.4`, `mjVersionRange >=6.1.4 <7.0.0`) and move bizapps-common to `^5.50.1`. The accounting packages sales depends on require MJ core 6.1.0-edge.7 or later; with the old `^6.1.0-edge.5` override the lockfile installed an edge.5 core under them and the first accounting read during a deal save failed. Common 5.50.1 carries the Tags metadata that pushes to an MJ v6 host.
+- Updated dependencies [016a740]
+  - @mj-biz-apps/sales-core-entities-server@6.12.1
+
+## 6.12.0
+
+### Patch Changes
+
+- Updated dependencies [58259d2]
+  - @mj-biz-apps/sales-core-entities-server@6.12.0
+
+## 6.11.0
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.11.0
+
+## 6.10.0
+
+### Patch Changes
+
+- Updated dependencies [117f74e]
+  - @mj-biz-apps/sales-core-entities-server@6.10.0
+
+## 6.9.3
+
+### Patch Changes
+
+- Updated dependencies [f8dc2f1]
+  - @mj-biz-apps/sales-core-entities-server@6.9.3
+
+## 6.9.2
+
+### Patch Changes
+
+- Updated dependencies [bead3d7]
+  - @mj-biz-apps/sales-core-entities-server@6.9.2
+
+## 6.9.1
+
+### Patch Changes
+
+- Updated dependencies [ec5d62b]
+  - @mj-biz-apps/sales-core-entities-server@6.9.1
+
 ## 6.9.0
 
 ### Patch Changes

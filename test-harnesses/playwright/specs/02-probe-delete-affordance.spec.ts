@@ -10,7 +10,7 @@
  *
  * Skipped unless PW_PROBE=1.
  */
-import { test } from '@playwright/test';
+import { test } from '../lib/test';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { AUTH_DIR, DEV_COMPANY_NAME, TEST_PREFIX } from '../lib/env';

@@ -1,5 +1,381 @@
 # @mj-biz-apps/sales-server
 
+## 6.24.1
+
+### Patch Changes
+
+- b4fca8a: Restore the Acronym field on Sales Accounts. Sales Accounts inherit it from Organization (Common 5.57+), and the 6.24.0 generated code dropped it, so every Sales Account form failed to load with "Cannot query field Acronym". Common is now required at 5.60.0 or later, the version AIDP Next runs, so CodeGen in this repo keeps the field.
+- Updated dependencies [b4fca8a]
+  - @mj-biz-apps/sales-entities@6.24.1
+  - @mj-biz-apps/sales-actions@6.24.1
+  - @mj-biz-apps/sales-core-entities-server@6.24.1
+
+## 6.24.0
+
+### Minor Changes
+
+- 1ceea58: Logging an activity from a deal now lets the rep choose who it is linked to: the deal's account and primary contact start ticked and can be unticked, the billing contact and buying team can be ticked, and any other person or organization can be searched for and added. The Activity panel shows who the selected activity is linked to. `Log Activity` gains an optional `Parties` input (metadata); without it the action behaves as before. (golive #408)
+
+### Patch Changes
+
+- Updated dependencies [da41816]
+- Updated dependencies [4a3226a]
+- Updated dependencies [c4808fa]
+- Updated dependencies [c96a138]
+  - @mj-biz-apps/sales-entities@6.24.0
+  - @mj-biz-apps/sales-core-entities-server@6.24.0
+  - @mj-biz-apps/sales-actions@6.24.0
+
+## 6.23.4
+
+### Patch Changes
+
+- Updated dependencies [3c7b6da]
+  - @mj-biz-apps/sales-core-entities-server@6.23.4
+  - @mj-biz-apps/sales-actions@6.23.4
+  - @mj-biz-apps/sales-entities@6.23.4
+
+## 6.23.3
+
+### Patch Changes
+
+- @mj-biz-apps/sales-actions@6.23.3
+- @mj-biz-apps/sales-core-entities-server@6.23.3
+- @mj-biz-apps/sales-entities@6.23.3
+
+## 6.23.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-actions@6.23.2
+- @mj-biz-apps/sales-core-entities-server@6.23.2
+- @mj-biz-apps/sales-entities@6.23.2
+
+## 6.23.1
+
+### Patch Changes
+
+- f616af3: Logging an activity on a deal works again for users who are not Owners. MJ 6.1.6 runs an action through `RunAction` for Owners only unless the action authorizes its caller, so Log Activity now does: it refuses a deal the caller cannot read, and saves the activity with the caller's own permissions.
+  - @mj-biz-apps/sales-actions@6.23.1
+  - @mj-biz-apps/sales-core-entities-server@6.23.1
+  - @mj-biz-apps/sales-entities@6.23.1
+
+## 6.23.0
+
+### Patch Changes
+
+- Updated dependencies [62e89d6]
+  - @mj-biz-apps/sales-entities@6.23.0
+  - @mj-biz-apps/sales-actions@6.23.0
+  - @mj-biz-apps/sales-core-entities-server@6.23.0
+
+## 6.22.1
+
+### Patch Changes
+
+- Updated dependencies [9e6d67e]
+  - @mj-biz-apps/sales-entities@6.22.1
+  - @mj-biz-apps/sales-core-entities-server@6.22.1
+  - @mj-biz-apps/sales-actions@6.22.1
+
+## 6.22.0
+
+### Patch Changes
+
+- Updated dependencies [f5dbce2]
+- Updated dependencies [a279840]
+- Updated dependencies [7761d34]
+- Updated dependencies [df7d0bb]
+  - @mj-biz-apps/sales-core-entities-server@6.22.0
+  - @mj-biz-apps/sales-entities@6.22.0
+  - @mj-biz-apps/sales-actions@6.22.0
+
+## 6.21.0
+
+### Minor Changes
+
+- f5aacda: Sales bug fixes:
+
+  - Close lock: a permitted edit on a closed deal no longer rewrites its Amount (#351); order lines lock when the deal's status row is missing, as the header does (#401); a save that reopens a deal and changes a frozen field says to save the status change first (#390); a Lost close takes its loss reason and notes from the caller, not from values left on the deal (#400).
+  - Close routing: the Contract Processing task follows the close's effective policy, overrides included. `CloseWonTaskInput.PipelineID` is replaced by `CreateContract` (#354).
+  - Order vetoes read Deals as the system user, so a role that may confirm orders but not read Deals is no longer refused; its refusals do not name the deal (#423).
+  - A stage that confirms the order holds it back with a warning while a line for a product the customer already holds has no next-term answer (#426).
+  - Deal form: no duplicate order-total read (#386); saving clears the stale-amount notice when only the order changed (#399); Amount, MRR, ARR and Weighted honour field-level read security (#403); an empty Pipeline shows the required underline (#416); a deal whose status row is gone can be set to an open status (#402); the closed-deal notice names Status and Forecast Category as the form labels them (#387).
+  - Deal lines: a term start is cleared when the product changes to a non-subscription (#374); a failed product catalogue load is shown, not an empty picker (#380); the product select explains an overridden price to reps without the price grant (#408).
+  - Team and contacts: picking an Employee clears the old Person's name on the row (#437); the Sales Contact form lists the accounts the contact works at (#442); the default contact fields are labelled without "ID" (#435); a new query lists owner-role rows held by a Person (#438).
+  - Queries: Deal Type Mix leaves out open deals of pipelines flagged out of the forecast (#404); Bookings by Period parses with MJ's SQL parser (#417); Slipped Deals takes the first and last move by when each was made (#353); the No owner queue says no employee holds the owner role (#438).
+
+### Patch Changes
+
+- Updated dependencies [f2ed582]
+- Updated dependencies [a3400af]
+- Updated dependencies [9daffcf]
+- Updated dependencies [f5aacda]
+- Updated dependencies [d716be7]
+  - @mj-biz-apps/sales-entities@6.21.0
+  - @mj-biz-apps/sales-core-entities-server@6.21.0
+  - @mj-biz-apps/sales-actions@6.21.0
+
+## 6.20.0
+
+### Patch Changes
+
+- Updated dependencies [4f5fddd]
+- Updated dependencies [849236d]
+  - @mj-biz-apps/sales-core-entities-server@6.20.0
+  - @mj-biz-apps/sales-entities@6.20.0
+  - @mj-biz-apps/sales-actions@6.20.0
+
+## 6.19.0
+
+### Patch Changes
+
+- Updated dependencies [9510fd9]
+- Updated dependencies [de98c6f]
+- Updated dependencies [c80645a]
+- Updated dependencies [3717a22]
+- Updated dependencies [6c2a165]
+  - @mj-biz-apps/sales-core-entities-server@6.19.0
+  - @mj-biz-apps/sales-entities@6.19.0
+  - @mj-biz-apps/sales-actions@6.19.0
+
+## 6.18.0
+
+### Minor Changes
+
+- 6e77e8f: Order review by trigger support (bc-aidp-next-golive#320 §5). Sales now registers `DealOrderLink` with orders' `RegisterOrderDealLink` seam at bootstrap, answering which deal created an order from `Deal.OrderID`, so orders can let a deal order confirm without review. The seam ships in `@mj-biz-apps/orders-entities` 5.36.0; with an older orders the registration is skipped and logged. A pipeline's `CloseWonPolicy.CloseWonTasks.RaiseOrderReviewTask: false` stops a won deal raising the `ORDER_REVIEW` task; absent or `true` keeps it, so existing installs are unchanged.
+- 20e1899: MemberJunction floor raised to 6.1.6, and a batch of non-UX fixes:
+
+  - Breaking for direct importers of `@mj-biz-apps/sales-ng`: the unmounted `DealWorkspaceComponent` and the validation helpers only it used (`DiscountRefusalIssues`, `ShouldRefuseLineRemoval`, `LineRemovalRefusedIssues`, `UnlinkedLineIssues`, `MergeValidation`) are removed (#291). `IDownstreamSeam` gains `UpdateContractFromDeal` (#278).
+  - Closing a reopened Won deal Won again reuses its contract, refreshing unsigned terms, instead of creating a second one (#278).
+  - Changing a deal's contact or account moves its order's bill-to while the order is Draft or Quoted and still bills the previous party (#319).
+  - Deal stage events refuse updates and deletes on the server, and the API no longer offers them (#348).
+  - Slipped Deals, Stage Conversion and Forecast History count whole business days at both period bounds; Slipped Deals no longer fails on audit rows that are not JSON (#289).
+  - The Deal form's inline-create key workaround is removed now that MJ 6.1.6 sends the written key (#207).
+  - CodeGen no longer writes recurring reconcilers, including the field prune, into migrations (#345).
+
+### Patch Changes
+
+- Updated dependencies [7041a49]
+- Updated dependencies [769158a]
+- Updated dependencies [6e77e8f]
+- Updated dependencies [0cd81c5]
+- Updated dependencies [20e1899]
+- Updated dependencies [7c5daa9]
+  - @mj-biz-apps/sales-actions@6.18.0
+  - @mj-biz-apps/sales-entities@6.18.0
+  - @mj-biz-apps/sales-core-entities-server@6.18.0
+
+## 6.17.0
+
+### Patch Changes
+
+- Updated dependencies [2018641]
+- Updated dependencies [7b134f9]
+  - @mj-biz-apps/sales-entities@6.17.0
+  - @mj-biz-apps/sales-actions@6.17.0
+  - @mj-biz-apps/sales-core-entities-server@6.17.0
+
+## 6.16.0
+
+### Minor Changes
+
+- 5623093: Every company can have its own pipeline, and the pipeline pickers filter by company.
+
+  A deal sells as its pipeline's company, and the app seeds its pipelines on one placeholder company, so a deal for any other company had no pipeline with the current stages. The new `Sales.CopyDefaultPipelineToCompanies` Action copies the default pipeline (the one marked `IsDefault`) and all of its stages onto every company that has no pipeline with the same Code. Each company's copy saves in one transaction, the copies are not marked default, and a second run skips companies that already have the pipeline, so it can run again after a company is added.
+
+  The deal form, the deal workspace and the board gain a Company control that narrows the pipeline list to that company, with the default pipeline's company first. Choosing a company moves the deal to that company's first pipeline. Each pipeline option names its company, for example "B2B (Acme)". Within a company, its copy of the default pipeline comes first and legacy pipelines follow. The control is hidden when one company owns every pipeline.
+
+  The seeded stages now look up their pipeline by ID instead of by Code, because the copies share the Code and MetadataSync resolves a lookup to the first matching row.
+
+  `PipelineOption` (deal form) and `PipelineLookup` (workspace) now carry `Code`, `IsDefault` and `DisplayRank`.
+
+### Patch Changes
+
+- 2cc414f: A daily job links each won deal's order to its contract where the link is missing.
+
+  `Sales.RelinkWonDealOrdersToContracts` covers deals closed while the installed bizapps-contracts had no order links, and links refused at close time; the close itself never retries them. It skips, successfully, until contracts has the `Contract Orders` entity, then links every won deal that names both a contract and an order. The scheduled job ships Active at 01:00 UTC, ahead of contracts' renewal-terms sweep, and runs once on first start so an upgrade is picked up without waiting a night.
+
+- Updated dependencies [17ff470]
+- Updated dependencies [966e18b]
+- Updated dependencies [fc1f0aa]
+- Updated dependencies [c8c11b3]
+- Updated dependencies [3d02df4]
+- Updated dependencies [1738cb0]
+- Updated dependencies [2925963]
+- Updated dependencies [e475d61]
+- Updated dependencies [3929ba8]
+- Updated dependencies [5623093]
+- Updated dependencies [0b93b39]
+- Updated dependencies [bcc41d7]
+- Updated dependencies [91e3f43]
+- Updated dependencies [a43114c]
+  - @mj-biz-apps/sales-entities@6.16.0
+  - @mj-biz-apps/sales-core-entities-server@6.16.0
+  - @mj-biz-apps/sales-actions@6.16.0
+
+## 6.15.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-actions@6.15.2
+- @mj-biz-apps/sales-core-entities-server@6.15.2
+- @mj-biz-apps/sales-entities@6.15.2
+
+## 6.15.1
+
+### Patch Changes
+
+- 19ecdc2: The packages' dependencies on each other are caret ranges (`^6.15.0`) instead of exact versions. A host that pins or overrides one package of this app at a later compatible version no longer forces an exact-match copy of its siblings. Changesets keeps the caret and moves its floor on each release.
+- Updated dependencies [19ecdc2]
+  - @mj-biz-apps/sales-actions@6.15.1
+  - @mj-biz-apps/sales-core-entities-server@6.15.1
+  - @mj-biz-apps/sales-entities@6.15.1
+
+## 6.15.0
+
+### Minor Changes
+
+- dbacb4c: An order whose deal is not Won can no longer be confirmed.
+
+  A deal closed Won mints an order. Reopening the deal puts it back to Open — and the order could still be confirmed from the order screen, booking a journal entry, a subscription and twelve recognition entries against a deal sitting Open at 75%. Sales already refuses the reverse: `Sales.ReopenDeal` will not reopen a deal whose order has booked, because the ledger has moved.
+
+  Orders cannot enforce this alone. It does not depend on Sales, and there is no link to follow — `Deal.OrderID` points at the order, while `OrderHeader` carries no `DealID`. So Orders asks through `RegisterOrderConfirmVeto` and this answers, the same shape as the existing line-edit veto.
+
+  Decided by the `IsWon` flag, never by the status name, so a deployment that renames or adds a winning status stays covered. An order no deal points at is allowed without comment: orders are created directly too, and refusing those would make installing Sales break ordinary ordering.
+
+### Patch Changes
+
+- Updated dependencies [dbacb4c]
+  - @mj-biz-apps/sales-core-entities-server@6.15.0
+  - @mj-biz-apps/sales-actions@6.15.0
+  - @mj-biz-apps/sales-entities@6.15.0
+
+## 6.14.0
+
+### Patch Changes
+
+- bb6025d: The daily forecast snapshot now writes rows. The forecast source factory defaulted to none and nothing replaced it outside tests, so every scheduled `Sales.CaptureForecastSnapshot` run reported success and wrote no `ForecastSnapshot` rows. The default now reads the `Sales: Forecast by Owner` query (exported as `DEFAULT_FORECAST_QUERY`), so each run writes one row per company, pipeline and owner for the current month. The no-source messages now say the default was replaced rather than that the queries do not exist.
+- b3691c6: Requires bizapps-orders 5.30.0 or later (`@mj-biz-apps/orders-entities` and `orders-ng` `^5.30.0`, `mj-app.json` `>=5.30.0`). That release exports `FindUnansweredHeldLines` and `HoldingSubscriberFor`, which the Close Won check uses. orders 5.30.0 needs MemberJunction 6.1.5, so the `@memberjunction/*` ranges and `mjVersionRange` floor at 6.1.5. The lockfile resolves bizapps-accounting 0.22.0, which orders-ng 5.30.0 requires.
+- Updated dependencies [ed649bb]
+- Updated dependencies [089e4d7]
+- Updated dependencies [65ae0b7]
+- Updated dependencies [900cdb0]
+- Updated dependencies [bb6025d]
+- Updated dependencies [ced96e0]
+- Updated dependencies [b3691c6]
+- Updated dependencies [c5d7b0b]
+- Updated dependencies [9a57950]
+- Updated dependencies [5d4c5f3]
+  - @mj-biz-apps/sales-core-entities-server@6.14.0
+  - @mj-biz-apps/sales-entities@6.14.0
+  - @mj-biz-apps/sales-actions@6.14.0
+
+## 6.13.0
+
+### Patch Changes
+
+- 2e66781: MemberJunction and other BizApps packages are peer dependencies with caret ranges (nothing in `dependencies`), so a host keeps one copy of each. The common, orders and tasks packages moved from `dependencies` to `peerDependencies`; every such peer has an exact `devDependencies` anchor for local builds. Adds `check-dependency-model` to CI.
+- Updated dependencies [29675ee]
+- Updated dependencies [2e66781]
+- Updated dependencies [86030e7]
+  - @mj-biz-apps/sales-core-entities-server@6.13.0
+  - @mj-biz-apps/sales-actions@6.13.0
+  - @mj-biz-apps/sales-entities@6.13.0
+
+## 6.12.3
+
+### Patch Changes
+
+- @mj-biz-apps/sales-actions@6.12.3
+- @mj-biz-apps/sales-core-entities-server@6.12.3
+- @mj-biz-apps/sales-entities@6.12.3
+
+## 6.12.2
+
+### Patch Changes
+
+- 01fa1e0: Requires MemberJunction 6.1.5, the 6.1 LTS release AIDP Next runs. Every `@memberjunction/*` range is `^6.1.5` and `mj-app.json` declares `>=6.1.5 <7.0.0`. 6.1.5 carries the CodeGen fix for MemberJunction/MJ#4603. Generated code regenerated on 6.1.5 from a database built from migrations is unchanged.
+- Updated dependencies [01fa1e0]
+- Updated dependencies [a316f32]
+  - @mj-biz-apps/sales-entities@6.12.2
+  - @mj-biz-apps/sales-core-entities-server@6.12.2
+  - @mj-biz-apps/sales-actions@6.12.2
+
+## 6.12.1
+
+### Patch Changes
+
+- 016a740: Raise the MemberJunction floor to the 6.1 LTS release (`^6.1.4`, `mjVersionRange >=6.1.4 <7.0.0`) and move bizapps-common to `^5.50.1`. The accounting packages sales depends on require MJ core 6.1.0-edge.7 or later; with the old `^6.1.0-edge.5` override the lockfile installed an edge.5 core under them and the first accounting read during a deal save failed. Common 5.50.1 carries the Tags metadata that pushes to an MJ v6 host.
+- Updated dependencies [016a740]
+  - @mj-biz-apps/sales-entities@6.12.1
+  - @mj-biz-apps/sales-core-entities-server@6.12.1
+  - @mj-biz-apps/sales-actions@6.12.1
+
+## 6.12.0
+
+### Patch Changes
+
+- Updated dependencies [58259d2]
+  - @mj-biz-apps/sales-core-entities-server@6.12.0
+  - @mj-biz-apps/sales-actions@6.12.0
+  - @mj-biz-apps/sales-entities@6.12.0
+
+## 6.11.0
+
+### Patch Changes
+
+- Updated dependencies [364871c]
+  - @mj-biz-apps/sales-entities@6.11.0
+  - @mj-biz-apps/sales-core-entities-server@6.11.0
+  - @mj-biz-apps/sales-actions@6.11.0
+
+## 6.10.0
+
+### Patch Changes
+
+- Updated dependencies [117f74e]
+- Updated dependencies [c5b7825]
+- Updated dependencies [c91feda]
+  - @mj-biz-apps/sales-core-entities-server@6.10.0
+  - @mj-biz-apps/sales-entities@6.10.0
+  - @mj-biz-apps/sales-actions@6.10.0
+
+## 6.9.3
+
+### Patch Changes
+
+- Updated dependencies [f8dc2f1]
+  - @mj-biz-apps/sales-core-entities-server@6.9.3
+  - @mj-biz-apps/sales-actions@6.9.3
+  - @mj-biz-apps/sales-entities@6.9.3
+
+## 6.9.2
+
+### Patch Changes
+
+- Updated dependencies [bead3d7]
+  - @mj-biz-apps/sales-core-entities-server@6.9.2
+  - @mj-biz-apps/sales-actions@6.9.2
+  - @mj-biz-apps/sales-entities@6.9.2
+
+## 6.9.1
+
+### Patch Changes
+
+- ec5d62b: Add the nightly `Sales.DetectWonDealsWithUnconfirmedOrders` Action and its scheduled job (golive #279,
+  type 3). It reads `MinDaysSinceClose` from accounting's `WON_DEAL_ORDER_NOT_CONFIRMED` exception type,
+  runs `Sales: Won Deals With Unconfirmed Orders`, and raises one finance exception per deal through
+  `Accounting.RaiseFinanceExceptions`, with the deal owner's linked login as creator. Skips when the type
+  is missing or inactive; a refused raise fails the run. When the owner's login cannot be resolved the
+  summary names the owner, since accounting shows it when refusing to clear the row. The job ships
+  Disabled; the new query `Sales: Deal Owners Without a Linked Login` lists owners to link before
+  enabling it. New exports only; no schema change.
+- Updated dependencies [ec5d62b]
+  - @mj-biz-apps/sales-core-entities-server@6.9.1
+  - @mj-biz-apps/sales-actions@6.9.1
+  - @mj-biz-apps/sales-entities@6.9.1
+
 ## 6.9.0
 
 ### Patch Changes

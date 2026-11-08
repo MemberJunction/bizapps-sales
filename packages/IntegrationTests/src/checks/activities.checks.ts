@@ -1138,7 +1138,13 @@ export const ActivitiesChecks: NamedCheck[] = [
                 /**
                  * AND THE CONSEQUENCE, PROVED RATHER THAN ARGUED: a meeting for an earlier date, created
                  * after that watermark, still comes through. Under the defect this second run saw nothing.
+                 *
+                 * "Next week" is measured from the first fetch, not written as a calendar date: a fixed
+                 * date passes only until the day it falls behind the run, after which the source drops it
+                 * as already-seen and the check fails whatever the code does. A week after the watermark
+                 * and years before `farFuture` is the window the defect closed.
                  */
+                const nextWeek = new Date(source.fetchedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
                 const nextSource = new FixtureActivitySyncProvider(
                     [
                         item({
@@ -1146,7 +1152,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                             TypeCode: 'Meeting',
                             Subject: 'AC19 meeting next week',
                             Direction: 'Internal',
-                            StartedAt: new Date(Date.UTC(2026, 8, 15, 9, 0, 0)),
+                            StartedAt: nextWeek,
                         }),
                     ],
                     'Calendar',
@@ -1425,6 +1431,56 @@ export const ActivitiesChecks: NamedCheck[] = [
                 Assert(
                     !!connection['LastError'],
                     'and LastError must survive: the row exists so a week of failure is visible',
+                );
+            }),
+    },
+    {
+        Id: 'activities.AC24',
+        Name: 'AC24: a chosen party list replaces the deal parties, one link per target, deal first (#408)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+
+                /**
+                 * The compose form's shape: the deal parties are NOT added by the service, and the list
+                 * names the deal's own account plus the same person twice. The primary contact is left
+                 * out on purpose, so a service that still added it would show up here.
+                 */
+                const [someone] = await rows(ctx, E_PERSON, `ID <> '${deal.ContactID}'`);
+                Assert(!!someone, 'setup: no Person besides the deal contact on this host');
+                const personID = String(someone['ID']);
+                const out = await writer.LogActivity(
+                    {
+                        DealID: deal.DealID,
+                        TypeCode: 'Call',
+                        Title: 'AC24 call',
+                        StartedAt: new Date('2026-11-04T09:00:00.000Z'),
+                        IncludeDealParties: false,
+                        Parties: [
+                            { Kind: 'Organization', RecordID: deal.AccountID, Role: 'Participant' },
+                            { Kind: 'Person', RecordID: personID, Role: 'Participant' },
+                            { Kind: 'Person', RecordID: personID.toLowerCase(), Role: 'Participant' },
+                        ],
+                    },
+                    ProviderOf(ctx),
+                    ctx.User,
+                );
+                Assert(out.Success, `the writer reported failure — ${out.Issues.join(' | ')}`);
+
+                const links = await rows(ctx, E_ACTIVITY_LINK, `ActivityID = '${out.ActivityID}'`);
+                const targets = links
+                    .sort((a, b) => Number(a['Sequence']) - Number(b['Sequence']))
+                    .map((l) => `${String(l['Role'])}:${String(l['RecordID']).toLowerCase()}`);
+                AssertEqual(
+                    targets.join(' | '),
+                    [
+                        `Regarding:${deal.DealID.toLowerCase()}`,
+                        `Participant:${deal.AccountID.toLowerCase()}`,
+                        `Participant:${personID.toLowerCase()}`,
+                    ].join(' | '),
+                    'exactly the deal (first, Regarding), the account and the person once — no primary contact',
                 );
             }),
     },

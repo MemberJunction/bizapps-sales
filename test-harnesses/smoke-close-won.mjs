@@ -40,7 +40,7 @@ const pool = await new sql.ConnectionPool({
 const { setupSQLServerClient, SQLServerProviderConfigData } = await import('@memberjunction/sqlserver-dataprovider');
 const { UserCache } = await import('@memberjunction/generic-database-provider');
 const provider = await setupSQLServerClient(new SQLServerProviderConfigData(pool, process.env.MJ_CORE_SCHEMA || '__mj'));
-await UserCache.Instance.Refresh(pool);
+await UserCache.Instance.Refresh(provider);
 const user = UserCache.Users.find((u) => u?.Type?.trim().toLowerCase() === 'owner') ?? UserCache.Users[0];
 
 /**
@@ -121,8 +121,13 @@ async function one(entity, filter, fields) {
 console.log(`\nSMOKE — close-won end to end · db=${DB_DATABASE} · run ${stamp}\n`);
 
 // ── 1. A pipeline to sell on ────────────────────────────────────────────────
-const pipeline = await one('MJ_BizApps_Sales: Pipelines', 'IsActive = 1', ['ID', 'CompanyID', 'Name']);
+const pipeline = await one('MJ_BizApps_Sales: Pipelines', 'IsActive = 1', ['ID', 'Name']);
 step('pipeline available', !!pipeline, pipeline?.Name);
+// A pipeline serves the companies it is actively linked to; the deal sells as one of them, or the
+// server refuses it.
+const link = await one('MJ_BizApps_Sales: Pipeline Companies', `PipelineID = '${pipeline.ID}' AND IsActive = 1`, ['CompanyID', 'Company']);
+step('pipeline linked to a company', !!link, link?.Company);
+const companyID = link?.CompanyID;
 
 const stage = await one('MJ_BizApps_Sales: Pipeline Stages', `PipelineID = '${pipeline.ID}' AND IsActive = 1`, ['ID']);
 const dealType = await one('MJ_BizApps_Sales: Deal Types', 'IsActive = 1', ['ID']);
@@ -132,7 +137,7 @@ const account = await one('MJ_BizApps_Sales: Sales Accounts', 'IsActive = 1', ['
 
 // ── 2. The picker's own filter, against orders' catalogue ───────────────────
 const productsView = await new RunView().RunView(
-    { EntityName: E_ORDERS_PRODUCT, ExtraFilter: `CompanyID = '${String(pipeline.CompanyID).replace(/'/g, "''")}' AND (${ProductFilterFor(new Date())})`, OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
+    { EntityName: E_ORDERS_PRODUCT, ExtraFilter: `CompanyID = '${String(companyID).replace(/'/g, "''")}' AND (${ProductFilterFor(new Date())})`, OrderBy: 'Name ASC', ResultType: 'simple', Fields: ['ID', 'Name'] },
     user,
 );
 const products = productsView.Success ? (productsView.Results ?? []) : [];
@@ -147,7 +152,7 @@ deal.PipelineStageID = stage.ID;
 deal.DealTypeID = dealType.ID;
 deal.DealStatusTypeID = openStatus.ID;
 deal.AccountID = account.ID;
-deal.CompanyID = pipeline.CompanyID;
+deal.CompanyID = companyID;
 deal.TermMonths = 12;
 
 /**

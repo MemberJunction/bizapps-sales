@@ -1,0 +1,83 @@
+[
+  {
+    "_comments": [
+      "bizapps-sales#273: the deal's Stage history grid had no DefaultInView field, so MJ showed the",
+      "first ten fields: the deal, stage, status and user IDs. A rep reads a stage change as when, from",
+      "which stage and status to which, who made it, how long the deal sat in the previous stage, and the",
+      "amount at that point. The view already carries the name columns; these eight are the grid.",
+      "",
+      "AutoUpdateDefaultInView is off so CodeGen's field analysis does not re-pick the columns when a",
+      "field is added to this entity. The ID columns stay available from the grid's column chooser."
+    ],
+    "fields": {
+      "DefaultInView": true,
+      "AutoUpdateDefaultInView": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Stage Events&Name=ChangedAt"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true,
+      "AutoUpdateDefaultInView": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Stage Events&Name=FromStage"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true,
+      "AutoUpdateDefaultInView": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Stage Events&Name=ToStage"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true,
+      "AutoUpdateDefaultInView": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Stage Events&Name=FromDealStatusType"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true,
+      "AutoUpdateDefaultInView": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Stage Events&Name=ToDealStatusType"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true,
+      "AutoUpdateDefaultInView": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Stage Events&Name=ChangedByUser"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true,
+      "AutoUpdateDefaultInView": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Stage Events&Name=DaysInPreviousStage"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true,
+      "AutoUpdateDefaultInView": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Stage Events&Name=AmountAtTransition"
+    }
+  }
+]

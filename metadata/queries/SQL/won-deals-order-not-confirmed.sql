@@ -15,9 +15,12 @@
 -- WON IS DealStatusType.IsWon, never a status name. Order Status is a CHECK-constrained column
 -- (Draft, Quoted, Confirmed, Voided), not seeded vocabulary, so it is compared by value.
 --
--- DATE DIMENSION: ActualCloseDate, falling back to the date part of ClosedAt for a deal closed
--- without one. DaysSinceClose counts to the business day from fnBusinessToday(), the same "today"
--- the orders views use, so a deal closed late in the evening does not age a day early.
+-- DATE DIMENSION: ActualCloseDate, falling back to ClosedAt's BUSINESS day (fnBusinessDayOf) for a
+-- deal closed without one. ActualCloseDate is stamped on the business day (bc-aidp-next-golive#168);
+-- a CAST of ClosedAt took the UTC day, the NEXT day for a close in the Central evening, so the
+-- fallback would have been a different kind of day from the column it stands in for. DaysSinceClose
+-- counts to the business day from fnBusinessToday(), the same "today" the orders views use, so a deal
+-- closed late in the evening does not age a day early.
 --
 -- MinDaysSinceClose is the grace period before a won deal counts as an exception. It is optional
 -- until finance sets the threshold; omitted, every won deal with an unconfirmed order is listed.
@@ -36,7 +39,7 @@ WITH won AS (
         d.OrderID,
         d.ClosedByUserID,
         d.ClosedByUser,
-        COALESCE(d.ActualCloseDate, CAST(d.ClosedAt AS DATE)) AS CloseDate
+        COALESCE(d.ActualCloseDate, [__mj_BizAppsCommon].[fnBusinessDayOf](d.ClosedAt)) AS CloseDate
     FROM [__mj_BizAppsSales].vwDeals d
     INNER JOIN [__mj_BizAppsSales].DealStatusType st
             ON st.ID = d.DealStatusTypeID

@@ -14,7 +14,7 @@
  * so the app never sees the write). A version of this test that reset the row would pass while proving
  * nothing.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../lib/test';
 import { Db } from '../lib/db';
 import { openAllEntities, openEntity, openSalesApp } from '../lib/explorer';
 

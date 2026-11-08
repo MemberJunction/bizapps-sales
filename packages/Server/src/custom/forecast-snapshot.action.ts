@@ -85,17 +85,17 @@ export class CaptureForecastSnapshotAction extends BaseAction {
         setOutput(params, 'Issues', JSON.stringify(result.Issues));
 
         /**
-         * NO SOURCE IS A SUCCESS, and says so. Until the forecast queries land there is nothing to read,
-         * and a daily job reporting failure for that would be red from the day it shipped — which is how a
-         * job log stops being read before it ever has anything to say.
+         * NO SOURCE IS A SUCCESS, and says so. The default factory always returns one; this is reached
+         * only when something replaced it with a factory that returns none, which is a configuration
+         * choice rather than a failed measurement.
          */
         if (!result.Period) {
             return {
                 Success: true,
                 ResultCode: 'NO_SOURCE',
                 Message:
-                    'No forecast source is registered, so nothing was captured. The chain is wired; the MJ '
-                    + 'Queries it reads from do not exist yet.',
+                    'No forecast source is registered, so nothing was captured. The default source was '
+                    + 'replaced with one that returns none.',
             };
         }
 

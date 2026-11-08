@@ -1,9 +1,9 @@
 /**
  * @fileoverview The real forecast source — an MJ Query, run by name.
  *
- * Written now, against queries that do not exist yet, so that when they land the only change is which
- * source the factory returns. It is complete and its one unproven part is
- * the mapping — `readRow` below — which a single run against a real query settles.
+ * Written before the forecast queries existed, so that when they landed the only change was which source
+ * the factory returns. It is now the default source, reading `Sales: Forecast by Owner`
+ * (`DEFAULT_FORECAST_QUERY`). `readRow` below is the mapping; FS11 checks it against a real query.
  *
  * ── IT REFUSES CLEARLY RATHER THAN RETURNING NOTHING ────────────────────────────────────────────
  *
@@ -42,7 +42,7 @@ import type {
  *   2. **`OwnerEmployeeID` is not projected at all.** `Sales: Forecast by Category` groups by company and
  *      pipeline only. That is not a gap: null means "across all owners" on `ForecastSnapshot`, which is
  *      the honest description of a company-by-pipeline rollup. But it means THIS query cannot produce the
- *      per-owner grain, and anything expecting one needs a different query. See D-33.
+ *      per-owner grain, and anything expecting one needs a different query. See D-32.
  *
  * A list rather than a rename because both names are legitimate and a future query may use either: the
  * query's own name first, the storage column name second. Declared, never inferred from position or

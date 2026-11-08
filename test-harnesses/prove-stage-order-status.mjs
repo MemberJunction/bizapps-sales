@@ -24,8 +24,8 @@ const pool = await new sql.ConnectionPool({
 
 const { setupSQLServerClient, SQLServerProviderConfigData } = await import('@memberjunction/sqlserver-dataprovider');
 const { UserCache } = await import('@memberjunction/generic-database-provider');
-await setupSQLServerClient(new SQLServerProviderConfigData(pool, process.env.MJ_CORE_SCHEMA || '__mj'));
-await UserCache.Instance.Refresh(pool);
+const provider = await setupSQLServerClient(new SQLServerProviderConfigData(pool, process.env.MJ_CORE_SCHEMA || '__mj'));
+await UserCache.Instance.Refresh(provider);
 const user = UserCache.Users.find((u) => u?.Type?.trim().toLowerCase() === 'owner') ?? UserCache.Users[0];
 
 await import('@mj-biz-apps/sales-server').then((m) => m.LoadBizAppsSalesServer?.());
@@ -58,7 +58,14 @@ ck(by('DISC')?.OrderStatusOnEntry === null, 'DISC says nothing about the order (
 ck(by('PROP')?.OrderStatusOnEntry === 'Quoted', 'PROP quotes it', by('PROP')?.OrderStatusOnEntry);
 ck(by('LOST')?.OrderStatusOnEntry === 'Voided', 'LOST voids it (S-US7)', by('LOST')?.OrderStatusOnEntry);
 
-const pipe = (await q("SELECT ID, CompanyID FROM __mj_BizAppsSales.Pipeline WHERE Code='B2B'"))[0];
+// The pipeline's company comes from its active link; the server refuses a deal selling as any other.
+const pipe = (await q(`
+    SELECT TOP 1 p.ID, pc.CompanyID
+      FROM __mj_BizAppsSales.Pipeline p
+      JOIN __mj_BizAppsSales.PipelineCompany pc ON pc.PipelineID = p.ID AND pc.IsActive = 1
+     WHERE p.Code = 'B2B'
+     ORDER BY pc.__mj_CreatedAt, pc.CompanyID`))[0];
+if (!pipe) { console.error('    PRECONDITION: B2B has no active company link'); process.exit(2); }
 const dtype = (await q('SELECT TOP 1 ID FROM __mj_BizAppsSales.DealType WHERE IsActive=1'))[0];
 const open = (await q('SELECT TOP 1 ID FROM __mj_BizAppsSales.DealStatusType WHERE IsOpen=1 AND IsActive=1'))[0];
 const account = (await q('SELECT TOP 1 ID FROM __mj_BizAppsSales.SalesAccount WHERE IsActive=1'))[0];
@@ -72,6 +79,7 @@ deal.PipelineStageID = by('DISC').ID;
 deal.DealTypeID = dtype.ID;
 deal.DealStatusTypeID = open.ID;
 deal.AccountID = account?.ID ?? null;
+deal.CompanyID = pipe.CompanyID;
 deal.TermMonths = 12;
 ck(await deal.Save(), 'a deal is created on DISC', deal.LatestResult?.CompleteMessage ?? '');
 const orderID = deal.OrderID;

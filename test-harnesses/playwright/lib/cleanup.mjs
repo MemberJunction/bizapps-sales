@@ -4,12 +4,12 @@
  *
  * WHY THIS IS SQL AND NOT MORE UI CLICKING. The CRUD spec proves deletion through the UI — that is its
  * job and it asserts it. But a spec that fails PART WAY leaves residue, and the next run then trips
- * over `UQ_Pipeline_Company_Code` and fails for a reason that has nothing to do with the code under
- * test. A guaranteed teardown that does not depend on the UI being healthy is what makes the harness
+ * over its own leftover rows (a second PW-VERIFY pipeline or deal of the same name) and fails for a
+ * reason that has nothing to do with the code under test. A guaranteed teardown that does not depend on the UI being healthy is what makes the harness
  * genuinely re-runnable, which B4 asks for.
  *
- * Safe by construction: it only ever touches rows whose Name starts with the loud PW-VERIFY prefix.
- * It cannot delete real data, and its deletes are ordered child-first so the FKs never block it.
+ * It only touches rows named with one of the harness prefixes in PREFIXES below, spares the seeded
+ * DEAL-90* deals, and orders its deletes child-first so the FKs never block it.
  *
  * Usage:  node lib/cleanup.mjs [--quiet]
  */
@@ -104,7 +104,7 @@ function readEnv() {
 
 /**
  * Child-first order. DealTeamMember / DealStageEvent / DealContactRole / DealPaymentSchedule all
- * reference Deal; Deal references Pipeline; PipelineStage references Pipeline. Deleting a parent first
+ * reference Deal; Deal references Pipeline; PipelineStage and PipelineCompany reference Pipeline. Deleting a parent first
  * would be refused by the very foreign keys the S1 baseline put there on purpose.
  *
  * ── THIS SCRIPT HAD NOT RUN AT ALL, AND SAID SO IN A LINE NOBODY READ ───────────────────────────────
@@ -155,8 +155,8 @@ INSERT INTO @inner (P) VALUES ${PREFIXES.map((x) => `(N'%${x}%')`).join(', ')};
  * cleanup step nobody was watching.
  *
  * So the demo set is named and excluded rather than trusted to not collide. DEAL-90% is the seeded
- * range and it is stable -- these are the seven rows every measurement in docs/DEMO-INVENTORY.md is
- * counted against. Belt and braces with the print below: the exclusion stops the known-precious rows,
+ * range and it is stable -- these are the seven deals scripts/seed-demo-data.sh seeds. Belt and
+ * braces with the print below: the exclusion stops the known-precious rows,
  * and the print lets a human stop the unknown ones.
  */
 DECLARE @keep TABLE (ID UNIQUEIDENTIFIER PRIMARY KEY);
@@ -395,6 +395,9 @@ INSERT INTO @pipeIds (ID)
 DELETE rc FROM [__mj].RecordChange rc
   JOIN @pipeIds x ON rc.RecordID IN (CAST(x.ID AS NVARCHAR(750)), 'ID|' + CAST(x.ID AS NVARCHAR(750)));
 
+-- The company links before the pipelines: FK_PipelineCompany_Pipeline does not cascade.
+DELETE pc FROM __mj_BizAppsSales.PipelineCompany pc JOIN @pipeIds x ON x.ID = pc.PipelineID;
+
 DELETE FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
 
 /*
@@ -564,16 +567,26 @@ SELECT 'remaining_activities=' + CAST(COUNT(*) AS varchar) FROM __mj_BizAppsComm
                              WHERE d.ID = TRY_CONVERT(UNIQUEIDENTIFIER, al.RecordID)));
 `;
 
-export function cleanup() {
-  const env = readEnv();
-  const args = [
+/**
+ * The sqlcmd arguments for the sweep.
+ *
+ * `-I` turns QUOTED_IDENTIFIER on. sqlcmd leaves it off, and SQL Server refuses any delete from a
+ * table with a filtered index while it is off (Msg 1934), so without it the sweep failed on its first
+ * such table and every leftover row stayed. The seed scripts pass `-I` for the same reason.
+ */
+export function sqlcmdArgs(env, sql) {
+  return [
     '-S', `${env.DB_HOST ?? 'localhost'},${env.DB_PORT ?? '1433'}`,
     '-U', env.DB_USERNAME ?? 'sa',
     '-P', env.DB_PASSWORD ?? '',
     '-d', env.DB_DATABASE ?? 'MJ_BizAppsSales',
-    '-C', '-N', 'o', '-b', '-h', '-1', '-W',
-    '-Q', SQL,
+    '-C', '-N', 'o', '-b', '-I', '-h', '-1', '-W',
+    '-Q', sql,
   ];
+}
+
+export function cleanup() {
+  const args = sqlcmdArgs(readEnv(), SQL);
   try {
     const out = execFileSync('sqlcmd', args, { encoding: 'utf8', timeout: 60_000 });
     const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);

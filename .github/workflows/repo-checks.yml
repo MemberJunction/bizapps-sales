@@ -1,0 +1,32 @@
+name: Repo checks
+
+# Checks specific to this repo. They live here, not in the shared workflows, because changes.yml,
+# release-readiness.yml and the rest are copied byte-for-byte from the reference repo
+# (bizapps-issues) and must stay identical across the open apps.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  # The old publish.yml ran this before publishing. On the release PR into main it fails the
+  # release before the merge instead of after it. It checks that every metadata record is written
+  # by a shipped migration, that @file: query SQL matches the latest seed, and that nothing changed
+  # since the latest Metadata_Sync (bizapps-sales#137). No database needed.
+  release-seed:
+    name: 'repo: release seed'
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Metadata is shipped by migrations (release seed gate)
+        run: node scripts/check-release-seed-coverage.mjs

@@ -1,0 +1,1072 @@
+-- =============================================================================================
+-- PostgreSQL counterpart of V202610131430__v6.14.x__Metadata_Sync.sql -- BizApps Sales v6.14.x Metadata_Sync
+-- =============================================================================================
+-- Same records, same values, same order as the T-SQL file; see its header for what ships and why.
+--
+-- HOW IT WAS MADE
+--   * `mj sql-convert --from tsql --to postgres` (MJ CLI 6.1.5) on the push log the T-SQL file
+--     was generated from. Each record is a DO block that calls the core spCreate*/spUpdate*
+--     function, in whichever signature the host has (jsonb or named parameters).
+--   * The converter does not translate the lookups and guards the T-SQL file adds, so they are
+--     written here by hand from the T-SQL ones, block for block:
+--       - SELECT TOP 1 @x = [ID] ... ORDER BY ... becomes
+--         p_x := COALESCE((SELECT "ID" ... ORDER BY ... LIMIT 1), p_x), which keeps the literal
+--         ID when nothing matches, as the T-SQL assignment does.
+--       - IF <guard> EXEC ... becomes IF <guard> THEN <call> END IF.
+--   * Schema names use the same placeholders as the T-SQL file.
+-- =============================================================================================
+
+SET standard_conforming_strings = on;
+
+-- Save MJ: API Scopes (core SP call only)
+DO $mj$
+DECLARE
+  p_ID_b020b12cccaa UUID;
+  p_Name_b020b12cccaa VARCHAR(100);
+  p_Category_b020b12cccaa VARCHAR(100);
+  p_Description_b020b12cccaa VARCHAR(500);
+  p_ParentID_b020b12cccaa UUID;
+  p_FullPath_b020b12cccaa VARCHAR(500);
+  p_ResourceType_b020b12cccaa VARCHAR(50);
+  p_IsActive_b020b12cccaa BOOLEAN;
+  p_UIConfig_b020b12cccaa TEXT;
+BEGIN
+  p_ID_b020b12cccaa := '080F5DDA-E5CD-444A-9D61-1A89AE5DF423';
+  p_Name_b020b12cccaa := 'sales';
+  p_Category_b020b12cccaa := 'Sales';
+  p_Description_b020b12cccaa := 'Parent scope for Sales remote operations';
+  p_FullPath_b020b12cccaa := 'sales';
+  p_IsActive_b020b12cccaa := TRUE;
+  IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."APIScope"
+               WHERE "ID" = p_ID_b020b12cccaa
+                  OR ("FullPath" = p_FullPath_b020b12cccaa)
+                  OR (("ParentID" = p_ParentID_b020b12cccaa OR ("ParentID" IS NULL AND p_ParentID_b020b12cccaa IS NULL)) AND "Name" = p_Name_b020b12cccaa)) THEN
+    IF EXISTS (
+      SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = '${mjSchema}' AND p.proname = 'spCreateAPIScope'
+         AND p.pronargs = 1 AND p.proargtypes[0] = 'jsonb'::regtype
+    ) THEN
+      PERFORM "${mjSchema}"."spCreateAPIScope"(p_data := jsonb_build_object(
+      'ID', p_ID_b020b12cccaa,
+      'Name', p_Name_b020b12cccaa,
+      'Category', p_Category_b020b12cccaa,
+      'Description', p_Description_b020b12cccaa,
+      'ParentID', p_ParentID_b020b12cccaa,
+      'FullPath', p_FullPath_b020b12cccaa,
+      'ResourceType', p_ResourceType_b020b12cccaa,
+      'IsActive', p_IsActive_b020b12cccaa,
+      'UIConfig', p_UIConfig_b020b12cccaa
+    ));
+    ELSE
+      PERFORM "${mjSchema}"."spCreateAPIScope"(p_ID := p_ID_b020b12cccaa, p_Name := p_Name_b020b12cccaa, p_Category := p_Category_b020b12cccaa, p_Description := p_Description_b020b12cccaa, p_ParentID := p_ParentID_b020b12cccaa, p_ParentID_Clear := TRUE, p_FullPath := p_FullPath_b020b12cccaa, p_ResourceType := p_ResourceType_b020b12cccaa, p_ResourceType_Clear := TRUE, p_IsActive := p_IsActive_b020b12cccaa, p_UIConfig := p_UIConfig_b020b12cccaa, p_UIConfig_Clear := TRUE);
+    END IF;
+  END IF;
+END $mj$;
+
+-- Save MJ: API Scopes (core SP call only)
+DO $mj$
+DECLARE
+  p_ID_3ae25d80c372 UUID;
+  p_Name_3ae25d80c372 VARCHAR(100);
+  p_Category_3ae25d80c372 VARCHAR(100);
+  p_Description_3ae25d80c372 VARCHAR(500);
+  p_ParentID_3ae25d80c372 UUID;
+  p_FullPath_3ae25d80c372 VARCHAR(500);
+  p_ResourceType_3ae25d80c372 VARCHAR(50);
+  p_IsActive_3ae25d80c372 BOOLEAN;
+  p_UIConfig_3ae25d80c372 TEXT;
+BEGIN
+  p_ID_3ae25d80c372 := '038C63C1-2247-47D8-ADFB-594666717C86';
+  p_Name_3ae25d80c372 := 'write';
+  p_Category_3ae25d80c372 := 'Sales';
+  p_Description_3ae25d80c372 := 'Sales operations that change data: close and reopen a deal';
+  p_ParentID_3ae25d80c372 := '080F5DDA-E5CD-444A-9D61-1A89AE5DF423';
+  p_FullPath_3ae25d80c372 := 'sales:write';
+  p_IsActive_3ae25d80c372 := TRUE;
+  p_ParentID_3ae25d80c372 := COALESCE((SELECT "ID" FROM "${mjSchema}"."APIScope" WHERE "FullPath" = 'sales' ORDER BY CASE WHEN "ID" = p_ParentID_3ae25d80c372 THEN 0 ELSE 1 END LIMIT 1), p_ParentID_3ae25d80c372);
+  IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."APIScope"
+               WHERE "ID" = p_ID_3ae25d80c372
+                  OR ("FullPath" = p_FullPath_3ae25d80c372)
+                  OR (("ParentID" = p_ParentID_3ae25d80c372 OR ("ParentID" IS NULL AND p_ParentID_3ae25d80c372 IS NULL)) AND "Name" = p_Name_3ae25d80c372)) THEN
+    IF EXISTS (
+      SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = '${mjSchema}' AND p.proname = 'spCreateAPIScope'
+         AND p.pronargs = 1 AND p.proargtypes[0] = 'jsonb'::regtype
+    ) THEN
+      PERFORM "${mjSchema}"."spCreateAPIScope"(p_data := jsonb_build_object(
+      'ID', p_ID_3ae25d80c372,
+      'Name', p_Name_3ae25d80c372,
+      'Category', p_Category_3ae25d80c372,
+      'Description', p_Description_3ae25d80c372,
+      'ParentID', p_ParentID_3ae25d80c372,
+      'FullPath', p_FullPath_3ae25d80c372,
+      'ResourceType', p_ResourceType_3ae25d80c372,
+      'IsActive', p_IsActive_3ae25d80c372,
+      'UIConfig', p_UIConfig_3ae25d80c372
+    ));
+    ELSE
+      PERFORM "${mjSchema}"."spCreateAPIScope"(p_ID := p_ID_3ae25d80c372, p_Name := p_Name_3ae25d80c372, p_Category := p_Category_3ae25d80c372, p_Description := p_Description_3ae25d80c372, p_ParentID := p_ParentID_3ae25d80c372, p_FullPath := p_FullPath_3ae25d80c372, p_ResourceType := p_ResourceType_3ae25d80c372, p_ResourceType_Clear := TRUE, p_IsActive := p_IsActive_3ae25d80c372, p_UIConfig := p_UIConfig_3ae25d80c372, p_UIConfig_Clear := TRUE);
+    END IF;
+  END IF;
+END $mj$;
+
+-- Save MJ: API Application Scopes (core SP call only)
+DO $mj$
+DECLARE
+  p_ID_7a96e34626b9 UUID;
+  p_ApplicationID_7a96e34626b9 UUID;
+  p_ScopeID_7a96e34626b9 UUID;
+  p_ResourcePattern_7a96e34626b9 VARCHAR(750);
+  p_PatternType_7a96e34626b9 VARCHAR(20);
+  p_IsDeny_7a96e34626b9 BOOLEAN;
+  p_Priority_7a96e34626b9 INTEGER;
+  p_RowFilterID_7a96e34626b9 UUID;
+BEGIN
+  p_ID_7a96e34626b9 := 'E8CDF57F-53DF-4646-B1BD-F86CACBD3BD6';
+  p_ApplicationID_7a96e34626b9 := '15A906BC-55F3-489C-A7D3-F8DAE9F26D6B';
+  p_ScopeID_7a96e34626b9 := '038C63C1-2247-47D8-ADFB-594666717C86';
+  p_ResourcePattern_7a96e34626b9 := '*';
+  p_PatternType_7a96e34626b9 := 'Include';
+  p_IsDeny_7a96e34626b9 := FALSE;
+  p_Priority_7a96e34626b9 := 0;
+  p_ApplicationID_7a96e34626b9 := COALESCE((SELECT "ID" FROM "${mjSchema}"."APIApplication" WHERE "Name" = 'MJAPI' ORDER BY CASE WHEN "ID" = p_ApplicationID_7a96e34626b9 THEN 0 ELSE 1 END LIMIT 1), p_ApplicationID_7a96e34626b9);
+  p_ScopeID_7a96e34626b9 := COALESCE((SELECT "ID" FROM "${mjSchema}"."APIScope" WHERE "FullPath" = 'sales:write' ORDER BY CASE WHEN "ID" = p_ScopeID_7a96e34626b9 THEN 0 ELSE 1 END LIMIT 1), p_ScopeID_7a96e34626b9);
+  IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."APIApplicationScope"
+               WHERE "ID" = p_ID_7a96e34626b9
+                  OR ("ApplicationID" = p_ApplicationID_7a96e34626b9 AND "ScopeID" = p_ScopeID_7a96e34626b9 AND ("ResourcePattern" = p_ResourcePattern_7a96e34626b9 OR ("ResourcePattern" IS NULL AND p_ResourcePattern_7a96e34626b9 IS NULL)))) THEN
+    IF EXISTS (
+      SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = '${mjSchema}' AND p.proname = 'spCreateAPIApplicationScope'
+         AND p.pronargs = 1 AND p.proargtypes[0] = 'jsonb'::regtype
+    ) THEN
+      PERFORM "${mjSchema}"."spCreateAPIApplicationScope"(p_data := jsonb_build_object(
+      'ID', p_ID_7a96e34626b9,
+      'ApplicationID', p_ApplicationID_7a96e34626b9,
+      'ScopeID', p_ScopeID_7a96e34626b9,
+      'ResourcePattern', p_ResourcePattern_7a96e34626b9,
+      'PatternType', p_PatternType_7a96e34626b9,
+      'IsDeny', p_IsDeny_7a96e34626b9,
+      'Priority', p_Priority_7a96e34626b9,
+      'RowFilterID', p_RowFilterID_7a96e34626b9
+    ));
+    ELSE
+      PERFORM "${mjSchema}"."spCreateAPIApplicationScope"(p_ID := p_ID_7a96e34626b9, p_ApplicationID := p_ApplicationID_7a96e34626b9, p_ScopeID := p_ScopeID_7a96e34626b9, p_ResourcePattern := p_ResourcePattern_7a96e34626b9, p_PatternType := p_PatternType_7a96e34626b9, p_IsDeny := p_IsDeny_7a96e34626b9, p_Priority := p_Priority_7a96e34626b9, p_RowFilterID := p_RowFilterID_7a96e34626b9, p_RowFilterID_Clear := TRUE);
+    END IF;
+  END IF;
+END $mj$;
+
+-- Save MJ: Queries (core SP call only)
+DO $mj$
+DECLARE
+  p_Name_b77dfbd84854 VARCHAR(255);
+  p_CategoryID_b77dfbd84854 UUID;
+  p_UserQuestion_b77dfbd84854 TEXT;
+  p_Description_b77dfbd84854 TEXT;
+  p_SQL_b77dfbd84854 TEXT;
+  p_TechnicalDescription_b77dfbd84854 TEXT;
+  p_OriginalSQL_b77dfbd84854 TEXT;
+  p_Feedback_b77dfbd84854 TEXT;
+  p_Status_b77dfbd84854 VARCHAR(15);
+  p_QualityRank_b77dfbd84854 INTEGER;
+  p_ExecutionCostRank_b77dfbd84854 INTEGER;
+  p_UsesTemplate_b77dfbd84854 BOOLEAN;
+  p_AuditQueryRuns_b77dfbd84854 BOOLEAN;
+  p_CacheEnabled_b77dfbd84854 BOOLEAN;
+  p_CacheTTLMinutes_b77dfbd84854 INTEGER;
+  p_CacheMaxSize_b77dfbd84854 INTEGER;
+  p_EmbeddingVector_b77dfbd84854 TEXT;
+  p_EmbeddingModelID_b77dfbd84854 UUID;
+  p_CacheValidationSQL_b77dfbd84854 TEXT;
+  p_SQLDialectID_b77dfbd84854 UUID;
+  p_Reusable_b77dfbd84854 BOOLEAN;
+  p_ExternalDataSourceID_b77dfbd84854 UUID;
+  p_IsMaterialized_b77dfbd84854 BOOLEAN;
+  p_ID_b77dfbd84854 UUID;
+BEGIN
+  p_Name_b77dfbd84854 := 'Sales: Dashboard Summary';
+  p_CategoryID_b77dfbd84854 := '5A1E5000-0000-4000-A000-000000000001';
+  p_UserQuestion_b77dfbd84854 := 'What are the dashboard headline figures right now — open pipeline, open deals, deals past their expected close, and wins in the selected period?';
+  p_Description_b77dfbd84854 := 'The four KPI tiles as a single row of scalars. Added because the other thirteen queries do not answer them as scalars: Pipeline Summary is grouped by stage and open-only, Deal Roster carries the past-close flag per row, and Bookings by Period is date-windowed — composing the tiles from those would have moved the SQL to the server and left the aggregation in the browser, which is the half §9.5 is about. Also returns the priced/stated split of the open figure so a tile can say how much of it nobody priced. WonCount accepts an optional period window; the other figures never do.';
+  p_SQL_b77dfbd84854 := '-- The four dashboard tiles, as ONE row of scalars. Master plan §9.5.
+--
+-- ── WHY THIS EXISTS WHEN THIRTEEN QUERIES ALREADY DO ────────────────────────────────────────────
+--
+-- The tiles were re-pointed onto queries per §9.5, and the existing set does not answer them as
+-- SCALARS. Checked one by one before adding anything:
+--
+--   Open pipeline        `Sales: Pipeline Summary` has OpenAmount, but grouped by pipeline and stage —
+--                        the tile would still be summing rows in the browser.
+--   Open deals / total   the DENOMINATOR is every deal regardless of status, and nothing in the set
+--                        reports that: Pipeline Summary is open-only by construction.
+--   Past expected close  `Sales: Deal Roster` carries IsPastExpectedClose per row, so the tile would
+--                        be counting rows in the browser.
+--   Won                  `Sales: Bookings by Period` is date-windowed and grouped by period; the tile
+--                        wants an all-time count.
+--
+-- Composing the tiles from those would have moved the SQL to the server and left the AGGREGATION in
+-- the component, which is the half §9.5 is actually about. So this returns the four figures already
+-- reduced, and the component renders them.
+--
+-- ── THE SAME FLAGS, THE SAME MEANINGS ───────────────────────────────────────────────────────────
+--
+-- Every count branches on a DealStatusType FLAG, exactly as the component''s `hasFlag` did. This is a
+-- MECHANISM change, not a measure change: each column below is defined to match what the tile
+-- computed client-side, so a figure that moves is a bug in one of the two and not a difference of
+-- opinion. `test-harnesses/compare-dashboard-measures.mjs` runs both paths over the same data and
+-- fails on any disagreement.
+--
+-- ── THE ONE PLACE THE DEFINITIONS COULD DRIFT, AND HOW IT IS PINNED ─────────────────────────────
+--
+-- `IsPastExpectedClose` compares against `bt.Today` from `[__mj_BizAppsCommon].[fnBusinessToday]()`:
+-- the business day, the same "today" the dashboard''s client side takes from BusinessTimeZoneEngine.
+-- Doing it in SQL keeps the browser''s clock out of the question entirely.
+--
+-- It used to compare against `CAST(SYSUTCDATETIME() AS DATE)`, the UTC day, which rolls over at 6 PM
+-- Central (7 PM in daylight time): every evening a deal due TODAY counted as past its expected close (bc-aidp-next-golive#168).
+-- ExpectedCloseDate itself is a DATE and is compared as one; only "today" needed the zone.
+--
+-- ── THE PERIOD WINDOW APPLIES TO ONE COLUMN, AND IT IS NOT IN THE `WHERE` ──────────────────────
+--
+-- This header used to read "NO PERIOD PARAMETER -- these tiles are ''right now'' and ''to date''". That
+-- was true of all four tiles and is now true of three. golive#232 reported the fourth: a "Won" count
+-- of every won deal ever, sitting beside Open pipeline and Open deals, which are the current book.
+-- Read together they invite a subtraction that means nothing.
+--
+-- So `WonCount` takes an OPTIONAL window on `ActualCloseDate` -- the date a win actually landed,
+-- which is the same dimension `win-rate.sql` uses, so the two agree by construction rather than by
+-- coincidence.
+--
+-- THE PREDICATE IS INSIDE THE CASE, NEVER IN THE `WHERE`, AND THAT IS THE WHOLE DESIGN. A `WHERE`
+-- clause would narrow every column in this SELECT: open pipeline would drop any deal whose close
+-- date is outside the window, and `TotalCount` -- the denominator of the "of N total" tile -- would
+-- stop describing the whole book. golive#232 asks for the opposite in as many words: open-deal
+-- figures stay as they are, because they are not period-bound. Keeping the window inside the one
+-- CASE is what makes that literally true rather than approximately true.
+--
+-- Omitting both parameters restores the original all-time count exactly, which is what the "All
+-- time" option on the dashboard selects.
+--
+-- Company and pipeline remain the only slices that apply to the whole row.
+--
+-- ── PIPELINES FLAGGED OUT OF THE FORECAST ───────────────────────────────────────────────────────
+--
+-- Pipeline.IncludeInForecast = 0 marks a pipeline that holds historical deals. Its OPEN deals are
+-- left out of every tile, TotalCount included, so "of N total" stays the denominator of the figures
+-- beside it. Its won and lost deals stay. Naming the pipeline in PipelineID includes it.
+SELECT
+    -- TILE 1 — open pipeline. A SUM of stored answers, not pricing arithmetic.
+    SUM(CASE WHEN st.IsOpen = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END)              AS OpenAmount,
+    SUM(CASE WHEN st.IsOpen = 1 THEN 1 ELSE 0 END)                                AS OpenCount,
+
+    -- TILE 2 — the denominator: every deal, whatever its status. COUNT(*) over the OUTER join, so a
+    -- status-less deal is counted here even though it lands in none of the flag-driven figures.
+    COUNT(*)                                                                      AS TotalCount,
+    -- Visible rather than merely absent: if this is non-zero, OpenCount + WonCount will not reconcile
+    -- to TotalCount and a reader deserves to know why.
+    SUM(CASE WHEN st.ID IS NULL THEN 1 ELSE 0 END)                                AS NoStatusCount,
+
+    -- TILE 3 — open, and its expected close date has gone by.
+    SUM(CASE WHEN st.IsOpen = 1
+              AND d.ExpectedCloseDate IS NOT NULL
+              AND d.ExpectedCloseDate < bt.Today
+             THEN 1 ELSE 0 END)                                                   AS PastExpectedCloseCount,
+
+    -- TILE 4 — won, within the selected period. Unbounded when no period is supplied.
+    --
+    -- A won deal with a NULL ActualCloseDate is EXCLUDED from a bounded window and included in the
+    -- unbounded one. That is the only reading available: the tile asks "won in this period", and a
+    -- deal that never recorded when it closed cannot answer it. It stays visible in the all-time
+    -- figure, so the deal is never invisible everywhere at once.
+    --
+    -- The exclusion needs no `IS NOT NULL`: a comparison against NULL is UNKNOWN, so the CASE falls to
+    -- ELSE 0. Said here rather than written twice, because an explicit guard in each branch would
+    -- duplicate when both bounds are supplied. The client-side `WonInPeriod()` applies the same rule
+    -- against the same column, which is what keeps the tile and its drill-through in agreement.
+    SUM(CASE WHEN st.IsWon = 1
+              {% if PeriodStart %}
+              AND d.ActualCloseDate >= {{ PeriodStart | sqlString }}
+              {% endif %}
+              {% if PeriodEnd %}
+              AND d.ActualCloseDate <= {{ PeriodEnd | sqlString }}
+              {% endif %}
+             THEN 1 ELSE 0 END)                                                   AS WonCount,
+    -- The same deals as WonCount, summed: the forecast stack''s Closed segment. A SUM of stored
+    -- answers, not pricing arithmetic. It moved here from the browser so the section need not load
+    -- every won deal to total them (bizapps-sales#209); the predicate is WonCount''s, so the tile and
+    -- the segment count the same deals.
+    SUM(CASE WHEN st.IsWon = 1
+              {% if PeriodStart %}
+              AND d.ActualCloseDate >= {{ PeriodStart | sqlString }}
+              {% endif %}
+              {% if PeriodEnd %}
+              AND d.ActualCloseDate <= {{ PeriodEnd | sqlString }}
+              {% endif %}
+             THEN ISNULL(d.Amount, 0) ELSE 0 END)                                 AS WonAmount,
+
+    -- Provenance for the open figure, so a tile can say how much of it nobody priced. Not currently
+    -- rendered on the dashboard; it is here because the figure and its provenance should travel
+    -- together, and because the board already makes this distinction visible.
+    SUM(CASE WHEN st.IsOpen = 1 AND d.AmountIsComputed = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END)
+                                                                                  AS OpenPricedAmount,
+    SUM(CASE WHEN st.IsOpen = 1 AND d.AmountIsComputed = 0 THEN ISNULL(d.Amount, 0) ELSE 0 END)
+                                                                                  AS OpenStatedAmount,
+    SUM(CASE WHEN st.IsOpen = 1 AND d.Amount IS NULL THEN 1 ELSE 0 END)           AS OpenNoAmountCount
+FROM [__mj_BizAppsSales].Deal d
+/**
+ * LEFT JOIN, NOT INNER -- `Deal.DealStatusTypeID` is NULLABLE.
+ *
+ * With an INNER JOIN, a deal with no status disappears from every figure here, including TotalCount,
+ * which is the denominator of the "of N total" tile. The client implementation this replaced counted
+ * `this.Deals.length` with no join at all, so an INNER JOIN would have silently changed what the tile
+ * MEANS -- and this file''s header claims a mechanism change, not a measure change. Keeping that claim
+ * true requires the outer join.
+ *
+ * The counts below already branch on flags, and a NULL flag fails every CASE, so an unclassified deal
+ * lands in TotalCount and in none of the others. That is the correct reading: it exists, and it is
+ * neither open nor won.
+ */
+LEFT OUTER JOIN [__mj_BizAppsSales].DealStatusType st
+        ON st.ID = d.DealStatusTypeID
+INNER JOIN [__mj_BizAppsSales].Pipeline p
+        ON p.ID = d.PipelineID
+-- One row: the business day and its SQL zone. See the header.
+CROSS JOIN [__mj_BizAppsCommon].[fnBusinessToday]() AS bt
+WHERE 1 = 1
+  {% if CompanyID %}
+  AND d.CompanyID = {{ CompanyID | sqlString }}
+  {% endif %}
+  {% if PipelineID %}
+  AND d.PipelineID = {{ PipelineID | sqlString }}
+  {% else %}
+  AND (ISNULL(st.IsOpen, 0) = 0 OR p.IncludeInForecast = 1)
+  {% endif %};
+';
+  p_TechnicalDescription_b77dfbd84854 := 'Grain: Deal, reduced to one row. Every count branches on a DealStatusType FLAG (IsOpen, IsWon) exactly as the component''s hasFlag did — this is a mechanism change, not a measure change, and test-harnesses/compare-dashboard-measures.mjs runs both paths over the same data and fails on any disagreement. PastExpectedCloseCount compares ExpectedCloseDate against the business day from __mj_BizAppsCommon.fnBusinessToday() (bt.Today), which keeps the client''s clock out of the comparison. It was the UTC day until bc-aidp-next-golive#168, which made every deal due today count as past due from 6 PM Central (7 PM in daylight time). PERIOD SCOPE (golive#232): PeriodStart/PeriodEnd are optional and are applied INSIDE the WonCount CASE expression on ActualCloseDate — never in the WHERE clause. That is deliberate and load-bearing: a WHERE would narrow every column, dropping open deals whose close date falls outside the window and making TotalCount stop describing the whole book, whereas golive#232 requires open-deal figures to stay unwindowed. Omitting both parameters reproduces the original all-time count exactly. ActualCloseDate is the same date dimension win-rate.sql uses, so the Won tile and the win rate agree by construction; a won deal with a NULL ActualCloseDate is excluded from a bounded window and included in the unbounded one. WonAmount sums Amount over exactly the deals WonCount counts (same CASE predicate); it is the dashboard forecast stack''s Closed segment (bizapps-sales#209). Open deals in pipelines with IncludeInForecast = 0 are excluded from every tile, TotalCount included, unless PipelineID names the pipeline.';
+  p_Status_b77dfbd84854 := 'Approved';
+  p_QualityRank_b77dfbd84854 := 9;
+  p_ExecutionCostRank_b77dfbd84854 := 1;
+  p_UsesTemplate_b77dfbd84854 := TRUE;
+  p_AuditQueryRuns_b77dfbd84854 := FALSE;
+  p_CacheEnabled_b77dfbd84854 := FALSE;
+  p_EmbeddingVector_b77dfbd84854 := '[-0.060127586126327515,0.07600998878479004,-0.03980054333806038,-0.023172978311777115,-0.009980072267353535,-0.027933161705732346,0.06631717085838318,0.004659883212298155,-0.047054920345544815,0.009588317945599556,-0.023451462388038635,-0.025785330682992935,0.04687312990427017,0.13283221423625946,0.0016337694833055139,-0.054363179951906204,0.0031472460832446814,-0.006677244324237108,-0.037576161324977875,0.0007001961348578334,-0.005723769310861826,0.00699320062994957,-0.047211140394210815,0.035016100853681564,-0.014865022152662277,-0.03383940830826759,-0.008990858681499958,-0.018864911049604416,0.0026094268541783094,-0.09966862201690674,0.0046555292792618275,0.023401619866490364,-0.003970147110521793,0.0033704049419611692,0.0000027276751097815577,-0.017223574221134186,-0.04678630083799362,0.011339213699102402,-0.04672893136739731,0.09767694026231766,0.006208672188222408,-0.04505284130573273,-0.0027735643088817596,-0.009815829806029797,0.02718963287770748,-0.0418119877576828,-0.059426821768283844,0.07100401818752289,-0.03675193339586258,-0.04690500348806381,0.017804227769374847,-0.0054049319587647915,-0.028757475316524506,0.010378754697740078,-0.00248750951141119,-0.1045464500784874,-0.012647501192986965,-0.065241739153862,0.014462439343333244,-0.11312703043222427,-0.046445105224847794,0.015064291656017303,0.006841191090643406,-0.04753050208091736,0.013886173255741596,0.08469390869140625,-0.02712266333401203,0.00030739366775378585,-0.02426072023808956,-0.003963665571063757,0.07372549921274185,-0.004582203924655914,-0.006525931879878044,-0.06162657588720322,-0.014096159487962723,-0.07308273762464523,-0.057971905916929245,0.03200984001159668,0.022671816870570183,-0.009568789973855019,-0.09162936359643936,0.08685542643070221,-0.03860499709844589,0.012546847574412823,-0.00962898414582014,-0.011359332129359245,0.011963581666350365,-0.006951339077204466,0.008033504709601402,0.011654539033770561,-0.02879672683775425,-0.0012499132426455617,-0.01784275844693184,-0.009793419390916824,-0.028310414403676987,-0.009320884011685848,0.041729528456926346,0.051750730723142624,-0.010580115020275116,-0.0004605682916007936,0.01073539350181818,0.035166237503290176,0.022486375644803047,0.04308412969112396,0.03441111370921135,0.02391251176595688,0.0167067963629961,-0.026606174185872078,-0.009922527708113194,0.05168946087360382,0.015554812736809254,-0.01171222422271967,0.03153776377439499,-0.006795765832066536,-0.07990770041942596,-0.022282153367996216,-0.022857192903757095,0.018569348379969597,-0.01702507957816124,0.023473920300602913,0.10032916814088821,0.00657200301066041,0.0035897111520171165,0.021775633096694946,-0.00871836394071579,0.025712231174111366,-0.014192426577210426,-0.03904116898775101,-0.011594359762966633,-0.011528669856488705,-0.04623667895793915,-0.006162754260003567,0.03296637535095215,-0.013766169548034668,-0.01990223303437233,-0.02000901848077774,-0.000765902572311461,0.05694769322872162,-0.016095956787467003,-0.012042518705129623,-0.028309056535363197,0.0034208977594971657,-0.03996085748076439,0.04219425469636917,0.032391224056482315,-0.014251024462282658,-0.024988623335957527,0.07983363419771194,0.014148086309432983,0.01885795220732689,-0.009220043197274208,-0.008983813226222992,0.0008426228887401521,0.006935401353985071,-0.020214982330799103,-0.016401831060647964,0.023613959550857544,0.00451642507687211,-0.01970263011753559,0.058034468442201614,0.011755483224987984,0.003944258205592632,0.028091175481677055,-0.006280592642724514,-0.008244335651397705,0.02653663605451584,-0.041243776679039,0.014699151739478111,0.0037912921980023384,-0.06097142770886421,-0.03121430054306984,-0.053085144609212875,-0.016601983457803726,0.03702031821012497,0.040757276117801666,-0.00441742641851306,0.0020308434031903744,-0.010893753729760647,-0.009392095729708672,-0.03560582175850868,0.0305106732994318,-0.09787922352552414,-0.025288403034210205,-0.01776202768087387,0.04352951794862747,-0.0027958624996244907,-0.03049580007791519,-0.0221864003688097,0.00884429644793272,0.016141925007104874,0.011401822790503502,0.05203251540660858,-0.08719685673713684,0.0244643185287714,-0.0033085844479501247,-0.04349828138947487,-0.001900803647004068,-0.03956051543354988,0.044827573001384735,0.05029752850532532,-0.007252891082316637,-0.009472114965319633,0.01872148923575878,0.033318351954221725,0.03780301660299301,0.008019932545721531,0.023813696578145027,-0.011688289232552052,-0.05188297852873802,0.015047796070575714,0.05022939294576645,0.006874642800539732,-0.02545999176800251,0.04156000167131424,0.01276066992431879,0.029527150094509125,0.04190049320459366,0.017374077811837196,-0.021385839208960533,-0.006537958513945341,-0.025869397446513176,0.03133624792098999,-0.014812439680099487,0.005434373859316111,0.11844506114721298,0.02925720438361168,0.016072481870651245,0.01129380613565445,-0.011323987506330013,-0.0036583649925887585,-0.02287825010716915,-0.013555005192756653,0.03690285235643387,0.02166210301220417,0.05089978128671646,0.08092189580202103,0.04635603353381157,0.03159122169017792,0.0010705903405323625,0.07803326100111008,-0.027536530047655106,-0.04950963705778122,-0.01890343241393566,0.016452010720968246,0.05841469019651413,-0.020693333819508553,-0.06524763256311417,-0.03863002359867096,0.021444937214255333,0.017382975667715073,-0.03186393156647682,0.019429095089435577,0.082712322473526,-0.01682521589100361,-0.004075432661920786,-0.005172082222998142,-0.13349613547325134,0.018648244440555573,-0.013086451217532158,0.07571934908628464,0.02669525519013405,-0.02233601175248623,-0.008706842549145222,-0.030614031478762627,0.03433331847190857,-0.03115387074649334,0.045518383383750916,-0.05518731474876404,-0.00833535473793745,0.010126281529664993,0.013989884406328201,0.021345771849155426,-0.021867843344807625,-0.01818682812154293,-0.000258817570284009,0.047196291387081146,-0.10145734250545502,-0.0026562013663351536,-0.013688065111637115,-0.006264795549213886,0.012827117927372456,-0.002362632192671299,-0.006240001879632473,0.014504159800708294,0.004221578128635883,0.023244544863700867,0.021680936217308044,-0.005794356111437082,-0.010032975114881992,-0.09275445342063904,0.00911447312682867,-0.028465578332543373,0.03275603801012039,-0.007876495830714703,-0.04788986220955849,0.010481569916009903,-0.057436391711235046,0.037487179040908813,0.0015744110569357872,0.031430259346961975,-0.0403008870780468,-0.03249586373567581,-0.02981134131550789,0.03315603360533714,-0.02216443605720997,0.04025934636592865,0.008297646418213844,-0.0028420097660273314,0.011065407656133175,0.01633448153734207,0.03268444165587425,0.011434374377131462,-0.010231141932308674,-0.016367726027965546,0.022426413372159004,-0.038222119212150574,-0.0641375407576561,0.06129961833357811,-0.028525903820991516,0.07411316782236099,0.0023911260068416595,-0.009732640348374844,-0.04613286256790161,-0.011511583812534809,-0.04425341635942459,0.00955674797296524,-0.0003493004769552499,-0.029518207535147667,-0.039116308093070984,-0.0411493293941021,0.01623409241437912,-0.11655812710523605,-0.025594688951969147,0.00039684560033492744,0.0054585980251431465,-0.07091033458709717,-0.011652993969619274,0.05866345763206482,-0.0130391800776124,-0.026635244488716125,-0.018588608130812645,-0.02399030141532421,-0.025500936433672905,-0.015269674360752106,-0.013357017189264297,-0.04250651225447655,0.08409276604652405,0.02613467164337635,-0.09670598059892654,0.044558651745319366,0.02522071823477745,0.03416764363646507,-0.03658808767795563,-0.01980207860469818,-0.008253004401922226,-0.02350519970059395,-0.02430756203830242,0.009478218853473663,-0.0015061013400554657,-0.08183912187814713,-0.016918199136853218,0.02085586078464985,0.039084699004888535,0.08698741346597672,0.05225575715303421,0.04161331057548523,0.0059710233472287655,-0.014161043800413609,0.052462588995695114,-0.0002459646202623844,-0.022285746410489082,0.01545285526663065,0.038643915206193924,0.025938676670193672,0.004234806168824434,0.005496997851878405,-0.00048613070975989103,0.029079006984829903,0.023167362436652184,-0.013072594068944454,0.035273902118206024,0.03170193359255791,0.0959104597568512,-0.02310512587428093,0.07330967485904694,0.0032515302300453186,-0.05471796914935112,-0.056052833795547485,-0.05670778080821037,0.03221934661269188,-0.0057344152592122555,-0.01813378371298313,0.07141588628292084,0.000313027820084244,-0.000788157747592777,-0.011351149529218674,-0.02413948066532612,0.03919559717178345,-0.005052960477769375,0.006842623930424452,0.00136214355006814,0.05110664293169975,0.05471009761095047,-0.014812995679676533,0.03023948147892952,-0.0495971143245697,-0.10836859792470932,0.02540278248488903,-0.031004054471850395,-0.013840312138199806,-0.021956490352749825,-0.014353838749229908,0.021452337503433228,-0.009061077609658241,0.03659573942422867,-0.006537465378642082,-0.007225422654300928,-0.007918658666312695,0.005403807852417231,0.004189338069409132,0.02559327334165573,0.016148939728736877,0.038307979702949524,0.0005698400782421231,0.020835263654589653,-0.004149071406573057,0.05169299244880676,-0.06993559002876282,-0.0012093809200450778,0.023718761280179024,0.010257451795041561,-0.012907620519399643,-0.017130587249994278,0.016802920028567314,-0.04562200605869293,-0.00588811282068491,0.015286356210708618,-0.009452560916543007,-0.03300878405570984,0.01431305706501007,-0.03092992678284645,0.03549639508128166,0.0748201310634613,0.004495120141655207,-0.020185429602861404,0.007935358211398125,0.0028346371836960316,0.004363827873021364,-0.04675676301121712,-0.06546526402235031,0.02467055805027485,-0.02887878194451332,0.07167527824640274,-0.017679648473858833,-0.037931498140096664,-0.05728955566883087,0.023110125213861465,-0.04742145165801048,-0.02277863770723343,-0.029723864048719406,0.007611400447785854,0.02964375913143158,-0.08341929316520691,0.006463129073381424,0.057583585381507874,-0.04817836359143257,-0.014091072604060173,-0.042438115924596786,0.02043832279741764,-0.052782367914915085,0.05460761487483978,-0.019494377076625824,-0.032892774790525436,-0.005524152889847755,0.04214733466506004,0.018089033663272858,-0.000006923263299540849,0.05762932822108269,0.06541337072849274,0.0030969998333603144,-0.027042686939239502,-0.0032003740780055523,0.018419155851006508,-0.09020102769136429,0.001471925526857376,0.02927774377167225,-0.015191895887255669,-0.020090920850634575,-0.006040351465344429,-0.022731903940439224,0.00435976218432188,-0.011904590763151646,-0.05418871343135834,0.06953944265842438,0.039617281407117844,0.08506439626216888,-0.0047136167995631695,-0.09915921837091446,0.02665577456355095,-0.0481429323554039,-0.05171160772442818,0.018381180241703987,0.016211088746786118,-0.055074241012334824,-0.041369568556547165,0.03005989082157612,0.05974983423948288,-0.024053575471043587,-0.008898421190679073,-0.007950562052428722,0.014226500876247883,-0.002815990010276437,-0.04515327513217926,-0.0267744492739439,0.0661085918545723,-0.011118918657302856,-0.03195256367325783,0.005492775700986385,-0.03249741345643997,0.014150520786643028,0.003999641630798578,-0.01647523045539856,-0.014080172404646873,-0.003519086865708232,0.09026169031858444,-0.04535817727446556,0.027308756485581398,-0.01252102293074131,0.004448090214282274,0.0311159435659647,-0.014223314821720123,0.021290412172675133,0.019409995526075363,0.022272605448961258,-0.00970940850675106,-0.023554015904664993,-0.052213579416275024,0.0295413788408041,0.030915701761841774,0.004390914924442768,-0.061608556658029556,0.03520897030830383,0.04621349647641182,-0.005101226270198822,0.00012877982226200402,0.00472353445366025,-0.028692876920104027,-0.02429930865764618,0.015883956104516983,0.012263180688023567,0.01526965294033289,0.0009266167762689292,-0.03169005736708641,0.0031602371018379927,-0.03899114951491356,-7.656857960569444e-33,-0.009026866406202316,-0.030194979161024094,-0.019522370770573616,0.014235064387321472,-0.03319920226931572,-0.05521384999155998,0.03708502650260925,-0.04256536066532135,0.013702863827347755,-0.04014058783650398,-0.03332286328077316,-0.010135536082088947,0.03181404620409012,-0.008635098114609718,0.041064657270908356,-0.0023147251922637224,0.029214413836598396,-0.012848833575844765,-0.038179438561201096,0.01041455939412117,-0.019240550696849823,0.032066717743873596,0.021598724648356438,0.010084022767841816,-0.04938957840204239,0.015897400677204132,-0.0013441430637612939,0.004439068492501974,0.039693158119916916,-0.02537764050066471,0.007290071342140436,-0.007303626276552677,0.010564878582954407,0.007132531609386206,-0.003732407232746482,-0.08356840908527374,0.016848109662532806,0.002254979219287634,0.02311353012919426,-0.008672303520143032,0.06523662060499191,0.007227993570268154,-0.01076001301407814,0.007715528830885887,0.007273439783602953,-0.02428026869893074,0.022463925182819366,-0.03036116622388363,-0.00756120728328824,0.014137791469693184,0.06147310882806778,0.004499438684433699,-0.022157229483127594,0.07817299664020538,0.0035249015782028437,0.03670618683099747,0.044706959277391434,0.015580402687191963,-0.040599510073661804,0.023049160838127136,0.0027408013120293617,-0.009373246692121029,0.013431723229587078,0.005498893093317747,0.03567828983068466,0.005470640491694212,0.014866556040942669,0.021236954256892204,-0.005717645864933729,-0.023036407306790352,-0.0037365411408245564,0.056074317544698715,-0.033626068383455276,-0.07802709937095642,0.000412580615375191,0.016102423891425133,0.022028731182217598,0.011930849403142929,-0.014962182380259037,0.04129556193947792,0.0036980584263801575,-0.025667699053883553,-0.04854295030236244,0.030375462025403976,0.02802293561398983,-0.03723593428730965,-0.01274107675999403,0.035119716078042984,0.03747234120965004,0.03612091764807701,-0.010045001283288002,0.06787214428186417,-0.03539837896823883,0.01855948381125927,-0.04299412667751312,-0.01478038914501667,0.06361018121242523,0.06007649376988411,0.006675646174699068,-0.029628850519657135,-0.009220218285918236,0.05014333128929138,0.012162363156676292,0.0013628983870148659,-0.007492590229958296,-0.0035476256161928177,0.02191806212067604,0.03272340074181557,-0.03692410886287689,0.031238634139299393,0.008933976292610168,0.02299279160797596,0.045188065618276596,0.013338408432900906,-0.01632426306605339,0.007043258287012577,0.009284740313887596,-0.03600398451089859,-0.0010397667065262794,0.035769522190093994,0.01905129849910736,-0.01764162816107273,-0.01355357002466917,0.004378331825137138,0.018923180177807808,-0.02227449044585228,0.025908131152391434,-0.061283886432647705,0.012306720949709415,0.005951837170869112,-0.0074993278831243515,0.016118232160806656,3.4944602589348506e-7,0.009268190711736679,-0.018664773553609848,-0.02888839691877365,0.10727230459451675,0.014910365454852581,-0.02144809253513813,-0.020539142191410065,0.019524792209267616,0.0031897269655019045,-0.009560516104102135,0.01584112085402012,-0.023843776434659958,0.039737436920404434,0.025278819724917412,0.03453795611858368,-0.04281758889555931,-0.011388491839170456,-0.053834784775972366,-0.07992386817932129,-0.019079837948083878,0.044222939759492874,0.043547794222831726,0.06009037792682648,0.009274653159081936,0.015631655231118202,0.03010251559317112,-0.003386205993592739,-0.047574661672115326,-0.01848326250910759,0.016065344214439392,0.06281747668981552,0.0010399901075288653,-0.017250383272767067,-0.0050944555550813675,0.004979098215699196,0.05770902335643768,-0.02185424417257309,-0.02585320547223091,0.05467350408434868,0.00909033976495266,-0.006543838884681463,-0.06664834171533585,-0.03223368152976036,-0.06378105282783508,0.032371703535318375,-0.009719928726553917,0.04400693625211716,0.07201158255338669,0.002088912297040224,-0.03714516758918762,0.03599166125059128,-0.002242312766611576,0.02040252462029457,0.025345640257000923,0.020473143085837364,-0.018014617264270782,0.03780415281653404,0.03162690997123718,0.04012183099985123,-0.026950277388095856,-0.03307460993528366,-0.010545910336077213,0.011174126528203487,0.022876163944602013,0.0037470096722245216,-0.05533105507493019,-0.030476383864879608,4.035657154897671e-34,0.034414101392030716,0.013100829906761646,0.010824309661984444,0.008996985852718353,0.02585357427597046,-0.015995917841792107,0.04804551228880882,-0.046797625720500946,-0.022200103849172592,-0.07891340553760529,-0.020670097321271896]';
+  p_EmbeddingModelID_b77dfbd84854 := '1D45AA65-41EC-4572-9ECD-AB2826C9B059';
+  p_SQLDialectID_b77dfbd84854 := '1F203987-A37B-4BC1-85B3-BA50DC33C3E0';
+  p_Reusable_b77dfbd84854 := FALSE;
+  p_IsMaterialized_b77dfbd84854 := FALSE;
+  p_ID_b77dfbd84854 := '5A1E5000-0001-4000-A000-00000000000E';
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = '${mjSchema}' AND p.proname = 'spUpdateQuery'
+       AND p.pronargs = 1 AND p.proargtypes[0] = 'jsonb'::regtype
+  ) THEN
+    PERFORM "${mjSchema}"."spUpdateQuery"(p_data := jsonb_build_object(
+    'Name', p_Name_b77dfbd84854,
+    'CategoryID', p_CategoryID_b77dfbd84854,
+    'UserQuestion', p_UserQuestion_b77dfbd84854,
+    'Description', p_Description_b77dfbd84854,
+    'SQL', p_SQL_b77dfbd84854,
+    'TechnicalDescription', p_TechnicalDescription_b77dfbd84854,
+    'OriginalSQL', p_OriginalSQL_b77dfbd84854,
+    'Feedback', p_Feedback_b77dfbd84854,
+    'Status', p_Status_b77dfbd84854,
+    'QualityRank', p_QualityRank_b77dfbd84854,
+    'ExecutionCostRank', p_ExecutionCostRank_b77dfbd84854,
+    'UsesTemplate', p_UsesTemplate_b77dfbd84854,
+    'AuditQueryRuns', p_AuditQueryRuns_b77dfbd84854,
+    'CacheEnabled', p_CacheEnabled_b77dfbd84854,
+    'CacheTTLMinutes', p_CacheTTLMinutes_b77dfbd84854,
+    'CacheMaxSize', p_CacheMaxSize_b77dfbd84854,
+    'EmbeddingVector', p_EmbeddingVector_b77dfbd84854,
+    'EmbeddingModelID', p_EmbeddingModelID_b77dfbd84854,
+    'CacheValidationSQL', p_CacheValidationSQL_b77dfbd84854,
+    'SQLDialectID', p_SQLDialectID_b77dfbd84854,
+    'Reusable', p_Reusable_b77dfbd84854,
+    'ExternalDataSourceID', p_ExternalDataSourceID_b77dfbd84854,
+    'IsMaterialized', p_IsMaterialized_b77dfbd84854,
+    'ID', p_ID_b77dfbd84854
+  ));
+  ELSE
+    PERFORM "${mjSchema}"."spUpdateQuery"(p_Name := p_Name_b77dfbd84854, p_CategoryID := p_CategoryID_b77dfbd84854, p_UserQuestion := p_UserQuestion_b77dfbd84854, p_Description := p_Description_b77dfbd84854, p_SQL := p_SQL_b77dfbd84854, p_TechnicalDescription := p_TechnicalDescription_b77dfbd84854, p_OriginalSQL := p_OriginalSQL_b77dfbd84854, p_OriginalSQL_Clear := TRUE, p_Feedback := p_Feedback_b77dfbd84854, p_Feedback_Clear := TRUE, p_Status := p_Status_b77dfbd84854, p_QualityRank := p_QualityRank_b77dfbd84854, p_ExecutionCostRank := p_ExecutionCostRank_b77dfbd84854, p_UsesTemplate := p_UsesTemplate_b77dfbd84854, p_AuditQueryRuns := p_AuditQueryRuns_b77dfbd84854, p_CacheEnabled := p_CacheEnabled_b77dfbd84854, p_CacheTTLMinutes := p_CacheTTLMinutes_b77dfbd84854, p_CacheTTLMinutes_Clear := TRUE, p_CacheMaxSize := p_CacheMaxSize_b77dfbd84854, p_CacheMaxSize_Clear := TRUE, p_EmbeddingVector := p_EmbeddingVector_b77dfbd84854, p_EmbeddingModelID := p_EmbeddingModelID_b77dfbd84854, p_CacheValidationSQL := p_CacheValidationSQL_b77dfbd84854, p_CacheValidationSQL_Clear := TRUE, p_SQLDialectID := p_SQLDialectID_b77dfbd84854, p_Reusable := p_Reusable_b77dfbd84854, p_ExternalDataSourceID := p_ExternalDataSourceID_b77dfbd84854, p_ExternalDataSourceID_Clear := TRUE, p_IsMaterialized := p_IsMaterialized_b77dfbd84854, p_ID := p_ID_b77dfbd84854);
+  END IF;
+END $mj$;
+
+-- Save MJ: Query Fields (core SP call only)
+DO $mj$
+DECLARE
+  p_ID_4045ee706930 UUID;
+  p_QueryID_4045ee706930 UUID;
+  p_Name_4045ee706930 VARCHAR(255);
+  p_Description_4045ee706930 TEXT;
+  p_Sequence_4045ee706930 INTEGER;
+  p_SQLBaseType_4045ee706930 VARCHAR(50);
+  p_SQLFullType_4045ee706930 VARCHAR(100);
+  p_SourceEntityID_4045ee706930 UUID;
+  p_SourceFieldName_4045ee706930 VARCHAR(255);
+  p_IsComputed_4045ee706930 BOOLEAN;
+  p_ComputationDescription_4045ee706930 TEXT;
+  p_IsSummary_4045ee706930 BOOLEAN;
+  p_SummaryDescription_4045ee706930 TEXT;
+  p_DetectionMethod_4045ee706930 VARCHAR(50);
+  p_AutoDetectConfidenceScore_4045ee706930 NUMERIC(3,2);
+BEGIN
+  p_ID_4045ee706930 := '76216847-7c49-439a-9e23-7316580d3e58';
+  p_QueryID_4045ee706930 := '5A1E5000-0001-4000-A000-00000000000E';
+  p_Name_4045ee706930 := 'WonAmount';
+  p_Description_4045ee706930 := 'Computed column: WonAmount';
+  p_Sequence_4045ee706930 := 1;
+  p_SQLBaseType_4045ee706930 := 'nvarchar';
+  p_SQLFullType_4045ee706930 := 'nvarchar(MAX)';
+  p_IsComputed_4045ee706930 := TRUE;
+  p_IsSummary_4045ee706930 := FALSE;
+  p_DetectionMethod_4045ee706930 := 'Manual';
+  p_QueryID_4045ee706930 := COALESCE((SELECT "ID" FROM "${mjSchema}"."Query" WHERE "Name" = 'Sales: Dashboard Summary' ORDER BY CASE WHEN "ID" = p_QueryID_4045ee706930 THEN 0 ELSE 1 END LIMIT 1), p_QueryID_4045ee706930);
+  IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
+               WHERE "ID" = p_ID_4045ee706930
+                  OR ("QueryID" = p_QueryID_4045ee706930 AND "Name" = p_Name_4045ee706930)) THEN
+    IF EXISTS (
+      SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = '${mjSchema}' AND p.proname = 'spCreateQueryField'
+         AND p.pronargs = 1 AND p.proargtypes[0] = 'jsonb'::regtype
+    ) THEN
+      PERFORM "${mjSchema}"."spCreateQueryField"(p_data := jsonb_build_object(
+      'ID', p_ID_4045ee706930,
+      'QueryID', p_QueryID_4045ee706930,
+      'Name', p_Name_4045ee706930,
+      'Description', p_Description_4045ee706930,
+      'Sequence', p_Sequence_4045ee706930,
+      'SQLBaseType', p_SQLBaseType_4045ee706930,
+      'SQLFullType', p_SQLFullType_4045ee706930,
+      'SourceEntityID', p_SourceEntityID_4045ee706930,
+      'SourceFieldName', p_SourceFieldName_4045ee706930,
+      'IsComputed', p_IsComputed_4045ee706930,
+      'ComputationDescription', p_ComputationDescription_4045ee706930,
+      'IsSummary', p_IsSummary_4045ee706930,
+      'SummaryDescription', p_SummaryDescription_4045ee706930,
+      'DetectionMethod', p_DetectionMethod_4045ee706930,
+      'AutoDetectConfidenceScore', p_AutoDetectConfidenceScore_4045ee706930
+    ));
+    ELSE
+      PERFORM "${mjSchema}"."spCreateQueryField"(p_ID := p_ID_4045ee706930, p_QueryID := p_QueryID_4045ee706930, p_Name := p_Name_4045ee706930, p_Description := p_Description_4045ee706930, p_Sequence := p_Sequence_4045ee706930, p_SQLBaseType := p_SQLBaseType_4045ee706930, p_SQLFullType := p_SQLFullType_4045ee706930, p_SourceEntityID := p_SourceEntityID_4045ee706930, p_SourceEntityID_Clear := TRUE, p_SourceFieldName := p_SourceFieldName_4045ee706930, p_SourceFieldName_Clear := TRUE, p_IsComputed := p_IsComputed_4045ee706930, p_ComputationDescription := p_ComputationDescription_4045ee706930, p_ComputationDescription_Clear := TRUE, p_IsSummary := p_IsSummary_4045ee706930, p_SummaryDescription := p_SummaryDescription_4045ee706930, p_SummaryDescription_Clear := TRUE, p_DetectionMethod := p_DetectionMethod_4045ee706930, p_AutoDetectConfidenceScore := p_AutoDetectConfidenceScore_4045ee706930, p_AutoDetectConfidenceScore_Clear := TRUE);
+    END IF;
+  END IF;
+END $mj$;
+
+-- Save MJ: Query Fields (core SP call only)
+DO $mj$
+DECLARE
+  p_QueryID_d594150246ea UUID;
+  p_Name_d594150246ea VARCHAR(255);
+  p_Description_d594150246ea TEXT;
+  p_Sequence_d594150246ea INTEGER;
+  p_SQLBaseType_d594150246ea VARCHAR(50);
+  p_SQLFullType_d594150246ea VARCHAR(100);
+  p_SourceEntityID_d594150246ea UUID;
+  p_SourceFieldName_d594150246ea VARCHAR(255);
+  p_IsComputed_d594150246ea BOOLEAN;
+  p_ComputationDescription_d594150246ea TEXT;
+  p_IsSummary_d594150246ea BOOLEAN;
+  p_SummaryDescription_d594150246ea TEXT;
+  p_DetectionMethod_d594150246ea VARCHAR(50);
+  p_AutoDetectConfidenceScore_d594150246ea NUMERIC(3,2);
+  p_ID_d594150246ea UUID;
+BEGIN
+  p_QueryID_d594150246ea := '5A1E5000-0001-4000-A000-00000000000E';
+  p_Name_d594150246ea := 'OpenNoAmountCount';
+  p_Description_d594150246ea := 'Computed column: OpenNoAmountCount';
+  p_Sequence_d594150246ea := 10;
+  p_SQLBaseType_d594150246ea := 'nvarchar';
+  p_SQLFullType_d594150246ea := 'nvarchar(MAX)';
+  p_IsComputed_d594150246ea := TRUE;
+  p_IsSummary_d594150246ea := FALSE;
+  p_DetectionMethod_d594150246ea := 'Manual';
+  p_ID_d594150246ea := 'CC5A1403-9778-468D-B156-16A4B5083243';
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = '${mjSchema}' AND p.proname = 'spUpdateQueryField'
+       AND p.pronargs = 1 AND p.proargtypes[0] = 'jsonb'::regtype
+  ) THEN
+    PERFORM "${mjSchema}"."spUpdateQueryField"(p_data := jsonb_build_object(
+    'QueryID', p_QueryID_d594150246ea,
+    'Name', p_Name_d594150246ea,
+    'Description', p_Description_d594150246ea,
+    'Sequence', p_Sequence_d594150246ea,
+    'SQLBaseType', p_SQLBaseType_d594150246ea,
+    'SQLFullType', p_SQLFullType_d594150246ea,
+    'SourceEntityID', p_SourceEntityID_d594150246ea,
+    'SourceFieldName', p_SourceFieldName_d594150246ea,
+    'IsComputed', p_IsComputed_d594150246ea,
+    'ComputationDescription', p_ComputationDescription_d594150246ea,
+    'IsSummary', p_IsSummary_d594150246ea,
+    'SummaryDescription', p_SummaryDescription_d594150246ea,
+    'DetectionMethod', p_DetectionMethod_d594150246ea,
+    'AutoDetectConfidenceScore', p_AutoDetectConfidenceScore_d594150246ea,
+    'ID', p_ID_d594150246ea
+  ));
+  ELSE
+    PERFORM "${mjSchema}"."spUpdateQueryField"(p_QueryID := p_QueryID_d594150246ea, p_Name := p_Name_d594150246ea, p_Description := p_Description_d594150246ea, p_Sequence := p_Sequence_d594150246ea, p_SQLBaseType := p_SQLBaseType_d594150246ea, p_SQLFullType := p_SQLFullType_d594150246ea, p_SourceEntityID := p_SourceEntityID_d594150246ea, p_SourceEntityID_Clear := TRUE, p_SourceFieldName := p_SourceFieldName_d594150246ea, p_SourceFieldName_Clear := TRUE, p_IsComputed := p_IsComputed_d594150246ea, p_ComputationDescription := p_ComputationDescription_d594150246ea, p_ComputationDescription_Clear := TRUE, p_IsSummary := p_IsSummary_d594150246ea, p_SummaryDescription := p_SummaryDescription_d594150246ea, p_SummaryDescription_Clear := TRUE, p_DetectionMethod := p_DetectionMethod_d594150246ea, p_AutoDetectConfidenceScore := p_AutoDetectConfidenceScore_d594150246ea, p_AutoDetectConfidenceScore_Clear := TRUE, p_ID := p_ID_d594150246ea);
+  END IF;
+END $mj$;
+
+-- Save MJ: Query Fields (core SP call only)
+DO $mj$
+DECLARE
+  p_QueryID_333d3269f589 UUID;
+  p_Name_333d3269f589 VARCHAR(255);
+  p_Description_333d3269f589 TEXT;
+  p_Sequence_333d3269f589 INTEGER;
+  p_SQLBaseType_333d3269f589 VARCHAR(50);
+  p_SQLFullType_333d3269f589 VARCHAR(100);
+  p_SourceEntityID_333d3269f589 UUID;
+  p_SourceFieldName_333d3269f589 VARCHAR(255);
+  p_IsComputed_333d3269f589 BOOLEAN;
+  p_ComputationDescription_333d3269f589 TEXT;
+  p_IsSummary_333d3269f589 BOOLEAN;
+  p_SummaryDescription_333d3269f589 TEXT;
+  p_DetectionMethod_333d3269f589 VARCHAR(50);
+  p_AutoDetectConfidenceScore_333d3269f589 NUMERIC(3,2);
+  p_ID_333d3269f589 UUID;
+BEGIN
+  p_QueryID_333d3269f589 := '5A1E5000-0001-4000-A000-00000000000E';
+  p_Name_333d3269f589 := 'OpenStatedAmount';
+  p_Description_333d3269f589 := 'Computed column: OpenStatedAmount';
+  p_Sequence_333d3269f589 := 9;
+  p_SQLBaseType_333d3269f589 := 'nvarchar';
+  p_SQLFullType_333d3269f589 := 'nvarchar(MAX)';
+  p_IsComputed_333d3269f589 := TRUE;
+  p_IsSummary_333d3269f589 := FALSE;
+  p_DetectionMethod_333d3269f589 := 'Manual';
+  p_ID_333d3269f589 := 'D5B8A981-9C1A-420D-9F5C-BDB604732AD8';
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = '${mjSchema}' AND p.proname = 'spUpdateQueryField'
+       AND p.pronargs = 1 AND p.proargtypes[0] = 'jsonb'::regtype
+  ) THEN
+    PERFORM "${mjSchema}"."spUpdateQueryField"(p_data := jsonb_build_object(
+    'QueryID', p_QueryID_333d3269f589,
+    'Name', p_Name_333d3269f589,
+    'Description', p_Description_333d3269f589,
+    'Sequence', p_Sequence_333d3269f589,
+    'SQLBaseType', p_SQLBaseType_333d3269f589,
+    'SQLFullType', p_SQLFullType_333d3269f589,
+    'SourceEntityID', p_SourceEntityID_333d3269f589,
+    'SourceFieldName', p_SourceFieldName_333d3269f589,
+    'IsComputed', p_IsComputed_333d3269f589,
+    'ComputationDescription', p_ComputationDescription_333d3269f589,
+    'IsSummary', p_IsSummary_333d3269f589,
+    'SummaryDescription', p_SummaryDescription_333d3269f589,
+    'DetectionMethod', p_DetectionMethod_333d3269f589,
+    'AutoDetectConfidenceScore', p_AutoDetectConfidenceScore_333d3269f589,
+    'ID', p_ID_333d3269f589
+  ));
+  ELSE
+    PERFORM "${mjSchema}"."spUpdateQueryField"(p_QueryID := p_QueryID_333d3269f589, p_Name := p_Name_333d3269f589, p_Description := p_Description_333d3269f589, p_Sequence := p_Sequence_333d3269f589, p_SQLBaseType := p_SQLBaseType_333d3269f589, p_SQLFullType := p_SQLFullType_333d3269f589, p_SourceEntityID := p_SourceEntityID_333d3269f589, p_SourceEntityID_Clear := TRUE, p_SourceFieldName := p_SourceFieldName_333d3269f589, p_SourceFieldName_Clear := TRUE, p_IsComputed := p_IsComputed_333d3269f589, p_ComputationDescription := p_ComputationDescription_333d3269f589, p_ComputationDescription_Clear := TRUE, p_IsSummary := p_IsSummary_333d3269f589, p_SummaryDescription := p_SummaryDescription_333d3269f589, p_SummaryDescription_Clear := TRUE, p_DetectionMethod := p_DetectionMethod_333d3269f589, p_AutoDetectConfidenceScore := p_AutoDetectConfidenceScore_333d3269f589, p_AutoDetectConfidenceScore_Clear := TRUE, p_ID := p_ID_333d3269f589);
+  END IF;
+END $mj$;
+
+-- Save MJ: Query Fields (core SP call only)
+DO $mj$
+DECLARE
+  p_QueryID_2daf368a9ef9 UUID;
+  p_Name_2daf368a9ef9 VARCHAR(255);
+  p_Description_2daf368a9ef9 TEXT;
+  p_Sequence_2daf368a9ef9 INTEGER;
+  p_SQLBaseType_2daf368a9ef9 VARCHAR(50);
+  p_SQLFullType_2daf368a9ef9 VARCHAR(100);
+  p_SourceEntityID_2daf368a9ef9 UUID;
+  p_SourceFieldName_2daf368a9ef9 VARCHAR(255);
+  p_IsComputed_2daf368a9ef9 BOOLEAN;
+  p_ComputationDescription_2daf368a9ef9 TEXT;
+  p_IsSummary_2daf368a9ef9 BOOLEAN;
+  p_SummaryDescription_2daf368a9ef9 TEXT;
+  p_DetectionMethod_2daf368a9ef9 VARCHAR(50);
+  p_AutoDetectConfidenceScore_2daf368a9ef9 NUMERIC(3,2);
+  p_ID_2daf368a9ef9 UUID;
+BEGIN
+  p_QueryID_2daf368a9ef9 := '5A1E5000-0001-4000-A000-00000000000E';
+  p_Name_2daf368a9ef9 := 'OpenPricedAmount';
+  p_Description_2daf368a9ef9 := 'Computed column: OpenPricedAmount';
+  p_Sequence_2daf368a9ef9 := 8;
+  p_SQLBaseType_2daf368a9ef9 := 'nvarchar';
+  p_SQLFullType_2daf368a9ef9 := 'nvarchar(MAX)';
+  p_IsComputed_2daf368a9ef9 := TRUE;
+  p_IsSummary_2daf368a9ef9 := FALSE;
+  p_DetectionMethod_2daf368a9ef9 := 'Manual';
+  p_ID_2daf368a9ef9 := '476C8704-431B-498F-B05C-C747FE863E96';
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = '${mjSchema}' AND p.proname = 'spUpdateQueryField'
+       AND p.pronargs = 1 AND p.proargtypes[0] = 'jsonb'::regtype
+  ) THEN
+    PERFORM "${mjSchema}"."spUpdateQueryField"(p_data := jsonb_build_object(
+    'QueryID', p_QueryID_2daf368a9ef9,
+    'Name', p_Name_2daf368a9ef9,
+    'Description', p_Description_2daf368a9ef9,
+    'Sequence', p_Sequence_2daf368a9ef9,
+    'SQLBaseType', p_SQLBaseType_2daf368a9ef9,
+    'SQLFullType', p_SQLFullType_2daf368a9ef9,
+    'SourceEntityID', p_SourceEntityID_2daf368a9ef9,
+    'SourceFieldName', p_SourceFieldName_2daf368a9ef9,
+    'IsComputed', p_IsComputed_2daf368a9ef9,
+    'ComputationDescription', p_ComputationDescription_2daf368a9ef9,
+    'IsSummary', p_IsSummary_2daf368a9ef9,
+    'SummaryDescription', p_SummaryDescription_2daf368a9ef9,
+    'DetectionMethod', p_DetectionMethod_2daf368a9ef9,
+    'AutoDetectConfidenceScore', p_AutoDetectConfidenceScore_2daf368a9ef9,
+    'ID', p_ID_2daf368a9ef9
+  ));
+  ELSE
+    PERFORM "${mjSchema}"."spUpdateQueryField"(p_QueryID := p_QueryID_2daf368a9ef9, p_Name := p_Name_2daf368a9ef9, p_Description := p_Description_2daf368a9ef9, p_Sequence := p_Sequence_2daf368a9ef9, p_SQLBaseType := p_SQLBaseType_2daf368a9ef9, p_SQLFullType := p_SQLFullType_2daf368a9ef9, p_SourceEntityID := p_SourceEntityID_2daf368a9ef9, p_SourceEntityID_Clear := TRUE, p_SourceFieldName := p_SourceFieldName_2daf368a9ef9, p_SourceFieldName_Clear := TRUE, p_IsComputed := p_IsComputed_2daf368a9ef9, p_ComputationDescription := p_ComputationDescription_2daf368a9ef9, p_ComputationDescription_Clear := TRUE, p_IsSummary := p_IsSummary_2daf368a9ef9, p_SummaryDescription := p_SummaryDescription_2daf368a9ef9, p_SummaryDescription_Clear := TRUE, p_DetectionMethod := p_DetectionMethod_2daf368a9ef9, p_AutoDetectConfidenceScore := p_AutoDetectConfidenceScore_2daf368a9ef9, p_AutoDetectConfidenceScore_Clear := TRUE, p_ID := p_ID_2daf368a9ef9);
+  END IF;
+END $mj$;
+
+-- Save MJ: Queries (core SP call only)
+DO $mj$
+DECLARE
+  p_Name_05e309419f18 VARCHAR(255);
+  p_CategoryID_05e309419f18 UUID;
+  p_UserQuestion_05e309419f18 TEXT;
+  p_Description_05e309419f18 TEXT;
+  p_SQL_05e309419f18 TEXT;
+  p_TechnicalDescription_05e309419f18 TEXT;
+  p_OriginalSQL_05e309419f18 TEXT;
+  p_Feedback_05e309419f18 TEXT;
+  p_Status_05e309419f18 VARCHAR(15);
+  p_QualityRank_05e309419f18 INTEGER;
+  p_ExecutionCostRank_05e309419f18 INTEGER;
+  p_UsesTemplate_05e309419f18 BOOLEAN;
+  p_AuditQueryRuns_05e309419f18 BOOLEAN;
+  p_CacheEnabled_05e309419f18 BOOLEAN;
+  p_CacheTTLMinutes_05e309419f18 INTEGER;
+  p_CacheMaxSize_05e309419f18 INTEGER;
+  p_EmbeddingVector_05e309419f18 TEXT;
+  p_EmbeddingModelID_05e309419f18 UUID;
+  p_CacheValidationSQL_05e309419f18 TEXT;
+  p_SQLDialectID_05e309419f18 UUID;
+  p_Reusable_05e309419f18 BOOLEAN;
+  p_ExternalDataSourceID_05e309419f18 UUID;
+  p_IsMaterialized_05e309419f18 BOOLEAN;
+  p_ID_05e309419f18 UUID;
+BEGIN
+  p_Name_05e309419f18 := 'Sales: Deal Roster';
+  p_CategoryID_05e309419f18 := '5A1E5000-0000-4000-A000-000000000001';
+  p_UserQuestion_05e309419f18 := 'Which deals are these — one row each, with names, amounts and provenance?';
+  p_Description_05e309419f18 := 'One row per deal, dimensioned, as a grid source and a drill-through target for every aggregate here. Exists because the first thing anyone does with a number they distrust is ask which deals are in it, and without a roster sharing the same filters that question gets answered by ad-hoc SQL — which is how a report and its drill-through quietly stop agreeing. Names throughout, per S-US11, with IDs alongside for navigation.';
+  p_SQL_05e309419f18 := '-- The deal roster — one row per deal, dimensioned, for a grid or a drill-through target.
+--
+-- WHY A LIST BELONGS IN A SET OF AGGREGATES. Every other query here answers a question with a number,
+-- and the first thing anyone does with a number they distrust is ask which deals are in it. Without a
+-- roster that shares the same filters, that question gets answered by someone writing ad-hoc SQL
+-- against `Deal` — which is how a report and its drill-through quietly stop agreeing.
+--
+-- It is also what the dashboard''s own tables need. `DealWorkspaceService.LoadRoster()` currently
+-- builds this shape by hand in TypeScript; when the tiles are re-pointed at these queries (a later
+-- step, deliberately not done here while another session is in that file), this is what they read.
+--
+-- NO RAW IDs FOR DISPLAY — S-US11 asks for names throughout — but the IDs are returned alongside,
+-- because a grid needs the name and a drill-through needs the key.
+--
+-- STATUS FLAGS TRAVEL WITH THE ROW so a consumer can branch on IsOpen / IsWon / IsClosed without
+-- either re-joining the type table or, worse, comparing the status NAME it was given for display.
+-- That is the vocabulary rule reaching one layer further out than the query itself.
+--
+-- DATE DIMENSION: filtered on expected close for open deals and actual close for closed ones, so one
+-- period filter behaves sensibly across a mixed set.
+SELECT
+    d.ID                                        AS DealID,
+    d.DealNumber,
+    d.Name                                      AS DealName,
+    d.CompanyID,
+    d.Company                                   AS CompanyName,
+    d.AccountID,
+    d.Account                                   AS AccountName,
+    d.PipelineID,
+    d.Pipeline                                  AS PipelineName,
+    -- Whether this pipeline''s OPEN deals belong in the current-book figures. The roster itself keeps
+    -- every deal, because the board must still show a pipeline that holds historical deals; the
+    -- dashboard''s aggregates drop open rows where this is 0.
+    p.IncludeInForecast                         AS PipelineIncludeInForecast,
+    d.PipelineStageID,
+    d.PipelineStage                             AS StageName,
+    ps.DisplayOrder                             AS StageOrder,
+    d.DealTypeID,
+    d.DealType                                  AS DealTypeName,
+    d.DealStatusTypeID,
+    d.DealStatusType                            AS StatusName,
+    -- A deal with no status is not open, won, lost or closed -- it is unclassified. ISNULL(...,0)
+    -- says exactly that, and keeps every consumer''s boolean checks total.
+    ISNULL(st.IsOpen, 0)                        AS IsOpen,
+    ISNULL(st.IsWon, 0)                         AS IsWon,
+    ISNULL(st.IsLost, 0)                        AS IsLost,
+    ISNULL(st.IsClosed, 0)                      AS IsClosed,
+    -- Surfaced so a status-less deal is VISIBLE as one rather than merely reading as not-open.
+    CASE WHEN d.DealStatusTypeID IS NULL OR st.ID IS NULL THEN 1 ELSE 0 END AS HasNoStatus,
+    d.ForecastCategoryType                      AS ForecastCategoryName,
+    fc.IncludeInCommit,
+    fc.IncludeInBestCase,
+    d.OwnerEmployeeID,
+    d.OwnerEmployee                             AS OwnerName,
+    d.Amount,
+    /**
+     * THE CURRENCY THE AMOUNT IS IN. Selected because three display sites hardcode ''USD'', and a deal
+     * priced in EUR would otherwise render as dollars and be summed into a dollar column total.
+     *
+     * Nullable, and NULL on every seeded deal today -- nothing populates it yet. A consumer must treat
+     * NULL as "unknown", not as the display default, and must refuse to total a set containing more
+     * than one distinct value. The board does both.
+     */
+    d.CurrencyID,
+    -- Provenance, so a grid can mark a stated figure rather than presenting it as settled. This is
+    -- the same distinction the board and dashboard now render.
+    d.AmountIsComputed,
+    d.AmountComputedAt,
+    d.Probability,
+    ISNULL(d.Amount, 0) * ISNULL(d.Probability, 0) / 100.0 AS WeightedAmount,
+    d.ExpectedCloseDate,
+    d.ActualCloseDate,
+    -- "Past its expected close and still open" — the slipped flag the dashboard shows. "Today" is
+    -- the BUSINESS day from fnBusinessToday(), not the UTC day: from 6 PM Central (7 PM in daylight
+    -- time) the UTC day is already tomorrow, and a deal due today read as past due all evening (bc-aidp-next-golive#168).
+    CASE WHEN ISNULL(st.IsOpen, 0) = 1
+          AND d.ExpectedCloseDate IS NOT NULL
+          AND d.ExpectedCloseDate < bt.Today
+         THEN 1 ELSE 0 END                      AS IsPastExpectedClose,
+    d.OrderID,
+    d.ContractID,
+    d.__mj_CreatedAt                            AS CreatedAt
+FROM [__mj_BizAppsSales].vwDeals d
+/**
+ * LEFT JOIN, NOT INNER, AND THIS WAS A BUG.
+ *
+ * `Deal.DealStatusTypeID` is NULLABLE. An INNER JOIN here silently DROPS any deal with no status, or
+ * whose status row has been deleted -- and this query is the roster, so such a deal would vanish from
+ * the grid, from the board, from the "of N total" denominator, and from every §9 aggregate built on
+ * it. The client path this replaced was a plain RunView with no join at all, which counted every
+ * deal, so the INNER JOIN quietly turned a mechanism change into a MEASURE change.
+ *
+ * There are no status-less deals in the seeded data, which is the only reason it never showed. The
+ * flags below therefore have to tolerate NULL rather than assume a row: see the ISNULL wrappers.
+ */
+LEFT OUTER JOIN [__mj_BizAppsSales].DealStatusType st
+        ON st.ID = d.DealStatusTypeID
+INNER JOIN [__mj_BizAppsSales].Pipeline p
+        ON p.ID = d.PipelineID
+LEFT OUTER JOIN [__mj_BizAppsSales].PipelineStage ps
+        ON ps.ID = d.PipelineStageID
+LEFT OUTER JOIN [__mj_BizAppsSales].ForecastCategoryType fc
+        ON fc.ID = d.ForecastCategoryTypeID
+CROSS JOIN [__mj_BizAppsCommon].[fnBusinessToday]() AS bt
+WHERE 1 = 1
+  {% if CompanyID %}
+  AND d.CompanyID = {{ CompanyID | sqlString }}
+  {% endif %}
+  {% if PipelineID %}
+  AND d.PipelineID = {{ PipelineID | sqlString }}
+  {% endif %}
+  {% if OwnerEmployeeID %}
+  AND d.OwnerEmployeeID = {{ OwnerEmployeeID | sqlString }}
+  {% endif %}
+  {% if OpenOnly == "true" %}
+  AND ISNULL(st.IsOpen, 0) = 1
+  {% endif %}
+  {% if PeriodStart %}
+  AND COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) >= {{ PeriodStart | sqlString }}
+  {% endif %}
+  /**
+   * CLOSED DEALS FROM A DATE ON; EVERY OTHER DEAL ALWAYS (bizapps-sales#209).
+   *
+   * The Sales section''s first load shipped the whole book, closed deals included, and the browser
+   * reduced it. Its dashboard figures read only open deals, and the won figures come from
+   * `Sales: Dashboard Summary`, so the only closed deals it renders are the board''s, which shows those
+   * closed in the current fiscal quarter. This bounds the closed rows and leaves the rest alone:
+   * open deals and status-less ones are kept whatever their dates, unlike `PeriodStart`, which windows
+   * every row.
+   *
+   * A closed deal with neither close date is left out: nothing says when it closed.
+   */
+  {% if ClosedSince %}
+  AND (ISNULL(st.IsClosed, 0) = 0
+       OR COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) >= {{ ClosedSince | sqlString }})
+  {% endif %}
+  {% if PeriodEnd %}
+  AND COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) <= {{ PeriodEnd | sqlString }}
+  {% endif %}
+ORDER BY
+    CASE WHEN ISNULL(st.IsOpen, 0) = 1 THEN 0 ELSE 1 END,
+    d.ExpectedCloseDate,
+    d.Amount DESC;
+';
+  p_TechnicalDescription_05e309419f18 := 'Grain: Deal. Returns the IsOpen / IsWon / IsLost / IsClosed flags on every row so a consumer can branch on behaviour rather than on the status name it was given for display — the vocabulary rule reaching one layer past the query. Carries AmountIsComputed so a grid can mark a stated figure instead of presenting it as settled. IsPastExpectedClose compares ExpectedCloseDate against the business day from __mj_BizAppsCommon.fnBusinessToday(), not the UTC day (bc-aidp-next-golive#168). Filtered on expected close for open deals and actual close for closed, so one period filter behaves across a mixed set. Returns every deal unless filtered. ClosedSince (optional) drops closed deals (IsClosed) whose COALESCE(ActualCloseDate, ExpectedCloseDate) is before it, or that have neither date, and keeps every open and status-less deal; the Sales section passes the current fiscal quarter''s start so its board shows open deals plus those closed this quarter (bizapps-sales#209). PipelineIncludeInForecast lets a consumer leave open deals in pipelines flagged out of the forecast out of current-book figures.';
+  p_Status_05e309419f18 := 'Approved';
+  p_QualityRank_05e309419f18 := 8;
+  p_ExecutionCostRank_05e309419f18 := 2;
+  p_UsesTemplate_05e309419f18 := TRUE;
+  p_AuditQueryRuns_05e309419f18 := FALSE;
+  p_CacheEnabled_05e309419f18 := FALSE;
+  p_EmbeddingVector_05e309419f18 := '[-0.015757467597723007,0.09076380729675293,0.012486986815929413,-0.011973385699093342,0.013671742752194405,0.016475502401590347,0.07377937436103821,0.010363291017711163,-0.031016742810606956,-0.005965918302536011,-0.03958207741379738,-0.006266278214752674,0.031253568828105927,0.08149415254592896,0.015433473512530327,0.005209656432271004,0.016544293612241745,-0.0046236454509198666,-0.025774430483579636,-0.0043441904708743095,-0.004250737372785807,0.01525562722235918,-0.026677589863538742,0.009663310833275318,-0.03441742807626724,-0.021730782464146614,0.01690538413822651,-0.012855740264058113,0.023387005552649498,-0.05434203892946243,0.037548795342445374,0.0401901975274086,0.0235616285353899,0.014579848386347294,0.0000027511653115652734,-0.023049142211675644,-0.07704177498817444,0.0032731976825743914,-0.0651940330862999,0.07383361458778381,-0.016520358622074127,-0.052365899085998535,0.00296174013055861,-0.019766712561249733,-0.006972066592425108,-0.035359013825654984,-0.04473976790904999,-0.004184743855148554,-0.011014865711331367,-0.030049636960029602,0.021180976182222366,0.0045037162490189075,-0.04742451757192612,-0.030639907345175743,0.05488394573330879,-0.05752842500805855,0.009495127014815807,-0.03502073511481285,0.022475458681583405,-0.04138965532183647,-0.021592991426587105,0.005457676947116852,0.0030858644749969244,-0.0592292957007885,0.03492329642176628,0.05606617406010628,-0.015058293007314205,0.00520544545724988,0.009419281035661697,0.0016361046582460403,0.11448915302753448,0.010586732067167759,0.004321434535086155,-0.030342642217874527,-0.006916029844433069,-0.057259757071733475,-0.043632492423057556,0.060016945004463196,-0.01601792685687542,-0.022738121449947357,-0.09930036962032318,0.09463997930288315,0.005114761646836996,0.013150396756827831,-0.0391104519367218,-0.02910805679857731,-0.0013780666049569845,0.0025901293847709894,-0.05218904837965965,-0.025299541652202606,0.0011975604575127363,-0.022778037935495377,0.006253481842577457,0.003488600719720125,-0.07543233782052994,0.00621522543951869,0.02632618136703968,-0.0000130952021208941,0.03371184691786766,-0.008965590968728065,-0.034244198352098465,0.007265494670718908,0.006521543022245169,0.012139162980020046,0.04718918725848198,0.012187696993350983,0.0022918505128473043,-0.05372396856546402,-0.031281519681215286,0.033023469150066376,0.011532220989465714,-0.016074785962700844,-0.024944854900240898,0.05692499876022339,-0.048574160784482956,-0.02938566729426384,-0.045340076088905334,-0.013724571093916893,-0.030805163085460663,0.03833003714680672,0.0383022166788578,0.027214277535676956,0.014629460871219635,-0.005474706646054983,0.033270761370658875,-0.04376671835780144,-0.0342438705265522,-0.03842443600296974,0.013589507900178432,0.0019206427969038486,-0.02892809361219406,-0.016378358006477356,0.03514022380113602,-0.02891046553850174,-0.004399009048938751,-0.009166326373815536,0.013146786950528622,0.01620510220527649,0.0037794511299580336,-0.003954960498958826,0.00047249096678569913,0.019644174724817276,-0.038519542664289474,0.05109727755188942,0.031700991094112396,-0.024457532912492752,-0.029573475942015648,0.003083703340962529,-0.00027623542700894177,0.017811138182878494,-0.03885836526751518,0.007142579648643732,-0.03009927086532116,0.012044926173985004,-0.010845751501619816,-0.014973572455346584,0.06259866803884506,-0.06064985692501068,0.00941681768745184,0.03167937323451042,0.011134599335491657,-0.030385741963982582,0.050423622131347656,-0.014277011156082153,-0.007544705644249916,0.0026759265456348658,-0.016683703288435936,0.028617074713110924,-0.0004494866298045963,-0.0439358651638031,-0.0140353012830019,-0.029720226302742958,-0.020524200052022934,-0.0028307330794632435,0.059843141585588455,0.01993906870484352,0.011462978087365627,0.02538713999092579,-0.0197096299380064,-0.021100517362356186,-0.0070686680264770985,-0.10374077409505844,-0.0028909018728882074,0.006555804517120123,0.060101673007011414,-0.029502103105187416,0.040628477931022644,-0.03302614390850067,-0.009428367018699646,0.020529305562376976,0.005492448341101408,0.022468190640211105,-0.053576234728097916,0.03263087943196297,-0.02717740088701248,-0.020928846672177315,-0.00016109671560116112,0.018458660691976547,0.018288999795913696,0.006887135095894337,-0.02133330889046192,-0.0018926572520285845,0.02301342785358429,0.002380231861025095,0.04299439117312431,0.024160420522093773,-0.09817785024642944,-0.006848194170743227,-0.019703373312950134,0.031226495280861855,-0.01779855787754059,0.00482881860807538,-0.016886243596673012,0.022450430318713188,-0.0032472361344844103,0.0232460405677557,0.021253429353237152,0.025309130549430847,-0.030019816011190414,-0.0622519925236702,-0.010545436292886734,-0.030969304963946342,0.0014075073413550854,0.009631837718188763,0.06748854368925095,-0.01835557445883751,0.031845785677433014,-0.007600707933306694,-0.0023948876187205315,0.0012774589704349637,0.010583115741610527,-0.0018234031740576029,0.05683021992444992,0.0352463498711586,0.07005159556865692,0.019735144451260567,0.05290019139647484,0.10907473415136337,0.00309136719442904,0.06865525245666504,0.0039831846952438354,-0.06370721012353897,-0.020830580964684486,0.015642572194337845,-0.01936396025121212,-0.03313203155994415,-0.09309206157922745,-0.004527296405285597,-0.0023442176170647144,0.01386759802699089,0.023792123422026634,0.04411698132753372,0.07094146311283112,-0.011506715789437294,0.019326046109199524,0.038825519382953644,-0.08366569876670837,0.036585479974746704,-0.01244395412504673,0.11798790842294693,-0.051175035536289215,-0.056127820163965225,-0.012299969792366028,-0.03045492246747017,0.009555859491229057,-0.002397388918325305,0.061820853501558304,0.012900998815894127,0.026168212294578552,0.02772068791091442,-0.006862184498459101,-0.001645849086344242,-0.024020453914999962,-0.026769690215587616,-0.019225051626563072,0.022455617785453796,-0.10606689006090164,0.004226747900247574,0.002795411041006446,-0.0015383909922093153,-0.001749628223478794,-0.02200440503656864,-0.01566213183104992,0.035159457474946976,0.03038550354540348,0.004802923649549484,0.02654152736067772,-0.026171784847974777,-0.07804790884256363,-0.0693332627415657,-0.016664007678627968,-0.023059355095028877,0.0018043980235233903,-0.015685472637414932,-0.015907032415270805,0.02240419201552868,-0.023447725921869278,0.04812105372548103,0.01896573416888714,0.024198036640882492,-0.049298785626888275,-0.05235517397522926,-0.0007723260205239058,0.013447956182062626,-0.0018367943121120334,0.045604314655065536,0.054168567061424255,-0.003469842951744795,0.0293600894510746,0.02457498386502266,-0.021271225064992905,0.013339808210730553,0.001574650057591498,-0.006057234946638346,0.0531107634305954,-0.008730035275220871,-0.02868957258760929,0.02240096963942051,-0.03060852736234665,0.09312265366315842,0.008138063363730907,-0.01768038235604763,-0.009021492674946785,-0.004831369966268539,-0.029023021459579468,0.006904481910169125,-0.004776314832270145,0.015195239335298538,-0.04386147856712341,-0.012249520979821682,0.0004684418090619147,-0.09915177524089813,-0.03776368126273155,0.040124934166669846,0.022529060021042824,0.013057831674814224,-0.0062924157828092575,0.04623027145862579,0.02246960997581482,-0.000957493030000478,-0.048362791538238525,-0.025575874373316765,-0.024713857099413872,-0.04328371211886406,0.017319323495030403,0.01585419289767742,0.11477900296449661,0.0014852305175736547,-0.0841699093580246,0.0823049247264862,0.05802973359823227,0.03592991456389427,-0.010527162812650204,-0.006183631252497435,-0.021992452442646027,-0.050362855195999146,-0.03682965040206909,-0.026973191648721695,0.03175666928291321,-0.07444067299365997,-0.02105668932199478,0.007725847885012627,-0.028306804597377777,0.06815940886735916,0.02653130702674389,0.010580450296401978,-0.008708673529326916,-0.016232185065746307,0.03500238060951233,0.022457590326666832,-0.040682103484869,-0.004761204123497009,-0.007900195196270943,0.019952377304434776,0.004902414046227932,-0.029289446771144867,0.026905931532382965,0.05350595340132713,0.0011441536480560899,-0.0021924299653619528,0.023216262459754944,-0.005137315951287746,0.08858217298984528,-0.02994389459490776,0.03246442973613739,0.01356502529233694,-0.07135237008333206,-0.05681844428181648,-0.07268461585044861,0.02927154116332531,-0.008972518146038055,-0.013635392300784588,0.05361226201057434,0.006909654475748539,0.008052616380155087,-0.010383284650743008,-0.006357401143759489,0.04956532642245293,-0.019687969237565994,0.01474972814321518,0.012088625691831112,0.04149528965353966,0.08254990726709366,-0.013497481122612953,0.02127673104405403,-0.02829931117594242,-0.025512199848890305,0.02603187784552574,-0.026376822963356972,-0.06411226838827133,-0.06413496285676956,-0.007477529812604189,-0.0029833379667252302,-0.010735801421105862,0.09208994358778,0.0023780621122568846,-0.004641483537852764,-0.031934790313243866,0.0009025529725477099,-0.05133761093020439,0.02755194529891014,-0.018482541665434837,0.021776195615530014,0.00563554372638464,0.05859220400452614,0.010465828701853752,0.01233925111591816,-0.07528869062662125,0.0021631871350109577,0.008595388382673264,-0.01355854794383049,0.04197288677096367,-0.014078883454203606,0.050177816301584244,-0.019506145268678665,0.04482966288924217,0.03927745297551155,-0.06503255665302277,-0.07430975139141083,-0.003271449124440551,-0.07428886741399765,0.04363255575299263,0.04835008084774017,-0.00846869871020317,-0.01954318955540657,-0.016133254393935204,-0.013512199744582176,0.039171040058135986,-0.02829188108444214,-0.06375434994697571,0.02428670972585678,-0.038598861545324326,0.06528125703334808,0.015476333908736706,-0.013416494242846966,-0.0306388009339571,-0.07158273458480835,-0.029270518571138382,-0.014190570451319218,-0.0346086286008358,0.03519352152943611,0.025429774075746536,-0.07277072221040726,0.00879364088177681,0.00530016515403986,-0.10976552963256836,0.024220697581768036,-0.06910283118486404,-0.018472973257303238,-0.034222979098558426,0.020043667405843735,-0.020109012722969055,-0.034919414669275284,0.0016012380365282297,0.050106730312108994,0.04215064272284508,0.006137324962764978,-0.01090382132679224,0.08986710757017136,0.05808493494987488,-0.02390582300722599,0.038635797798633575,-0.0010493810987100005,-0.09301090985536575,-0.007372406776994467,0.040223486721515656,-0.03391877934336662,0.0016067149117588997,0.001262039877474308,-0.008794940076768398,0.015070322901010513,-0.018546948209404945,-0.04516115039587021,0.12865985929965973,0.017523469403386116,0.11837999522686005,-0.043185316026210785,-0.060311462730169296,-0.012187403626739979,-0.04522792622447014,-0.01595166325569153,-0.005606067832559347,-0.014130458235740662,-0.03209332376718521,-0.014329100027680397,0.05175851657986641,0.029839618131518364,-0.02346082031726837,0.014594579115509987,-0.007444688118994236,0.009958538226783276,0.021157117560505867,0.001861828495748341,-0.05410737544298172,0.04225333034992218,-0.03010857291519642,-0.05954201519489288,0.03663215786218643,-0.02496185153722763,0.022003211081027985,-0.004459994845092297,-0.010914884507656097,0.002416882198303938,0.015206986106932163,0.0050597768276929855,-0.053847454488277435,0.03979376703500748,-0.02232804149389267,-0.0002439861127641052,0.07476955652236938,-0.024766460061073303,-0.006184555124491453,0.01971837319433689,0.006012341473251581,-0.0195027906447649,0.01423839945346117,-0.010668449103832245,0.006012012716382742,0.017658235505223274,-0.004063407424837351,-0.047487977892160416,0.008448835462331772,0.03895183652639389,-0.028257913887500763,-0.010807204991579056,0.01643848419189453,-0.022649550810456276,0.0018018773989751935,0.008154760114848614,0.031146256253123283,0.05168936029076576,-0.031224001199007034,-0.07833347469568253,-0.05016611889004707,-0.062325842678546906,-7.846776705360047e-33,-0.001251433975994587,-0.05035439506173134,0.008848334662616253,-0.04045828431844711,0.015915872529149055,-0.03640056401491165,0.016732841730117798,-0.0005561335710808635,-0.01835528202354908,-0.023608487099409103,-0.025543535128235817,0.012412362731993198,0.034090980887413025,-0.0024882853031158447,0.05319526791572571,0.025891121476888657,0.024791913107037544,-0.015713686123490334,-0.025562278926372528,0.026088356971740723,-0.031826235353946686,0.03077397122979164,0.04901513829827309,0.03582979738712311,-0.022101406008005142,-0.03611215204000473,-0.015921935439109802,0.04353950172662735,0.005510410759598017,-0.006847981829196215,-0.003274890361353755,-0.04585137590765953,0.01935242861509323,0.008490367792546749,0.024499373510479927,-0.043863847851753235,0.00048408517614006996,-0.0021158650051802397,-0.008717474527657032,-0.008852966129779816,0.09181096404790878,-0.005916686728596687,0.02328251674771309,0.003828139742836356,-0.003955591470003128,-0.004521950613707304,0.014227289706468582,-0.03395543247461319,-0.04160109907388687,-0.007363559678196907,0.02374081127345562,-0.006922800559550524,0.006359803956001997,0.028624078258872032,0.01945420913398266,0.04733971133828163,0.02509325183928013,0.027909619733691216,-0.07155457884073257,0.0011215643025934696,0.03986360877752304,0.006298494525253773,0.014750038273632526,-0.004760836251080036,0.025295935571193695,-0.010297889821231365,-0.008483237586915493,0.004419825039803982,-0.009579307399690151,0.0005262750783003867,-0.031046977266669273,0.09749502688646317,-0.02030189149081707,0.013587125577032566,0.009369037114083767,0.05517937242984772,-0.019809702411293983,0.029636578634381294,-0.0010698373662307858,0.013690358959138393,0.03252967819571495,-0.005901329685002565,-0.023755645379424095,0.00817713513970375,0.031210964545607567,-0.03124893084168434,-0.005779221188277006,0.03001377545297146,0.04001246392726898,-0.0032722295727580786,-0.027358708903193474,0.047884006053209305,-0.028061695396900177,0.014587515033781528,-0.08637696504592896,0.010110871866345406,0.050560545176267624,0.02363443188369274,0.0028884285129606724,-0.021155934780836105,-0.030185163021087646,0.048292532563209534,0.046886712312698364,-0.03172697126865387,-0.03326962888240814,0.01797367073595524,0.04764754697680473,-0.016172464936971664,-0.05431414768099785,0.026404565200209618,0.02196703851222992,0.045850157737731934,0.0009577288874424994,0.0017378805205225945,0.007062835153192282,-0.01604946330189705,0.01883843168616295,-0.04531808942556381,0.021803556010127068,-0.029794780537486076,0.029429910704493523,0.040973491966724396,-0.03665923699736595,0.002876357873901725,0.01950008049607277,-0.007299008779227734,0.05026565119624138,-0.03880469128489494,0.058531444519758224,0.015888826921582222,-0.0014852940803393722,0.04799579456448555,3.3915421226993203e-7,0.010289759375154972,-0.009635514579713345,-0.01819196157157421,0.01017501950263977,0.017697805538773537,0.027817895635962486,-0.0021122803445905447,0.02817891351878643,-0.027050938457250595,-0.08680377155542374,0.018522437661886215,-0.05048833042383194,0.0697254166007042,0.03452630713582039,-0.0017459607915952802,-0.06276258826255798,-0.023503243923187256,-0.05549364909529686,-0.06643068045377731,-0.03437068313360214,-0.016238272190093994,0.007048846688121557,0.045209720730781555,-0.0006967806839384139,0.02880881540477276,-0.009225362911820412,-0.0031197278294712305,-0.06583686918020248,-0.00008588900527684018,0.0272828321903944,0.024293921887874603,-0.09301836788654327,-0.01412006001919508,0.0029247859492897987,0.00985660683363676,0.024294471368193626,-0.03580554202198982,-0.022425005212426186,0.030708380043506622,0.03274122625589371,-0.05628751218318939,-0.0907081812620163,-0.006872470956295729,-0.003352453699335456,-0.007045903243124485,-0.018189823254942894,-0.008636179380118847,0.049743328243494034,-0.03263426944613457,0.002227451652288437,-0.00037116280873306096,0.014453192241489887,0.01768665388226509,-0.02112741395831108,0.037888020277023315,0.024342313408851624,0.03916388750076294,0.018620839342474937,0.06410270184278488,0.017891308292746544,-0.03617290407419205,-0.0002772511215880513,0.0023982184939086437,-0.04615803062915802,0.05224187299609184,-0.030288096517324448,-0.009159142151474953,3.530276776813149e-34,0.02352234721183777,-0.027783771976828575,0.022397473454475403,0.0672004371881485,0.0352511964738369,-0.012055733241140842,-0.01258031651377678,-0.022615844383835793,0.02163536846637726,-0.05847138166427612,-0.02202402614057064]';
+  p_EmbeddingModelID_05e309419f18 := '1D45AA65-41EC-4572-9ECD-AB2826C9B059';
+  p_SQLDialectID_05e309419f18 := '1F203987-A37B-4BC1-85B3-BA50DC33C3E0';
+  p_Reusable_05e309419f18 := FALSE;
+  p_IsMaterialized_05e309419f18 := FALSE;
+  p_ID_05e309419f18 := '5A1E5000-0001-4000-A000-00000000000D';
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = '${mjSchema}' AND p.proname = 'spUpdateQuery'
+       AND p.pronargs = 1 AND p.proargtypes[0] = 'jsonb'::regtype
+  ) THEN
+    PERFORM "${mjSchema}"."spUpdateQuery"(p_data := jsonb_build_object(
+    'Name', p_Name_05e309419f18,
+    'CategoryID', p_CategoryID_05e309419f18,
+    'UserQuestion', p_UserQuestion_05e309419f18,
+    'Description', p_Description_05e309419f18,
+    'SQL', p_SQL_05e309419f18,
+    'TechnicalDescription', p_TechnicalDescription_05e309419f18,
+    'OriginalSQL', p_OriginalSQL_05e309419f18,
+    'Feedback', p_Feedback_05e309419f18,
+    'Status', p_Status_05e309419f18,
+    'QualityRank', p_QualityRank_05e309419f18,
+    'ExecutionCostRank', p_ExecutionCostRank_05e309419f18,
+    'UsesTemplate', p_UsesTemplate_05e309419f18,
+    'AuditQueryRuns', p_AuditQueryRuns_05e309419f18,
+    'CacheEnabled', p_CacheEnabled_05e309419f18,
+    'CacheTTLMinutes', p_CacheTTLMinutes_05e309419f18,
+    'CacheMaxSize', p_CacheMaxSize_05e309419f18,
+    'EmbeddingVector', p_EmbeddingVector_05e309419f18,
+    'EmbeddingModelID', p_EmbeddingModelID_05e309419f18,
+    'CacheValidationSQL', p_CacheValidationSQL_05e309419f18,
+    'SQLDialectID', p_SQLDialectID_05e309419f18,
+    'Reusable', p_Reusable_05e309419f18,
+    'ExternalDataSourceID', p_ExternalDataSourceID_05e309419f18,
+    'IsMaterialized', p_IsMaterialized_05e309419f18,
+    'ID', p_ID_05e309419f18
+  ));
+  ELSE
+    PERFORM "${mjSchema}"."spUpdateQuery"(p_Name := p_Name_05e309419f18, p_CategoryID := p_CategoryID_05e309419f18, p_UserQuestion := p_UserQuestion_05e309419f18, p_Description := p_Description_05e309419f18, p_SQL := p_SQL_05e309419f18, p_TechnicalDescription := p_TechnicalDescription_05e309419f18, p_OriginalSQL := p_OriginalSQL_05e309419f18, p_OriginalSQL_Clear := TRUE, p_Feedback := p_Feedback_05e309419f18, p_Feedback_Clear := TRUE, p_Status := p_Status_05e309419f18, p_QualityRank := p_QualityRank_05e309419f18, p_ExecutionCostRank := p_ExecutionCostRank_05e309419f18, p_UsesTemplate := p_UsesTemplate_05e309419f18, p_AuditQueryRuns := p_AuditQueryRuns_05e309419f18, p_CacheEnabled := p_CacheEnabled_05e309419f18, p_CacheTTLMinutes := p_CacheTTLMinutes_05e309419f18, p_CacheTTLMinutes_Clear := TRUE, p_CacheMaxSize := p_CacheMaxSize_05e309419f18, p_CacheMaxSize_Clear := TRUE, p_EmbeddingVector := p_EmbeddingVector_05e309419f18, p_EmbeddingModelID := p_EmbeddingModelID_05e309419f18, p_CacheValidationSQL := p_CacheValidationSQL_05e309419f18, p_CacheValidationSQL_Clear := TRUE, p_SQLDialectID := p_SQLDialectID_05e309419f18, p_Reusable := p_Reusable_05e309419f18, p_ExternalDataSourceID := p_ExternalDataSourceID_05e309419f18, p_ExternalDataSourceID_Clear := TRUE, p_IsMaterialized := p_IsMaterialized_05e309419f18, p_ID := p_ID_05e309419f18);
+  END IF;
+END $mj$;
+
+-- Save MJ: Query Parameters (core SP call only)
+DO $mj$
+DECLARE
+  p_ID_581eae996185 UUID;
+  p_QueryID_581eae996185 UUID;
+  p_Name_581eae996185 VARCHAR(255);
+  p_Type_581eae996185 VARCHAR(50);
+  p_IsRequired_581eae996185 BOOLEAN;
+  p_DefaultValue_581eae996185 TEXT;
+  p_Description_581eae996185 TEXT;
+  p_SampleValue_581eae996185 TEXT;
+  p_ValidationFilters_581eae996185 TEXT;
+  p_DetectionMethod_581eae996185 VARCHAR(50);
+  p_AutoDetectConfidenceScore_581eae996185 NUMERIC(3,2);
+BEGIN
+  p_ID_581eae996185 := 'a31e5f51-ef19-44f7-a11b-8dd8c477031f';
+  p_QueryID_581eae996185 := '5A1E5000-0001-4000-A000-00000000000D';
+  p_Name_581eae996185 := 'ClosedSince';
+  p_Type_581eae996185 := 'string';
+  p_IsRequired_581eae996185 := FALSE;
+  p_Description_581eae996185 := 'Optional text value for Closed Since';
+  p_SampleValue_581eae996185 := 'Example';
+  p_DetectionMethod_581eae996185 := 'AI';
+  p_QueryID_581eae996185 := COALESCE((SELECT "ID" FROM "${mjSchema}"."Query" WHERE "Name" = 'Sales: Deal Roster' ORDER BY CASE WHEN "ID" = p_QueryID_581eae996185 THEN 0 ELSE 1 END LIMIT 1), p_QueryID_581eae996185);
+  IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryParameter"
+               WHERE "ID" = p_ID_581eae996185
+                  OR ("QueryID" = p_QueryID_581eae996185 AND "Name" = p_Name_581eae996185)) THEN
+    IF EXISTS (
+      SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = '${mjSchema}' AND p.proname = 'spCreateQueryParameter'
+         AND p.pronargs = 1 AND p.proargtypes[0] = 'jsonb'::regtype
+    ) THEN
+      PERFORM "${mjSchema}"."spCreateQueryParameter"(p_data := jsonb_build_object(
+      'ID', p_ID_581eae996185,
+      'QueryID', p_QueryID_581eae996185,
+      'Name', p_Name_581eae996185,
+      'Type', p_Type_581eae996185,
+      'IsRequired', p_IsRequired_581eae996185,
+      'DefaultValue', p_DefaultValue_581eae996185,
+      'Description', p_Description_581eae996185,
+      'SampleValue', p_SampleValue_581eae996185,
+      'ValidationFilters', p_ValidationFilters_581eae996185,
+      'DetectionMethod', p_DetectionMethod_581eae996185,
+      'AutoDetectConfidenceScore', p_AutoDetectConfidenceScore_581eae996185
+    ));
+    ELSE
+      PERFORM "${mjSchema}"."spCreateQueryParameter"(p_ID := p_ID_581eae996185, p_QueryID := p_QueryID_581eae996185, p_Name := p_Name_581eae996185, p_Type := p_Type_581eae996185, p_IsRequired := p_IsRequired_581eae996185, p_DefaultValue := p_DefaultValue_581eae996185, p_DefaultValue_Clear := TRUE, p_Description := p_Description_581eae996185, p_SampleValue := p_SampleValue_581eae996185, p_ValidationFilters := p_ValidationFilters_581eae996185, p_ValidationFilters_Clear := TRUE, p_DetectionMethod := p_DetectionMethod_581eae996185, p_AutoDetectConfidenceScore := p_AutoDetectConfidenceScore_581eae996185, p_AutoDetectConfidenceScore_Clear := TRUE);
+    END IF;
+  END IF;
+END $mj$;
+
+-- Save MJ: Queries (core SP call only)
+DO $mj$
+DECLARE
+  p_Name_0a30949527b8 VARCHAR(255);
+  p_CategoryID_0a30949527b8 UUID;
+  p_UserQuestion_0a30949527b8 TEXT;
+  p_Description_0a30949527b8 TEXT;
+  p_SQL_0a30949527b8 TEXT;
+  p_TechnicalDescription_0a30949527b8 TEXT;
+  p_OriginalSQL_0a30949527b8 TEXT;
+  p_Feedback_0a30949527b8 TEXT;
+  p_Status_0a30949527b8 VARCHAR(15);
+  p_QualityRank_0a30949527b8 INTEGER;
+  p_ExecutionCostRank_0a30949527b8 INTEGER;
+  p_UsesTemplate_0a30949527b8 BOOLEAN;
+  p_AuditQueryRuns_0a30949527b8 BOOLEAN;
+  p_CacheEnabled_0a30949527b8 BOOLEAN;
+  p_CacheTTLMinutes_0a30949527b8 INTEGER;
+  p_CacheMaxSize_0a30949527b8 INTEGER;
+  p_EmbeddingVector_0a30949527b8 TEXT;
+  p_EmbeddingModelID_0a30949527b8 UUID;
+  p_CacheValidationSQL_0a30949527b8 TEXT;
+  p_SQLDialectID_0a30949527b8 UUID;
+  p_Reusable_0a30949527b8 BOOLEAN;
+  p_ExternalDataSourceID_0a30949527b8 UUID;
+  p_IsMaterialized_0a30949527b8 BOOLEAN;
+  p_ID_0a30949527b8 UUID;
+BEGIN
+  p_Name_0a30949527b8 := 'Sales: Forecast History';
+  p_CategoryID_0a30949527b8 := '5A1E5000-0000-4000-A000-000000000001';
+  p_UserQuestion_0a30949527b8 := 'What did we think the forecast was on a past date, and how has it moved since?';
+  p_Description_0a30949527b8 := 'Point-in-time forecast from ForecastSnapshot (master plan §9.4). A DIFFERENT QUESTION from "Sales: Forecast by Category", not a variant of it: reconstructing a past forecast from Deal is impossible, not merely inaccurate, because amounts change, dates move and deals get recategorised without the current row carrying what it used to say. CommitChangeSincePrior is the column a forecast review actually reads — not the level, but the movement.';
+  p_SQL_0a30949527b8 := '-- Forecast history — what we THOUGHT the forecast was, on a past date. Master plan §9.4.
+--
+-- ══ THIS IS A DIFFERENT QUESTION FROM `forecast-by-category.sql`, NOT A VARIANT OF IT ═══════════
+--
+-- §9.4: "''What is the forecast'' and ''what did we think the forecast was on the 1st'' are different
+-- queries. The first reads `Deal`; the second reads `ForecastSnapshot`."
+--
+-- The distinction is not stylistic. Reconstructing a past forecast from `Deal` is IMPOSSIBLE, not
+-- merely inaccurate: amounts change, expected close dates move, deals are recategorised, and none of
+-- those leave the current row carrying what it used to say. A forecast review that asks "we called
+-- 4.2 million on the first — where did it go?" cannot be answered from live data at all.
+--
+-- So the answer has to be captured, not derived. The `Sales.CaptureForecastSnapshot` Action writes one
+-- row per company × pipeline × owner × period, on a daily ScheduledJob. This query reads them.
+--
+-- THE ACTION IS THE WRITER (D-31): exactly one thing writes ForecastSnapshot, and
+-- `scripts/capture-forecast-snapshot.sql` is a manual tool that is deliberately unseeded rather than a
+-- second path. So "what grain do these rows have" is a question about WHICH QUERY THE ACTION READS.
+--
+-- It reads `Sales: Forecast by Owner` by default (D-32, #216), which groups by the deal''s owner stamp. So
+-- both LAG windows below partition by a real OwnerEmployeeID and the Employee join projects OwnerName.
+-- A NULL owner is an unassigned deal. Snapshots captured from `Sales: Forecast by Category` instead carry
+-- OwnerEmployeeID = NULL meaning "across all owners", and render as one partition with no owner names.
+--
+-- It is a COMPANION rather than a widened `Forecast by Category` deliberately: that query is published,
+-- the dashboard consumes it, and changing a report''s row shape to serve a second consumer is how one
+-- consumer breaks another.
+--
+-- ══ THE COLUMN NAMES DIVERGE FROM THE MASTER PLAN, DELIBERATELY ════════════════════════════════
+--
+-- §9.5 lists the columns as `Commit` / `BestCase` / `Pipeline` / `Closed`. The shipped table has
+-- `CommitAmount` / `BestCaseAmount` / `PipelineAmount` / `ClosedAmount`, and the shipped names are
+-- authoritative — `docs/DECISIONS.md` D6. `COMMIT` is reserved in T-SQL and in Postgres, and
+-- production is Postgres.
+--
+-- DATE DIMENSION: CapturedAt — when the picture was taken. PeriodStart/PeriodEnd describe which
+-- period the snapshot was ABOUT, which is a different thing and is filtered separately.
+SELECT
+    fs.CapturedAt,
+    fs.PeriodStart,
+    fs.PeriodEnd,
+    fs.CompanyID,
+    co.Name                                     AS CompanyName,
+    fs.PipelineID,
+    p.Name                                      AS PipelineName,
+    fs.OwnerEmployeeID,
+    emp.FirstName + '' '' + emp.LastName          AS OwnerName,
+    fs.CommitAmount,
+    fs.BestCaseAmount,
+    fs.PipelineAmount,
+    fs.ClosedAmount,
+    -- Movement since the PREVIOUS capture for the same slice. This is the column a forecast review
+    -- actually reads: not the level, but the change, and where it came from.
+    fs.CommitAmount - LAG(fs.CommitAmount) OVER (
+        PARTITION BY fs.CompanyID, fs.PipelineID, fs.OwnerEmployeeID, fs.PeriodStart
+        ORDER BY fs.CapturedAt
+    )                                           AS CommitChangeSincePrior,
+    fs.ClosedAmount - LAG(fs.ClosedAmount) OVER (
+        PARTITION BY fs.CompanyID, fs.PipelineID, fs.OwnerEmployeeID, fs.PeriodStart
+        ORDER BY fs.CapturedAt
+    )                                           AS ClosedChangeSincePrior
+FROM [__mj_BizAppsSales].ForecastSnapshot fs
+LEFT OUTER JOIN [${mjSchema}].Company co  ON co.ID  = fs.CompanyID
+LEFT OUTER JOIN [__mj_BizAppsSales].Pipeline p ON p.ID = fs.PipelineID
+LEFT OUTER JOIN [${mjSchema}].Employee emp ON emp.ID = fs.OwnerEmployeeID
+WHERE 1 = 1
+  {% if CompanyID %}
+  AND fs.CompanyID = {{ CompanyID | sqlString }}
+  {% endif %}
+  {% if PipelineID %}
+  AND fs.PipelineID = {{ PipelineID | sqlString }}
+  {% endif %}
+  -- The period the snapshot is ABOUT.
+  {% if PeriodStart %}
+  AND fs.PeriodStart >= {{ PeriodStart | sqlString }}
+  {% endif %}
+  {% if PeriodEnd %}
+  AND fs.PeriodEnd <= {{ PeriodEnd | sqlString }}
+  {% endif %}
+  -- When the picture was TAKEN. "As we saw it on the 1st" is this filter, not the two above.
+  {% if CapturedOnOrBefore %}
+  AND fs.CapturedAt <= {{ CapturedOnOrBefore | sqlString }}
+  {% endif %}
+ORDER BY
+    fs.CapturedAt DESC, co.Name, p.Name;
+';
+  p_TechnicalDescription_0a30949527b8 := 'Grain: ForecastSnapshot, written by the Sales.CaptureForecastSnapshot Action on the Sales - Forecast Snapshot (daily) ScheduledJob. (scripts/capture-forecast-snapshot.sql is a manual tool, deliberately unseeded -- see its header.) Two independent date concepts: CapturedAt is when the picture was taken ("as we saw it on the 1st"), PeriodStart/PeriodEnd describe which period it was ABOUT — filtered separately because conflating them answers neither question. Column names are *Amount-suffixed, diverging from §9.5''s bare Commit/BestCase/Pipeline/Closed; the shipped names are authoritative per docs/DECISIONS.md D6, since COMMIT is reserved in T-SQL and Postgres and production is Postgres.';
+  p_Status_0a30949527b8 := 'Approved';
+  p_QualityRank_0a30949527b8 := 9;
+  p_ExecutionCostRank_0a30949527b8 := 2;
+  p_UsesTemplate_0a30949527b8 := TRUE;
+  p_AuditQueryRuns_0a30949527b8 := FALSE;
+  p_CacheEnabled_0a30949527b8 := FALSE;
+  p_EmbeddingVector_0a30949527b8 := '[0.0035934557672590017,0.12378042936325073,-0.007328607141971588,-0.04287165403366089,-0.0128278573974967,-0.015458809211850166,0.04001140594482422,0.005732997786253691,-0.03127996250987053,0.02928507700562477,0.026858564466238022,-0.039666153490543365,0.02690623141825199,0.02995494194328785,-0.04475988820195198,-0.02434634044766426,0.04035608842968941,-0.005991621874272823,-0.05472142994403839,-0.001571320230141282,0.020733842626214027,-0.021620485931634903,-0.011517439037561417,-0.0006231694715097547,-0.04462519288063049,-0.010423419065773487,-0.022906119003891945,0.004968968685716391,-0.0221527311950922,-0.10959330946207047,0.006893358193337917,-0.01502081286162138,0.03349970281124115,-0.005398820154368877,0.0000025430263121961616,0.02462219074368477,-0.05922747403383255,-0.00030343301477842033,-0.009579936973750591,0.011593191884458065,0.019477004185318947,-0.061651811003685,0.010500903241336346,-0.009972555562853813,-0.0042286524549126625,0.0033062598668038845,-0.01855054683983326,0.034144241362810135,0.010266688652336597,0.0239709485322237,0.04121938347816467,-0.00760358851402998,-0.0376548245549202,-0.014785049483180046,-0.0012728649890050292,-0.061805691570043564,0.01149493083357811,-0.09994398057460785,-0.008662653155624866,-0.047234270721673965,-0.01598563976585865,-0.020594792440533638,0.006218001712113619,-0.032689303159713745,0.02812446467578411,0.0325145460665226,0.09484836459159851,-0.03053460456430912,-0.004207153804600239,-0.04584244266152382,0.09122154861688614,0.00428211921826005,-0.02774285152554512,-0.014772702008485794,-0.009548581205308437,-0.006671527866274118,-0.05393778532743454,-0.02787255495786667,0.0039466144517064095,-0.014376052655279636,0.006137767806649208,0.03855951875448227,-0.00785135943442583,0.005813890136778355,-0.04090902954339981,0.08575509488582611,-0.019145503640174866,-0.05169810354709625,-0.03418572619557381,-0.0029425150714814663,0.08873341232538223,-0.015597300603985786,-0.004995848052203655,-0.004915353376418352,-0.05678329989314079,0.01592663861811161,0.010765278711915016,0.0613272562623024,-0.02871699258685112,-0.013055764138698578,0.07836740463972092,0.02746814861893654,0.03270493820309639,0.010703637264668941,0.048230890184640884,0.06904914230108261,0.012762091122567654,-0.044301893562078476,-0.055273715406656265,0.02342521771788597,-0.01820344105362892,0.0044227177277207375,0.0036120926961302757,-0.015953481197357178,0.007677769288420677,-0.005421229172497988,0.020070143043994904,-0.005794737953692675,-0.033690258860588074,0.033243291079998016,0.067781463265419,-0.0040098754689097404,-0.06952642649412155,0.0018104955088347197,-0.04465446248650551,0.023821206763386726,-0.01126528438180685,-0.03877481073141098,0.007995781488716602,0.023435719311237335,-0.04333455488085747,-0.05945524945855141,0.006720725912600756,-0.017856596037745476,-0.0033047220204025507,-0.004090995527803898,0.011099405586719513,0.05059970170259476,-0.053952429443597794,-0.025103449821472168,-0.0009058873984031379,0.009776732884347439,0.0017621989827603102,0.04334866628050804,-0.04780985787510872,-0.03005463257431984,-0.010649872943758965,0.02630937285721302,0.01574687659740448,0.031409118324518204,-0.05206259712576866,-0.00523559283465147,-0.020974915474653244,-0.015991603955626488,-0.040660981088876724,-0.005666638724505901,0.03715481236577034,-0.00833332072943449,-0.01963580958545208,0.06246646121144295,-0.0014549220213666558,0.0035836214665323496,0.03777655214071274,-0.014017123728990555,-0.02082800678908825,-0.005967925302684307,-0.14283297955989838,0.02267892099916935,-0.11181731522083282,-0.007265509106218815,-0.02767365425825119,-0.050774600356817245,-0.00041819066973403096,-0.0012033877428621054,0.002866931026801467,0.014134815894067287,0.014111446216702461,0.07413501292467117,-0.004008141811937094,-0.0660446435213089,-0.031082620844244957,-0.05776665732264519,-0.020290980115532875,0.025547215715050697,0.005625351797789335,-0.02467465028166771,-0.05545847490429878,-0.06410292536020279,-0.010330560617148876,0.018479611724615097,0.011362163349986076,0.006984978914260864,-0.11429937183856964,-0.012800527736544609,-0.01646495796740055,-0.014559340663254261,0.0011990286875516176,0.06067947670817375,0.054105013608932495,0.035528577864170074,0.00257279584184289,0.026868922635912895,0.015722086653113365,0.06703338772058487,0.019059916958212852,-0.01621158793568611,-0.05004916340112686,-0.029615500941872597,-0.021357204765081406,0.038971107453107834,0.025409378111362457,0.015652714297175407,-0.07228897511959076,0.02282041124999523,-0.008747969754040241,0.034436989575624466,0.04736609011888504,0.040708549320697784,-0.058542054146528244,-0.02180061675608158,-0.03105410747230053,0.005990410223603249,0.0003087653312832117,0.0016037370078265667,0.07542046904563904,0.03842751681804657,0.015593498013913631,-0.030455641448497772,0.025245944038033485,-0.006161128636449575,-0.022143280133605003,0.013329504989087582,0.033537693321704865,0.0018773197662085295,0.033502109348773956,0.0829760953783989,-0.05539149045944214,0.06655921041965485,-0.007083996199071407,0.04259752854704857,-0.01094733364880085,-0.03288766369223595,-0.014477896504104137,0.01730380579829216,0.08223439007997513,-0.018099745735526085,-0.0294555202126503,-0.029887553304433823,0.006307085510343313,-0.00011450103193055838,-0.03649240732192993,0.033672165125608444,0.019054872915148735,-0.016931258141994476,-0.00457422761246562,0.01347640436142683,-0.11720595508813858,-0.001092988415621221,0.053493618965148926,0.06832235306501389,0.017810583114624023,-0.0008859119843691587,0.0171244814991951,-0.017517926171422005,-0.0024035971146076918,-0.036905113607645035,0.025116732344031334,0.03243464231491089,-0.017919417470693588,-0.00808762013912201,0.012938328087329865,0.018988458439707756,-0.021219205111265182,0.009140544570982456,-0.003384894924238324,0.06528916954994202,-0.032279472798109055,-0.04003370925784111,0.02864878438413143,-0.017672087997198105,0.022456476464867592,-0.005556780844926834,-0.007792504969984293,0.015678808093070984,0.01891627162694931,0.07029225677251816,0.05550304427742958,-0.01487786415964365,-0.02426838129758835,-0.10165109485387802,-0.03645894676446915,-0.041058499366045,-0.005800850223749876,-0.003608342260122299,-0.0245145782828331,-0.007894044741988182,-0.05467337369918823,0.04132850840687752,0.022937148809432983,0.03733230382204056,-0.028896193951368332,-0.020657846704125404,-0.028695670887827873,0.008516954258084297,-0.03079047240316868,0.01963203214108944,-0.007539925165474415,0.010905396193265915,-0.011068321764469147,0.0751819983124733,0.00008905609865905717,0.006023222580552101,0.011620619334280491,0.017267387360334396,-0.03549065440893173,-0.030498988926410675,-0.038602858781814575,0.03733526170253754,-0.054216187447309494,0.06867647916078568,0.011765004135668278,-0.013316038995981216,-0.024894898757338524,0.04298856854438782,0.013641523197293282,0.01057136245071888,-0.0017126237507909536,0.01063678227365017,-0.054440297186374664,-0.017461467534303665,0.000671206449624151,-0.07067234814167023,-0.005836484022438526,0.012742474675178528,-0.05059639364480972,-0.06246340274810791,0.010505487211048603,0.00045770424185320735,-0.014202741906046867,-0.007877754978835583,-0.021606558933854103,0.008755676448345184,-0.002328369300812483,-0.04984370246529579,-0.046640027314424515,-0.011812174692749977,0.027778320014476776,0.021544359624385834,-0.09607023745775223,0.03407558426260948,-0.012541788630187511,0.05095713213086128,-0.03963929042220116,-0.02958630584180355,0.006579418200999498,-0.08379339426755905,-0.027110790833830833,-0.04707007855176926,-0.014659102074801922,-0.097031369805336,-0.05414658039808273,0.022135138511657715,0.028169825673103333,0.021340668201446533,-0.012950843200087547,0.031118884682655334,0.010351421311497688,-0.005328794941306114,0.02922770008444786,0.01657775044441223,-0.04954858496785164,-0.0012894310057163239,-0.06290600448846817,0.03554196655750275,0.00664861686527729,-0.022144153714179993,0.02247321791946888,0.028767583891749382,0.016807863488793373,-0.02176629938185215,0.016667351126670837,0.041811130940914154,0.028089413419365883,0.03241725638508797,0.034521277993917465,0.001412457786500454,-0.07208395004272461,-0.054353486746549606,-0.03293696418404579,0.00827519316226244,-0.011907467618584633,0.06595467031002045,0.04123859480023384,-0.03147460147738457,-0.01625826582312584,0.004957539960741997,-0.024175120517611504,0.04640110209584236,0.02258860133588314,0.012040254659950733,0.03198866546154022,-0.06983745843172073,0.06373707205057144,0.00598845025524497,0.039192814379930496,-0.06845957785844803,0.03648115694522858,0.028758300468325615,-0.02859954908490181,-0.023849600926041603,-0.00035042481613345444,-0.028017817065119743,0.05485188215970993,-0.007829360663890839,0.007613809779286385,-0.016810834407806396,-0.007990177720785141,0.02483457885682583,0.02010563388466835,0.004331848584115505,0.05801285058259964,0.000055968514061532915,0.03776342049241066,-0.005425311159342527,0.01478989515453577,0.005853387527167797,0.016327498480677605,-0.051204878836870193,-0.004211570136249065,-0.01721521094441414,-0.004936717450618744,-0.01566397212445736,-0.04133172333240509,0.040716785937547684,-0.0017327186651527882,0.061499375849962234,0.00023458775831386447,0.012970631010830402,0.005970308091491461,0.0015393744688481092,0.00575393158942461,-0.001664518378674984,0.06947343051433563,-0.009882470592856407,-0.03617448732256889,0.01784546673297882,-0.01841966062784195,-0.012327400967478752,-0.017390303313732147,-0.004571403842419386,0.018055211752653122,-0.04567229002714157,0.01283777691423893,0.020821459591388702,0.03427863493561745,-0.03578121215105057,-0.03410101681947708,-0.0515136681497097,0.009011346846818924,0.04321117699146271,0.01699703373014927,0.028877204284071922,-0.04614732041954994,0.017594609409570694,0.06483057886362076,0.03538716584444046,0.027313923463225365,-0.018117578700184822,-0.01809225045144558,-0.01986071839928627,0.04053528606891632,0.003297929186373949,-0.010692618787288666,-0.005901367869228125,0.013159162364900112,0.02538897842168808,-0.009980479255318642,0.03438008576631546,-0.01377792563289404,-0.007297859061509371,-0.04729371890425682,0.04546409845352173,0.031764741986989975,-0.12208479642868042,-0.0016287112375721335,0.03326907381415367,-0.025929054245352745,-0.021889880299568176,-0.019119175150990486,-0.029347630217671394,0.04040028899908066,-0.022172892466187477,-0.041233472526073456,0.08926733583211899,-0.021826544776558876,0.012970633804798126,0.037757422775030136,-0.028523774817585945,0.07314207404851913,0.016656076535582542,-0.02437579073011875,0.006284208036959171,-0.006541144568473101,-0.10366928577423096,-0.039622411131858826,0.018042610958218575,0.03802446275949478,0.004023835528641939,-0.007032785098999739,0.009874512441456318,0.00822263304144144,-0.019174186512827873,-0.0580916553735733,-0.04684621840715408,0.008665873669087887,0.012984925881028175,-0.006832947488874197,0.010835288092494011,-0.028647560626268387,-0.0014114994555711746,0.009962263517081738,0.017809024080634117,0.03846750780940056,0.04423223063349724,0.02542443573474884,0.00015268215793184936,0.00006398335244739428,-0.02148030884563923,0.03785928711295128,0.02417517453432083,-0.05709722638130188,0.05403204262256622,0.004309077747166157,0.030686788260936737,-0.009096872061491013,-0.04631137475371361,-0.010590196587145329,-0.04390968754887581,0.047570765018463135,-0.03558269143104553,-0.06891526281833649,0.04200144112110138,0.13180947303771973,-0.0011335660237818956,-0.019526701420545578,-0.014925718307495117,-0.02911660447716713,-0.018886446952819824,0.006089765578508377,0.049699362367391586,0.034742794930934906,-0.030740346759557724,-0.03242719545960426,-0.004817273002117872,-0.061546120792627335,-7.420091357794757e-33,-0.03744528442621231,-0.003921124152839184,-0.01175727415829897,-0.08809929341077805,-0.023073509335517883,-0.007146254647523165,0.012769213877618313,-0.04730604588985443,0.024563565850257874,-0.024013053625822067,-0.04634568840265274,-0.011960724368691444,0.024702638387680054,-0.0020835211034864187,0.04806169494986534,0.01643916219472885,0.02594969980418682,-0.03620709851384163,0.008693280629813671,-0.0038475680630654097,0.03822031989693642,0.045735012739896774,0.04368668422102928,0.09996280074119568,-0.025123097002506256,0.04035911336541176,-0.016669366508722305,0.022270090878009796,0.008948099799454212,-0.04365590214729309,0.02059643156826496,-0.0633193850517273,0.0072266049683094025,-0.013150716200470924,-0.02857990935444832,-0.07292808592319489,0.0380365289747715,-0.01908261701464653,-0.033209893852472305,-0.03919511288404465,0.04411334916949272,0.0394735112786293,0.006151682697236538,0.03750428557395935,-0.02922140806913376,-0.028287755325436592,0.008354274556040764,-0.029037529602646828,-0.029426366090774536,-0.009374597109854221,0.04504808783531189,0.023440545424818993,-0.008360262028872967,0.01660859026014805,0.010217183269560337,0.05664472654461861,0.03834304213523865,0.0016626990400254726,-0.021649204194545746,0.015317550860345364,0.04220478609204292,0.01651339791715145,-0.013038041070103645,0.02521447092294693,0.0009498480358161032,0.03175405412912369,0.03971385210752487,-0.004250320605933666,0.021409496665000916,0.02596220001578331,-0.01850314997136593,0.016447454690933228,-0.007949781604111195,0.022700835019350052,0.07489380240440369,0.0046742260456085205,0.011108692735433578,0.0035378308966755867,-0.0008620590670034289,0.11129218339920044,0.048997003585100174,-0.011054778471589088,-0.004459140356630087,0.008893322199583054,0.029816625639796257,0.007218438200652599,-0.01923261769115925,0.02161506935954094,0.017799265682697296,0.004144230391830206,0.006361973937600851,0.0846821516752243,-0.026159808039665222,0.021102910861372948,-0.0252380408346653,0.026417631655931473,0.029870914295315742,-0.0010231983615085483,0.024661798030138016,0.0052854083478450775,-0.05983128026127815,0.0038519061636179686,0.031098593026399612,0.025562139227986336,-0.00898821372538805,0.024172598496079445,0.05866334214806557,0.02795880287885666,-0.0462653711438179,-0.0093288104981184,0.005213215481489897,0.033973801881074905,-0.0028267588932067156,-0.00802271906286478,0.043794866651296616,-0.0409201942384243,0.0008848818251863122,0.020178938284516335,-0.02847280167043209,0.023423954844474792,0.025676339864730835,0.1109493151307106,0.031033001840114594,0.010993008501827717,0.014328948222100735,-0.02462317794561386,0.03152495622634888,-0.0809168666601181,-0.0280093252658844,0.017060687765479088,0.008288007229566574,0.016799168661236763,3.32081668830142e-7,-0.029755664989352226,0.005640588700771332,0.013181624002754688,0.02732369862496853,0.034845512360334396,0.024480825290083885,-0.0480731837451458,0.006224348209798336,0.022426044568419456,0.028994733467698097,0.040593221783638,-0.056775566190481186,0.03304624557495117,0.048057034611701965,0.028159325942397118,-0.05397980287671089,-0.06340658664703369,0.013186278752982616,-0.05245380848646164,-0.015483292751014233,0.04406481236219406,0.011463949456810951,0.041094426065683365,-0.0022142392117530107,0.012581798247992992,-0.0014940636465325952,-0.01229466125369072,-0.0893191322684288,-0.026433559134602547,-0.019294168800115585,0.04584996774792671,-0.0011172398226335645,0.006038484629243612,-0.04479936510324478,-0.01610967516899109,-0.004907058551907539,-0.055791910737752914,0.010584349744021893,0.011443889699876308,-0.009563476778566837,-0.009687152691185474,0.0029748843517154455,-0.027809739112854004,-0.006721945479512215,0.0031102714128792286,-0.031069764867424965,-0.004562989342957735,-0.02223990112543106,-0.061396390199661255,0.024638770148158073,-0.006187632214277983,0.014959113672375679,0.01650153286755085,0.010027159005403519,0.022372324019670486,0.038155317306518555,-0.007082348223775625,0.01342977024614811,0.06159566342830658,-0.023178573697805405,-0.020543169230222702,0.0007392572588287294,0.010822632350027561,0.054966963827610016,-0.010064679197967052,-0.0667232871055603,0.01949843019247055,2.97205494300554e-34,0.03889469429850578,0.027995888143777847,0.001979836029931903,-0.046302758157253265,0.036411747336387634,-0.004683345090597868,0.0981251671910286,-0.03219885006546974,-0.00034572629374451935,-0.015309124253690243,-0.04231477901339531]';
+  p_EmbeddingModelID_0a30949527b8 := '1D45AA65-41EC-4572-9ECD-AB2826C9B059';
+  p_SQLDialectID_0a30949527b8 := '1F203987-A37B-4BC1-85B3-BA50DC33C3E0';
+  p_Reusable_0a30949527b8 := FALSE;
+  p_IsMaterialized_0a30949527b8 := FALSE;
+  p_ID_0a30949527b8 := '5A1E5000-0001-4000-A000-00000000000C';
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = '${mjSchema}' AND p.proname = 'spUpdateQuery'
+       AND p.pronargs = 1 AND p.proargtypes[0] = 'jsonb'::regtype
+  ) THEN
+    PERFORM "${mjSchema}"."spUpdateQuery"(p_data := jsonb_build_object(
+    'Name', p_Name_0a30949527b8,
+    'CategoryID', p_CategoryID_0a30949527b8,
+    'UserQuestion', p_UserQuestion_0a30949527b8,
+    'Description', p_Description_0a30949527b8,
+    'SQL', p_SQL_0a30949527b8,
+    'TechnicalDescription', p_TechnicalDescription_0a30949527b8,
+    'OriginalSQL', p_OriginalSQL_0a30949527b8,
+    'Feedback', p_Feedback_0a30949527b8,
+    'Status', p_Status_0a30949527b8,
+    'QualityRank', p_QualityRank_0a30949527b8,
+    'ExecutionCostRank', p_ExecutionCostRank_0a30949527b8,
+    'UsesTemplate', p_UsesTemplate_0a30949527b8,
+    'AuditQueryRuns', p_AuditQueryRuns_0a30949527b8,
+    'CacheEnabled', p_CacheEnabled_0a30949527b8,
+    'CacheTTLMinutes', p_CacheTTLMinutes_0a30949527b8,
+    'CacheMaxSize', p_CacheMaxSize_0a30949527b8,
+    'EmbeddingVector', p_EmbeddingVector_0a30949527b8,
+    'EmbeddingModelID', p_EmbeddingModelID_0a30949527b8,
+    'CacheValidationSQL', p_CacheValidationSQL_0a30949527b8,
+    'SQLDialectID', p_SQLDialectID_0a30949527b8,
+    'Reusable', p_Reusable_0a30949527b8,
+    'ExternalDataSourceID', p_ExternalDataSourceID_0a30949527b8,
+    'IsMaterialized', p_IsMaterialized_0a30949527b8,
+    'ID', p_ID_0a30949527b8
+  ));
+  ELSE
+    PERFORM "${mjSchema}"."spUpdateQuery"(p_Name := p_Name_0a30949527b8, p_CategoryID := p_CategoryID_0a30949527b8, p_UserQuestion := p_UserQuestion_0a30949527b8, p_Description := p_Description_0a30949527b8, p_SQL := p_SQL_0a30949527b8, p_TechnicalDescription := p_TechnicalDescription_0a30949527b8, p_OriginalSQL := p_OriginalSQL_0a30949527b8, p_OriginalSQL_Clear := TRUE, p_Feedback := p_Feedback_0a30949527b8, p_Feedback_Clear := TRUE, p_Status := p_Status_0a30949527b8, p_QualityRank := p_QualityRank_0a30949527b8, p_ExecutionCostRank := p_ExecutionCostRank_0a30949527b8, p_UsesTemplate := p_UsesTemplate_0a30949527b8, p_AuditQueryRuns := p_AuditQueryRuns_0a30949527b8, p_CacheEnabled := p_CacheEnabled_0a30949527b8, p_CacheTTLMinutes := p_CacheTTLMinutes_0a30949527b8, p_CacheTTLMinutes_Clear := TRUE, p_CacheMaxSize := p_CacheMaxSize_0a30949527b8, p_CacheMaxSize_Clear := TRUE, p_EmbeddingVector := p_EmbeddingVector_0a30949527b8, p_EmbeddingModelID := p_EmbeddingModelID_0a30949527b8, p_CacheValidationSQL := p_CacheValidationSQL_0a30949527b8, p_CacheValidationSQL_Clear := TRUE, p_SQLDialectID := p_SQLDialectID_0a30949527b8, p_Reusable := p_Reusable_0a30949527b8, p_ExternalDataSourceID := p_ExternalDataSourceID_0a30949527b8, p_ExternalDataSourceID_Clear := TRUE, p_IsMaterialized := p_IsMaterialized_0a30949527b8, p_ID := p_ID_0a30949527b8);
+  END IF;
+END $mj$;
+
+
+-- ===================== Other =====================
+
+-- End of SQL Logging Session
+-- Session ID: 4bdd1758-b4e2-4d94-9da0-948523142d87
+-- Completed: 2026-10-13T14:24:27.671Z
+-- Duration: 4400ms
+-- Total Statements: 11

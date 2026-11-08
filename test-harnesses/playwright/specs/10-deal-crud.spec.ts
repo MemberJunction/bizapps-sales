@@ -8,17 +8,20 @@
  *
  * SHAPE
  *   - one serial test, because each step depends on the previous record existing
- *   - a Pipeline is created FIRST because Deal.PipelineID is NOT NULL (L-14 makes Pipeline.CompanyID
- *     NOT NULL too, so a Company must exist — scripts/seed-dev-data.sh provides one)
+ *   - a Pipeline is created FIRST because Deal.PipelineID is NOT NULL, then linked to the dev Company
+ *     (PipelineCompany) because a deal's company must be actively linked to its pipeline —
+ *     scripts/seed-dev-data.sh provides the company
  *   - every created record is prefixed PW-VERIFY so cleanup is unambiguous
- *   - teardown deletes in FK order (Deal, then Pipeline) and runs even if the test fails
+ *   - teardown deletes in FK order (Deal, then the pipeline's links, then Pipeline) and runs even if
+ *     the test fails
  *   - the console-error KEYSTONE is asserted at the end: a UI that renders but logs errors is broken
  *     in a way presence assertions cannot see
  *
  * Screenshots land in artifacts/ — one per step, for the demo.
  */
-import { test, expect } from '@playwright/test';
-import { ARTIFACTS_DIR, DEV_COMPANY_NAME, EXPLORER_BASE_URL, TEST_PREFIX } from '../lib/env';
+import { expect, test } from '../lib/test';
+import { ARTIFACTS_DIR, DEV_COMPANY_ID, DEV_COMPANY_NAME, EXPLORER_BASE_URL, TEST_PREFIX } from '../lib/env';
+import { QueryAll } from '../lib/db';
 import {
   captureConsoleErrors,
   clickNew,
@@ -37,9 +40,9 @@ import {
   readField,
   saveForm,
   setField,
-  setLookup,
   shot,
 } from '../lib/explorer';
+import { PipelineByName, SetPipelineByID } from '../lib/deal-form';
 
 const PIPELINE_NAME = `${TEST_PREFIX} Pipeline`;
 const PIPELINE_CODE = `${TEST_PREFIX}-PIPE`;
@@ -102,21 +105,30 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
     await clickNew(page);
     await shot(page, '11-pipeline-new-form');
 
-    // The schema's NOT NULL columns should surface as required in the UI. This is a real assertion
-    // about the generated form honouring the schema, not decoration.
-    expect(await isRequiredEmpty(page, 'Company'), 'Pipeline.Company is NOT NULL and must render required').toBe(true);
-
+    // A pipeline has no company of its own any more: it serves the companies it is linked to through
+    // PipelineCompany, so the form asks only for the pipeline's own fields.
     await setField(page, 'Name', PIPELINE_NAME);
     await setField(page, 'Code', PIPELINE_CODE);
-    await setLookup(page, 'Company', DEV_COMPANY_NAME);
     await shot(page, '12-pipeline-filled');
 
     await saveForm(page);
     await shot(page, '13-pipeline-saved');
 
-    // Saved means the required-empty marker is gone from Company.
-    expect(await isRequiredEmpty(page, 'Company'), 'Company should be populated after save').toBe(false);
     expect(await readField(page, 'Name'), 'Name should have persisted').toContain(TEST_PREFIX);
+  });
+
+  /**
+   * LINK THE PIPELINE TO THE DEV COMPANY, in SQL rather than through the link's own form.
+   *
+   * Without an active link the Deal form offers this pipeline under no company and the server refuses a
+   * deal on it. The link's form needs two foreign-key lookups, the harness's flakiest verb; what this
+   * spec proves is the DEAL's create/read/update/delete, so the link is set up the way an import would.
+   */
+  await test.step('link the Pipeline to the dev Company', async () => {
+    const pipeline = await PipelineByName(PIPELINE_NAME);
+    await QueryAll(`
+      INSERT INTO __mj_BizAppsSales.PipelineCompany (PipelineID, CompanyID, IsActive)
+      VALUES ('${pipeline.ID}', '${DEV_COMPANY_ID}', 1)`);
   });
 
   // =============================================================================================
@@ -132,10 +144,28 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
     expect(await isRequiredEmpty(page, 'Company'), 'Deal.Company is NOT NULL and must render required').toBe(true);
 
     await setField(page, 'Name', DEAL_NAME);
-    await setLookup(page, 'Pipeline', PIPELINE_NAME);
-    await setLookup(page, 'Company', DEV_COMPANY_NAME);
+    // A dedicated <select> since golive#291, not an FK lookup -- setLookup waits on
+    // .mj-fk-search input, which this control does not render. Resolved by NAME so this spec still
+    // gets the pipeline it just created, and matched on id the way the option is written.
+    //
+    // THE COMPANY IS PICKED FIRST. Deal.CompanyID is the rep's choice: the Company control (shown when
+    // more than one company has a pipeline) sets it and narrows the Pipeline list to the pipelines
+    // linked to that company. With one company the control is hidden and the form fills it.
+    // DealEntityServer refuses a company the pipeline is not actively linked to.
+    await SetPipelineByID(page, (await PipelineByName(PIPELINE_NAME)).ID, DEV_COMPANY_ID);
     await setField(page, 'Amount', '120000');
-    await setField(page, 'Probability', '20');
+    /**
+     * PROBABILITY IS NOT SET HERE, and that is the form working rather than a gap.
+     *
+     * A new deal's probability is the STAGE's to decide. The pipeline panel filters its field list
+     * through CREATION_PIPELINE_FIELDS while the record is unsaved, and the panel says why:
+     * "those the stage really does decide, so offering them invites a rep to set values about to be
+     * overwritten". So there is no control to type into, and a deal created without a stage simply
+     * has no probability yet.
+     *
+     * The claim this spec makes about probability -- that it is editable and survives a reload --
+     * is exercised in the UPDATE step below, on a SAVED deal, which is where the form offers it.
+     */
     await setField(page, 'Term Months', '12');
     await setField(page, 'Next Step', 'Book technical validation');
     await shot(page, '16-deal-filled');
@@ -150,7 +180,27 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
   // 3. READ — the saved Deal, and the provenance + relationship surfaces
   // =============================================================================================
   await test.step('read the Deal back', async () => {
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    /**
+     * RELOAD THROUGH THE ROUTE THAT RESTORES FROM THE URL.
+     *
+     * Explorer leaves an APP-SCOPED url in the bar after a save --
+     * `/app/mjbizappssales/record/<entity>/<key>` -- and that route restores the record from the
+     * WORKSPACE, not from the url. Measured across three spellings on a cold load:
+     *
+     *     /app/mjbizappssales/record/...   workspace present: renders   absent: does NOT
+     *     /app/sales/record/...            workspace present: renders   absent: does NOT
+     *     /resource/record/...             renders either way
+     *
+     * This suite runs with an ephemeral workspace on purpose (see lib/test.ts), so a bare reload
+     * lands on a url whose only means of restoration has been removed, and the step failed waiting
+     * for a record that was never coming back.
+     *
+     * The key is taken from the url the app itself produced, so this still re-reads the record the
+     * spec just saved rather than one it looked up by name.
+     */
+    const savedKey = page.url().split('/record/')[1] ?? '';
+    expect(savedKey, 'the saved deal must leave a record url to reload from').not.toBe('');
+    await page.goto(`${EXPLORER_BASE_URL}/resource/record/${savedKey}`, { waitUntil: 'domcontentloaded' });
 
     /**
      * Wait for the RECORD to be back, not for six seconds.
@@ -187,12 +237,27 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
     // VIEW MODE. Assert the values a rep actually sees, including the two FKs resolved to their
     // display names — which is what proves the generated base view's denormalised columns work, not
     // just that a UUID was stored.
-    const viewText = await page.locator('body').innerText();
+    /**
+     * THE FORM'S TEXT, INCLUDING SECTIONS THE RAIL IS NOT SHOWING.
+     *
+     * These assertions are about VALUES -- that the generated base view's denormalised columns
+     * resolved an FK to a name rather than a UUID. They are not about which section happens to be
+     * on screen. `body.innerText()` is layout-aware, so it reports only the showing section, and
+     * MJ's chrome rail shows one at a time: Company lives on another one, so the Company assertion
+     * failed while the value was present and correct.
+     *
+     * textContent reads the form regardless of section, which is the question actually being asked.
+     * Scoped to the deal form so a background tab's copy cannot answer for it.
+     */
+    const viewText = (await page.locator('mjs-deal-form').first().textContent()) ?? '';
     expect(viewText, 'the Deal name renders').toContain(DEAL_NAME);
     expect(viewText, 'the Pipeline FK resolves to its name, not a UUID').toContain(PIPELINE_NAME);
     expect(viewText, 'the Company FK resolves to its name').toContain(DEV_COMPANY_NAME);
     expect(viewText, 'Amount survives a reload').toContain('120000');
-    expect(viewText, 'Probability survives a reload').toContain('20');
+    // No probability assertion here: none was set, because the form does not offer one before the
+    // deal has a stage (see the create step). Asserting '20' here passed only while the spec was
+    // typing a value the form had stopped accepting. The reload claim for probability lives in the
+    // UPDATE step, where there is a value to survive.
     expect(viewText, 'Next Step survives a reload').toContain('Book technical validation');
 
     // EDIT MODE. View mode omits NULL fields, so the provenance trio — which is unset on a
@@ -329,6 +394,12 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
   //    (global-teardown also sweeps PW-VERIFY rows in SQL, for the case where this step never runs.)
   // =============================================================================================
   await test.step('delete the Pipeline', async () => {
+    // Its company links first: FK_PipelineCompany_Pipeline does not cascade, so the UI delete would be
+    // refused while a link exists.
+    await QueryAll(`
+      DELETE pc FROM __mj_BizAppsSales.PipelineCompany pc
+        JOIN __mj_BizAppsSales.Pipeline p ON p.ID = pc.PipelineID
+       WHERE p.Name = '${PIPELINE_NAME.replace(/'/g, "''")}'`);
     await openEntityGrid(page, 'Pipelines');
     await deleteRecordViaRecordView(page, PIPELINE_NAME);
     await openEntityGrid(page, 'Pipelines');

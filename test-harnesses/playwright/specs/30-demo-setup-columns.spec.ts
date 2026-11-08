@@ -19,7 +19,7 @@
  *
  * Idempotent: a column already visible is skipped. Safe to re-run.
  */
-import { test, expect } from '@playwright/test';
+import { expect, test } from '../lib/test';
 import { openAllEntities, openSalesApp, shot } from '../lib/explorer';
 
 /** Columns to make visible, in the order they should read left-to-right. */

@@ -13,11 +13,11 @@
  *   PW_HEADLESS=1 npx playwright test --config test-harnesses/playwright/playwright.config.ts \
  *     --project crud --grep "demo tour"
  */
-import { test, expect } from '@playwright/test';
+import { expect, test } from '../lib/test';
 import { ARTIFACTS_DIR, EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, expectNoConsoleErrors, openAllEntities, openSalesApp, shot } from '../lib/explorer';
 import { QueryOne } from '../lib/db';
-import { DealForm, OpenSection } from '../lib/deal-form';
+import { DealForm, OpenSection, RevealInForm } from '../lib/deal-form';
 import { ReopenRecord } from '../lib/deal-flow';
 
 /**
@@ -129,7 +129,12 @@ test('demo tour: every screen the demo shows, with its seeded data', async ({ pa
     await OpenSection(page, 'lines');
 
     const panel = DealForm(page).locator('.mj-forms-panel[data-section-key="lines"]');
-    const lineRows = panel.locator('.ag-center-cols-container .ag-row');
+    const lineRows = panel.locator('[data-testid="deal-line"]');
+    // OpenSection resolves the panel; it does NOT move MJ's chrome rail, and ReopenRecord above has
+    // just reset that rail to the form's lead section. The row locator filters on :visible, so the
+    // line cards are present and hidden and read as zero -- "the seeded deal must show its
+    // product lines" then blames the data for a rail position. Same cause as 40 and 41.
+    await RevealInForm(page, lineRows.first());
     await expect(lineRows, 'the seeded deal must show its product lines').not.toHaveCount(0, { timeout: 30_000 });
     await shot(page, 'demo-07-product-lines');
 

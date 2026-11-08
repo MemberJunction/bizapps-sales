@@ -1,0 +1,26 @@
+[
+  {
+    "_comments": [
+      "Former description, kept as the design note: Finance exception review (golive #279): deal owners whose employee record is not linked to exactly one login. The nightly check for won deals with unconfirmed orders needs the owner's login to stop them clearing an exception on their own deal; without it the exception is raised as creator unresolved and cannot be cleared until the link is fixed. Use it to set up the links before enabling that job, and to check them afterwards."
+    ],
+    "fields": {
+      "Name": "Sales: Deal Owners Without a Linked Login",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "Which deal owners have no login linked to their employee record, or more than one?",
+      "Description": "Deal owners whose employee record is not linked to exactly one login. Fix these before enabling the nightly check for won deals with unconfirmed orders.",
+      "SQL": "@file:SQL/deal-owners-without-linked-login.sql",
+      "TechnicalDescription": "Grain: owner employee (Deal.OwnerEmployeeID). LinkedLoginCount counts __mj.[User] rows whose EmployeeID is the owner, active or not; rows with a count other than 1 are returned. DealCount, OpenDealCount (DealStatusType.IsOpen) and WonDealCount (IsWon) over that owner's deals. Optional CompanyID limits the deals counted.",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 2,
+      "UsesTemplate": true
+    },
+    "primaryKey": {
+      "ID": "5A1E5000-0001-4000-A000-000000000011"
+    },
+    "sync": {
+      "lastModified": "2026-10-03T21:34:47.559Z",
+      "checksum": "61532b8ee7231d3c488b4b06e520d0975fe3aedc60180f8a9f752f7c9a73de4e"
+    }
+  }
+]

@@ -23,10 +23,10 @@
     "Evaluating, Booked), with OrderStatusOnEntry populated per D-OS1.",
     "",
     "The company is the part that made this awkward and is worth reading before changing it: see",
-    "pipelines/.mj-sync.json. Pipeline.CompanyID is NOT NULL (D5) and companies are MJ core data, so",
-    "the seed resolves 'Default Company' and relies on this file's autoCreateMissingRecords to create",
-    "it on a bare install. scripts/seed-dev-data.sh repoints the two rows at the local dev companies,",
-    "so a development host gets these pipelines on real companies rather than a second set of them.",
+    "pipelines/.mj-sync.json. A pipeline with no PipelineCompany link offers no company a deal can sell",
+    "as, and companies are MJ core data, so the seed links both pipelines to 'Default Company' (seeded",
+    "by companies/). scripts/seed-demo-data.sh links them to the local dev companies instead, so a",
+    "development host gets these pipelines on real companies rather than a second set of them.",
     "",
     "DealType.DefaultPipelineID is STILL deliberately left NULL. It is the other half of the DealType",
     "<-> Pipeline cycle, and now that pipelines exist it could be filled — but a default pipeline per",
@@ -36,7 +36,10 @@
     "remote-operation-categories MUST precede remote-operations: the operation rows resolve their",
     "CategoryID with @lookup against a category by Name, so the category has to exist first. This is",
     "the first entry in this list where the ordering is genuinely load-bearing rather than",
-    "precautionary — get it wrong and the push fails on an unresolvable lookup."
+    "precautionary — get it wrong and the push fails on an unresolvable lookup.",
+    "",
+    "api-scopes then api-application-scopes follow it: an application-scope row resolves its ScopeID with",
+    "@lookup against a scope by FullPath, so the scope has to exist first (#186)."
   ],
   "_comment_queries": [
     "query-categories MUST precede queries, and the ordering is load-bearing in a way that is easy to",
@@ -73,6 +76,8 @@
     "task-types",
     "remote-operation-categories",
     "remote-operations",
+    "api-scopes",
+    "api-application-scopes",
     "query-categories",
     "queries",
     "action-categories",
@@ -82,11 +87,7 @@
     "applications",
     "entity-fields",
     "user-views",
-    "entity-relationships",
-    "ml-training-pipelines",
-    "ml-models",
-    "record-processes",
-    "ml-model-scoring-bindings"
+    "entity-relationships"
   ],
   "sqlLogging": {
     "enabled": true,

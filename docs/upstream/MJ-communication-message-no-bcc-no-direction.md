@@ -1,84 +1,52 @@
 # Communication: `GetMessageMessage` carries no direction and no Bcc, so delegate-sent mail is logged backwards
 
+Not filed yet.
+
 **Component:** `@memberjunction/communication-base-types` — `GetMessageMessage`
 **Affects:** any consumer that records whether a message was sent or received
-**Observed on:** MJ `6.1.0-edge.2`
+**Checked on:** MJ `next` (`8b8d645`), 2026-10-11
 **Severity:** medium — a wrong value rather than a missing one, which is the harder kind to notice
 
 ---
 
-## Consequence first
-
-**A message sent by an assistant on an executive's behalf is recorded as inbound.** It appears on the
-timeline as something the customer sent us, when it is something we sent the customer. The record is
-not incomplete; it is wrong in a way that reads as fact.
-
-That matters most in exactly the accounts that have delegates — the largest ones — and it is
-unfalsifiable from the stored data, because nothing carries the direction the transport actually knew.
-
 ## What is missing
 
-```ts
-// Communication/base-types/src/BaseProvider.ts
-export type GetMessageMessage<T = Record<string, any>> = {
-    From: string;
-    To: string;
-    ToRecipients?: string[];
-    CCRecipients?: string[];
-    Body: string;
-    ReplyTo?: string[];
-    Subject?: string;
-    ExternalSystemRecordID?: string;
-    ThreadID?: string;
-    CreatedAt?: Date;
-    LastModifiedAt?: Date;
-    ReceivedAt?: Date;
-    SentAt?: Date;
-    SourceData?: T;
-};
-```
+`GetMessageMessage` (`packages/Communication/base-types/src/BaseProvider.ts:261-296`) has `From`, `To`,
+`ToRecipients`, `CCRecipients`, `ReplyTo`, subject, body, external and thread IDs, and four timestamps. It has no
+direction and no Bcc, although sending supports Bcc (`Message.BCCRecipients`, `:61`). The Graph
+provider maps `from` only, and drops `sender` and `bccRecipients`
+(`packages/Communication/providers/MSGraph/src/MSGraphProvider.ts:570-573`).
 
-Two absences:
+## Why direction cannot be inferred
 
-- **No direction.** Nothing states inbound versus outbound. `SentAt` and `ReceivedAt` are both
-  optional and both are populated for ordinary mail, so they do not distinguish it either.
-- **No Bcc.** There is `ToRecipients` and `CCRecipients` and no blind-copy field at all.
-
-## Why direction cannot be reliably inferred
-
-The only available inference is comparing `From` against the mailbox being read. That is correct for
+The only inference available is comparing `From` with the mailbox being read. That is right for
 ordinary mail and wrong for delegated send:
 
 | Scenario | `From` | Mailbox read | Inferred | Truth |
 |---|---|---|---|---|
 | User sends | the user | the user | Outbound | Outbound ✓ |
 | User receives | a customer | the user | Inbound | Inbound ✓ |
-| **Assistant sends on exec's behalf** | **the exec** | **the assistant** | **Inbound** | **Outbound ✗** |
+| **Assistant sends on an executive's behalf** | **the executive** | **the assistant** | **Inbound** | **Outbound ✗** |
 
-The transport knows. Graph exposes the parent folder, `sender` distinct from `from`, and
-`sentDateTime` on items in Sent Items — all of which say outbound unambiguously. The signal is being
-lost at MJ's message type, not at the provider.
+`From` is the executive in the delegated case, so no comparison against the mailbox recovers the
+answer. The transport knows: Graph's `sender` differs from `from`, and the message sits in Sent Items.
+The signal is lost at MJ's message type, not at the provider.
 
-Note that `From` is the *exec* in the delegated case, not the assistant — so no comparison against the
-mailbox address recovers the right answer. This is not a matter of a smarter inference.
+bizapps-common's activity sync shows the cost. It reads Graph's raw payload from
+`GetMessagesResult.SourceData` instead of `Messages`, and still infers direction by comparing `from`
+with the mailbox (`packages/ActivitySync/src/providers/GraphMessageMapper.ts:68-75`), so a delegate's
+sent mail is filed as inbound.
 
-## The Bcc absence is probably fine, and should be recorded as accepted
+## Bcc
 
-A Bcc is deliberately invisible to recipients, so a provider reading a *recipient's* mailbox genuinely
-cannot know about it — the information is not withheld by the type, it was never delivered. Reading
-the *sender's* Sent Items is the one case where it exists and is dropped.
-
-We are not asking for this to be fixed. We are asking for it to be an **accepted absence rather than
-an unnoticed one**, because the two are indistinguishable from the outside and a future consumer will
-otherwise assume `ToRecipients` + `CCRecipients` is the complete recipient set. For compliance or
-audit use it is not.
+A Bcc is not delivered to recipients, so it exists only in the sender's own Sent Items, where it is
+dropped. Either return it there, or document that `ToRecipients` + `CCRecipients` is not the complete
+recipient set; a consumer doing compliance or audit work will otherwise assume it is.
 
 ## Suggested fix
 
-Add direction as a value the provider supplies rather than something the caller derives:
-
 ```ts
-export type GetMessageMessage<T = Record<string, any>> = {
+export type GetMessageMessage = {
     …
     /** Set by the provider from transport metadata (folder, sender vs from, sent state).
      *  Callers must not infer this from From/Identifier — delegated send breaks that inference. */
@@ -89,17 +57,7 @@ export type GetMessageMessage<T = Record<string, any>> = {
 };
 ```
 
-Optional keeps it backward compatible. A provider that genuinely cannot determine direction leaves it
-undefined, and a caller can then fall back to the inference **knowingly** — which is materially better
-than today, where the caller cannot tell whether it is guessing.
-
-If `Direction` as an enum is contentious, a `Folder` or `IsFromSentItems` field would carry the same
-fact with less semantics attached.
-
-## Notes for whoever picks this up
-
-- `Direction` is the load-bearing half. The Bcc field is a smaller matter and could be declined
-  outright, as long as the decision is written down somewhere a consumer will find it.
-- The type already carries provider-specific detail in `SourceData`, so a caller *can* dig direction
-  out per provider — but doing so defeats the point of the abstraction and has to be written once per
-  provider, which is what `BaseCommunicationProvider` exists to avoid.
+Optional keeps it backward compatible. A provider that cannot determine direction leaves it
+undefined, and the caller falls back to the inference knowing it is a guess. `Direction` is the
+load-bearing half; the Bcc field could be declined, as long as the decision is written down where a
+consumer will find it.

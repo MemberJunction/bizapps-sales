@@ -69,19 +69,25 @@ const EDITABLE_ON_ANY_LOCKED_DEAL: ReadonlySet<string> = new Set<string>([
 const EDITABLE_ON_A_LOST_DEAL: ReadonlySet<string> = new Set<string>(['LossNotes']);
 
 /**
- * Every field a locked deal still accepts, given its outcome.
+ * Every field a locked deal still accepts, given its outcome and whether its persisted account is blank.
  *
- * Takes the flag rather than exposing a flat set, so a caller cannot read the list and forget the
+ * Takes the flags rather than exposing a flat set, so a caller cannot read the list and forget the
  * condition. That is not hypothetical: four call sites used to read the flat constant directly.
  *
  * @param isLost - whether the deal's PERSISTED status carries `IsLost`. When it cannot be determined,
  *                 pass `false`: refusing an edit to a closed deal is the cheaper mistake.
+ * @param accountBlank - whether the deal's PERSISTED `AccountID` is blank, allowing a closed deal with
+ *                       no account to be linked to one once without reopening (golive#306).
  */
-export function DealFieldsEditableWhileLocked(isLost: boolean): ReadonlySet<string> {
-    if (!isLost) {
+export function DealFieldsEditableWhileLocked(isLost: boolean, accountBlank = false): ReadonlySet<string> {
+    if (!isLost && !accountBlank) {
         return EDITABLE_ON_ANY_LOCKED_DEAL;
     }
-    return new Set<string>([...EDITABLE_ON_ANY_LOCKED_DEAL, ...EDITABLE_ON_A_LOST_DEAL]);
+    return new Set<string>([
+        ...EDITABLE_ON_ANY_LOCKED_DEAL,
+        ...(isLost ? EDITABLE_ON_A_LOST_DEAL : []),
+        ...(accountBlank ? ['AccountID'] : []),
+    ]);
 }
 
 /**
@@ -89,8 +95,40 @@ export function DealFieldsEditableWhileLocked(isLost: boolean): ReadonlySet<stri
  *
  * Callers should prefer this to reaching into the sets, so the membership test stays in one place.
  */
-export function IsDealFieldEditableWhileLocked(fieldName: string, isLost: boolean): boolean {
-    return EDITABLE_ON_ANY_LOCKED_DEAL.has(fieldName) || (isLost && EDITABLE_ON_A_LOST_DEAL.has(fieldName));
+export function IsDealFieldEditableWhileLocked(
+    fieldName: string,
+    isLost: boolean,
+    accountBlank = false,
+): boolean {
+    return (
+        EDITABLE_ON_ANY_LOCKED_DEAL.has(fieldName) ||
+        (isLost && EDITABLE_ON_A_LOST_DEAL.has(fieldName)) ||
+        (accountBlank && fieldName === 'AccountID')
+    );
+}
+
+/**
+ * The close stamps: written by `Sales.CloseDeal`, cleared by `Sales.ReopenDeal`, and by nothing else
+ * (bizapps-sales#252).
+ *
+ * Not a lock rule -- they are frozen on an OPEN deal too. Every surface that asks "has this deal
+ * closed?" reads these stamps, because they are what the close writes when it actually runs. A stamp
+ * typed onto an open deal therefore made the whole header call it closed: a rep looking for where to
+ * enter an expected close found Actual Close Date, typed a future day, and the deal read "Closed".
+ *
+ * Here for the reason the lock's own list is: the entity server refuses a direct write and the form
+ * renders the fields read-only, and both read this one set.
+ */
+const DEAL_CLOSE_STAMP_FIELDS: ReadonlySet<string> = new Set<string>(['ClosedAt', 'ActualCloseDate', 'ClosedByUserID']);
+
+/** Every close stamp, for a caller that has to walk them. */
+export function DealCloseStampFields(): readonly string[] {
+    return [...DEAL_CLOSE_STAMP_FIELDS];
+}
+
+/** Whether `fieldName` is a close stamp, which only the close and the reopen may write. */
+export function IsDealCloseStamp(fieldName: string): boolean {
+    return DEAL_CLOSE_STAMP_FIELDS.has(fieldName);
 }
 
 /**
@@ -112,7 +150,14 @@ const DEAL_FIELD_LABELS: Readonly<Record<string, string>> = {
     LeadSourceTypeID: 'Lead Source',
     CampaignID: 'Campaign',
     LossNotes: 'Loss Notes',
-    DealStatusTypeID: 'Deal Status',
+    // The two below match the relabels in metadata/entity-fields/.deal-field-labels.json, which set
+    // them on the virtual name fields (DealStatusType, ForecastCategoryType) the form reads. A test
+    // pins every override to that file, so a relabel there cannot leave a notice naming a field the
+    // form no longer shows (#387).
+    DealStatusTypeID: 'Status',
+    ForecastCategoryTypeID: 'Forecast Category',
+    // The close stamps, named in the refusal a direct write gets (#252).
+    ClosedByUserID: 'Closed By',
 };
 
 /**
@@ -155,13 +200,27 @@ export function DealFieldLabel(fieldName: string): string {
  * and `Sales.ReopenDeal`, which the form's status control routes to. So the field IS editable to a
  * person and IS NOT writable by a raw save, and one set cannot say both.
  *
- * The notice describes what a PERSON can do, so it is the one that carries Deal Status.
+ * The notice describes what a PERSON can do, so it is the one that carries the status.
  *
  * It takes `isLost` because the set it wraps does: golive#206 keeps Loss Notes editable on a lost
  * deal and frozen on a won one, so the notice must name it on one and not the other.
  */
-export function DealFieldsListedAsEditable(isLost: boolean): readonly string[] {
-    return ['DealStatusTypeID', ...DealFieldsEditableWhileLocked(isLost)];
+export function DealFieldsListedAsEditable(isLost: boolean, accountBlank = false): readonly string[] {
+    return ['DealStatusTypeID', ...DealFieldsEditableWhileLocked(isLost, accountBlank)];
+}
+
+/**
+ * Refusal when a second close or a stale pre-close save hits a deal that is already Won (golive#387).
+ *
+ * Names the deal and, when one was created, the contract number so a retry after a timeout tells the
+ * rep that the first close already succeeded instead of presenting a generic lock wall.
+ */
+export function AlreadyWonRefusal(dealLabel?: string | null, contractNumber?: string | null): string {
+    const deal = dealLabel?.trim() || 'This deal';
+    const contract = contractNumber?.trim() || null;
+    return contract
+        ? `${deal} is already Won; contract ${contract} was created.`
+        : `${deal} is already Won.`;
 }
 
 /**
@@ -215,6 +274,13 @@ export interface DealLockState {
      * getters tests the CLOSE STAMPS first, so an open won-status deal still reads "Closes".
      */
     IsWon: boolean;
+    /**
+     * The deal points at a status row that no longer exists (#402). Locked like a closed deal, with
+     * one difference the server makes too: `DealStatusTypeID` itself may be written, to an OPEN
+     * status, because that is how the orphan is repaired. A surface reads this to leave its status
+     * control usable, which the notice below tells the user to do.
+     */
+    IsStatusMissing: boolean;
     /** A ready-to-render explanation, or null when the deal is open. */
     Notice: string | null;
 }
@@ -240,8 +306,16 @@ export interface DealLockState {
 export async function ResolveDealLockState(
     persistedStatusID: string | null | undefined,
     contextUser?: UserInfo,
+    accountBlank = false,
 ): Promise<DealLockState> {
-    const open: DealLockState = { IsLocked: false, StatusName: null, IsLost: false, IsWon: false, Notice: null };
+    const open: DealLockState = {
+        IsLocked: false,
+        StatusName: null,
+        IsLost: false,
+        IsWon: false,
+        IsStatusMissing: false,
+        Notice: null,
+    };
     if (!persistedStatusID) {
         return open;
     }
@@ -265,12 +339,13 @@ export async function ResolveDealLockState(
      * offers a field the server then refuses. Setting the status to an open one is the way out.
      */
     if (result?.Success && !row) {
-        const editable = JoinLabels(DealFieldsListedAsEditable(false).map(DealFieldLabel));
+        const editable = JoinLabels(DealFieldsListedAsEditable(false, accountBlank).map(DealFieldLabel));
         return {
             IsLocked: true,
             StatusName: null,
             IsLost: false,
             IsWon: false,
+            IsStatusMissing: true,
             Notice:
                 `This deal's status could not be found, so it is treated as closed. Only ${editable} can be ` +
                 'edited. To change anything else, set the status to an open one.',
@@ -303,12 +378,13 @@ export async function ResolveDealLockState(
      * not the provenance argument, and the reason is one click away in the close history.
      */
     const isLost = row.IsLost === true;
-    const editable = JoinLabels(DealFieldsListedAsEditable(isLost).map(DealFieldLabel));
+    const editable = JoinLabels(DealFieldsListedAsEditable(isLost, accountBlank).map(DealFieldLabel));
     return {
         IsLocked: true,
         StatusName: row.Name,
         IsLost: isLost,
         IsWon: isWon,
+        IsStatusMissing: false,
         Notice:
             `This deal is closed (${row.Name}). Only ${editable} can be edited. ` +
             'To change anything else, set the status back to Open.',

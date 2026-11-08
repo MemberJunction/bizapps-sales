@@ -21,7 +21,8 @@
  * check that no raw `UQ_OrderLine_OrderHeader_LineNumber` text surfaced. The decline no longer exists by
  * design; the editor's own error channel (`.mjs-le__error`) is asserted empty in its place.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Page } from '@playwright/test';
 
 import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
@@ -46,7 +47,7 @@ async function orderLines(id: string): Promise<LineRow[]> {
 }
 
 /**
- * Opens the line editor for the first row of the lines grid (an MJ entity data grid) by double-click.
+ * Opens the line editor for the first line card by double-click.
  *
  * Which line that is, is NOT assumed from the row's position: the caller reads the editor's quantity
  * back and matches it to a database row.
@@ -54,9 +55,9 @@ async function orderLines(id: string): Promise<LineRow[]> {
 async function openFirstLine(page: Page): Promise<void> {
     await OpenSection(page, 'lines');
     const row = DealForm(page)
-        .locator('.mj-forms-panel[data-section-key="lines"] .ag-center-cols-container .ag-row')
+        .locator('.mj-forms-panel[data-section-key="lines"] [data-testid="deal-line"]')
         .first();
-    await expect(row, 'the lines grid must render the deal\'s lines').toBeVisible({ timeout: 30_000 });
+    await expect(row, 'the panel must render the deal\'s line cards').toBeVisible({ timeout: 30_000 });
     await row.dblclick();
 }
 

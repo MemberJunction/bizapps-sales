@@ -1,0 +1,43 @@
+[
+  {
+    "_comments": [
+      "The Buying team grid had no DefaultInView field, so MJ showed the first ten fields,",
+      "most of them IDs. The flags go on the view's name fields (SalesContact, BuyingRoleType, Deal), not the",
+      "foreign keys, so the grid shows words instead of GUIDs.",
+      "",
+      "Deal is included because the same flag drives the buying-roles section on a Sales Contact's",
+      "form, where it is the only column that says which deal a role is on. On the deal's own form it",
+      "repeats the deal. Notes stays off: long text does not fit a grid column."
+    ],
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Contact Roles&Name=SalesContact"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Contact Roles&Name=BuyingRoleType"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Contact Roles&Name=Influence"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Contact Roles&Name=Deal"
+    }
+  }
+]

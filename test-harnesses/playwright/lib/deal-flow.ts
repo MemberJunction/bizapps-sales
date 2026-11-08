@@ -9,13 +9,21 @@ import { expect, type Page } from '@playwright/test';
 
 import { QueryAll, QueryOne } from './db';
 import {
+    ChooseLineProduct,
+    OfferedLineProducts,
     ByTestId,
     DealForm,
     FirstOpenStatus,
     OpenNewDeal,
     OpenSection,
+    FirstSalesAccountName,
     PickLookup,
+    RevealInForm,
+    PipelineByName,
     SaveDeal,
+    FirstOpenStageOf,
+    SetPipelineByID,
+    SetStageByID,
     SetStatusByID,
     SetText,
 } from './deal-form';
@@ -37,8 +45,23 @@ export interface ComposedDeal {
 export async function ComposeDeal(page: Page, name: string, pipeline?: string): Promise<ComposedDeal> {
     await OpenNewDeal(page);
     await SetText(page, 'Name', name);
-    await PickLookup(page, 'PipelineID', pipeline);
-    await PickLookup(page, 'AccountID');
+    // Pipeline is a dedicated `<select>` since golive#291, so `PickLookup` -- which waits on
+    // `.mj-fk-search` -- cannot reach it. Resolved by NAME through the database so a caller that asks
+    // for a specific pipeline still gets that one, and the id is what the option is matched on.
+    const chosenPipeline = await PipelineByName(pipeline);
+    await SetPipelineByID(page, chosenPipeline.ID);
+    /**
+     * ── AND A STAGE, BECAUSE ONE NO LONGER APPEARS BY ITSELF ────────────────────────────────────
+     *
+     * golive#291 clears the stage when the pipeline changes -- deliberately, since two pipelines'
+     * processes do not translate. A deal composed without this saves with PipelineStageID NULL, and
+     * anything reading deals through `JOIN PipelineStage` then cannot see it at all: 80-board-drag
+     * failed both tests on its own precondition, reporting a deal it had just created as missing.
+     *
+     * AFTER the pipeline, never before: choosing a pipeline is what does the clearing.
+     */
+    await SetStageByID(page, (await FirstOpenStageOf(chosenPipeline.ID)).ID);
+    await PickLookup(page, 'AccountID', await FirstSalesAccountName());
 
     /**
      * ── THE STATUS, SET EXPLICITLY ──────────────────────────────────────────────────────────────
@@ -147,26 +170,57 @@ export async function ComposeDeal(page: Page, name: string, pipeline?: string): 
 export async function AddLines(page: Page, orderID: string, count: number): Promise<number> {
     await OpenSection(page, 'lines');
 
+    /**
+     * ── ONLY PRODUCTS THE ORDER CAN PRICE ───────────────────────────────────────────────────────
+     *
+     * A product with no price rule cannot be saved onto a line: the server refuses with "cannot be
+     * priced: no price rule was found for this product, and no UnitPrice was supplied", and the
+     * editor stays open to show it. The failure then reads "the line editor must close once the line
+     * saves", which says nothing about pricing and looks like a stuck editor.
+     *
+     * The picker offers every active product, most of which have no rule -- 6 of 28 here -- and the
+     * first alphabetically is one of them. Read the priceable set from the database rather than
+     * trusting the order of a dropdown.
+     */
+    const priceable = (
+        await QueryAll<{ Name: string }>(
+            `SELECT DISTINCT p.Name
+               FROM __mj_BizAppsOrders.Product p
+               JOIN __mj_BizAppsOrders.ProductPrice pp ON pp.ProductID = p.ID
+              WHERE p.Status = 'Active'
+              ORDER BY p.Name`,
+        )
+    ).map((r) => String(r.Name));
+    expect(priceable.length, 'the host needs at least one product carrying a price rule').toBeGreaterThan(0);
+
     for (let i = 0; i < count; i += 1) {
         const add = ByTestId(page, 'lines-add');
+        // Lines live in their own form section; the rail may be showing a different one.
+        await RevealInForm(page, add);
         await expect(add, 'a saved, open deal must offer Add a product').toBeVisible({ timeout: 30_000 });
         await add.click();
 
         const editor = page.locator('[data-testid="line-editor"]:visible').first();
         await expect(editor, 'Add a product must open the line editor').toBeVisible({ timeout: 20_000 });
 
-        const product = editor.locator('[data-testid="line-product"]');
-        await expect(product, 'the line editor must offer a product picker').toBeVisible({ timeout: 20_000 });
-        const labels = (await product.locator('option').allTextContents())
-            .map((o) => o.trim())
-            .filter((o) => o && !o.startsWith('—'));
-        if (labels.length === 0) {
+        /**
+         * The product box is a type-ahead showing a capped page of rows (golive#360), so each priceable
+         * name is TYPED and kept only when the box offers it — a priced product can still be inactive
+         * or out of window. Stops once there are enough to give each line its own product.
+         */
+        const usable: string[] = [];
+        for (const name of priceable) {
+            if ((await OfferedLineProducts(editor, name)).includes(name)) usable.push(name);
+            if (usable.length > i) break;
+        }
+        if (usable.length === 0) {
             throw new Error(
-                'the product picker offered nothing — the orders catalogue did not load, and adding a ' +
-                    'line with no product would make this spec pass while testing nothing',
+                'the product box offered none of the products that carry a price rule, so every line would '
+                    + 'be refused for pricing rather than for anything this spec is about, or the orders '
+                    + `catalogue did not load. Priceable products here: ${priceable.join(', ') || '(none)'}`,
             );
         }
-        await product.selectOption({ label: labels[Math.min(i, labels.length - 1)] });
+        await ChooseLineProduct(editor, usable[Math.min(i, usable.length - 1)]);
 
         /**
          * Quantity is the rep's to state and is not seeded, so a line without it cannot save — Save
@@ -204,6 +258,8 @@ export async function AddLines(page: Page, orderID: string, count: number): Prom
 async function openClosePanel(page: Page): Promise<void> {
     await OpenSection(page, 'close');
     const open = ByTestId(page, 'close-open');
+    // The close panel is its own form section; the rail may be showing a different one.
+    await RevealInForm(page, open);
     await expect(open, 'an open, saved deal must offer Close this deal').toBeVisible({ timeout: 30_000 });
     await open.click();
     await expect(ByTestId(page, 'close-panel'), 'the close panel must open').toBeVisible({ timeout: 20_000 });
@@ -221,8 +277,15 @@ async function closingStatus(flag: 'IsWon' | 'IsLost'): Promise<string> {
 
 /** Checks the close-target radio for a status ID, matched case-insensitively. */
 async function chooseTarget(page: Page, statusID: string): Promise<void> {
+    /**
+     * Read from the ATTRIBUTE, not the property. `[value]` on a radio with `ngModel` binds to
+     * Angular's value accessor rather than to the DOM, so `input.value` reads "on" for every option
+     * and the id is nowhere in the property. `data-status-id` carries it.
+     */
     const radios = ByTestId(page, 'close-panel').locator('[data-testid="close-target"]');
-    const values = await radios.evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+    const values = await radios.evaluateAll((els) =>
+        els.map((e) => e.getAttribute('data-status-id') ?? (e as HTMLInputElement).value),
+    );
     const index = values.findIndex((v) => v.toLowerCase() === statusID.toLowerCase());
     if (index < 0) {
         throw new Error(`the close panel offers no target for status ${statusID}. It offers: ${values.join(', ') || '(none)'}`);
@@ -430,14 +493,29 @@ export async function PurgeDeal(dealID: string, orderID: string | null): Promise
     }
 }
 
-/** The demo baseline this host must be at when the suite finishes. */
+/**
+ * The demo baseline: the SEEDED deals, untouched.
+ *
+ * SCOPED TO THE SEED, not to every row on the host. Counting everything made this assertion mean
+ * "no other test is running", which was accidentally true while the suite ran one spec at a time and
+ * is false at four workers -- it failed twice in one parallel run, reporting another spec's
+ * in-flight deal as a corrupted seed. The rows this harness creates all carry a loud run prefix
+ * (`PW-LIFE-<base36>`, `BD-...`), so they are excluded here, the same prefixes cleanup.mjs sweeps.
+ *
+ * It is also STRONGER this way when run serially: a leftover prefixed deal could previously offset a
+ * missing seeded one and let a broken baseline pass the count.
+ */
+const HARNESS_PREFIXES = ['PW-', 'TS-', 'BD-', 'AT-', 'CL-', 'RT-'];
+
 export async function AssertBaseline(): Promise<void> {
+    const notHarness = HARNESS_PREFIXES.map((p) => `d.Name NOT LIKE '${p}%'`).join(' AND ');
     const b = await QueryOne<{ Deals: number; OpenAmount: number; Priced: number }>(`
         SELECT COUNT(*) AS Deals,
                SUM(CASE WHEN t.IsOpen = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END) AS OpenAmount,
                SUM(CASE WHEN d.AmountIsComputed = 1 THEN 1 ELSE 0 END)         AS Priced
           FROM __mj_BizAppsSales.Deal d
-          JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID`);
+          JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID
+         WHERE ${notHarness}`);
     expect(Number(b?.Deals), 'the host must be back to its seven seeded deals').toBe(7);
     expect(Number(b?.OpenAmount), 'and to an open pipeline of 251,220').toBe(251220);
     expect(Number(b?.Priced), 'and five of seven priced').toBe(5);

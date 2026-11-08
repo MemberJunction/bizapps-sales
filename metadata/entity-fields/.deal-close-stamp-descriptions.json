@@ -1,0 +1,50 @@
+[
+  {
+    "_comments": [
+      "#252: reviewers asked why Actual Close Date and Closed At both exist, and a rep looking for an",
+      "expected close date typed one into Actual Close Date on an open deal. The columns had no",
+      "description, so nothing on screen said which date is which or who writes it.",
+      "",
+      "Closed At is the instant the close ran; Actual Close Date is the business day it closed on, in the",
+      "deal company's time zone. Sales.CloseDeal writes both, Sales.ReopenDeal clears both, and",
+      "DealEntityServer refuses any other write.",
+      "",
+      "AutoUpdateDescription goes to 0 because the columns carry no extended property: CodeGen's schema",
+      "sync rewrites Description from the column when the flag is on, and would put NULL back."
+    ],
+    "fields": {
+      "Description": "The moment the deal was closed. Set by closing the deal and cleared by reopening it; it cannot be edited. For when an open deal is expected to close, use Expected Close Date.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ClosedAt"
+    }
+  },
+  {
+    "fields": {
+      "Description": "The business day the deal closed on, in its company's time zone. Set by closing the deal and cleared by reopening it; it cannot be edited. For when an open deal is expected to close, use Expected Close Date.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ActualCloseDate"
+    }
+  },
+  {
+    "fields": {
+      "Description": "The user who closed the deal. Set by closing the deal and cleared by reopening it; it cannot be edited.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ClosedByUserID"
+    }
+  },
+  {
+    "fields": {
+      "Description": "The day the deal is expected to close. Update it as the date moves; the actual close date is set when the deal is closed.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ExpectedCloseDate"
+    }
+  }
+]

@@ -43,12 +43,13 @@
  *    WHERE ActivityID IN (SELECT ID FROM __mj_BizAppsCommon.Activity WHERE Title LIKE 'AT-%');
  *   DELETE FROM __mj_BizAppsCommon.Activity WHERE Title LIKE 'AT-%';
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test } from '../lib/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { EXPLORER_BASE_URL } from '../lib/env';
 import { captureConsoleErrors, drain, shot } from '../lib/explorer';
 import { CloseDb, QueryAll, QueryOne } from '../lib/db';
-import { DealForm, OpenSection } from '../lib/deal-form';
+import { DealForm, OpenSection, RevealInForm } from '../lib/deal-form';
 
 const RUN_TAG = `AT-${Date.now().toString(36).toUpperCase()}`;
 
@@ -147,6 +148,9 @@ async function openDealByID(page: Page, deal: Subject): Promise<void> {
     });
     await expect(DealForm(page), `the deal "${deal.Name}" must open as a record form`).toBeVisible({ timeout: 60_000 });
     await OpenSection(page, 'activity');
+    // OpenSection resolves the panel; it does not move MJ's chrome rail, which shows one section
+    // at a time. RevealInForm is the walk that does, and a no-op when the panel is already up.
+    await RevealInForm(page, timeline(page));
     // The timeline renders only for a SAVED deal — it needs an ID to link an activity to.
     await expect(timeline(page), 'the Activity panel must render the timeline').toBeVisible({ timeout: 20_000 });
 }

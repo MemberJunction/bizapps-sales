@@ -19,6 +19,10 @@
  *   - `DealNumber` — a gap-free counter taken from a locked row, inside the save's transaction.
  *   - The OWNER STAMP — `Deal.OwnerEmployeeID` derived from the `DealTeamMember` carrying the owner
  *     role, resolved from `DealRole.IsOwnerRole` rather than from any role name.
+ *   - The STAGE-EVENT APPEND (D-BD2). A stage move, or a close or reopen declared through
+ *     {@link DealEntityServer.DeclareTransition}, appends one `DealStageEvent` stamping
+ *     `AmountAtTransition` and `ProbabilityAtTransition`, inside the save's transaction — see
+ *     {@link DealEntityServer.saveWithinScope}.
  *
  * WHAT THIS FILE MUST NEVER DO. Arithmetic on money. No summing lines into `Amount`, no applying
  * `RequestedDiscountPct`, no checking that the payment schedule adds up. `Amount` is a cached answer
@@ -34,13 +38,6 @@
  *     (except Description / NextStep), its lines, its instalments and its team are immutable, and
  *     reopening goes through `Sales.ReopenDeal`, which records a reason.
  *
- * ── STILL TO COME (deliberately not stubbed) ────────────────────────────────────────────────────
- *   - `DealStageEvent` append on ORDINARY stage transition, stamping `AmountAtTransition` and
- *     `ProbabilityAtTransition`. `Sales.CloseDeal` already stamps the CLOSE transition; consolidating
- *     the two into a single writer here is D-BD2. It must be inside the graph's transaction, which
- *     since MJ `47ff71d68b` means a scope opened around `super.Save()` rather than a graph-node
- *     branch — see the note on {@link DealEntityServer.Save}.
- *
  * @module @mj-biz-apps/sales-core-entities-server
  */
 import {
@@ -54,12 +51,21 @@ import {
 } from '@memberjunction/core';
 import { createHash } from 'node:crypto';
 
-import { RegisterClass } from '@memberjunction/global';
+import { RegisterClass, UUIDsEqual } from '@memberjunction/global';
+import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 // ORDERS' OWN RULE, imported rather than restated. `CanTransition` is the same function
 // `OrderEntityServer.passesStatusTransition()` consults, so a refusal here and a refusal there cannot
 // disagree — and the reason string the warning carries is orders' wording, not this app's guess at it.
-import { CanTransition, IsBooked, IsEditable, type OrderStatus } from '@mj-biz-apps/orders-entities';
 import {
+    CanTransition,
+    IsBooked,
+    IsEditable,
+    type mjBizAppsOrdersOrderHeaderEntity,
+    type OrderStatus,
+} from '@mj-biz-apps/orders-entities';
+import {
+    AlreadyWonRefusal,
+    DealCloseStampFields,
     DealFieldsEditableWhileLocked,
     DealFieldLabel,
     DealEntity,
@@ -68,6 +74,9 @@ import {
 } from '@mj-biz-apps/sales-entities';
 
 import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
+import { FindUnansweredSubscriptionLines } from './subscription-choice.js';
+import { KeptOnDealNote, SendDealScheduleToOrder, StatusIsWon } from './deal-schedule-to-order.js';
+import { OrdersIsInstalled } from './orders-availability.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 
@@ -114,8 +123,25 @@ type StatusTransitionPlan =
     | ActionableStatusTransition
     | UnreadableStatusTransition
     | PriorMissingStatusTransition;
-const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
+const PIPELINE_COMPANY_ENTITY = 'MJ_BizApps_Sales: Pipeline Companies';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
+const SALES_ACCOUNT_ENTITY = 'MJ_BizApps_Sales: Sales Accounts';
+const SALES_CONTACT_ENTITY = 'MJ_BizApps_Sales: Sales Contacts';
+const ORGANIZATION_ENTITY = 'MJ_BizApps_Common: Organizations';
+const PERSON_ENTITY = 'MJ_BizApps_Common: People';
+const GUID_SHAPE = /^[0-9a-fA-F-]{36}$/;
+
+/** A party this save writes onto the deal, checked for existence before anything is written. */
+interface PartyCheck {
+    EntityName: string;
+    /** The Common entity the sales row extends (IsA): its ID is the party's ID. */
+    ParentEntityName: string;
+    ID: string;
+    Label: 'customer' | 'primary contact';
+}
+
+/** Why a supplied party was refused: the sales row is missing but its parent exists, or neither does. */
+type MissingParty = PartyCheck & { NotSetUp: boolean };
 
 /**
  * Accounting's two currency entities — READ, never written, and never assumed present.
@@ -147,12 +173,9 @@ interface CurrencyIDRow {
     ID: string;
 }
 
-/**
- * The one column the pipeline lookup selects. `CompanyID` is NOT NULL on `Pipeline`, so a successful read
- * always carries one.
- */
-interface PipelineCompanyRow {
-    CompanyID: string;
+/** The one column the pipeline-company link lookup selects; only whether a row exists matters. */
+interface PipelineCompanyLinkRow {
+    ID: string;
 }
 
 const STAGE_ENTITY = 'MJ_BizApps_Sales: Pipeline Stages';
@@ -163,9 +186,23 @@ interface OrderTotalRow {
     TotalGross: number | null;
 }
 
-/** The one column the stage lookup selects for the order rule. */
+/** What the stage lookup selects for the order rule: the status it names, and the stage's own status. */
 interface StageOrderStatusRow {
     OrderStatusOnEntry: string | null;
+    DealStatusTypeID: string | null;
+}
+
+/**
+ * What the stage lookup selects to check the stage against the deal's pipeline.
+ *
+ * `Pipeline` is the stage view's virtual name column, taken in the same read as the id so the refusal
+ * can say which pipeline the stage actually belongs to. Naming it costs nothing here and saves the
+ * reader a lookup they would otherwise have to do by hand.
+ */
+interface StagePipelineRow {
+    Name: string | null;
+    PipelineID: string | null;
+    Pipeline: string | null;
 }
 
 /**
@@ -192,9 +229,60 @@ interface StageDefaultsPlan {
     DealStatusTypeID: string | null;
 }
 
+/** One row's dirty-tracking baseline, captured before `super.Save()`. See `captureSavedState`. */
+interface SavedStateSnapshot {
+    Row: BaseEntity;
+    OldValues: { Name: string; OldValue: unknown }[];
+}
+
 interface StageOrderPlan {
     StageID: string;
     Target: OrderStatus;
+}
+
+/**
+ * What this save's party edits ask of an existing order's bill-to (#319) — resolved before the
+ * transaction from the deal's persisted values, applied inside it.
+ *
+ * `Previous` is what the deal billed before this save: the order is only moved when it still bills
+ * that, so a bill-to finance set by hand is left alone. A side whose value did not change is `null`
+ * and is never written.
+ */
+interface OrderBillToPlan {
+    Person: { Previous: string | null; Next: string | null } | null;
+    Organization: { Previous: string | null; Next: string | null } | null;
+}
+
+/**
+ * Orders' `KeepPartyOrganization`, which only newer orders-entities builds carry. Those builds clear an
+ * unchanged bill-to organization when the person is replaced and it is the previous person's employer;
+ * older ones never clear it, so the call is made when the method exists and skipped when it does not.
+ */
+type PartyOrganizationKeeper = {
+    KeepPartyOrganization?: (field: 'BillToOrganizationID' | 'ShipToOrganizationID') => void;
+};
+
+/**
+ * Keeps the order's bill-to organization through a replacement of its person. Without it, newer orders
+ * builds clear an organization that is the previous person's employer — usually the deal's account —
+ * and stamp the new person's employer in its place.
+ */
+function keepBillToOrganization(order: mjBizAppsOrdersOrderHeaderEntity): void {
+    const keeper = order as mjBizAppsOrdersOrderHeaderEntity & PartyOrganizationKeeper;
+    if (typeof keeper.KeepPartyOrganization === 'function') {
+        keeper.KeepPartyOrganization('BillToOrganizationID');
+    }
+}
+
+/** Names the parties a bill-to warning is about, in the deal's own terms. */
+function describeBillToSides(
+    person: OrderBillToPlan['Person'],
+    organization: OrderBillToPlan['Organization'],
+): string {
+    if (person && organization) {
+        return 'bill-to contact and account';
+    }
+    return person ? 'bill-to contact' : 'account';
 }
 
 /**
@@ -306,6 +394,19 @@ export class DealEntityServer extends DealEntity {
         try {
             return await this.saveDeclared(options);
         } finally {
+            /**
+             * A SAVE THAT DID NOT COMMIT GIVES THE CALLER THEIR STATUS BACK, on every exit.
+             *
+             * The status was reverted so the close lock and `super.Save()` would not write it. When the
+             * save then fails (`super.Save()` returning false, or a throw rolled back in
+             * `saveWithinScope`), nothing was written, and a clean status would make the retry skip the
+             * close and report success. Here rather than at each `return false`, like the clears below.
+             * A transition that fails AFTER the commit keeps today's behaviour: the row moved, so the
+             * object is resynced to it rather than re-dirtied.
+             */
+            if (!this._committed && this._revertedStatusTarget) {
+                this.Set('DealStatusTypeID', this._revertedStatusTarget);
+            }
             this._declaredTransition = null;
             this._revertedStatusTarget = null;
         }
@@ -315,9 +416,11 @@ export class DealEntityServer extends DealEntity {
         // Per-save, so a caller reading them after `Save()` sees this save's warnings and not the last
         // one's. Cleared before the close lock can return early — an abandoned save has no warnings.
         this._orderStatusWarnings.length = 0;
+        this._ownerStampWarnings.length = 0;
         this._orderJustProvisioned = false;
         this._lockedAtSave = false;
         this._lastStageEventID = null;
+        this._committed = false;
 
         /**
          * THE STATUS FIELD DRIVES THE CLOSE AND THE REOPEN (bc-aidp-next-golive#205).
@@ -409,6 +512,19 @@ export class DealEntityServer extends DealEntity {
         }
 
         /**
+         * THE CLOSE STAMPS ARE WRITTEN BY THE CLOSE AND THE REOPEN, AND BY NOTHING ELSE (#252).
+         *
+         * Refused on an OPEN deal too, which the lock below cannot do: it only looks at deals that are
+         * already closed. Runs before it so a refused save costs nothing, and so the message names the
+         * stamp rather than the lock.
+         */
+        const stampRefusal = this.closeStampEditRefusal();
+        if (stampRefusal) {
+            const wonRefusal = await this.staleWonSaveRefusal();
+            return this.refuseSave(wonRefusal ?? stampRefusal);
+        }
+
+        /**
          * THE CLOSE LOCK (L-17, master plan §7.3) — enforced HERE and nowhere else.
          *
          * Once a deal enters a status where `DealStatusType.LocksDeal = 1` it is the provenance of a
@@ -423,7 +539,7 @@ export class DealEntityServer extends DealEntity {
          * Runs BEFORE any transaction opens: a refused save should cost nothing.
          */
         if (this.IsSaved && !this._reopenInProgress) {
-            const refusal = await this.checkCloseLock();
+            const refusal = await this.checkCloseLock(transition?.Kind === 'Reopen');
             if (refusal) {
                 return this.refuseSave(refusal);
             }
@@ -436,26 +552,78 @@ export class DealEntityServer extends DealEntity {
          * field, and a rule that only the UI enforces is not a rule. Runs before the stamps below so a
          * refused save costs nothing.
          */
-        const ownerRefusal = this.ownerStampEditRefusal();
-        if (ownerRefusal) {
-            return this.refuseSave(ownerRefusal);
+        await this.overrideSuppliedOwnerStamp();
+
+        /**
+         * Before the stamps, for the reason the owner refusal is: a refused save should cost nothing.
+         * This one reads, so it is not free -- but one lookup is still cheaper than a transaction that
+         * is going to be rolled back, and cheaper than the wrong forecast numbers it prevents.
+         */
+        /**
+         * FAIL CLOSED, AND SAY WHICH FAILURE IT WAS.
+         *
+         * The check reads, so it can fail for reasons that have nothing to do with the deal — a
+         * dropped connection, a provider error. This REFUSES the save when that happens, rather than
+         * letting it through on the grounds that nothing was proven wrong.
+         *
+         * That is the right way round here because the thing being guarded is not cosmetic: a deal
+         * saved with a stage from another pipeline has `applyStageDefaults` take that stage's
+         * Probability, ForecastCategoryTypeID and DealStatusTypeID, so the forecast numbers come from
+         * a pipeline the deal does not belong to. A save refused in error is retried; a forecast
+         * quietly rewritten from the wrong pipeline is found a quarter later, if at all.
+         *
+         * The cost is bounded by the same early return the check uses: it only runs when the save
+         * MOVES the stage or the pipeline, so an ordinary edit to a closed or legacy deal cannot be
+         * refused by a lookup that failed. And the message names the lookup rather than the deal, so
+         * a transient failure reads as a transient failure instead of as "your stage is wrong".
+         */
+        let stageRefusal: string | null;
+        try {
+            stageRefusal = await this.stageBelongsToPipelineRefusal();
+        } catch (err) {
+            return this.refuseSave(`could not check the stage against the pipeline: ${err}`);
+        }
+        if (stageRefusal) {
+            return this.refuseSave(stageRefusal);
+        }
+
+        /**
+         * A CUSTOMER OR CONTACT THAT NO LONGER EXISTS IS REFUSED BY NAME, BEFORE THE ORDER IS BUILT.
+         *
+         * The embedded order is saved first in the graph and takes its bill-to from this deal, so a
+         * missing customer otherwise fails on the ORDER's foreign key, with a SQL error naming
+         * `FK_OrderHeader_BillToOrganization` rather than the stale selection that caused it.
+         */
+        const partyRefusal = await this.missingPartyRefusal();
+        if (partyRefusal) {
+            return this.refuseSave(partyRefusal);
+        }
+
+        let companyRefusal: string | null;
+        try {
+            companyRefusal = await this.companyLinkedToPipelineRefusal();
+        } catch (err) {
+            return this.refuseSave(`could not check the company against the pipeline: ${err}`);
+        }
+        if (companyRefusal) {
+            return this.refuseSave(companyRefusal);
         }
 
         try {
-            await this.stampCompanyFromPipeline();
             await this.stampOwnerFromTeam();
         } catch (err) {
             return this.refuseSave(`could not resolve a server-maintained stamp: ${err}`);
         }
 
         /**
-         * AFTER the company stamp, because the company is what decides the currency, and OUTSIDE the
+         * AFTER the company check, because the company is what decides the currency, and OUTSIDE the
          * try above, because this one may not refuse a save. See {@link defaultCurrencyOnCreate}.
          */
         await this.defaultCurrencyOnCreate();
+        this.defaultCreationDateOnCreate();
 
         /**
-         * AFTER the company stamp, deliberately — and NOT AT ALL on a locked deal.
+         * AFTER the company check, deliberately — and NOT AT ALL on a locked deal.
          *
          * The lock check above has already run, so `_lockedAtSave` is trustworthy here. A locked deal
          * that reaches this point is one making a PERMITTED edit (Description, NextStep), and permitted
@@ -467,8 +635,16 @@ export class DealEntityServer extends DealEntity {
          * it one the moment it is legitimately reopened and saved, which is the path that is allowed to
          * change it.
          */
-        if (!this._lockedAtSave) {
+        if (!this._lockedAtSave && !(await this.isBornClosedWithoutOrder())) {
             this.provisionEmbeddedOrder();
+        }
+
+        /**
+         * After provisioning, for the same reason as the currency default: it reads the order the deal
+         * now has, and it may not refuse a save.
+         */
+        if (!this._lockedAtSave) {
+            await this.moveDraftOrderDateToToday();
         }
 
         /**
@@ -483,6 +659,15 @@ export class DealEntityServer extends DealEntity {
          * one lookup, and work that might not be needed should not lengthen a critical section.
          */
         const stageOrder = this._lockedAtSave ? null : await this.planStageOrderStatus();
+
+        /**
+         * AND WHAT A CHANGED CONTACT OR ACCOUNT ASKS OF THE ORDER'S BILL-TO (#319).
+         *
+         * Provisioning stamps the bill-to once, so without this a deal whose billing contact changed
+         * after its order existed kept billing the old person. Not on a locked deal: a closed deal's
+         * order is the record of what was sold, and the close lock already refuses these fields there.
+         */
+        const orderBillTo = this.planOrderBillTo();
 
         /**
          * AND WHAT IT OWES THE APPEND-ONLY LOG — snapshotted here, for the same reason.
@@ -551,9 +736,18 @@ export class DealEntityServer extends DealEntity {
          * tests, which genuinely require the object, stay behind it — and the state tests, which only
          * need the deal's own columns, ask the FK instead.
          */
-        const amountMayHaveMoved =
+        /**
+         * ── AND NEVER ON A LOCKED DEAL (#351) ───────────────────────────────────────────────────────
+         *
+         * `refreshAmountFromOrder` writes `Amount` with raw SQL, past the entity and so past the close
+         * lock. A closed deal's amount is what was agreed at close, so a permitted edit (Description,
+         * NextStep) must not re-copy an order total that moved since. Gated on `_lockedAtSave` like the
+         * stage writers below; the close and the reopen both save while the persisted status is open,
+         * so they still refresh.
+         */
+        const amountMayHaveMoved = !this._lockedAtSave && (
             (!!order && (order.Dirty || order.Lines.Dirty))
-            || (!!this.OrderID && (this.AmountIsComputed === true || this.Amount === null));
+            || (!!this.OrderID && (this.AmountIsComputed === true || this.Amount === null)));
 
         // The stage's forecast defaults, on the same trigger as the three above. Read here, applied
         // inside the scope, for the same reason the others are: work that might not be needed should not
@@ -596,18 +790,30 @@ export class DealEntityServer extends DealEntity {
          */
         const needsStatusDefault = !this.IsSaved && !this.DealStatusTypeID;
 
+        /**
+         * A WON DEAL'S SCHEDULE EDIT REACHES ITS ORDER (bc-aidp-next-golive#290). Read here, sent inside
+         * the scope after the companion rows are written. A read that fails refuses the save: letting the
+         * edit through would leave the order on a schedule the deal no longer shows.
+         */
+        let scheduleOrderID: string | null;
+        try {
+            scheduleOrderID = await this.planScheduleSync(transition !== null);
+        } catch (err) {
+            return this.refuseSave(`could not check the payment schedule against the order: ${err instanceof Error ? err.message : String(err)}`);
+        }
+
         // Staged BEFORE the save so the roster row travels in the same transaction, and so
         // `stampOwnerFromTeam()` derives the stamp from it rather than being told the answer.
         await this.seedOwnerOnCreate();
 
         const saved = this.IsSaved || this.DealNumber
             ? await this.saveWithinScope(options, {
-                  stageOrder, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: false,
-                  needsStatusDefault,
+                  stageOrder, orderBillTo, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: false,
+                  needsStatusDefault, scheduleOrderID,
               })
             : await this.saveWithinScope(options, {
-                  stageOrder, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: true,
-                  needsStatusDefault,
+                  stageOrder, orderBillTo, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: true,
+                  needsStatusDefault, scheduleOrderID,
               });
 
         // The declaration is cleared by the `finally` in `Save()` above, which covers this exit and the
@@ -824,10 +1030,10 @@ export class DealEntityServer extends DealEntity {
         /**
          * A DEAL BEING CREATED OWES NO EVENT, and `OldValue === null` is not a reliable way to ask.
          *
-         * `NewDeal()` preselects a pipeline and its first stage; the rep then picks the stage they
-         * actually want. That is TWO assignments before the first save, so the first becomes `OldValue`
-         * and the guard below saw a "transition" from a stage the deal was never in — and wrote it into
-         * an append-only log, where it cannot be corrected afterwards.
+         * The deal workspace's `NewDeal()` preselected a pipeline and its first stage; the rep then
+         * picked the stage they actually wanted. That is TWO assignments before the first save, so the
+         * first becomes `OldValue` and the guard below saw a "transition" from a stage the deal was never
+         * in — and wrote it into an append-only log, where it cannot be corrected afterwards.
          *
          * `IsSaved` is the question that holds however many times the field was touched. `DealStageEvent`
          * is a log of MOVEMENT, and nothing has moved until there is a row to move from.
@@ -905,24 +1111,30 @@ export class DealEntityServer extends DealEntity {
         options: EntitySaveOptions | undefined,
         work: {
             stageOrder: StageOrderPlan | null;
+            orderBillTo: OrderBillToPlan | null;
             stageMove: StageMoveSnapshot | null;
             stageDefaults: StageDefaultsPlan | null;
             amountMayHaveMoved: boolean;
             assignNumber: boolean;
             needsStatusDefault: boolean;
+            /** The won deal's order its schedule is sent to after the save, or null. */
+            scheduleOrderID: string | null;
         },
     ): Promise<boolean> {
         if (
             !work.assignNumber &&
             !work.stageOrder &&
+            !work.orderBillTo &&
             !work.stageMove &&
             !work.stageDefaults &&
             !work.amountMayHaveMoved &&
             // Without this term a create that supplied its own DealNumber and touched no stage would take
             // the fast path and land NULL again -- the exact gap this closes, through the one door left open.
-            !work.needsStatusDefault
+            !work.needsStatusDefault &&
+            !work.scheduleOrderID
         ) {
-            return super.Save(options);
+            this._committed = await super.Save(options);
+            return this._committed;
         }
 
         const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
@@ -935,6 +1147,7 @@ export class DealEntityServer extends DealEntity {
         }
 
         const scope = await provider.BeginEntityTransaction();
+        let snapshot: SavedStateSnapshot[] = [];
         try {
             if (work.assignNumber) {
                 this.DealNumber = await getNextDealNumber(
@@ -963,20 +1176,13 @@ export class DealEntityServer extends DealEntity {
             if (work.needsStatusDefault && !this.DealStatusTypeID) {
                 this.DealStatusTypeID = await this.defaultOpeningStatusID();
             }
-            /**
-             * The delta, not the total: a refusal RECORDED BY THIS SAVE is what tells the recovery to
-             * stand down. Comparing against zero would also catch a warning left by an earlier save on
-             * the same entity instance.
-             */
-            const warningsBeforePlan = this.OrderStatusWarnings.length;
-            if (work.stageOrder) {
-                await this.applyStageOrderStatus(work.stageOrder);
-            }
-            await this.recoverOrderOnReopen(this.OrderStatusWarnings.length > warningsBeforePlan);
+            await this.applyOrderWork(work.orderBillTo, work.stageOrder);
 
+            snapshot = this.captureSavedState();
             const saved = await super.Save(options);
             if (!saved) {
                 await scope.Rollback();
+                this.restoreSavedState(snapshot);
                 /**
                  * ── THE NUMBER GOES BACK TOO, OR THE DEAL BECOMES UNSAVEABLE ────────────────────────
                  *
@@ -1003,12 +1209,32 @@ export class DealEntityServer extends DealEntity {
                 await this.appendStageEvent(work.stageMove);
             }
 
+            // AFTER the save, which is what wrote the schedule rows the copy reads.
+            if (work.scheduleOrderID) {
+                const outcome = await SendDealScheduleToOrder(
+                    this.ID,
+                    work.scheduleOrderID,
+                    this.ProviderToUse as unknown as IMetadataProvider,
+                    this.ContextCurrentUser,
+                );
+                if (outcome.Kind === 'Hard') {
+                    await scope.Rollback();
+                    return this.reportPostSaveFailure(
+                        `This deal was not saved, because it is won and its order refused the new payment schedule: ${outcome.Message}`,
+                    );
+                }
+                if (outcome.Kind === 'Soft') {
+                    this._orderStatusWarnings.push(KeptOnDealNote(outcome.Message));
+                }
+            }
+
             // LAST, because it reads a total the trigger only produced a moment ago. See the method.
             if (work.amountMayHaveMoved || work.assignNumber) {
                 await this.refreshAmountFromOrder();
             }
 
             await scope.Commit();
+            this._committed = true;
             return true;
         } catch (err) {
             LogError(`DealEntityServer.saveWithinScope failed for deal ${this.ID}: ${err}`);
@@ -1019,6 +1245,9 @@ export class DealEntityServer extends DealEntity {
                 rolledBack = false;
                 LogError(`Failed to roll back after a failed deal save: ${rollbackErr}`);
             }
+            // `super.Save()` may have marked the deal, its order and their rows clean before the step
+            // that threw. The database rolled back; this puts the dirty state back so a retry writes them.
+            this.restoreSavedState(snapshot);
             /**
              * ── THE SAME COMPENSATION AS THE `!saved` BRANCH, AND FOR THE SAME REASON ──────────────
              *
@@ -1059,6 +1288,39 @@ export class DealEntityServer extends DealEntity {
                     : `This deal could not be saved AND the rollback failed, so the row may be ` +
                       `partly written. Check it before retrying: ${err}`,
             );
+        }
+    }
+
+    /**
+     * The dirty-tracking baseline of every row this save may write that is ALREADY on disk: the deal,
+     * its team and payment schedule, its order and the order's lines.
+     *
+     * `super.Save()` leaves each of them clean. When a later step in the same transaction throws, the
+     * database rolls back but the objects stay clean, so a retry saves nothing and reports success.
+     * Restoring the captured `OldValue`s (`EntityField.RestoreOldValue`, the call MJ's own graph rollback
+     * uses) makes the retry see the same changes again.
+     *
+     * Rows that were NEW before this save are left out: MJ 6.1.5 has no public way to mark a record
+     * unsaved again, so a create rolled back here still reads as saved.
+     */
+    private captureSavedState(): SavedStateSnapshot[] {
+        const order = this.OrderID_Object;
+        const rows: BaseEntity[] = [
+            this,
+            ...(this.Team?.Items ?? []),
+            ...(this.PaymentSchedule?.Items ?? []),
+            ...(order ? [order, ...(order.Lines?.Items ?? [])] : []),
+        ];
+        return rows
+            .filter((row) => row.IsSaved)
+            .map((row) => ({ Row: row, OldValues: row.Fields.map((f) => ({ Name: f.Name, OldValue: f.OldValue })) }));
+    }
+
+    private restoreSavedState(snapshot: SavedStateSnapshot[]): void {
+        for (const { Row, OldValues } of snapshot) {
+            for (const { Name, OldValue } of OldValues) {
+                Row.GetFieldByName(Name)?.RestoreOldValue(OldValue);
+            }
         }
     }
 
@@ -1135,11 +1397,11 @@ export class DealEntityServer extends DealEntity {
      *
      * ── WHY FIRST SAVE AND NOT NewRecord() ──
      *
-     * `OrderHeader.CompanyID` is NOT NULL, and a deal does not know its company until
-     * `stampCompanyFromPipeline()` has run: the caller supplies a PipelineID and the selling company is
-     * derived from it (D-4). Provisioning in `NewRecord()` would mean inventing a company or building an
-     * order that cannot be inserted. So it happens here, after the stamps, on the one call where
-     * `IsSaved` is still false.
+     * `OrderHeader.CompanyID` is NOT NULL, and a deal's company is only known to be valid once
+     * `companyLinkedToPipelineRefusal()` has passed it: the rep picks the selling company and it must be
+     * linked to the pipeline. Provisioning in `NewRecord()` would mean inventing a company or building an
+     * order that cannot be inserted. So it happens here, after the checks and stamps, on the one call
+     * where `IsSaved` is still false.
      *
      * ── WHY THE GUARD IS `IsSaved`, AND NOT `IsSaved || OrderID` ──
      *
@@ -1164,7 +1426,11 @@ export class DealEntityServer extends DealEntity {
      * legal -- `OrderHeader` has no XOR across them, checked against `sys.check_constraints`. Do not
      * carry the contract's exactly-one rule across by analogy; it is that table's rule, not a house style.
      * `Deal.AccountID` is a `SalesAccount`, an IsA child of common's `Organization`, so its key IS an
-     * organization key; `PrimaryContactID` is a `SalesContact`, an IsA child of `Person`.
+     * organization key; both contact columns are `SalesContact`s, an IsA child of `Person`.
+     *
+     * The person billed is the Billing Contact, falling back to the Primary Contact when it is empty --
+     * empty means "bill the primary contact" (the column's own description). It read only the primary
+     * contact before #312, so a different billing contact never reached the order.
      */
     private provisionEmbeddedOrder(): void {
         /**
@@ -1198,7 +1464,34 @@ export class DealEntityServer extends DealEntity {
         order.CompanyID = this.CompanyID;
         order.OrderType = 'Sale';
         order.BillToOrganizationID = this.AccountID ?? null;
-        order.BillToPersonID = this.PrimaryContactID ?? null;
+        order.BillToPersonID = this.BillingContactID || this.PrimaryContactID || null;
+    }
+
+    /**
+     * Whether this save CREATES a deal already in a locking status, with no order supplied (#152).
+     *
+     * The close lock keys on the PERSISTED status, so a create has none and passes as unlocked. A deal
+     * born Won or Lost — an integration sync bringing in deal history does exactly this — would then get
+     * an empty Draft order beside a closed deal, consuming an order number and never moving. That is
+     * the same outcome the lock already prevents for a saved closed deal, reached through the one save
+     * the lock cannot see.
+     *
+     * So the INCOMING status is asked here, and only on a create: on an update the persisted status is
+     * the lock's question, and the transition into a locking status is handled by the close flow.
+     *
+     * AN ORDER THE CALLER ALREADY BUILT IS STILL PROVISIONED. `OrderID_Object` is non-null only when
+     * something reached for the order before saving — lines added for this one save. That caller asked
+     * for an order, and skipping the stamps would fail the insert on `CompanyID`.
+     *
+     * An unreadable status reports `LocksDeal: true` and so skips the order. On a create that costs
+     * nothing: a deal that turns out to be open gets its order on its next save.
+     */
+    private async isBornClosedWithoutOrder(): Promise<boolean> {
+        if (this.IsSaved || !this.DealStatusTypeID || this.OrderID_Object) {
+            return false;
+        }
+        const flags = await this.readStatusLockFlags(this.DealStatusTypeID);
+        return flags.LocksDeal;
     }
 
     /**
@@ -1233,6 +1526,28 @@ export class DealEntityServer extends DealEntity {
         );
     }
 
+    /* ── The won deal's schedule → its order (bc-aidp-next-golive#290) ───────── */
+
+    /**
+     * The order a won deal's schedule edit must reach, or null when this save owes it nothing.
+     *
+     * Only a save that changes the `PaymentSchedule` collection on a deal that is ALREADY Won, by the
+     * persisted status row's `IsWon` flag. The closing save is not one: `Sales.CloseDeal` copies the
+     * schedule itself, before the order hears about the stage. A save that also moves the status hands
+     * off to that flow (`transitionPlanned`), and a reopened deal's edits stay on the deal.
+     *
+     * Throws when the status cannot be read; the caller refuses the save.
+     */
+    private async planScheduleSync(transitionPlanned: boolean): Promise<string | null> {
+        if (!this.IsSaved || transitionPlanned || this._closeInProgress || this._reopenInProgress) return null;
+        if (!this.OrderID || !OrdersIsInstalled()) return null;
+        if (!this.Companions.some((c) => c.Name === 'PaymentSchedule' && c.Dirty)) return null;
+        const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
+        if (!persistedStatusID) return null;
+        const won = await StatusIsWon(persistedStatusID, this.ProviderToUse as unknown as IMetadataProvider, this.ContextCurrentUser);
+        return won ? String(this.OrderID) : null;
+    }
+
     /* ── The stage → order status writer (S-US5 / S-US7 / S-US8, D-OS1) ─────── */
 
     /**
@@ -1252,6 +1567,19 @@ export class DealEntityServer extends DealEntity {
 
     public get OrderStatusWarnings(): readonly string[] {
         return this._orderStatusWarnings;
+    }
+
+    /**
+     * Raised when a caller supplied `OwnerEmployeeID` and the roster overrode it.
+     *
+     * SEPARATE FROM THE ORDER-STATUS WARNINGS because they are about different things and the close
+     * operation renders them against different fields. Same shape and same lifetime: cleared per
+     * save, read after it.
+     */
+    private readonly _ownerStampWarnings: string[] = [];
+
+    public get OwnerStampWarnings(): readonly string[] {
+        return this._ownerStampWarnings;
     }
 
     /**
@@ -1300,7 +1628,7 @@ export class DealEntityServer extends DealEntity {
      */
     private async planStageDefaults(): Promise<StageDefaultsPlan | null> {
         const stageID = this.PipelineStageID;
-        if (!stageID) {
+        if (!stageID || !GUID_SHAPE.test(stageID)) {
             return null;
         }
         if (this.IsSaved) {
@@ -1364,7 +1692,7 @@ export class DealEntityServer extends DealEntity {
          */
         const stageStatusID = row.DealStatusTypeID ?? null;
         let derivableStatusID: string | null = null;
-        if (stageStatusID) {
+        if (stageStatusID && GUID_SHAPE.test(stageStatusID)) {
             const status = await view.RunView<{ LocksDeal: boolean }>(
                 {
                     EntityName: DEAL_STATUS_ENTITY,
@@ -1379,6 +1707,16 @@ export class DealEntityServer extends DealEntity {
             // other direction closes deals nobody asked to close.
             if (status.Success && flags && flags.LocksDeal !== true) {
                 derivableStatusID = stageStatusID;
+            } else if (!(await this.closesIntoLockingStage())) {
+                /**
+                 * ── AND AN OPEN DEAL TAKES NONE OF A CLOSING STAGE'S FIGURES ───────────────────────
+                 *
+                 * Withholding only the status still left the deal Open at the stage's 0% or 100% and in
+                 * its "Closed" forecast category, so the forecast counted it as decided. A closing
+                 * stage's probability and category describe a decided deal; they belong to the close,
+                 * which sets its own. The deal keeps the figures it had.
+                 */
+                return null;
             }
         }
 
@@ -1428,8 +1766,8 @@ export class DealEntityServer extends DealEntity {
      * places did not, and both were wrong in the same direction:
      *
      *   · `planStageEvent` inferred a birth from `OldValue === null`. But a new deal whose stage is set
-     *     TWICE before the first save — `NewDeal()` preselects a pipeline and its first stage, the rep
-     *     then picks a different one — has a non-null `OldValue` holding a stage the deal was NEVER IN.
+     *     TWICE before the first save — the deal workspace's `NewDeal()` preselected a pipeline and its
+     *     first stage, the rep then picked a different one — has a non-null `OldValue` holding a stage the deal was NEVER IN.
      *     It appended a transition event for it, into an append-only log. `BD1` asserts against exactly
      *     that and passes only because it assigns the stage once.
      *   · `ownerStampEditRefusal` asked `Dirty`, so an importer doing `NewRecord()` ->
@@ -1474,7 +1812,7 @@ export class DealEntityServer extends DealEntity {
         /**
          * ── THE STATUS COMES FROM THE STAGE, AND A DEAL WITH NO STATUS IS INVISIBLE ──────────────────
          *
-         * `DealWorkspaceService.NewDeal()` is `NewRecord()` and nothing else, and `DealStatusTypeID` is
+         * The deal workspace's `NewDeal()` was `NewRecord()` and nothing else, and `DealStatusTypeID` is
          * nullable with no column default. So a rep who never touched the Status select saved a deal that
          * every `IsOpen`/`IsWon` rollup skipped — and while the roster and summary queries still INNER
          * JOINed that FK, such a deal was invisible to every surface in the app. It was also what made
@@ -1570,10 +1908,16 @@ export class DealEntityServer extends DealEntity {
 
     private async planStageOrderStatus(): Promise<StageOrderPlan | null> {
         const stageID = this.PipelineStageID;
-        if (!stageID) {
+        if (!stageID || !GUID_SHAPE.test(stageID)) {
             return null;
         }
-        if (this.IsSaved && !this._orderJustProvisioned) {
+        /**
+         * A declared close asks even when the stage did not move. A deal already sitting in its closing
+         * stage no longer had that stage's order status applied on entry (see below), so the close is the
+         * one save left to apply it.
+         */
+        const closing = this._declaredTransition?.Kind === 'Close';
+        if (this.IsSaved && !this._orderJustProvisioned && !closing) {
             const previous = this.GetFieldByName('PipelineStageID')?.OldValue as string | null | undefined;
             if (previous && String(previous).toLowerCase() === String(stageID).toLowerCase()) {
                 return null;   // the stage did not move; the order is not this save's business
@@ -1598,7 +1942,7 @@ export class DealEntityServer extends DealEntity {
                 EntityName: STAGE_ENTITY,
                 ExtraFilter: `ID = '${stageID}'`,
                 ResultType: 'simple',
-                Fields: ['OrderStatusOnEntry'],
+                Fields: ['OrderStatusOnEntry', 'DealStatusTypeID'],
             },
             this.ContextCurrentUser,
         );
@@ -1612,11 +1956,43 @@ export class DealEntityServer extends DealEntity {
             return null;
         }
 
-        const target = (result.Results ?? [])[0]?.OrderStatusOnEntry;
+        const row = (result.Results ?? [])[0];
+        const target = row?.OrderStatusOnEntry;
         if (!target) {
             return null;   // this stage says nothing about the order. The common case.
         }
+
+        /**
+         * ── A CLOSING STAGE'S ORDER STATUS IS THE CLOSE'S TO APPLY ────────────────────────────────
+         *
+         * The losing stage names `Voided` and the winning one `Quoted`. Applied on a plain move, an
+         * open deal parked in the losing stage had its order voided while nothing closed it. Only a
+         * save that closes the deal into the stage applies it; an unreadable status counts as locking.
+         */
+        if (row.DealStatusTypeID) {
+            const flags = await this.readStatusLockFlags(row.DealStatusTypeID);
+            if (flags.LocksDeal && !(await this.closesIntoLockingStage())) {
+                return null;
+            }
+        }
         return { StageID: stageID, Target: target as OrderStatus };
+    }
+
+    /**
+     * Does this save close the deal into the stage it is entering? A declared close does, and so does a
+     * create whose own status locks (an importer bringing a deal that is already closed). Every other
+     * save that enters a stage whose status locks leaves the deal open, so it takes none of that stage's
+     * figures.
+     */
+    private async closesIntoLockingStage(): Promise<boolean> {
+        if (this._declaredTransition?.Kind === 'Close') {
+            return true;
+        }
+        if (this.IsSaved || !this.DealStatusTypeID) {
+            return false;
+        }
+        const flags = await this.readStatusLockFlags(this.DealStatusTypeID);
+        return flags.Read && flags.LocksDeal;
     }
 
 
@@ -1630,9 +2006,10 @@ export class DealEntityServer extends DealEntity {
      * declares, so a reopen that lands on the stage the deal is ALREADY in never consulted the
      * recovery at all.
      *
-     * That is not a hypothetical corner. `save-deal.SD35` makes it ordinary: a plain save or a board
-     * drag into the losing stage leaves the deal OPEN -- `planStageDefaults` refuses to derive a
-     * locking status -- while `applyStageOrderStatus` voids the order on entry. Closing Lost then
+     * That is not a hypothetical corner. A plain save or a board drag into the losing
+     * stage used to leave the deal OPEN -- `planStageDefaults` refuses to derive a locking status -- while
+     * `applyStageOrderStatus` voided the order on entry, and deals parked that way still exist. A plain
+     * move no longer voids the order (`planStageOrderStatus`), but closing Lost from there
      * derives that same stage, so nothing moves and the close event records
      * `FromStageID === ToStageID`. The reopen restores the stage the deal is already in, the gate
      * returns null, and the deal comes back OPEN pointing at a `Voided` order with `Issues` empty.
@@ -1689,6 +2066,29 @@ export class DealEntityServer extends DealEntity {
     }
 
     /**
+     * What this save asks of the deal's order, in the order it has to happen.
+     *
+     * The bill-to goes BEFORE the stage's order status: a stage that confirms the order books it, and a
+     * booked order refuses a bill-to change, so the party has to be in place first or the order books
+     * against the person the deal just stopped billing (#319).
+     */
+    private async applyOrderWork(orderBillTo: OrderBillToPlan | null, stageOrder: StageOrderPlan | null): Promise<void> {
+        if (orderBillTo) {
+            await this.applyOrderBillTo(orderBillTo);
+        }
+        /**
+         * The delta, not the total: a refusal RECORDED BY THIS SAVE is what tells the recovery to stand
+         * down. Comparing against zero would also catch a warning left by an earlier save on the same
+         * entity instance.
+         */
+        const warningsBeforePlan = this.OrderStatusWarnings.length;
+        if (stageOrder) {
+            await this.applyStageOrderStatus(stageOrder);
+        }
+        await this.recoverOrderOnReopen(this.OrderStatusWarnings.length > warningsBeforePlan);
+    }
+
+    /**
      * Applies the plan to the deal's order, and NEVER lets a refusal reach the caller as a failure.
      *
      * ── WHY THE TRANSITION IS CHECKED BEFORE IT IS ATTEMPTED ──
@@ -1710,7 +2110,8 @@ export class DealEntityServer extends DealEntity {
      * ── THE UNSAVED ORDER ──
      *
      * A new deal's order has not been written yet, so there is nothing to transition and nothing to
-     * roll back: setting `Status` means it is INSERTED in that state by the graph a moment later.
+     * roll back: setting `Status` means it is INSERTED in that state by the graph a moment later. A
+     * booking status still waits on {@link holdsConfirmForUnansweredLines} first, as on a saved order.
      */
     private async applyStageOrderStatus(plan: StageOrderPlan): Promise<void> {
         const order = this.OrderID_Object;
@@ -1721,10 +2122,63 @@ export class DealEntityServer extends DealEntity {
         }
 
         if (!order.IsSaved) {
+            if (IsBooked(plan.Target) && (await this.holdsConfirmForUnansweredLines(order.Status))) {
+                return;
+            }
             order.Status = plan.Target;
+            this.stampBookingDate(plan.Target);
             return;
         }
+        await this.applyStageOrderStatusToSavedOrder(order, plan);
+    }
 
+    /**
+     * A stage that books the order asks the question Close Won asks (#426).
+     *
+     * Confirm turns a subscription line whose customer already holds the product into the next term
+     * of that subscription unless the line says otherwise, and Close Won refuses a deal with such a
+     * line unanswered (`subscription-choice.ts`). A stage whose `OrderStatusOnEntry` books the order
+     * reached the same confirm without that check, so it extended subscriptions nobody was asked
+     * about. Same rule, same lines: orders' `FindUnansweredHeldLines`.
+     *
+     * The order is held back with a warning rather than the save refused, as for any other order-side
+     * reason (D-OS1). Close Won has already refused or answered these lines by the time it gets here,
+     * so on a close this finds none. A read that fails holds the confirm too: an unanswered line cannot
+     * be ruled out, and confirming would decide it.
+     *
+     * @returns true when the confirm was held back and a warning recorded.
+     */
+    private async holdsConfirmForUnansweredLines(from: string): Promise<boolean> {
+        let labels: string[];
+        try {
+            const user = this.ContextCurrentUser;
+            if (!user) throw new Error('no user to read the lines as');
+            const view = this.ProviderToUse as unknown as IRunViewProvider;
+            const unanswered = await FindUnansweredSubscriptionLines(this, view, user);
+            labels = unanswered.map(({ Line }) => `${Line.LineNumber} (${Line.Product?.trim() || 'this product'})`);
+        } catch (err) {
+            this._orderStatusWarnings.push(
+                `The deal moved stage, but its order stayed ${from}: whether any line extends a subscription the ` +
+                `customer already holds could not be read (${err instanceof Error ? err.message : String(err)}). ` +
+                'The stage change was kept.',
+            );
+            return true;
+        }
+        if (labels.length === 0) return false;
+        this._orderStatusWarnings.push(
+            `The deal moved stage, but its order stayed ${from}: ${labels.length === 1 ? 'line' : 'lines'} ` +
+            `${labels.join(', ')} ${labels.length === 1 ? 'is' : 'are'} for a product the customer already holds. ` +
+            'Open each one and choose whether it is the next term of that subscription or a new subscription, ' +
+            'then confirm the order. The stage change was kept.',
+        );
+        return true;
+    }
+
+    /** The stage's order status on an order already in the database: a transition, in its own scope. */
+    private async applyStageOrderStatusToSavedOrder(
+        order: NonNullable<DealEntityServer['OrderID_Object']>,
+        plan: StageOrderPlan,
+    ): Promise<void> {
         const from = order.Status;
         if (from === plan.Target) {
             return;   // already there; a no-op write would only dirty the row
@@ -1743,11 +2197,16 @@ export class DealEntityServer extends DealEntity {
             );
             return;
         }
+        if (IsBooked(plan.Target) && (await this.holdsConfirmForUnansweredLines(from))) {
+            return;
+        }
 
         const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
         const scope = await provider.BeginEntityTransaction();
+        const orderDate = order.OrderDate;
         try {
             order.Status = plan.Target;
+            this.stampBookingDate(plan.Target);
             if (await order.Save()) {
                 await scope.Commit();
                 return;
@@ -1762,6 +2221,7 @@ export class DealEntityServer extends DealEntity {
             // Put the in-memory value back, or the deal's save graph will try to write the status the
             // database has just refused and take the whole save down with it.
             order.Status = from;
+            order.OrderDate = orderDate;
             this._orderStatusWarnings.push(
                 `The deal moved stage, but its order stayed ${from}: the move to ${plan.Target} was legal ` +
                 `but did not complete (${err instanceof Error ? err.message : String(err)}). The stage change was kept.`,
@@ -1770,6 +2230,230 @@ export class DealEntityServer extends DealEntity {
         }
     }
 
+    /* ── The deal's parties → the order's bill-to (#319) ────────────────────────────────── */
+
+    /**
+     * What this save's contact and account edits ask of the order's bill-to. Reads only; opens nothing.
+     *
+     * The bill-to PERSON is the billing contact, falling back to the primary contact, exactly as
+     * provisioning stamps it — so the previous value is worked out the same way from the persisted
+     * (`OldValue`) columns, and a primary-contact change on a deal with a billing contact moves nothing.
+     * The bill-to ORGANIZATION is the account. Null when neither effective value changed, which is
+     * every save that does not touch these three fields.
+     *
+     * Only an existing deal with an order: a new deal's order is provisioned from the current values.
+     * Never on a locked deal: a closed deal's order is the record of what was sold.
+     */
+    private planOrderBillTo(): OrderBillToPlan | null {
+        if (this._lockedAtSave || !this.IsSaved || !this.OrderID) {
+            return null;
+        }
+        const previous = (field: string): string | null =>
+            (this.GetFieldByName(field)?.OldValue as string | null | undefined) || null;
+        const change = (before: string | null, after: string | null) =>
+            UUIDsEqual(before, after) ? null : { Previous: before, Next: after };
+
+        const person = change(
+            previous('BillingContactID') || previous('PrimaryContactID'),
+            this.BillingContactID || this.PrimaryContactID || null,
+        );
+        const organization = change(previous('AccountID'), this.AccountID || null);
+        return person || organization ? { Person: person, Organization: organization } : null;
+    }
+
+    /**
+     * Moves the order's bill-to with the deal, and NEVER lets that fail the deal's save.
+     *
+     * ── ONLY WHAT STILL BILLS THE DEAL'S PREVIOUS PARTY ──
+     *
+     * Each side is moved only when the order still holds what the deal held before this save. A
+     * different value there was put on the order by someone else — finance correcting who is billed —
+     * and the deal does not get to overwrite it. Person and organization are judged separately, so a
+     * corrected organization survives a contact change and the reverse.
+     *
+     * ── ONLY WHILE ORDERS SAYS THE ORDER IS EDITABLE ──
+     *
+     * `IsEditable` is orders' own predicate (Draft and Quoted today). A booked order refuses a bill-to
+     * change in its trigger, so asking first costs no write and leaves a warning that says why.
+     */
+    private async applyOrderBillTo(plan: OrderBillToPlan): Promise<void> {
+        try {
+            const order = await this.orderForBillTo();
+            if (!order) {
+                return;
+            }
+            const person = plan.Person && UUIDsEqual(order.BillToPersonID, plan.Person.Previous) ? plan.Person : null;
+            const organization =
+                plan.Organization && UUIDsEqual(order.BillToOrganizationID, plan.Organization.Previous)
+                    ? plan.Organization
+                    : null;
+            if (!person && !organization) {
+                return;   // the order's bill-to was set by someone else; it stays theirs
+            }
+            if (!IsEditable(order.Status)) {
+                this._orderStatusWarnings.push(
+                    `The deal's ${describeBillToSides(person, organization)} changed, but its order is ` +
+                    `${order.Status}, so the order still bills the previous one. Change the order's bill-to ` +
+                    'through orders if it should follow.',
+                );
+                return;
+            }
+            await this.writeOrderBillTo(order, person, organization);
+        } catch (err) {
+            this._orderStatusWarnings.push(
+                `The deal was saved, but its order's bill-to could not be updated ` +
+                `(${err instanceof Error ? err.message : String(err)}).`,
+            );
+            LogError(`DealEntityServer: syncing the order bill-to for deal ${this.ID} failed: ${err}`);
+        }
+    }
+
+    /**
+     * The deal's persisted order, or null when there is none to update.
+     *
+     * The in-memory embedded order when it is the persisted one, so a stage status written to that same
+     * object later in this save books it with the new bill-to. A deal that was loaded holds its order
+     * (`LoadEager` runs on load); one hydrated without a load (`LoadFromData`) does not, so the order is
+     * loaded by `OrderID`. An embedded order that is not saved yet was provisioned from the current
+     * values and needs nothing.
+     */
+    private async orderForBillTo(): Promise<mjBizAppsOrdersOrderHeaderEntity | null> {
+        const embedded = this.OrderID_Object;
+        if (embedded && UUIDsEqual(embedded.ID, this.OrderID)) {
+            return embedded.IsSaved ? embedded : null;
+        }
+        if (!this.OrderID) {
+            return null;
+        }
+        const provider = this.ProviderToUse as unknown as IMetadataProvider;
+        const order = await provider.GetEntityObject<mjBizAppsOrdersOrderHeaderEntity>(
+            ORDER_HEADER_ENTITY,
+            this.ContextCurrentUser,
+        );
+        if (await order.Load(this.OrderID)) {
+            return order;
+        }
+        throw new Error(`order ${this.OrderID} could not be read`);
+    }
+
+    /**
+     * Writes the bill-to in its own savepoint, as `applyStageOrderStatus` writes the status: a refusal
+     * rolls back the order write alone and becomes a warning, and the deal's save carries on.
+     *
+     * On a refusal every party field goes back to what it held, not only the two written here: orders'
+     * own save may have filled the ship-to or an employer on the way, and the embedded order is part
+     * of the deal's save graph, which would otherwise write those leftovers a moment later.
+     */
+    private async writeOrderBillTo(
+        order: mjBizAppsOrdersOrderHeaderEntity,
+        person: OrderBillToPlan['Person'],
+        organization: OrderBillToPlan['Organization'],
+    ): Promise<void> {
+        const partyFields = ['BillToPersonID', 'BillToOrganizationID', 'ShipToPersonID', 'ShipToOrganizationID'];
+        const before = partyFields.map((field) => [field, order.Get(field)] as const);
+        const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
+        const scope = await provider.BeginEntityTransaction();
+        try {
+            if (organization) {
+                order.BillToOrganizationID = organization.Next;
+            }
+            if (person) {
+                order.BillToPersonID = person.Next;
+                keepBillToOrganization(order);
+            }
+            if (await order.Save()) {
+                await scope.Commit();
+                return;
+            }
+            throw new Error(order.LatestResult?.CompleteMessage ?? 'the order save was refused with no message');
+        } catch (err) {
+            try {
+                await scope.Rollback();
+            } catch (rollbackErr) {
+                LogError(`DealEntityServer: rolling back the order bill-to update failed: ${rollbackErr}`);
+            }
+            for (const [field, value] of before) {
+                order.Set(field, value);
+            }
+            this._orderStatusWarnings.push(
+                `The deal was saved, but its order still bills the previous ` +
+                `${describeBillToSides(person, organization)}: orders refused the change ` +
+                `(${err instanceof Error ? err.message : String(err)}).`,
+            );
+            LogError(`DealEntityServer: the order bill-to update for order ${order.ID} failed: ${err}`);
+        }
+    }
+
+
+    /**
+     * A move that BOOKS the order takes the deal's close date as the order date.
+     *
+     * Orders reads `OrderDate` as the purchase day for every subscription line without its own start,
+     * and freezes the header once the order is booked. The date was the day the deal was created, so a
+     * deal won months later booked its subscriptions from that day. `ActualCloseDate` is the business
+     * day the close stamped; nothing is written when the deal carries none.
+     */
+    private stampBookingDate(target: OrderStatus): void {
+        const order = this.OrderID_Object;
+        if (order && IsBooked(target) && this.ActualCloseDate) {
+            order.OrderDate = this.ActualCloseDate;
+        }
+    }
+
+    /**
+     * A DRAFT order's date follows the business day, so new lines default their term start to today,
+     * are priced as of today, and a later booking does not start from the day the deal was created.
+     *
+     * Only Draft: a quoted order's prices are as of the quote day, and moving its date could change
+     * prices a customer was already shown. The order is read only when it is not already in memory, and
+     * loaded only when its date has to move. A failure leaves the date as it was; it never refuses the
+     * save.
+     */
+    private async moveDraftOrderDateToToday(): Promise<void> {
+        if (!this.OrderID || this._orderJustProvisioned) {
+            return;
+        }
+        try {
+            await BusinessTimeZoneEngine.Instance.Config(
+                false, this.ContextCurrentUser, this.ProviderToUse as unknown as IMetadataProvider,
+            );
+            const today = BusinessTimeZoneEngine.Instance.Today(this.CompanyID ?? undefined);
+            const order = this.OrderID_Object ?? (await this.staleDraftOrder(today));
+            // Orders' status is its fixed lifecycle (CK_OrderHeader_Status), not a sales type table.
+            if (!order || order.Status !== 'Draft') { // vocabulary-grep-allow: orders' fixed lifecycle
+                return;
+            }
+            const day = ToCalendarDay(order.OrderDate);
+            if (day && day < today) {
+                order.OrderDate = FromCalendarDay(today);
+            }
+        } catch (err) {
+            LogError(`DealEntityServer: the draft order's date could not be moved to today: ${err}`);
+        }
+    }
+
+    /** The deal's order, loaded only when the row on disk is a Draft dated before `today`. */
+    private async staleDraftOrder(today: string) {
+        if (!this.OrderID || !GUID_SHAPE.test(this.OrderID)) {
+            return null;
+        }
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await view.RunView<{ Status: string; OrderDate: Date | string | null }>(
+            {
+                EntityName: ORDER_HEADER_ENTITY,
+                ExtraFilter: `ID = '${this.OrderID}'`,
+                ResultType: 'simple',
+                Fields: ['Status', 'OrderDate'],
+            },
+            this.ContextCurrentUser,
+        );
+        const row = result.Success ? (result.Results ?? [])[0] : undefined;
+        const day = row ? ToCalendarDay(row.OrderDate) : null;
+        if (!row || row.Status !== 'Draft' || !day || day >= today) { // vocabulary-grep-allow: orders' fixed lifecycle
+            return null;
+        }
+        return this.OrderID_LoadObject();
+    }
 
     /**
      * Re-establishes `Deal.Amount` from the order, as a CACHE with honest provenance.
@@ -1819,7 +2503,7 @@ export class DealEntityServer extends DealEntity {
      * Sales never sums lines itself. It copies the one number orders already stands behind.
      */
     private async refreshAmountFromOrder(): Promise<void> {
-        if (!this.OrderID) {
+        if (!this.OrderID || !GUID_SHAPE.test(this.OrderID)) {
             return;
         }
 
@@ -2021,9 +2705,12 @@ export class DealEntityServer extends DealEntity {
     private _lockedAtSave = false;
     /**
      * The status the caller asked for, held while the field is reverted to its persisted value so the
-     * close lock can do its real job. `refuseSave` puts it back; see the note there for why.
+     * close lock can do its real job. `refuseSave` puts it back, and so does `Save()` for any save that
+     * did not commit; see the notes there for why.
      */
     private _revertedStatusTarget: string | null = null;
+    /** Whether this save reached its commit. `Save()` restores the reverted status when it did not. */
+    private _committed = false;
 
     /**
      * The fields that stay editable on a locked deal — read from the SHARED rule, not redeclared.
@@ -2036,8 +2723,8 @@ export class DealEntityServer extends DealEntity {
      * on the deal's outcome, so the outcome has to reach it. It used to be a flat `ReadonlySet` held in
      * a static, which is precisely how a caller ends up with the list and without the condition.
      */
-    private static lockEditableFields(isLost: boolean): ReadonlySet<string> {
-        return DealFieldsEditableWhileLocked(isLost);
+    private static lockEditableFields(isLost: boolean, accountBlank = false): ReadonlySet<string> {
+        return DealFieldsEditableWhileLocked(isLost, accountBlank);
     }
 
     /**
@@ -2068,6 +2755,61 @@ export class DealEntityServer extends DealEntity {
         'Team',
         'PaymentSchedule',
     ]);
+
+    /**
+     * Set only for the duration of {@link BeginClose}: the one path that may write the close stamps.
+     *
+     * Grants nothing else. The close lock still runs, and passes because the deal is still open on
+     * disk while it closes; this only answers {@link closeStampEditRefusal}.
+     */
+    private _closeInProgress = false;
+
+    /**
+     * Runs `body` with the close stamps writable, and always restores them.
+     *
+     * `Sales.CloseDeal` is the only caller. The `finally` is the same guarantee {@link BeginReopen}
+     * gives: an exception inside the close must not leave the stamps writable for later saves.
+     */
+    public async BeginClose<T>(body: () => Promise<T>): Promise<T> {
+        this._closeInProgress = true;
+        try {
+            return await body();
+        } finally {
+            this._closeInProgress = false;
+        }
+    }
+
+    /**
+     * Why this save is refused for writing a close stamp, or null if it may proceed.
+     *
+     * ── WHY IT REFUSES RATHER THAN PUTTING THE VALUE BACK ──────────────────────────────────────────
+     *
+     * The owner stamp is overwritten and reported, because its right value is derivable here. A close
+     * stamp's is not: it is the record of a close that did or did not happen. With the form rendering
+     * the stamps read-only, the callers left are an import, an agent, an Action, or a page left open
+     * while someone else closed or reopened the deal -- and every one of those wants to be told,
+     * not to have the save half-apply.
+     *
+     * `callerSuppliedValue` is the create-versus-update question `ownerStampEditRefusal` once got
+     * wrong, so a deal CREATED with a stamp is refused too.
+     */
+    private closeStampEditRefusal(): string | null {
+        if (this._closeInProgress || this._reopenInProgress) {
+            return null;
+        }
+        const supplied = DealCloseStampFields().filter((name) =>
+            this.callerSuppliedValue(name, this.GetFieldByName(name)?.Value),
+        );
+        if (supplied.length === 0) {
+            return null;
+        }
+        return (
+            `${JoinLabels(supplied.map(DealFieldLabel))} cannot be edited: closing the deal sets the ` +
+            'close stamps and reopening it clears them. To record when the deal is expected to close, ' +
+            'use Expected Close Date. If this page was open while the deal was closed or reopened, ' +
+            'reload it and try again. Nothing was changed.'
+        );
+    }
 
     /**
      * Runs `body` with the close lock suppressed, and always restores it.
@@ -2157,10 +2899,12 @@ export class DealEntityServer extends DealEntity {
      *
      * Two things differ from `refuseSave` and both matter:
      *
-     * 1. IT DOES NOT PUT THE STATUS BACK. `refuseSave` restores the caller's target because nothing
-     *    was written and a retry must still carry it. Here the row has already moved (or been rolled
-     *    back) and `Load()` has resynced this object to it -- re-dirtying a field to a value the
-     *    database just rejected would invite the same failure on the next save.
+     * 1. IT DOES NOT PUT THE STATUS BACK ITSELF. `refuseSave` restores the caller's target because
+     *    nothing was written and a retry must still carry it. After a failed transition the row has
+     *    already moved and `Load()` has resynced this object to it -- re-dirtying a field to a value
+     *    the database just rejected would invite the same failure on the next save. When the save was
+     *    rolled back instead, nothing reloads, and `Save()`'s `finally` restores the status because the
+     *    save never committed.
      * 2. IT CARRIES THE OPERATION'S ISSUES. `CloseDealOperation` returns a structured `Issues` array
      *    which was being joined into a `LogError` and dropped. Those sentences are the only thing
      *    that says WHY the close refused, and they are what the user needs.
@@ -2192,7 +2936,13 @@ export class DealEntityServer extends DealEntity {
         return false;
     }
 
-    private async checkCloseLock(): Promise<string | null> {
+    /**
+     * @param reopening this save also sets the status back to an open one (#390). The reopen runs after
+     * the save, against the committed row, so a frozen field edited alongside it is still refused; the
+     * message then says to save the status change first rather than telling the caller to do what they
+     * just did.
+     */
+    private async checkCloseLock(reopening = false): Promise<string | null> {
         const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
         if (!persistedStatusID) {
             return null;
@@ -2211,8 +2961,16 @@ export class DealEntityServer extends DealEntity {
          * The outcome decides one field. golive#206: Loss Notes stays editable on a LOST deal and is
          * frozen on a won one, and the form asks the same function with the same flag — both take it
          * from the status ROW, never from a name.
+         *
+         * golive#306: A closed deal whose persisted `AccountID` is blank may have its account filled in
+         * once without reopening; changing an existing non-blank account or clearing it stays frozen.
          */
-        const editable = DealEntityServer.lockEditableFields(persisted.IsLost);
+        const accountField = this.GetFieldByName('AccountID');
+        const accountOld = accountField?.OldValue as string | null | undefined;
+        const accountWasBlank = !accountOld || String(accountOld).trim() === '';
+        const fillingBlankAccount =
+            accountWasBlank && !!this.AccountID && String(this.AccountID).trim() !== '';
+        const editable = DealEntityServer.lockEditableFields(persisted.IsLost, fillingBlankAccount);
 
         /**
          * `OwnerEmployeeID` IS FROZEN, AND IS STILL WRITTEN HERE WHEN THE ROSTER DRIVES IT.
@@ -2282,7 +3040,15 @@ export class DealEntityServer extends DealEntity {
 
         const all = [...changed, ...dirtyCollections];
         if (all.length === 0) {
+            if (fillingBlankAccount && accountField?.Dirty) {
+                this._orderStatusWarnings.push(
+                    "Account was set on this closed deal; its order's bill-to and any contract were left unchanged.",
+                );
+            }
             return null;
+        }
+        if (persisted.LocksDeal && persisted.IsWon && changed.includes('DealStatusTypeID') && !reopening) {
+            return await this.alreadyWonRefusal();
         }
         /**
          * golive#207 row 18, verbatim: "This deal is closed. {fields} cannot be changed until the
@@ -2319,7 +3085,28 @@ export class DealEntityServer extends DealEntity {
                 `${named} cannot be changed until the status is set to an open one.`
             );
         }
+        if (reopening) {
+            return DealEntityServer.reopenWithEditsRefusal(named);
+        }
         return `This deal is closed. ${named} cannot be changed until the status is set back to Open.`;
+    }
+
+    /**
+     * The refusal when one save reopens the deal AND changes a frozen field (#390).
+     *
+     * ── WHY THE EDIT IS REFUSED RATHER THAN APPLIED AFTER THE REOPEN ─────────────────────────────
+     *
+     * The reopen runs after `super.Save()` because `Sales.ReopenDeal` loads and saves its own copy of
+     * this row. Writing the frozen field first would put it on a deal that is still closed, and leave it
+     * there if the reopen then failed. Running the reopen first would need this object reloaded and the
+     * caller's edits replayed mid-save, with a reopened deal and no edits if the replay failed. Two
+     * saves are the honest order, so the message asks for exactly that.
+     */
+    private static reopenWithEditsRefusal(named: string): string {
+        return (
+            `This deal is closed, and ${named} cannot be changed in the same save that reopens it. ` +
+            'Save the status change on its own first, then make the edit. Nothing was changed.'
+        );
     }
 
     /**
@@ -2352,14 +3139,17 @@ export class DealEntityServer extends DealEntity {
      */
     private async readStatusLockFlags(
         statusID: string,
-    ): Promise<{ LocksDeal: boolean; IsLost: boolean; Read: boolean; Absent: boolean }> {
+    ): Promise<{ LocksDeal: boolean; IsLost: boolean; IsWon: boolean; Read: boolean; Absent: boolean }> {
+        if (!GUID_SHAPE.test(statusID)) {
+            return { LocksDeal: true, IsLost: false, IsWon: false, Read: false, Absent: false };
+        }
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView(
             {
                 EntityName: DEAL_STATUS_ENTITY,
                 ExtraFilter: `ID = '${statusID}'`,
                 ResultType: 'simple',
-                Fields: ['LocksDeal', 'IsLost'],
+                Fields: ['LocksDeal', 'IsLost', 'IsWon'],
             },
             this.ContextCurrentUser,
         );
@@ -2367,55 +3157,317 @@ export class DealEntityServer extends DealEntity {
             LogError(
                 `DealEntityServer.readStatusLockFlags: could not read status ${statusID}: ${result.ErrorMessage}`,
             );
-            return { LocksDeal: true, IsLost: false, Read: false, Absent: false };
+            return { LocksDeal: true, IsLost: false, IsWon: false, Read: false, Absent: false };
         }
-        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean } | undefined;
-        return { LocksDeal: row?.LocksDeal === true, IsLost: row?.IsLost === true, Read: !!row, Absent: !row };
+        const row = (result.Results ?? [])[0] as { LocksDeal?: boolean; IsLost?: boolean; IsWon?: boolean } | undefined;
+        return {
+            LocksDeal: row?.LocksDeal === true,
+            IsLost: row?.IsLost === true,
+            IsWon: row?.IsWon === true,
+            Read: !!row,
+            Absent: !row,
+        };
+    }
+
+    /**
+     * When a stale pre-close save hits a deal whose persisted status on disk is already Won, explain
+     * that the deal is already Won (and name the contract if one was created) instead of reporting the
+     * close-stamp edit refusal (golive#387).
+     */
+    private async staleWonSaveRefusal(): Promise<string | null> {
+        if (!this.IsSaved) return null;
+        const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
+        if (!persistedStatusID) return null;
+        const persisted = await this.readStatusLockFlags(persistedStatusID);
+        if (!persisted.LocksDeal || !persisted.IsWon) return null;
+        return this.alreadyWonRefusal();
+    }
+
+    private async alreadyWonRefusal(): Promise<string> {
+        const contractID =
+            (this.ContractID ?? (this.GetFieldByName('ContractID')?.OldValue as string | null | undefined)) ?? null;
+        let contractNumber: string | null = null;
+        if (contractID && GUID_SHAPE.test(String(contractID))) {
+            try {
+                const provider = this.ProviderToUse as unknown as IRunViewProvider | undefined;
+                if (provider?.RunView) {
+                    const result = await provider.RunView<{ ContractNumber: string | null }>(
+                        {
+                            EntityName: 'MJ_BizApps_Contracts: Contracts',
+                            ExtraFilter: `ID = '${contractID}'`,
+                            ResultType: 'simple',
+                            Fields: ['ContractNumber'],
+                        },
+                        this.ContextCurrentUser,
+                    );
+                    if (result?.Success) {
+                        contractNumber = (result.Results ?? [])[0]?.ContractNumber ?? null;
+                    }
+                }
+            } catch {
+                contractNumber = null;
+            }
+        }
+        return AlreadyWonRefusal(this.DealNumber || this.Name, contractNumber);
+    }
+
+    /* ── Parties ────────────────────────────────────────────────────────────── */
+
+    /**
+     * Refuses a customer or primary contact that this save writes and the database no longer holds.
+     *
+     * Only a value the caller SUPPLIES is checked. One already on disk is guaranteed by
+     * `FK_Deal_SalesAccount` and `FK_Deal_PrimaryContact`, so reading it again proves nothing. A
+     * supplied value can name a row that does not exist in two measured ways: it was picked from a list
+     * read before a data reload re-keyed the customers, or the inline-create slide-in reported an id
+     * other than the one it wrote (`DECISIONS-NEEDED.md` DN-19, the "INTERMITTENT" entry).
+     *
+     * A malformed id is refused without a read, so it never reaches the filter.
+     *
+     * A read that FAILS does not refuse. The constraints still hold, so the save loses only this
+     * clearer message; refusing on a transient read would block every deal edit instead.
+     */
+    private async missingPartyRefusal(): Promise<string | null> {
+        const checks = this.suppliedParties();
+        if (!checks.length) {
+            return null;
+        }
+
+        const malformed = checks.filter((c) => !GUID_SHAPE.test(c.ID));
+        if (malformed.length) {
+            return this.missingPartyMessage(malformed.map((c) => ({ ...c, NotSetUp: false })));
+        }
+
+        const provider = this.ProviderToUse as unknown as IRunViewProvider;
+        const results = await provider.RunViews(
+            checks.map((c) => ({
+                EntityName: c.EntityName,
+                ExtraFilter: `ID = '${c.ID}'`,
+                ResultType: 'simple' as const,
+                Fields: ['ID'],
+            })),
+            this.ContextCurrentUser,
+        );
+
+        const missing = checks.filter((c, i) => {
+            const result = results[i];
+            if (!result?.Success) {
+                LogError(`DealEntityServer.missingPartyRefusal: could not read ${c.Label} ${c.ID}: ${result?.ErrorMessage}`);
+                return false;
+            }
+            return (result.Results ?? []).length === 0;
+        });
+        if (!missing.length) {
+            return null;
+        }
+
+        return this.missingPartyMessage(await this.classifyMissingParties(missing));
+    }
+
+    /**
+     * Tells the two cases apart, because they need different actions from the rep. A Sales Account or
+     * Sales Contact shares its Organization's or Person's ID (IsA), so the deal panels on those forms
+     * pre-fill the record's own ID; when that record was never set up for sales, there is nothing to
+     * pick again. A party whose parent is gone too was a stale pick. Only runs on the refusal path, and
+     * a failed read falls back to the stale-pick wording.
+     */
+    private async classifyMissingParties(missing: PartyCheck[]): Promise<MissingParty[]> {
+        const provider = this.ProviderToUse as unknown as IRunViewProvider;
+        const parents = await provider.RunViews(
+            missing.map((c) => ({
+                EntityName: c.ParentEntityName,
+                ExtraFilter: `ID = '${c.ID}'`,
+                ResultType: 'simple' as const,
+                Fields: ['ID'],
+            })),
+            this.ContextCurrentUser,
+        );
+        return missing.map((c, i) => {
+            const parent = parents[i];
+            return { ...c, NotSetUp: !!parent?.Success && (parent.Results ?? []).length > 0 };
+        });
+    }
+
+    /** The rep-facing refusal. The IDs go to the log only: they mean nothing to a rep. */
+    private missingPartyMessage(missing: MissingParty[]): string {
+        LogError(
+            `DealEntityServer.missingPartyRefusal: ${missing
+                .map((c) => `${c.Label} ${c.ID} ${c.NotSetUp ? 'has no sales row' : 'does not exist'}`)
+                .join('; ')}`,
+        );
+        const sentences = missing.map((c) => {
+            if (!c.NotSetUp) {
+                return `The selected ${c.Label} no longer exists. Pick it again from the list.`;
+            }
+            return c.Label === 'customer'
+                ? 'The selected customer is not set up as a sales customer. Add the organization as a ' +
+                      'sales account first, or pick another customer.'
+                : 'The selected primary contact is not set up as a sales contact. Add the person as a ' +
+                      'sales contact first, or pick another contact.';
+        });
+        return `Nothing was saved. ${sentences.join(' ')}`;
+    }
+
+    private suppliedParties(): PartyCheck[] {
+        const checks: PartyCheck[] = [];
+        if (this.AccountID && this.callerSuppliedValue('AccountID', this.AccountID)) {
+            checks.push({
+                EntityName: SALES_ACCOUNT_ENTITY,
+                ParentEntityName: ORGANIZATION_ENTITY,
+                ID: this.AccountID,
+                Label: 'customer',
+            });
+        }
+        if (this.PrimaryContactID && this.callerSuppliedValue('PrimaryContactID', this.PrimaryContactID)) {
+            checks.push({
+                EntityName: SALES_CONTACT_ENTITY,
+                ParentEntityName: PERSON_ENTITY,
+                ID: this.PrimaryContactID,
+                Label: 'primary contact',
+            });
+        }
+        return checks;
     }
 
     /* ── Selling company ────────────────────────────────────────────────────── */
 
     /**
-     * Forces `Deal.CompanyID` to the pipeline's company, ignoring whatever the caller supplied.
+     * Refuses a deal whose company is not actively linked to its pipeline through `PipelineCompany`.
      *
-     * THE PIPELINE IS THE ONLY SOURCE THAT CAN BE RIGHT. A deal belongs to the company that owns the
-     * pipeline it sits in, and a CHECK constraint cannot express that — it cannot reach across the
-     * foreign key to compare the two. So it is resolved on the write path instead, on every save, for
-     * every caller.
+     * A pipeline can serve several companies, so the deal's company is the rep's choice and can no
+     * longer be copied from the pipeline. What stays checkable is that the choice is one the pipeline
+     * offers. A CHECK constraint cannot reach across the link, so it is checked here, on every save, for
+     * every caller — the form, the workspace, imports and Actions alike.
      *
-     * An explicitly supplied value is OVERWRITTEN rather than rejected. A client that gets this wrong is
-     * not making a choice the app should honour or argue with; it is stating something it has no standing
-     * to know, and the correct answer is available here.
+     * Keyed on either half moving, like the stage check: an existing deal whose link was later retired
+     * (`IsActive = 0`) keeps saving ordinary edits, and is refused only when a save changes its company
+     * or its pipeline.
      *
-     * A missing pipeline is left alone: `Validate()` already refuses a deal without one, and raising a
-     * second, vaguer complaint here would just bury the specific message the user needs.
+     * A missing pipeline or company is left to `Validate()`, which already names it.
      */
-    private async stampCompanyFromPipeline(): Promise<void> {
-        if (!this.PipelineID) {
-            return;
+    private async companyLinkedToPipelineRefusal(): Promise<string | null> {
+        const pipelineID = this.PipelineID;
+        const companyID = this.CompanyID;
+        if (!pipelineID || !companyID) {
+            return null;
+        }
+
+        const companyDirty = this.GetFieldByName('CompanyID')?.Dirty === true;
+        const pipelineDirty = this.GetFieldByName('PipelineID')?.Dirty === true;
+        if (this.IsSaved && !companyDirty && !pipelineDirty) {
+            return null;
+        }
+        if (!GUID_SHAPE.test(pipelineID)) {
+            return 'the pipeline on this deal is not a valid ID.';
+        }
+        if (!GUID_SHAPE.test(companyID)) {
+            return 'the company on this deal is not a valid ID.';
         }
 
         const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
-        const result = await viewProvider.RunView<PipelineCompanyRow>(
+        const result = await viewProvider.RunView<PipelineCompanyLinkRow>(
             {
-                EntityName: PIPELINE_ENTITY,
-                ExtraFilter: `ID = '${this.PipelineID}'`,
+                EntityName: PIPELINE_COMPANY_ENTITY,
+                ExtraFilter: `PipelineID = '${pipelineID}' AND CompanyID = '${companyID}' AND IsActive = 1`,
                 ResultType: 'simple',
-                Fields: ['CompanyID'],
+                Fields: ['ID'],
             },
             this.ContextCurrentUser,
         );
         if (!result.Success) {
-            throw new Error(`DealEntityServer: could not read the pipeline's company: ${result.ErrorMessage}`);
+            throw new Error(`DealEntityServer: could not read the pipeline's companies: ${result.ErrorMessage}`);
+        }
+        if ((result.Results ?? []).length === 0) {
+            return 'the pipeline on this deal is not available to its company. Pick a pipeline linked to the company, or link the company to the pipeline.';
+        }
+        return null;
+    }
+
+    /**
+     * Refuses a deal whose stage belongs to a different pipeline (bc-aidp-next-golive#291).
+     *
+     * ── WHY REFUSE RATHER THAN CORRECT ──────────────────────────────────────────────────────────
+     *
+     * A wrong stage has no derivable right answer. Moving the deal to the pipeline's first stage
+     * would be inventing a position in a sales process nobody chose, and keeping the stage while
+     * changing the pipeline would be the same invention from the other end. So this asks the caller
+     * instead, as the company check above does.
+     *
+     * ── IT DID NOT SIT INERT ────────────────────────────────────────────────────────────────────
+     *
+     * A B2B deal saved with a D2C stage was accepted, and `applyStageDefaults` then took that stage's
+     * `Probability`, `ForecastCategoryTypeID` and `DealStatusTypeID`. The mismatch rewrote the deal's
+     * forecast numbers from a pipeline it does not belong to, which is why this is a refusal on the
+     * write path rather than a lint on the form: the form is one of the callers, and imports and
+     * Actions reach the same code without passing through it.
+     *
+     * A CHECK constraint cannot express this — it cannot reach across the foreign key to compare the
+     * stage's pipeline with the deal's — which is the same reason the company check lives here.
+     *
+     * ── KEYED ON EITHER HALF MOVING ─────────────────────────────────────────────────────────────
+     *
+     * An existing deal whose stage and pipeline already disagree is left alone unless this save
+     * touches one of them, matching how every other rule in this class is keyed. Converted deals sit
+     * in legacy pipelines (#257) and some of them may already be inconsistent; refusing a rename or a
+     * note on one of those would be a rule nobody asked for, arriving nowhere near the edit that
+     * triggered it. A save that MOVES either half is a caller stating the pair, and that is checked.
+     */
+    private async stageBelongsToPipelineRefusal(): Promise<string | null> {
+        const stageID = this.PipelineStageID;
+        const pipelineID = this.PipelineID;
+        if (!stageID || !pipelineID) {
+            // No pipeline is `Validate()`'s complaint, and no stage is a legitimate state — a deal can
+            // be created before anyone positions it. Neither is this rule's business.
+            return null;
         }
 
-        const pipeline = (result.Results ?? [])[0];
-        if (!pipeline?.CompanyID) {
-            throw new Error(
-                `DealEntityServer: pipeline ${this.PipelineID} could not be read, so the selling company is unknown.`,
-            );
+        const stageDirty = this.GetFieldByName('PipelineStageID')?.Dirty === true;
+        const pipelineDirty = this.GetFieldByName('PipelineID')?.Dirty === true;
+        if (this.IsSaved && !stageDirty && !pipelineDirty) {
+            return null;
         }
-        this.CompanyID = pipeline.CompanyID;
+        if (!GUID_SHAPE.test(stageID)) {
+            return 'the stage on this deal is not a valid ID.';
+        }
+        if (!GUID_SHAPE.test(pipelineID)) {
+            return 'the pipeline on this deal is not a valid ID.';
+        }
+
+        const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
+        const result = await viewProvider.RunView<StagePipelineRow>(
+            {
+                EntityName: STAGE_ENTITY,
+                ExtraFilter: `ID = '${stageID}'`,
+                ResultType: 'simple',
+                Fields: ['Name', 'PipelineID', 'Pipeline'],
+            },
+            this.ContextCurrentUser,
+        );
+        if (!result.Success) {
+            throw new Error(`DealEntityServer: could not read the stage's pipeline: ${result.ErrorMessage}`);
+        }
+
+        const stage = (result.Results ?? [])[0];
+        if (!stage) {
+            return `the stage on this deal could not be read, so it cannot be checked against the pipeline.`;
+        }
+
+        /**
+         * LOWERCASED BEFORE COMPARING, like every other id comparison in this class -- SQL Server hands
+         * back uppercase GUIDs and client code generates lowercase. The stage-event writer carried this
+         * bug once and recorded self-transitions because of it; the comment above `stageMoved` tells
+         * that story.
+         */
+        if (String(stage.PipelineID ?? '').toLowerCase() === String(pipelineID).toLowerCase()) {
+            return null;
+        }
+
+        const stageName = stage.Name ?? stageID;
+        const owner = stage.Pipeline ?? 'another pipeline';
+        return (
+            `the stage "${stageName}" belongs to ${owner}, not to this deal's pipeline. `
+            + `Pick a stage from the deal's own pipeline, or change the pipeline first.`
+        );
     }
 
     /* ── Owner stamp (§5.1) ─────────────────────────────────────────────────── */
@@ -2464,16 +3516,55 @@ export class DealEntityServer extends DealEntity {
      * IS part of that save, and the server re-derives the same value from it a moment later. The two
      * conditions mirror `stampOwnerFromTeam`'s guard exactly, which is what keeps them from disagreeing.
      */
-    private ownerStampEditRefusal(): string | null {
+    /**
+     * A caller-supplied `OwnerEmployeeID` loses to the roster, and the override is REPORTED.
+     *
+     * ── THIS USED TO REFUSE THE WHOLE SAVE, AND THAT COST MORE THAN IT PROTECTED ────────────────
+     *
+     * `SD26` asserted the refusal and its comment said why a correction was rejected: *"A save that
+     * quietly fixed the value would produce the same surprise — the owner is not who the caller said
+     * — with nothing to notice."* That objection is right, and it is an argument for NOTICING, not
+     * for refusing. Hence the warning below.
+     *
+     * What refusing cost, found in review of sales#147: a deal page open since before someone used
+     * the Internal team grid sends back the owner it LOADED. The server sees a value that differs
+     * from the row it just read, reads that as a hand-set owner, and refuses — so an unrelated edit
+     * to Next Step is lost, and the message tells the user to do the thing they just did. There is no
+     * signal in the payload separating a stale value from a deliberate one, so no narrower rule works.
+     *
+     * ── IT IS ALSO WHAT THE SIBLING FIELD ALREADY DOES ──────────────────────────────────────────
+     *
+     * `OwnerEmployeeID` is `serverMaintained` in the form's field list and derived, with exactly one
+     * right answer obtainable elsewhere (the owner-role team member), so a supplied value is overwritten
+     * rather than argued with. `CompanyID` used to be the same, copied from the pipeline; it is the rep's
+     * choice now that a pipeline serves several companies, and is checked instead.
+     *
+     * Loading the roster is what makes the override happen: `stampOwnerFromTeam()` runs below and is
+     * guarded by `RosterDrivesThisSave`, which asks `Team.IsLoaded`. A load failure leaves the roster
+     * absent, the derivation declines, and the supplied value stands — so the failure is recorded as a
+     * warning too rather than passing silently.
+     */
+    private async overrideSuppliedOwnerStamp(): Promise<void> {
         if (this.RosterDrivesThisSave) {
-            return null;   // the roster is part of this save; the stamp is derived from it below
+            return;   // the roster is already part of this save; the stamp is derived from it below
         }
         if (!this.callerSuppliedValue('OwnerEmployeeID', this.OwnerEmployeeID)) {
-            return null;   // nobody supplied it. The common case.
+            return;   // nobody supplied it. The common case.
         }
-        return (
-            'The owner is set from the deal team. Change the Owner role on the Internal team panel ' +
-            'instead.'
+
+        try {
+            await this.Team.Load();
+        } catch (err) {
+            this._ownerStampWarnings.push(
+                'The owner is set from the deal team, and the team could not be read to check it, so the '
+                + `value supplied was left as it was. ${err instanceof Error ? err.message : String(err)}`,
+            );
+            return;
+        }
+
+        this._ownerStampWarnings.push(
+            'The owner is set from the deal team, so the value supplied with this save was replaced by '
+            + 'the person in the deal\'s Owner role. Change the Owner role on the Internal team panel to change it.',
         );
     }
 
@@ -2496,7 +3587,7 @@ export class DealEntityServer extends DealEntity {
     }
 
     /**
-     * Gives a NEW deal an owner: the account's owner when it has one, otherwise whoever is creating it.
+     * Gives a NEW deal an owner: whoever is creating it, otherwise the account's owner.
      *
      * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────────────────────────
      *
@@ -2515,10 +3606,15 @@ export class DealEntityServer extends DealEntity {
      *
      * ── THE ORDER OF PREFERENCE, AND WHY ────────────────────────────────────────────────────────────
      *
-     * The ACCOUNT's owner first. A deal on an existing customer belongs to whoever runs that customer,
-     * and that is true whether a rep, an SE or an admin typed it in — so it beats the creator, who is
-     * merely the person at the keyboard. The creator is the fallback for a deal with no account yet, or
-     * an account nobody owns, where the person entering it is the best answer available.
+     * The CREATOR first. The people who enter deals are the people who work them, so a deal that
+     * defaulted to the account's owner had to be reassigned by hand on every create — and reassigning
+     * is the slow path, through the deal team. The account's owner is the fallback for a creator with
+     * no linked Employee (the importer, an agent, `System`), so those deals still land on whoever runs
+     * the customer rather than on nobody. A creator who has an Employee never costs an account read.
+     *
+     * This reverses the first version, which put the account's owner first on the theory that an admin
+     * might be typing a deal in on a rep's behalf (bc-aidp-next-golive#415). That case is a
+     * reassignment after save; the common case is a rep entering their own deal.
      *
      * ── EVERY WAY THIS DECLINES TO ACT ──────────────────────────────────────────────────────────────
      *
@@ -2530,7 +3626,7 @@ export class DealEntityServer extends DealEntity {
      *    `stampOwnerFromTeam` uses, so an importer or an Action that sets its own team is never
      *    second-guessed — and the two cannot disagree about what "the caller is managing this" means.
      *  - nothing resolves. A context user with no linked Employee (`System` and `Anonymous` have none)
-     *    and no account owner leaves the deal unowned, which is exactly what happens today. Refusing the
+     *    on a deal whose account has no owner leaves it unowned, which is exactly what happens today. Refusing the
      *    save because we could not GUESS an owner would turn a working create into a broken one.
      *
      * A failure to READ the account is also not fatal, for the same reason: the deal still saves, just
@@ -2580,6 +3676,32 @@ export class DealEntityServer extends DealEntity {
         const currencyID = await this.currencyIDForCode(code);
         if (currencyID) {
             this.CurrencyID = currencyID;
+        }
+    }
+
+    /**
+     * Stamps `Deal.CreationDate` from the server's clock on create when the caller did not supply one (#532).
+     *
+     * `EntityField`'s constructor evaluates `DefaultValue = 'getutcdate()'` during `NewRecord()`, setting
+     * `Value = new Date()` at construction time while leaving `_NeverSet = true`. Any explicit assignment
+     * by a caller (an importer setting a historical creation date, or a check supplying a specific instant)
+     * flips `_NeverSet` to `false`.
+     *
+     * Re-stamping here when `_NeverSet` is still `true` (or when a caller cleared `CreationDate` to null
+     * before saving) ensures that:
+     *   1. A deal created without an explicit `CreationDate` gets the server's save-time clock rather than
+     *      the instant `NewRecord()` happened to run (or failing `Validate()` when `CreationDate` was nulled).
+     *   2. An importer or API caller that explicitly sets a historical `CreationDate` on a new deal keeps
+     *      the date it supplied.
+     *   3. Updates (`this.IsSaved`) are never touched, so an open deal's `CreationDate` remains editable.
+     */
+    private defaultCreationDateOnCreate(): void {
+        if (this.IsSaved) {
+            return;
+        }
+        const field = this.GetFieldByName('CreationDate') as unknown as { _NeverSet?: boolean } | undefined;
+        if (!this.CreationDate || field?._NeverSet === true) {
+            this.CreationDate = new Date();
         }
     }
 
@@ -2662,7 +3784,7 @@ export class DealEntityServer extends DealEntity {
             return; // the caller is managing the team; do not second-guess it
         }
 
-        const employeeID = (await this.accountOwnerEmployeeID()) ?? this.creatorEmployeeID();
+        const employeeID = this.creatorEmployeeID() ?? (await this.accountOwnerEmployeeID());
         if (!employeeID) {
             return; // nothing to default to — an unowned deal is the honest outcome
         }
