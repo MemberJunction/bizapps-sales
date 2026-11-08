@@ -40,7 +40,8 @@ import { EntitySaveOptions, RunView } from '@memberjunction/core';
 
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
 import { MJS_ENTITIES } from '../data/entity-names';
-import { ShouldStampCompanyFromPipeline, type PipelineCompanyRow } from './company-from-pipeline';
+import { SameDealID, WatchDealSaves, type DealSave } from '../data/deal-saves';
+import { OnlyLinkedCompany, ShouldStampCompanyFromPipeline, type PipelineCompanyRow } from './company-from-pipeline';
 
 /** See `deal-stage-event-form.component.ts` for why the priority is explicit rather than import-order. */
 @RegisterClass(BaseFormComponent, 'MJ_BizApps_Sales: Deals', 2)
@@ -105,6 +106,36 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
          */
         this.RecordSaved.subscribe(() => { void this.resolveDealState(); });
         this.RecordRefreshed.subscribe(() => { void this.resolveDealState(); });
+        this.stopWatchingSaves = WatchDealSaves((save) => { void this.OnDealSaved(save); });
+    }
+
+    public override ngOnDestroy(): void {
+        this.stopWatchingSaves?.();
+        this.stopWatchingSaves = null;
+        super.ngOnDestroy();
+    }
+
+    private stopWatchingSaves: (() => void) | null = null;
+
+    /**
+     * Reloads this deal when another copy of it was saved (bc-aidp-next-golive#419).
+     *
+     * Explorer re-focuses a deal's open tab instead of loading it again, and the board's stage move
+     * saves its own copy of the deal. So a reopened deal showed the stage it had when the tab first
+     * opened, until the browser was refreshed. `RefreshRecord` re-reads the row and re-runs the lock
+     * through `RecordRefreshed`.
+     *
+     * Never over the user's work: not in edit mode (`RefreshRecord` refuses that itself) and not while
+     * anything is unsaved. A save this form ran through its own record is not news, so it is skipped.
+     *
+     * @returns whether the record was reloaded.
+     */
+    public async OnDealSaved(save: DealSave): Promise<boolean> {
+        const record = this.record;
+        if (!record || save.EntityName !== MJS_ENTITIES.Deal || save.Record === record) return false;
+        if (!SameDealID(save.DealID, record.Get('ID') as string | null)) return false;
+        if (this.EditMode || record.Dirty || this.PendingRecordsDirty() || this.HasAdditionalUnsavedChanges) return false;
+        return this.RefreshRecord();
     }
 
     /** Emits after {@link RefreshDealState}, so mounted panels re-check their own notices. */
@@ -129,9 +160,22 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         this.cdr?.detectChanges();
     }
 
+    /**
+     * Whether the deal's PERSISTED `AccountID` is blank, allowing a closed deal with no account to be
+     * linked to one once without reopening (golive#306).
+     */
+    public get IsPersistedAccountBlank(): boolean {
+        const field =
+            this.record?.GetFieldByName?.('AccountID') ??
+            this.record?.Fields?.find((f) => f.Name === 'AccountID');
+        if (!field) return false;
+        const old = field.OldValue as string | null | undefined;
+        return !old || String(old).trim() === '';
+    }
+
     /** The fields a user may still edit right now — everything when open, the carve-outs when locked. */
     public EditableFieldNames(): readonly string[] | null {
-        return this.IsLocked ? [...DealFieldsEditableWhileLocked(this.IsLost)] : null;
+        return this.IsLocked ? [...DealFieldsEditableWhileLocked(this.IsLost, this.IsPersistedAccountBlank)] : null;
     }
 
     /**
@@ -142,7 +186,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      */
     private async resolveCloseLock(): Promise<void> {
         const persisted = this.record?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
-        const lock = await ResolveDealLockState(persisted);
+        const lock = await ResolveDealLockState(persisted, undefined, this.IsPersistedAccountBlank);
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
         this.IsWon = lock.IsWon;
@@ -150,7 +194,8 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     }
 
     /**
-     * Fills the selling company from the pipeline before the save is validated.
+     * Fills the selling company from the pipeline before the save is validated, when the pipeline
+     * serves only one company.
      *
      * WHY IT IS HERE AND NOT IN `Validate()`. `SaveRecord` calls `Validate()` and returns early when it
      * fails, so a stamp applied inside validation would be racing the thing it exists to satisfy. This
@@ -208,7 +253,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         return freshness.IsStale;
     }
 
-    /** Reads the chosen pipeline's company and writes it to the deal. See `SaveRecord` for why. */
+    /** Writes the chosen pipeline's only linked company to the deal. See `SaveRecord` for why. */
     private async stampCompanyFromPipeline(): Promise<void> {
         const record = this.record;
         const should = ShouldStampCompanyFromPipeline({
@@ -220,14 +265,10 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             return;
         }
 
-        /**
-         * `ResultType: 'simple'` returns plain rows, which is what is wanted: CodeGen generates no
-         * `PipelineEntity` subclass, and nothing here mutates the pipeline — only reads one column off it.
-         */
         const rv = new RunView();
         const result = await rv.RunView<PipelineCompanyRow>({
-            EntityName: MJS_ENTITIES.Pipeline,
-            ExtraFilter: `ID='${String(record.Get('PipelineID')).replace(/'/g, "''")}'`,
+            EntityName: MJS_ENTITIES.PipelineCompany,
+            ExtraFilter: `PipelineID='${String(record.Get('PipelineID')).replace(/'/g, "''")}' AND IsActive=1`,
             ResultType: 'simple',
             Fields: ['CompanyID'],
         });
@@ -236,7 +277,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             return;
         }
 
-        const companyID = result.Results?.[0]?.CompanyID ?? null;
+        const companyID = OnlyLinkedCompany(result.Results ?? []);
         if (companyID) {
             record.Set('CompanyID', companyID);
         }
@@ -254,7 +295,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             return result;
         }
 
-        const editable = DealFieldsEditableWhileLocked(this.IsLost);
+        const editable = DealFieldsEditableWhileLocked(this.IsLost, this.IsPersistedAccountBlank);
         // The status repair the server allows on a deal whose status row is gone (#402).
         const statusRepair = (name: string): boolean => this.IsStatusMissing && name === 'DealStatusTypeID';
         const frozen = this.record.Fields.filter((f) => f.Dirty && !editable.has(f.Name) && !statusRepair(f.Name));

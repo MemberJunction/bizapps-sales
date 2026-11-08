@@ -14,7 +14,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import { RankCatalogMatches, type MJOProductOption } from '@mj-biz-apps/orders-ng';
-import type { ProductLookup } from '@mj-biz-apps/sales-entities';
+import type { DraftProductLookup, ProductLookup } from '@mj-biz-apps/sales-entities';
 
 /** A ranking stand-in: the three fields the ranker reads, and inert values for the rest. */
 function standIn(p: ProductLookup): MJOProductOption {
@@ -52,4 +52,24 @@ export function RankDealProducts(
     return RankCatalogMatches([...byStandIn.keys()], query, dealCompanyID).map(
         (option) => byStandIn.get(option) as ProductLookup,
     );
+}
+
+/**
+ * How many Draft products match `query` by the same rule the list uses (bc-aidp-next-golive#433).
+ *
+ * Zero for an empty query: with nothing typed there is no search for the hidden products to match,
+ * and a count of every Draft product in the catalogue would tell the rep nothing about what they want.
+ */
+export function CountDraftMatches(drafts: readonly DraftProductLookup[], query: string): number {
+    if (!query.trim() || !drafts.length) {
+        return 0;
+    }
+    const asLookups = drafts.map((d): ProductLookup => ({
+        ...d,
+        CompanyID: '',
+        Company: null,
+        SubscriptionTypeID: null,
+        ProductTypeID: null,
+    }));
+    return RankDealProducts(asLookups, query, null).length;
 }

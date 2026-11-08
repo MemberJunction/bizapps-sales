@@ -106,7 +106,7 @@ import {
     MJOLinePricePickerComponent,
     type MJOExistingHolding,
 } from '@mj-biz-apps/orders-ng';
-import { RankDealProducts } from './deal-product-ranking';
+import { CountDraftMatches, RankDealProducts } from './deal-product-ranking';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountAmountToPercent,
@@ -125,6 +125,7 @@ import {
     RecordDiscountConcession,
     ShouldOfferTermStart,
     type DiscountReasonCategory,
+    type DraftProductLookup,
     type ProductLookup,
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
@@ -255,6 +256,13 @@ interface RemoteOperationRouter {
                                 @if (PickerHidden > 0) {
                                     <div class="mjs-le__pick-empty" data-testid="line-product-more">
                                         {{ PickerHidden }} more — keep typing to narrow the list.
+                                    </div>
+                                }
+                                <!-- golive#433: a new product starts as Draft and is not offered, so say when the
+                                     search matches some, whether or not any Active product matches too. -->
+                                @if (DraftMatchNote; as note) {
+                                    <div class="mjs-le__pick-empty" data-testid="line-product-drafts" role="status">
+                                        <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ note }}
                                     </div>
                                 }
                             </div>
@@ -705,6 +713,14 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     public PickerResults: ProductLookup[] = [];
     /** How many matches are past the list's cap — named so the rep knows to keep typing. */
     public PickerHidden = 0;
+    /** How many Draft products match the search; the picker hides them, and the note says so (golive#433). */
+    public DraftMatches = 0;
+    /** Orders' Draft products, matched against the search for {@link DraftMatches}; never offered. */
+    private draftProducts: DraftProductLookup[] = [];
+    /** The text the list was last ranked by, so Draft rows that arrive later are counted against it. */
+    private rankedQuery = '';
+    /** Set on destroy, so a read that returns after the dialog closed does not touch its view. */
+    private destroyed = false;
     /** Each product's catalog price, for the picker label — read from orders, keyed by product id. */
     private readonly productPriceLabels = new Map<string, string>();
     /** The signed-in rep's price-override grant; `'none'` hides the price picker. */
@@ -734,6 +750,11 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     private coveredValue: number | null = null;
     private reasonCategories: DiscountReasonCategory[] | null = null;
     public DiscountCategory: DiscountReasonCategory | null = null;
+    /**
+     * Client-generated UUID for the current discount-concession recording attempt, kept across a retry
+     * so a resend after a timeout finds the concession the first attempt already wrote (#512).
+     */
+    private pendingConcessionID: string | null = null;
     public DiscountReason = '';
     /** What the rep must know after a save that recorded, or failed to record, a concession. */
     public Notice: string | null = null;
@@ -751,6 +772,8 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             const persisted = this.Deal?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
             this.IsLocked = (await ResolveDealLockState(persisted)).IsLocked;
 
+            // Not awaited: the note is a hint, and the catalogue must not wait on it.
+            void this.loadDraftProducts();
             await this.loadProducts();
             await this.loadProductPriceLabels();
             this.OverrideKind = this.resolveOverrideKind();
@@ -865,6 +888,23 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
                 `${reason.replace(/\.?\s*$/, '.')} Reload the page and try again; if it persists, an administrator needs to check ` +
                 `access to Orders' products.`;
         }
+    }
+
+    /**
+     * Orders' Draft products, for the note under the list. Re-counts on arrival, since the rep may
+     * already be typing. Anything that goes wrong only leaves the note off.
+     */
+    private async loadDraftProducts(): Promise<void> {
+        try {
+            this.draftProducts = await this.service.LoadDraftProducts();
+        } catch {
+            this.draftProducts = [];
+        }
+        // A closed list is re-counted when it next opens, and a dialog closed before the read returned
+        // has no view to update.
+        if (!this.PickerOpen || this.destroyed) return;
+        this.DraftMatches = CountDraftMatches(this.draftProducts, this.rankedQuery);
+        this.cdr.detectChanges();
     }
 
     /** Focus the dialog itself while it loads, so the trap and Escape work from the first frame. */
@@ -996,7 +1036,18 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         const ranked = RankDealProducts(this.Products, query, this.Deal?.CompanyID ?? null);
         this.PickerResults = ranked.slice(0, MJSDealLineEditorComponent.PickerLimit);
         this.PickerHidden = ranked.length - this.PickerResults.length;
+        this.rankedQuery = query;
+        this.DraftMatches = CountDraftMatches(this.draftProducts, query);
         this.PickerCursor = 0;
+    }
+
+    /** The note under the list when the search matches Draft products it does not offer, or null. */
+    public get DraftMatchNote(): string | null {
+        const n = this.DraftMatches;
+        if (n <= 0) return null;
+        const subject = n === 1 ? '1 Draft product matches' : `${n} Draft products match`;
+        const object = n === 1 ? 'it' : 'them';
+        return `${subject} but cannot be sold yet. Activate ${object} in Orders → Catalog to add ${object} here.`;
     }
 
     private chosenProductLabel(): string {
@@ -1066,6 +1117,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.EngineDefault = undefined;
         this.Applicable = [];
         this.Working.SubscriptionAction = null;
+        this.pendingConcessionID = null;
         void this.refreshApplicable();
         void this.refreshHolding();
         this.cdr.detectChanges();
@@ -1178,6 +1230,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         }
         this.DiscountRefusal = null;
         this.Working.DiscountPct = converted.Fraction;
+        this.pendingConcessionID = null;
     }
 
     /* ── A discount stated in dollars ─────────────────────────────────────────── */
@@ -1217,6 +1270,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.DiscountRefusal = null;
         if (converted.Fraction === (this.Working.DiscountPct ?? 0)) return;
         this.Working.DiscountPct = converted.Fraction;
+        this.pendingConcessionID = null;
         this.SchedulePrice();   // a priced input changed — ask Orders again
     }
 
@@ -1435,6 +1489,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      * or `Save` owns its own `finally`.
      */
     public ngOnDestroy(): void {
+        this.destroyed = true;
         if (this.priceTimer) {
             clearTimeout(this.priceTimer);
             this.priceTimer = null;
@@ -1785,13 +1840,18 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      */
     private async recordDiscountConcession(): Promise<string | null> {
         if (!this.Working || !this.NeedsDiscountReason || !this.DiscountCategory) return null;
+        this.pendingConcessionID ??= crypto.randomUUID();
         const outcome = await RecordDiscountConcession({
             OrderLineID: this.Working.ID,
             ReasonCategory: this.DiscountCategory,
             Reason: this.DiscountReason,
+            ConcessionID: this.pendingConcessionID,
         });
         this.savedDiscountPct = this.Working.DiscountPct ?? null;
-        if (outcome.Recorded) await this.refreshCoveredValue();
+        if (outcome.Recorded) {
+            this.pendingConcessionID = null;
+            await this.refreshCoveredValue();
+        }
         if (!outcome.Recorded) {
             return (
                 `The line is saved, but its discount could not be recorded for approval: ${outcome.Message} ` +
@@ -1840,6 +1900,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.DiscountCategory = null;
         this.DiscountReason = '';
         this.DiscountRefusal = null;
+        this.pendingConcessionID = null;
         this.Closed.emit();
     }
 }

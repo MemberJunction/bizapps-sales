@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
     type EntityInfo,
     EntityLifecyclePolicyEngine,
+    type IMetadataProvider,
     ServerOperationScopeManager,
+    type UserInfo,
 } from '@memberjunction/core';
 import { DealCloseStampFields, DealFieldsEditableWhileLocked } from '@mj-biz-apps/sales-entities';
+import { CloseDealOperation } from '../CloseDealOperation.js';
 import {
     DEAL_CLOSE_OPERATION_KEY,
     DEAL_LIFECYCLE_POLICY,
@@ -150,5 +153,146 @@ describe('the two paths that may write the stamps', () => {
                 'MJ_BizApps_Sales: Deals',
             ),
         ).toBe(false);
+    });
+});
+
+describe('golive#387 — already-Won refusal on re-close or stale pre-close save', () => {
+    const DEAL_ID = 'aaaaaaaa-0000-4000-8000-000000000001';
+    const WON_STATUS_ID = 'aaaaaaaa-0000-4000-8000-000000000002';
+    const CONTRACT_ID = 'aaaaaaaa-0000-4000-8000-000000000003';
+    const USER = { ID: 'aaaaaaaa-0000-4000-8000-000000000099' } as UserInfo;
+
+    it('Sales.CloseDeal tells the caller the deal is already Won and names the contract', async () => {
+        const provider = {
+            GetEntityObject: vi.fn(async () => ({
+                Load: async () => true,
+                ID: DEAL_ID,
+                DealNumber: 'DEAL-0042',
+                Name: 'Renewal',
+                DealStatusTypeID: WON_STATUS_ID,
+                ContractID: CONTRACT_ID,
+            })),
+            RunView: vi.fn(async (params: { EntityName: string }) => {
+                if (params.EntityName === 'MJ_BizApps_Sales: Deal Status Types') {
+                    return {
+                        Success: true,
+                        Results: [{ ID: WON_STATUS_ID, IsWon: true, IsLost: false, IsClosed: true, LocksDeal: true }],
+                    };
+                }
+                if (params.EntityName === 'MJ_BizApps_Contracts: Contracts') {
+                    return {
+                        Success: true,
+                        Results: [{ ContractNumber: 'CON-0019' }],
+                    };
+                }
+                return { Success: true, Results: [] };
+            }),
+        } as unknown as IMetadataProvider;
+
+        const op = new CloseDealOperation() as unknown as {
+            InternalExecute(
+                input: { DealID: string; DealStatusTypeID: string },
+                p: IMetadataProvider,
+                u: UserInfo,
+            ): Promise<{ Success: boolean; Issues: Array<{ Message: string }> }>;
+        };
+        const out = await op.InternalExecute({ DealID: DEAL_ID, DealStatusTypeID: WON_STATUS_ID }, provider, USER);
+
+        expect(out.Success).toBe(false);
+        expect(out.Issues[0]?.Message).toBe('DEAL-0042 is already Won; contract CON-0019 was created.');
+    });
+
+    it('DealEntityServer.staleWonSaveRefusal names the deal and contract when a stale pre-close save hits a Won deal', async () => {
+        const instance = Object.create(DealEntityServer.prototype) as {
+            staleWonSaveRefusal(): Promise<string | null>;
+        };
+        for (const [k, v] of Object.entries({
+            IsSaved: true,
+            DealNumber: 'DEAL-0042',
+            Name: 'Renewal',
+            ContractID: null,
+            ContextCurrentUser: USER,
+            GetFieldByName: (name: string) => {
+                if (name === 'DealStatusTypeID') return { OldValue: WON_STATUS_ID, Value: 'open', Dirty: true };
+                if (name === 'ContractID') return { OldValue: CONTRACT_ID, Value: null, Dirty: true };
+                return { OldValue: null, Value: null, Dirty: false };
+            },
+            ProviderToUse: {
+                RunView: vi.fn(async (params: { EntityName: string }) => {
+                    if (params.EntityName === 'MJ_BizApps_Sales: Deal Status Types') {
+                        return {
+                            Success: true,
+                            Results: [{ LocksDeal: true, IsLost: false, IsWon: true }],
+                        };
+                    }
+                    if (params.EntityName === 'MJ_BizApps_Contracts: Contracts') {
+                        return {
+                            Success: true,
+                            Results: [{ ContractNumber: 'CON-0019' }],
+                        };
+                    }
+                    return { Success: true, Results: [] };
+                }),
+            },
+        })) {
+            Object.defineProperty(instance, k, { value: v, writable: true });
+        }
+
+        expect(await instance.staleWonSaveRefusal()).toBe(
+            'DEAL-0042 is already Won; contract CON-0019 was created.',
+        );
+    });
+});
+
+describe('golive#306 — filling a blank AccountID on a closed deal', () => {
+    const LOST_STATUS_ID = 'aaaaaaaa-0000-4000-8000-000000000006';
+    const ACCOUNT_A = 'aaaaaaaa-0000-4000-8000-000000000010';
+    const ACCOUNT_B = 'aaaaaaaa-0000-4000-8000-000000000011';
+
+    function closedDeal(oldAccount: string | null, newAccount: string | null) {
+        const instance = Object.create(DealEntityServer.prototype) as {
+            checkCloseLock(reopening?: boolean): Promise<string | null>;
+            _orderStatusWarnings: string[];
+        };
+        const fields = [
+            { Name: 'DealStatusTypeID', OldValue: LOST_STATUS_ID, Value: LOST_STATUS_ID, Dirty: false },
+            { Name: 'AccountID', OldValue: oldAccount, Value: newAccount, Dirty: oldAccount !== newAccount },
+        ];
+        for (const [k, v] of Object.entries({
+            IsSaved: true,
+            AccountID: newAccount,
+            Fields: fields,
+            Companions: [],
+            RosterDrivesThisSave: false,
+            _orderStatusWarnings: [] as string[],
+            GetFieldByName: (name: string) => fields.find((f) => f.Name === name),
+            ProviderToUse: {
+                RunView: vi.fn(async () => ({
+                    Success: true,
+                    Results: [{ LocksDeal: true, IsLost: true, IsWon: false }],
+                })),
+            },
+        })) {
+            Object.defineProperty(instance, k, { value: v, writable: true });
+        }
+        return instance;
+    }
+
+    it('allows setting AccountID when the persisted account was blank, and records a warning', async () => {
+        const d = closedDeal(null, ACCOUNT_A);
+        expect(await d.checkCloseLock()).toBeNull();
+        expect(d._orderStatusWarnings).toContain(
+            "Account was set on this closed deal; its order's bill-to and any contract were left unchanged.",
+        );
+    });
+
+    it('refuses changing a non-blank AccountID on a closed deal', async () => {
+        const d = closedDeal(ACCOUNT_A, ACCOUNT_B);
+        expect(await d.checkCloseLock()).toContain('Account cannot be changed until the status is set back to Open.');
+    });
+
+    it('refuses clearing a non-blank AccountID on a closed deal', async () => {
+        const d = closedDeal(ACCOUNT_A, null);
+        expect(await d.checkCloseLock()).toContain('Account cannot be changed until the status is set back to Open.');
     });
 });
