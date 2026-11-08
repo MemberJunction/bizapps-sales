@@ -65,6 +65,7 @@ import {
 } from '@mj-biz-apps/sales-core-entities-server';
 
 import {
+    CompanyForPipeline,
     E_DEAL,
     E_EMPLOYEE,
     E_SCHEDULE,
@@ -123,7 +124,8 @@ async function openDeal(
     deal.DealTypeID = f.DealTypeID;
     deal.DealStatusTypeID = f.OpenStatusID;
     deal.AccountID = f.AccountID;
-    deal.CompanyID = f.PipelineCompanyID;
+    // The named pipeline's own company: the server refuses one not linked to the pipeline.
+    deal.CompanyID = CompanyForPipeline(f, pipelineID);
     deal.TermMonths = 12;
 
     for (const seed of instalments) {

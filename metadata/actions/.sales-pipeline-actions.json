@@ -5,18 +5,19 @@
       "`.sales-forecast-actions.json`: MetadataSync reads every dot-json here, so separate files do not",
       "conflict.",
       "",
-      "Companies are the deployment's data, so the copies cannot ship as metadata. An admin runs this once",
-      "after install, and again after adding a company: a company that already has a pipeline with the",
-      "default pipeline's Code is skipped."
+      "Companies are the deployment's data, so the links cannot ship as metadata. An admin runs this once",
+      "after install, and again after adding a company: a company already linked to the default pipeline",
+      "is skipped. It replaced copying the pipeline and its stages per company: one pipeline now serves",
+      "every company linked to it through PipelineCompany. Same record ID, renamed."
     ],
     "fields": {
-      "Name": "Copy Default Pipeline To Companies",
+      "Name": "Link Default Pipeline To Companies",
       "CategoryID": "@lookup:MJ: Action Categories.Name=Sales",
-      "Description": "Copy the default pipeline (IsDefault = 1) and all of its stages onto every company that has no pipeline with the same Code. Each company's copy saves in one transaction; a failure is reported per company and does not undo the others. Re-runnable: companies that already have the pipeline are skipped.",
+      "Description": "Link the default pipeline (IsDefault = 1) to every company that has no link to it, so deals for that company can use it. A failure is reported per company and does not undo the others. Re-runnable: companies already linked, actively or not, are skipped.",
       "Type": "Custom",
-      "DriverClass": "Sales.CopyDefaultPipelineToCompanies",
+      "DriverClass": "Sales.LinkDefaultPipelineToCompanies",
       "IconClass": "fa-solid fa-code-branch",
-      "UserPrompt": "Give every company its own copy of the default sales pipeline.",
+      "UserPrompt": "Make the default sales pipeline available to every company.",
       "CodeApprovalStatus": "Approved",
       "Status": "Active"
     },

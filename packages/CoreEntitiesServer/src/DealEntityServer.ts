@@ -123,7 +123,7 @@ type StatusTransitionPlan =
     | ActionableStatusTransition
     | UnreadableStatusTransition
     | PriorMissingStatusTransition;
-const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
+const PIPELINE_COMPANY_ENTITY = 'MJ_BizApps_Sales: Pipeline Companies';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 const SALES_ACCOUNT_ENTITY = 'MJ_BizApps_Sales: Sales Accounts';
 const SALES_CONTACT_ENTITY = 'MJ_BizApps_Sales: Sales Contacts';
@@ -173,12 +173,9 @@ interface CurrencyIDRow {
     ID: string;
 }
 
-/**
- * The one column the pipeline lookup selects. `CompanyID` is NOT NULL on `Pipeline`, so a successful read
- * always carries one.
- */
-interface PipelineCompanyRow {
-    CompanyID: string;
+/** The one column the pipeline-company link lookup selects; only whether a row exists matters. */
+interface PipelineCompanyLinkRow {
+    ID: string;
 }
 
 const STAGE_ENTITY = 'MJ_BizApps_Sales: Pipeline Stages';
@@ -602,22 +599,31 @@ export class DealEntityServer extends DealEntity {
             return this.refuseSave(partyRefusal);
         }
 
+        let companyRefusal: string | null;
         try {
-            await this.stampCompanyFromPipeline();
+            companyRefusal = await this.companyLinkedToPipelineRefusal();
+        } catch (err) {
+            return this.refuseSave(`could not check the company against the pipeline: ${err}`);
+        }
+        if (companyRefusal) {
+            return this.refuseSave(companyRefusal);
+        }
+
+        try {
             await this.stampOwnerFromTeam();
         } catch (err) {
             return this.refuseSave(`could not resolve a server-maintained stamp: ${err}`);
         }
 
         /**
-         * AFTER the company stamp, because the company is what decides the currency, and OUTSIDE the
+         * AFTER the company check, because the company is what decides the currency, and OUTSIDE the
          * try above, because this one may not refuse a save. See {@link defaultCurrencyOnCreate}.
          */
         await this.defaultCurrencyOnCreate();
         this.defaultCreationDateOnCreate();
 
         /**
-         * AFTER the company stamp, deliberately — and NOT AT ALL on a locked deal.
+         * AFTER the company check, deliberately — and NOT AT ALL on a locked deal.
          *
          * The lock check above has already run, so `_lockedAtSave` is trustworthy here. A locked deal
          * that reaches this point is one making a PERMITTED edit (Description, NextStep), and permitted
@@ -1391,11 +1397,11 @@ export class DealEntityServer extends DealEntity {
      *
      * ── WHY FIRST SAVE AND NOT NewRecord() ──
      *
-     * `OrderHeader.CompanyID` is NOT NULL, and a deal does not know its company until
-     * `stampCompanyFromPipeline()` has run: the caller supplies a PipelineID and the selling company is
-     * derived from it (D-4). Provisioning in `NewRecord()` would mean inventing a company or building an
-     * order that cannot be inserted. So it happens here, after the stamps, on the one call where
-     * `IsSaved` is still false.
+     * `OrderHeader.CompanyID` is NOT NULL, and a deal's company is only known to be valid once
+     * `companyLinkedToPipelineRefusal()` has passed it: the rep picks the selling company and it must be
+     * linked to the pipeline. Provisioning in `NewRecord()` would mean inventing a company or building an
+     * order that cannot be inserted. So it happens here, after the checks and stamps, on the one call
+     * where `IsSaved` is still false.
      *
      * ── WHY THE GUARD IS `IsSaved`, AND NOT `IsSaved || OrderID` ──
      *
@@ -3326,61 +3332,66 @@ export class DealEntityServer extends DealEntity {
     /* ── Selling company ────────────────────────────────────────────────────── */
 
     /**
-     * Forces `Deal.CompanyID` to the pipeline's company, ignoring whatever the caller supplied.
+     * Refuses a deal whose company is not actively linked to its pipeline through `PipelineCompany`.
      *
-     * THE PIPELINE IS THE ONLY SOURCE THAT CAN BE RIGHT. A deal belongs to the company that owns the
-     * pipeline it sits in, and a CHECK constraint cannot express that — it cannot reach across the
-     * foreign key to compare the two. So it is resolved on the write path instead, on every save, for
-     * every caller.
+     * A pipeline can serve several companies, so the deal's company is the rep's choice and can no
+     * longer be copied from the pipeline. What stays checkable is that the choice is one the pipeline
+     * offers. A CHECK constraint cannot reach across the link, so it is checked here, on every save, for
+     * every caller — the form, the workspace, imports and Actions alike.
      *
-     * An explicitly supplied value is OVERWRITTEN rather than rejected. A client that gets this wrong is
-     * not making a choice the app should honour or argue with; it is stating something it has no standing
-     * to know, and the correct answer is available here.
+     * Keyed on either half moving, like the stage check: an existing deal whose link was later retired
+     * (`IsActive = 0`) keeps saving ordinary edits, and is refused only when a save changes its company
+     * or its pipeline.
      *
-     * A missing pipeline is left alone: `Validate()` already refuses a deal without one, and raising a
-     * second, vaguer complaint here would just bury the specific message the user needs.
+     * A missing pipeline or company is left to `Validate()`, which already names it.
      */
-    private async stampCompanyFromPipeline(): Promise<void> {
-        if (!this.PipelineID) {
-            return;
+    private async companyLinkedToPipelineRefusal(): Promise<string | null> {
+        const pipelineID = this.PipelineID;
+        const companyID = this.CompanyID;
+        if (!pipelineID || !companyID) {
+            return null;
         }
-        if (!GUID_SHAPE.test(this.PipelineID)) {
-            throw new Error(`DealEntityServer: pipeline ${this.PipelineID} is not a valid ID.`);
+
+        const companyDirty = this.GetFieldByName('CompanyID')?.Dirty === true;
+        const pipelineDirty = this.GetFieldByName('PipelineID')?.Dirty === true;
+        if (this.IsSaved && !companyDirty && !pipelineDirty) {
+            return null;
+        }
+        if (!GUID_SHAPE.test(pipelineID)) {
+            return 'the pipeline on this deal is not a valid ID.';
+        }
+        if (!GUID_SHAPE.test(companyID)) {
+            return 'the company on this deal is not a valid ID.';
         }
 
         const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
-        const result = await viewProvider.RunView<PipelineCompanyRow>(
+        const result = await viewProvider.RunView<PipelineCompanyLinkRow>(
             {
-                EntityName: PIPELINE_ENTITY,
-                ExtraFilter: `ID = '${this.PipelineID}'`,
+                EntityName: PIPELINE_COMPANY_ENTITY,
+                ExtraFilter: `PipelineID = '${pipelineID}' AND CompanyID = '${companyID}' AND IsActive = 1`,
                 ResultType: 'simple',
-                Fields: ['CompanyID'],
+                Fields: ['ID'],
             },
             this.ContextCurrentUser,
         );
         if (!result.Success) {
-            throw new Error(`DealEntityServer: could not read the pipeline's company: ${result.ErrorMessage}`);
+            throw new Error(`DealEntityServer: could not read the pipeline's companies: ${result.ErrorMessage}`);
         }
-
-        const pipeline = (result.Results ?? [])[0];
-        if (!pipeline?.CompanyID) {
-            throw new Error(
-                `DealEntityServer: pipeline ${this.PipelineID} could not be read, so the selling company is unknown.`,
-            );
+        if ((result.Results ?? []).length === 0) {
+            return 'the pipeline on this deal is not available to its company. Pick a pipeline linked to the company, or link the company to the pipeline.';
         }
-        this.CompanyID = pipeline.CompanyID;
+        return null;
     }
 
     /**
      * Refuses a deal whose stage belongs to a different pipeline (bc-aidp-next-golive#291).
      *
-     * ── WHY REFUSE, WHEN THE COMPANY STAMP ABOVE OVERWRITES ─────────────────────────────────────
+     * ── WHY REFUSE RATHER THAN CORRECT ──────────────────────────────────────────────────────────
      *
-     * `stampCompanyFromPipeline` can correct a wrong company because there is exactly one right
-     * answer and it is derivable: the pipeline owns a company. A wrong STAGE has no such answer.
-     * Moving the deal to the pipeline's first stage would be inventing a position in a sales process
-     * nobody chose, and keeping the stage while changing the pipeline would be the same invention
-     * from the other end. So this one asks the caller instead.
+     * A wrong stage has no derivable right answer. Moving the deal to the pipeline's first stage
+     * would be inventing a position in a sales process nobody chose, and keeping the stage while
+     * changing the pipeline would be the same invention from the other end. So this asks the caller
+     * instead, as the company check above does.
      *
      * ── IT DID NOT SIT INERT ────────────────────────────────────────────────────────────────────
      *
@@ -3391,7 +3402,7 @@ export class DealEntityServer extends DealEntity {
      * Actions reach the same code without passing through it.
      *
      * A CHECK constraint cannot express this — it cannot reach across the foreign key to compare the
-     * stage's pipeline with the deal's — which is the same reason the company stamp lives here.
+     * stage's pipeline with the deal's — which is the same reason the company check lives here.
      *
      * ── KEYED ON EITHER HALF MOVING ─────────────────────────────────────────────────────────────
      *
@@ -3523,10 +3534,10 @@ export class DealEntityServer extends DealEntity {
      *
      * ── IT IS ALSO WHAT THE SIBLING FIELD ALREADY DOES ──────────────────────────────────────────
      *
-     * `CompanyID` and `OwnerEmployeeID` are both `serverMaintained` in the form's field list, both
-     * derived, and both have exactly one right answer obtainable elsewhere. `stampCompanyFromPipeline`
-     * OVERWRITES a supplied company for that reason. Nothing principled made the owner refuse instead;
-     * the two now behave the same way.
+     * `OwnerEmployeeID` is `serverMaintained` in the form's field list and derived, with exactly one
+     * right answer obtainable elsewhere (the owner-role team member), so a supplied value is overwritten
+     * rather than argued with. `CompanyID` used to be the same, copied from the pipeline; it is the rep's
+     * choice now that a pipeline serves several companies, and is checked instead.
      *
      * Loading the roster is what makes the override happen: `stampOwnerFromTeam()` runs below and is
      * guarded by `RosterDrivesThisSave`, which asks `Team.IsLoaded`. A load failure leaves the roster

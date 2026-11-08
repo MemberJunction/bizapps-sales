@@ -11,8 +11,9 @@ export const MJS_ENTITIES = {
     DealContactRole: 'MJ_BizApps_Sales: Deal Contact Roles',
     DealStageEvent: 'MJ_BizApps_Sales: Deal Stage Events',
     DealPaymentSchedule: 'MJ_BizApps_Sales: Deal Payment Schedules',
-    /** Read to resolve the selling company a new deal must carry. See `company-from-pipeline.ts`. */
     Pipeline: 'MJ_BizApps_Sales: Pipelines',
+    /** A pipeline's selling companies. Read to offer a company's pipelines and to pre-fill a deal's company. */
+    PipelineCompany: 'MJ_BizApps_Sales: Pipeline Companies',
     /** Read for `IsWon`, so the order header warns only for an order a won deal names (golive#443). */
     DealStatusType: 'MJ_BizApps_Sales: Deal Status Types',
     SalesAccount: 'MJ_BizApps_Sales: Sales Accounts',
