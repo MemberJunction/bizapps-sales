@@ -63,6 +63,21 @@ export interface OrderRelatedLinkState {
     Contract?: OrderContractRow | null;
     /** The contract's executed-agreement file, when one is linked and readable. */
     Agreement?: OrderAgreementFile | null;
+    /** The deal's `DealStatusType.IsWon`. Unknown (absent) when the status could not be read. */
+    DealIsWon?: boolean | null;
+    /**
+     * `true` once the contract lookup ANSWERED, found or not. A refused or thrown read leaves it unset,
+     * and the warning then stays silent rather than claiming a contract is missing.
+     */
+    ContractRead?: boolean;
+    /**
+     * `true` when the order is a reversal, so the deal was found through the order it reverses
+     * ({@link DealLookupOrderID}). The deal's chips still show; the warning does not, since the deal
+     * names the original order, not this one.
+     */
+    ViaReversedOrder?: boolean;
+    /** `true` when the order is voided. A voided order sends no invoice, so the warning does not apply. */
+    OrderVoided?: boolean;
 }
 
 /** The columns of `vwContracts` the order header shows. */
@@ -191,6 +206,10 @@ export function OrderRelatedLinksKey(recordID: string | null | undefined, state:
         contract?.State ?? '',
         contract?.IsAwaitingDocument ? '1' : '0',
         state.Agreement?.ID ?? '',
+        state.DealIsWon ? 'won' : '',
+        state.ContractRead ? 'read' : '',
+        state.ViaReversedOrder ? 'reversal' : '',
+        state.OrderVoided ? 'voided' : '',
     ].join(':');
 }
 
@@ -245,6 +264,14 @@ export interface OrderContractView {
     Chips: ResolvedRelatedChip[];
     /** "Awaiting signed agreement" when the contract's type needs paper and none is linked; else null. */
     AwaitingNote: string | null;
+    /** The "No executed agreement" warning for a won deal's order (golive#443); replaces the note. */
+    Warning: OrderAgreementWarning | null;
+}
+
+/** The warning chip's text and its longer explanation. */
+export interface OrderAgreementWarning {
+    Label: string;
+    Detail: string;
 }
 
 /** The contract chip's text: its number and status, e.g. `CTR-000123 · Active`. */
@@ -267,8 +294,9 @@ export function ContractChipName(contract: OrderContractRow): string {
  */
 export function OrderContractChips(state: OrderRelatedLinkState): OrderContractView {
     const contract = state.Contract;
+    const warning = NoExecutedAgreementWarning(state);
     if (!holds(state.DealID) || !contract) {
-        return { Chips: [], AwaitingNote: null };
+        return { Chips: [], AwaitingNote: null, Warning: warning };
     }
     const name = ContractChipName(contract) || 'Open';
     const chips: ResolvedRelatedChip[] = [chip('contract', 'Contract', name, 'fa-solid fa-file-contract', MJS_FOREIGN_ENTITIES.Contract, contract.ID)];
@@ -276,8 +304,45 @@ export function OrderContractChips(state: OrderRelatedLinkState): OrderContractV
     if (agreement && holds(agreement.ID)) {
         chips.push(chip('agreement', 'Executed agreement', agreement.Name || 'Open', 'fa-solid fa-file-signature', MJS_FOREIGN_ENTITIES.File, agreement.ID));
     }
-    const awaiting = contract.IsAwaitingDocument === true && !agreement;
-    return { Chips: chips, AwaitingNote: awaiting ? 'Awaiting signed agreement' : null };
+    const awaiting = contract.IsAwaitingDocument === true && !agreement && !warning;
+    return { Chips: chips, AwaitingNote: awaiting ? 'Awaiting signed agreement' : null, Warning: warning };
+}
+
+/**
+ * The "No executed agreement" warning (bc-aidp-next-golive#443, g443.1 A: warn, sending unchanged).
+ *
+ * The finance report of orders missing a deal, contract or executed agreement is a sales query of
+ * its own (bc-aidp-next-golive#388); this chip is the order form's half of the same control.
+ *
+ * - ONLY FOR AN ORDER A WON DEAL NAMES (g443.2 A). The panel only finds a deal through `Deal.OrderID`,
+ *   so renewals, checkout orders and conversions never reach this. An open or lost deal has no
+ *   agreement to expect yet. A reversal reaches the deal through the order it reverses and is
+ *   skipped: the deal names the original order, and the warning belongs there.
+ * - NOT FOR A VOIDED ORDER, which sends no invoice, so "Invoices still send" would be untrue.
+ * - THE GAP is no contract, or a contract `vwContracts` reports as awaiting its executed agreement. A
+ *   contract type that needs no paper (`RequiresExecutedDocument = 0`, Payment Link) never reports
+ *   awaiting, so it counts as covered.
+ * - SILENT WHEN UNSURE. A deal status or contract lookup that did not answer produces no warning: a
+ *   chip saying "no contract" because a read was refused would be a false alarm finance learns to skip.
+ *
+ * Apart from voided, the order's status is not consulted: the chip also warns on a draft order of a
+ * won deal, which is when the gap can still be closed before sending.
+ */
+export function NoExecutedAgreementWarning(state: OrderRelatedLinkState): OrderAgreementWarning | null {
+    if (!holds(state.DealID) || state.DealIsWon !== true || state.ContractRead !== true) {
+        return null;
+    }
+    if (state.ViaReversedOrder === true || state.OrderVoided === true) {
+        return null;
+    }
+    const contract = state.Contract;
+    if (!contract) {
+        return { Label: 'No executed agreement', Detail: 'This order comes from a won deal with no contract. Invoices still send.' };
+    }
+    if (contract.IsAwaitingDocument === true) {
+        return { Label: 'No executed agreement', Detail: 'The contract has no file marked as its executed agreement. Invoices still send.' };
+    }
+    return null;
 }
 
 function chip(key: string, label: string, name: string, icon: string, entityName: string, recordID: string): ResolvedRelatedChip {
