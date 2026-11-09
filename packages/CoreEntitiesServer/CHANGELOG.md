@@ -1,5 +1,14 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.25.0
+
+### Patch Changes
+
+- dde07ee: Close Won no longer stalls 30 seconds and returns a GraphQL 504. The check for an existing contract-processing task now reads on the close's own transaction instead of a separate connection that waited on the order-review task the close had just written.
+- Updated dependencies [73e4527]
+- Updated dependencies [c983e92]
+  - @mj-biz-apps/sales-entities@6.25.0
+
 ## 6.24.1
 
 ### Patch Changes
