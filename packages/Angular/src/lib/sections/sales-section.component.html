@@ -338,9 +338,15 @@
         <!-- ═════════════════════════ SETTINGS ═════════════════════════ -->
         <!-- Listed only for users who may change Application Settings; see SalesSettings.CanChange. -->
         @if (Page === 'settings') {
-          <mjs-sales-settings-page
-            [HidePipelines]="HidePipelines"
-            (HidePipelinesChange)="OnHidePipelinesChanged()"></mjs-sales-settings-page>
+          <div class="wrap wrap--list">
+            <div class="sechead">
+              <h2>Settings</h2>
+              <span class="r">Applies to everyone using Sales on this site</span>
+            </div>
+            <mjs-sales-settings-page
+              [HidePipelines]="HidePipelines"
+              (HidePipelinesChange)="OnHidePipelinesChanged()"></mjs-sales-settings-page>
+          </div>
         }
 
         <!-- ═════════════════════════ BOARD ═════════════════════════ -->

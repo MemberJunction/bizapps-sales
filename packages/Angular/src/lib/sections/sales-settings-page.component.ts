@@ -22,11 +22,7 @@ import { SalesSettings } from '../data/sales-settings';
     imports: [CommonModule, FormsModule, MJSwitchComponent],
     changeDetection: ChangeDetectionStrategy.OnPush,
     template: `
-        <div class="wrap wrap--list" data-testid="sales-settings">
-            <div class="sechead">
-                <h2>Settings</h2>
-                <span class="r">Applies to everyone using Sales on this site</span>
-            </div>
+        <div data-testid="sales-settings">
             <section class="setting">
                 <div class="setting__text">
                     <label class="setting__name" for="sales-hide-pipelines">Hide pipelines</label>
