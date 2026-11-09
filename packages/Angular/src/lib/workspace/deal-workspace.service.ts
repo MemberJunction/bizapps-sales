@@ -16,7 +16,7 @@ import { Injectable } from '@angular/core';
 import { EntitySaveOptions, LogError, LogStatus, Metadata, RunQuery, RunView, RunViewParams, type RunViewResult } from '@memberjunction/core';
 import { DealEntity } from '@mj-biz-apps/sales-entities';
 
-import { ExpandPipelinesByCompany, OrderPipelinesByCompany, type PipelineCompanyLink } from '../data/company-pipelines';
+import { ExpandPipelinesByCompany, OrderPipelinesByCompany, PIPELINE_LINK_ORDER, type PipelineCompanyLink } from '../data/company-pipelines';
 import { AssertRosterColumns } from './deal-roster.columns';
 
 import {
@@ -420,7 +420,8 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
     // read too, for the same reason retired pipelines are: their deals still have to be filterable.
     Pipelines: joinedLookupRead<PipelineRow, PipelineCompanyLink>(
         { EntityName: E_PIPELINE, ExtraFilter: PIPELINE_LIST_FILTER, OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'IsDefault', 'DisplayRank'] },
-        { EntityName: E_PIPELINE_COMPANY, ResultType: 'simple', Fields: ['PipelineID', 'CompanyID', 'Company'] },
+        // Oldest link first: the default pipeline's first-linked company is the default company.
+        { EntityName: E_PIPELINE_COMPANY, OrderBy: PIPELINE_LINK_ORDER, ResultType: 'simple', Fields: ['PipelineID', 'CompanyID', 'Company'] },
         (rows, links, into) => {
             const pipelines = rows.map((p) => ({
                 ID: p.ID,
