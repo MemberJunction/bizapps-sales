@@ -40,6 +40,19 @@ describe('CloseWonPolicyProblem', () => {
         expect(CloseWonPolicyProblem('{"CloseWonTasks":{"DueDays":5}}')).toContain('"DueDays"');
     });
 
+    // bizapps-sales#474: a lookup on a plain object finds Object's own members, so these slipped through
+    // as valid (null) or failed with "must be a undefined".
+    it.each(['constructor', 'toString', 'hasOwnProperty', '__proto__'])(
+        'refuses "%s", a key named after a built-in object property, as a setting the close does not use',
+        (key) => {
+            for (const value of ['1', 'null']) {
+                expect(CloseWonPolicyProblem(`{"${key}":${value}}`)).toContain(`has a setting the close does not use: "${key}"`);
+                expect(CloseWonPolicyProblem(`{"CloseWonTasks":{"${key}":${value}}}`))
+                    .toContain(`CloseWonTasks has a setting the close does not use: "${key}"`);
+            }
+        },
+    );
+
     it('refuses a value of the wrong type', () => {
         expect(CloseWonPolicyProblem('{"CreateContract":"yes"}')).toContain('must be a boolean');
         expect(CloseWonPolicyProblem('{"TermMonths":"12"}')).toContain('must be a whole number');
