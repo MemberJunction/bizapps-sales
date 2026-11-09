@@ -1,5 +1,20 @@
 # @mj-biz-apps/sales-entities
 
+## 6.25.0
+
+### Minor Changes
+
+- 73e4527: A pipeline can serve several selling companies. The new `Pipeline Companies` entity links a pipeline
+  to each company that sells through it, with `IsActive` to retire a link without touching existing
+  deals; `Pipeline.CompanyID` is removed. Every existing pipeline is linked to the company it had.
+
+  A deal's company is now the rep's choice: the company is picked first and the pipelines offered are
+  the ones actively linked to it. The server refuses a deal whose company is not linked to its pipeline,
+  instead of copying the company from the pipeline. Pipeline lookups by company resolve through the
+  link table.
+
+- c983e92: The 6.25 Metadata_Sync ships the Link Default Pipeline To Companies action and the Party Lookup Accounts query change, so a host that upgrades by migration gets the same metadata as one that ran `mj sync push`. It has a Postgres counterpart.
+
 ## 6.24.1
 
 ### Patch Changes
