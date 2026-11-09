@@ -206,6 +206,11 @@ export interface SalesRecordDiscountConcessionInput {
     ReasonCategory: string;
     /** The rep's reason. Required: an approver decides on it. */
     Reason: string;
+    /**
+     * Client-generated UUID for this recording attempt, so a retry after a timeout finds the
+     * concession the first attempt already wrote instead of withdrawing and recreating it.
+     */
+    ConcessionID?: string | null;
 }
 
 /**

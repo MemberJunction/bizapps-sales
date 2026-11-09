@@ -482,19 +482,20 @@ is wrong.
 > ### ⚠ THE ORDER IS LOAD-BEARING, AND THE FAILURE IT PREVENTS NAMES THE WRONG THING
 >
 > Push metadata FIRST, then seed. Both `metadata/pipelines/.sales-pipelines.json` and
-> `scripts/seed-demo-data.sh` set `Pipeline.CompanyID`, and they disagree: the metadata says
-> **Default Company** (correct on a fresh database, where nothing else exists), the seed splits the two
-> pipelines across **Blue Cypress** and **BC Education Group** so the demo can show that every rollup
-> slices by company.
+> `scripts/seed-demo-data.sh` write the pipelines' company links (`PipelineCompany`), and they disagree:
+> the metadata links both pipelines to **Default Company** (correct on a fresh database, where nothing
+> else exists); the seed links B2B to **Blue Cypress** and D2C to **BC Education Group**, so the demo
+> can show that every rollup slices by company, and retires (`IsActive = 0`) the Default Company links.
 >
-> In this order the seed lands last and everything is right. **Push again after seeding and the
-> metadata wins**, both pipelines collapse onto a company that owns no products, and every product
-> picker in the app goes empty. What you see is `locator.selectOption` timeouts and *"the orders
-> catalogue did not load"* -- nine failures in one run, none of which mentions a company or a pipeline.
-> Measured 2026-08-25. See **KI-26** for the repair, which is to re-run `seed-demo-data.sh`.
+> In this order the seed lands last and everything is right. The seed can only retire a Default Company
+> link that the push has already created. A push AFTER seeding is safe: the metadata's link rows carry no
+> `IsActive`, so a push never re-activates a link the seed retired (KI-26, resolved). Before
+> PipelineCompany the push repointed both pipelines at a company owning no products and emptied every
+> product picker (measured 2026-08-25).
 >
 > This matters because the push is also the remedy for other things -- a missing action, a stale remote
-> operation -- so there is a real reason to run it later in a host's life. When you do, re-seed after.
+> operation -- so there is a real reason to run it later in a host's life. The company links the seed
+> set survive it, so a re-seed after the push is no longer needed for them.
 
 
 > ### ⚠️ NONE OF THE COMMANDS BELOW NAME A DATABASE. They hit whatever `.env` says.

@@ -7,8 +7,8 @@ import { DealEntityServer } from '../DealEntityServer.js';
  * Nothing set `Deal.CurrencyID` — not the pipeline, not the company, not a column default — so the
  * Commercial section opened with the field blank on every deal anyone created (bc-aidp-next-golive#259
  * item 3). The tester asked for USD, "ideally configurable by company"; the per-company answer already
- * exists as `AccountingCompanyProfile.FunctionalCurrencyCode`, keyed on the same id the deal's
- * `CompanyID` was just stamped to.
+ * exists as `AccountingCompanyProfile.FunctionalCurrencyCode`, keyed on the deal's `CompanyID`, which
+ * the save has just checked against the pipeline's links.
  *
  * WHAT THESE TESTS ARE REALLY GUARDING is not the happy path — it is the promise that this default can
  * never cost anyone a deal. Accounting absent, no profile row, a failed read, a currency code naming no
@@ -165,7 +165,7 @@ describe('when the currency cannot be resolved, the deal is still created', () =
         expect(d.CurrencyID).toBeNull();
     });
 
-    it('leaves the field null when no selling company was stamped', async () => {
+    it('leaves the field null when the deal has no selling company', async () => {
         const d = deal({ CompanyID: null, functionalCurrencyCode: 'GBP' });
         await d.defaultCurrencyOnCreate();
         expect(d.CurrencyID).toBeNull();

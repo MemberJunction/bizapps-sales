@@ -93,6 +93,24 @@ describe('a LOCKED deal renders the frozen fields read-only', () => {
         Object.defineProperty(p, 'FormComponent', { value: undefined, configurable: true, writable: true });
         expect(p.FieldEditable('Amount')).toBe(true);
     });
+
+    it('lets Account be filled on a locked deal only when its persisted AccountID is blank (golive#306)', () => {
+        const withAccount = new MJSDealPartyPanel();
+        Object.defineProperty(withAccount, 'FormComponent', {
+            value: { IsLocked: true, IsLost: true, IsPersistedAccountBlank: false } as unknown,
+            configurable: true,
+            writable: true,
+        });
+        expect(withAccount.FieldEditable('AccountID')).toBe(false);
+
+        const blankAccount = new MJSDealPartyPanel();
+        Object.defineProperty(blankAccount, 'FormComponent', {
+            value: { IsLocked: true, IsLost: true, IsPersistedAccountBlank: true } as unknown,
+            configurable: true,
+            writable: true,
+        });
+        expect(blankAccount.FieldEditable('AccountID')).toBe(true);
+    });
 });
 
 describe('the binding is wired, not just the helper', () => {

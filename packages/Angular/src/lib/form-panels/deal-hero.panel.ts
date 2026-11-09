@@ -760,7 +760,9 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
 
     private async resolveLock(): Promise<void> {
         const persisted = this.Record?.GetFieldByName?.('DealStatusTypeID')?.OldValue as string | null | undefined;
-        const lock = await ResolveDealLockState(persisted ?? this.Record?.DealStatusTypeID);
+        const accountOld = this.Record?.GetFieldByName?.('AccountID')?.OldValue as string | null | undefined;
+        const accountBlank = this.Record !== undefined && (!accountOld || String(accountOld).trim() === '');
+        const lock = await ResolveDealLockState(persisted ?? this.Record?.DealStatusTypeID, undefined, accountBlank);
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
         this.IsWon = lock.IsWon;

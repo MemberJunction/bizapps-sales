@@ -129,7 +129,7 @@ with nothing mutated: AC6, AC8, AC12, AC13, AC16, AC19, CT1, CT5, CT6, SD6, WT10
 | `M-FS4` | `ForecastSnapshotJob.ts` | FS6 | OK — fell FS6 · 2026-08-21, no SHA |
 | `M-FS5` | `ForecastSnapshotJob.ts` | FS7 | OK — fell FS7 · 2026-08-21, no SHA |
 | `M-SD40` | `DealEntityServer.ts` | SD40 | — |
-| `M-SD45` | `DealEntityServer.ts` | SD45 | — |
+| `M-SD48` | `DealEntityServer.ts` | SD48 | — |
 | `M-CD39` | `PipelineStageEntityServer.ts` | CD39 | — |
 | `M-CD40` | `DealLockOrderLineVeto.ts` | CD40 | — |
 | `M-CD43` | `DealEntityServer.ts` | CD43 | — |
@@ -138,12 +138,10 @@ with nothing mutated: AC6, AC8, AC12, AC13, AC16, AC19, CT1, CT5, CT6, SD6, WT10
 | `M-SCH2` | `deal-schedule-to-order.ts` | CS3 | — |
 | `M-DC1` | `RecordDiscountConcessionOperation.ts` | DC1, DC2, DC3 | — |
 | `M-DC2` | `RecordDiscountConcessionOperation.ts` | DC4, DC5 | — |
-| `M-PC1` | `CopyDefaultPipeline.ts` | PC1 | — |
-| `M-PC2` | `CopyDefaultPipeline.ts` | PC2 | — |
 | `M-CO6` | `subscription-choice.ts` | CO6 | — |
 | `M-CT9` | `LiveContractsSeam.ts` | CT9 | — |
 | `M-CT10` | `LiveContractsSeam.ts` | CT10 | — |
-| `M-AC24` | `ActivityWriterService.ts` | AC24 | — |
+| `M-AC25` | `ActivityWriterService.ts` | AC25 | — |
 
 A `MISS` recorded before the dist-change guard landed (2026-08-24) is suspect: until then a run could
 measure unmutated code and report a miss. `OK` results are unaffected, because a kill shows the mutation

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { KeptOnDealNote, ReadOutcome, ToOrderRow } from '../deal-schedule-to-order.js';
+import { KeptOnDealNote, ReadOutcome, StatusIsWon, ToOrderRow } from '../deal-schedule-to-order.js';
 
 /**
  * THE DEAL'S SCHEDULE REACHES ITS ORDER (bc-aidp-next-golive#290) — the two pure halves of the copy:
@@ -47,5 +47,19 @@ describe('ReadOutcome', () => {
 
     it('says what happened when the edit is kept', () => {
         expect(KeptOnDealNote('off by 0.01.')).toContain('its order still has the previous schedule: off by 0.01.');
+    });
+});
+
+describe('StatusIsWon filter escaping', () => {
+    it('escapes quotes in the status ID filter', async () => {
+        const filters: string[] = [];
+        const provider = {
+            RunView: async ({ ExtraFilter }: { ExtraFilter: string }) => {
+                filters.push(ExtraFilter);
+                return { Success: true, Results: [{ IsWon: true }] };
+            },
+        };
+        expect(await StatusIsWon("st'1", provider as never, { ID: 'u1' } as never)).toBe(true);
+        expect(filters).toEqual(["ID = 'st''1'"]);
     });
 });

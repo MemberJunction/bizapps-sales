@@ -175,6 +175,14 @@ produces a "bookings by rep" total that does not reconcile to the company number
 
 ### D5 — Cross-company pipelines (master plan D-4): `Pipeline.CompanyID` stays required
 
+> **Superseded 2026-11-05.** A pipeline links to several companies through `PipelineCompany`
+> (PipelineID, CompanyID, IsActive) and `Pipeline.CompanyID` is removed. The rep picks the deal's
+> company first and is offered the pipelines actively linked to it; `DealEntityServer` refuses a deal
+> whose company is not linked to its pipeline instead of copying the company from the pipeline (which
+> also retires the first rule in D-RRC4). The link is strongly typed rather than polymorphic like
+> accounting's `GLAccountLink`, because a pipeline only ever links to a company. Lines still take
+> their company from the product. The ruling below is kept as history.
+
 **Decision:** keep `CompanyID` **NOT NULL** on `Pipeline`, as built, mirroring `Order.CompanyID` in
 orders (its D6/D7).
 
@@ -325,7 +333,9 @@ advisories are therefore presentational rather than entity rules. Header warning
 
 Found by the integration suite rather than by reading, which is the argument for having had it.
 
-- **`Deal.CompanyID` must equal `Pipeline.CompanyID`.** A CHECK constraint cannot reach across the
+- **`Deal.CompanyID` must equal `Pipeline.CompanyID`.** *(Superseded 2026-11-05 with D5: the deal's
+  company is the rep's choice and must be actively linked to its pipeline through `PipelineCompany`;
+  `DealEntityServer.companyLinkedToPipelineRefusal()` refuses rather than overwrites.)* A CHECK constraint cannot reach across the
   foreign key to compare them, so `Sales.SaveDeal` resolved it. Moved to
   `DealEntityServer.stampCompanyFromPipeline()`, which runs on every save for every caller and
   **overwrites** rather than rejects a supplied value — a client stating this is stating something it has

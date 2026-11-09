@@ -23,6 +23,7 @@ import {
     EntityViewerModule,
     type AfterDataLoadEventArgs,
     type RecordOpenedEvent,
+    type RecordSelectedEvent,
     type ViewRelatedRecordNavigation,
 } from '@memberjunction/ng-entity-viewer';
 import {
@@ -38,6 +39,7 @@ import {
     type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
+import { LinkedParties, type ActivityLinkFields, type LinkedParty } from '../activities/deal-activity-parties';
 import { RelatedRecordTarget, SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import {
@@ -46,6 +48,7 @@ import {
     OrderPipelinesByCompany,
     PipelineCompanies,
     PipelineLabel,
+    PipelineServesCompany,
     PipelinesForCompany,
     type CompanyPipeline,
     type PipelineCompany,
@@ -122,8 +125,12 @@ async function LoadEmployees(): Promise<EmployeeOption[] | null> {
     return (result.Results ?? []).map((e) => ({ ID: String(e.ID), Name: e.FirstLast ?? '(unnamed employee)' }));
 }
 
-/** One pipeline the deal may sit in, with the company it sells as (#327). */
-export type PipelineOption = CompanyPipeline;
+/**
+ * One pipeline the deal may sit in, as served by one of its linked companies (#327), with whether the
+ * pipeline and that link are active: an inactive one is offered only to the deal already in it
+ * (bc-aidp-next-golive#423).
+ */
+export type PipelineOption = CompanyPipeline & { IsActive: boolean; LinkIsActive: boolean };
 
 /**
  * One stage, carrying the pipeline that owns it — the whole point of the list — and the defaults a
@@ -136,7 +143,12 @@ export interface PipelineStageOption extends StageDefaults {
 }
 
 /**
- * Every active pipeline, for the picker that also decides which stages are offered.
+ * Every pipeline, active or not, for the picker that also decides which stages are offered.
+ *
+ * INACTIVE ONES ARE LOADED TOO (bc-aidp-next-golive#423). Deactivating a pipeline takes it off the
+ * picker for new choices, but a deal already in it still has to name it: with active-only rows a won
+ * deal in a retired pipeline showed "—" for its pipeline, and its select fell back to "— choose —".
+ * `PipelineOptions` offers an inactive pipeline only to the deal that sits in it.
  *
  * ORDERED THE WAY THE WORKSPACE ORDERS THEM, which is `DisplayRank` first.
  *
@@ -153,15 +165,23 @@ export interface PipelineStageOption extends StageDefaults {
  * the board use too, so the three lists still agree.
  */
 async function LoadPipelines(): Promise<PipelineOption[]> {
-    const result = await new RunView().RunView<PipelineRow>({
-        EntityName: MJS_ENTITIES.Pipeline,
-        ExtraFilter: 'IsActive = 1',
-        OrderBy: 'DisplayRank ASC, Name ASC',
-        ResultType: 'simple',
-        Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank'],
-    });
-    if (!result?.Success) return [];
-    return OrderPipelinesByCompany((result.Results ?? []).map(ToPipelineOption));
+    const [pipelines, links] = await new RunView().RunViews([
+        {
+            EntityName: MJS_ENTITIES.Pipeline,
+            OrderBy: 'DisplayRank ASC, Name ASC',
+            ResultType: 'simple',
+            Fields: ['ID', 'Name', 'Code', 'IsDefault', 'DisplayRank', 'IsActive'],
+        },
+        {
+            // Inactive links too, for the same reason as inactive pipelines: a deal on a retired link
+            // still has to show its company.
+            EntityName: MJS_ENTITIES.PipelineCompany,
+            ResultType: 'simple',
+            Fields: ['PipelineID', 'CompanyID', 'Company', 'IsActive'],
+        },
+    ]);
+    if (!pipelines?.Success || !links?.Success) return [];
+    return OrderPipelinesByCompany(ToPipelineOptions(pipelines.Results as PipelineRow[], links.Results as PipelineLinkRow[]));
 }
 
 /** A pipeline row as `ResultType: 'simple'` returns it. */
@@ -169,22 +189,39 @@ interface PipelineRow {
     ID: string;
     Name: string;
     Code: string;
-    CompanyID: string;
-    Company: string | null;
     IsDefault: boolean;
     DisplayRank: number;
+    IsActive: boolean;
 }
 
-function ToPipelineOption(r: PipelineRow): PipelineOption {
-    return {
-        ID: String(r.ID),
-        Name: String(r.Name),
-        Code: String(r.Code ?? ''),
-        CompanyID: String(r.CompanyID),
-        CompanyName: r.Company ?? null,
-        IsDefault: !!r.IsDefault,
-        DisplayRank: Number(r.DisplayRank ?? 0),
-    };
+/** A `PipelineCompany` row as `ResultType: 'simple'` returns it. */
+interface PipelineLinkRow {
+    PipelineID: string;
+    CompanyID: string;
+    Company: string | null;
+    IsActive: boolean;
+}
+
+/** One option per (pipeline, linked company). A pipeline with no link offers no company, so no option. */
+function ToPipelineOptions(pipelines: readonly PipelineRow[], links: readonly PipelineLinkRow[]): PipelineOption[] {
+    const options: PipelineOption[] = [];
+    for (const r of pipelines) {
+        const id = String(r.ID).toLowerCase();
+        for (const link of links.filter((l) => String(l.PipelineID).toLowerCase() === id)) {
+            options.push({
+                ID: String(r.ID),
+                Name: String(r.Name),
+                Code: String(r.Code ?? ''),
+                CompanyID: String(link.CompanyID),
+                CompanyName: link.Company ?? null,
+                IsDefault: !!r.IsDefault,
+                DisplayRank: Number(r.DisplayRank ?? 0),
+                IsActive: !!r.IsActive,
+                LinkIsActive: !!link.IsActive,
+            });
+        }
+    }
+    return options;
 }
 
 /**
@@ -766,12 +803,12 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         /**
          * SERVER-MAINTAINED STAMPS ARE NEVER EDITABLE, on an open deal or a closed one.
          *
-         * Checked BEFORE the lock, because the lock is not the reason: `stampCompanyFromPipeline()`
-         * overwrites a supplied CompanyID from the pipeline's company, and `ownerStampEditRefusal()`
+         * Checked BEFORE the lock, because the lock is not the reason: `ownerStampEditRefusal()`
          * REFUSES a supplied OwnerEmployeeID outright -- the owner comes from the deal team via
-         * `stampOwnerFromTeam()`. Offering either as an editable control invites a rep to choose a
-         * value the save then discards or rejects, which is the "accepts typing, refuses on save"
-         * behaviour golive#206 item 3 exists to delete.
+         * `stampOwnerFromTeam()`. CompanyID is chosen with Company on the Pipeline panel, which offers
+         * only companies linked to a pipeline; a free lookup here would offer any company and the save
+         * would refuse one the pipeline does not serve. Offering either as an editable control invites
+         * the "accepts typing, refuses on save" behaviour golive#206 item 3 exists to delete.
          *
          * They stay RENDERED and keep `link: 'Record'`, so the company and the owner are still
          * visible and still navigable. What goes away is the invitation to type into them.
@@ -782,9 +819,15 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
 
         const form = this.FormComponent as unknown as Partial<DealFormLockState> | undefined;
         const locked = form?.IsLocked === true;
+        const recordAccountOld = this.Record?.GetFieldByName?.('AccountID')?.OldValue as string | null | undefined;
+        const accountBlank =
+            form?.IsPersistedAccountBlank !== undefined
+                ? form.IsPersistedAccountBlank
+                : this.Record !== undefined && (!recordAccountOld || String(recordAccountOld).trim() === '');
         // The outcome rides along with the lock, from the same resolver, because golive#206 keeps Loss
-        // Notes editable on a LOST deal and frozen on a won one.
-        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true);
+        // Notes editable on a LOST deal and frozen on a won one; golive#306 keeps Account editable when
+        // the closed deal was saved without one.
+        return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true, accountBlank);
     }
 
     /**
@@ -892,7 +935,7 @@ const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID', 'ExpectedClos
  */
 const PARTY_FIELDS: readonly DealFieldSpec[] = [
     { name: 'AccountID', type: 'textbox', link: 'Record', party: { Kind: 'Organization', QueryName: 'Sales: Party Lookup Accounts' } },
-    // Derived by stampCompanyFromPipeline() / stampOwnerFromTeam(); see serverMaintained.
+    // CompanyID is set by the Pipeline panel's Company picker; OwnerEmployeeID by stampOwnerFromTeam(). See serverMaintained.
     { name: 'CompanyID', type: 'textbox', link: 'Record', serverMaintained: true },
     { name: 'OwnerEmployeeID', type: 'textbox', link: 'Record', serverMaintained: true },
     { name: 'PrimaryContactID', type: 'textbox', link: 'Record', party: { Kind: 'Person', QueryName: 'Sales: Party Lookup Contacts' } },
@@ -1663,10 +1706,10 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                      Pipeline is here too because choosing one chooses which stages exist; a plain
                      binding gives nowhere to clear a stage that has just become meaningless. The deal
                      workspace has always done both, which is why testers were told to use it. -->
-                <!-- COMPANY FIRST, then its pipelines (#327). Not a field of the deal: the deal's
-                     company is the pipeline's, so this only narrows the Pipeline list, and choosing a
-                     company picks that company's first pipeline. Hidden when one company owns every
-                     pipeline, where it would offer no choice. -->
+                <!-- COMPANY FIRST, then its pipelines (#327). Writes Deal.CompanyID and narrows the
+                     Pipeline list to the pipelines linked to that company; a current pipeline the
+                     company does not use moves to its first one. Hidden when one company has every
+                     pipeline, where it would offer no choice and SetPipeline fills the company. -->
                 @if (EditMode && FieldEditable('PipelineID') && CompanyOptions.length > 1) {
                     <div class="mjs-field" data-field="PipelineCompany">
                         <div class="mj-forms-field mj-forms-field--editing">
@@ -1947,26 +1990,47 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
 
     /** The selected company's pipelines, in picker order (#327). */
     public get PipelineOptions(): PipelineOption[] {
-        return PipelinesForCompany(this.pipelines(), this.SelectedCompanyID);
+        return PipelinesForCompany(this.offeredPipelines, this.SelectedCompanyID);
     }
 
-    /** Every company that owns a pipeline, default company first. */
+    /** Every company with a pipeline linked to it, default company first. */
     public get CompanyOptions(): PipelineCompany[] {
-        return PipelineCompanies(this.pipelines());
+        return PipelineCompanies(this.offeredPipelines);
     }
 
     /**
-     * The current pipeline's company, else the default company. Derived rather than stored: choosing a
-     * company also chooses its pipeline, so the pipeline always says which company is selected.
+     * The active pipelines on active links, plus the deal's own pipeline and company when either is
+     * retired (bc-aidp-next-golive#423).
      */
-    public get SelectedCompanyID(): string | null {
-        return InitialCompanyID(this.pipelines(), this.Record?.PipelineID ?? null);
+    private get offeredPipelines(): PipelineOption[] {
+        const id = String(this.Record?.PipelineID ?? '').toLowerCase();
+        const company = String(this.Record?.CompanyID ?? '').toLowerCase();
+        const isDealsOwn = (p: PipelineOption): boolean =>
+            !!id && p.ID.toLowerCase() === id && p.CompanyID.toLowerCase() === company;
+        return this.pipelines().filter((p) => (p.IsActive && p.LinkIsActive) || isDealsOwn(p));
     }
 
-    /** Moves the deal to the company's first pipeline, which clears a stage the old one owned. */
+    /**
+     * The deal's company, else the default company. The company is the rep's choice and is chosen
+     * first; a pipeline serves several companies, so it cannot say which one is selected.
+     */
+    public get SelectedCompanyID(): string | null {
+        return InitialCompanyID(this.offeredPipelines, this.Record?.CompanyID ?? null);
+    }
+
+    /**
+     * Sets the deal's company, and moves the deal to the company's first pipeline when its current one
+     * does not serve that company (which clears a stage the old pipeline owned).
+     */
     public SetCompany(companyID: string | null): void {
-        const first = PipelinesForCompany(this.pipelines(), companyID)[0];
-        if (first) this.SetPipeline(first.ID);
+        if (!this.Record || !companyID) return;
+        this.Record.CompanyID = companyID;
+        if (!PipelineServesCompany(this.offeredPipelines, this.Record.PipelineID ?? null, companyID)) {
+            const first = PipelinesForCompany(this.offeredPipelines, companyID)[0];
+            if (first) this.SetPipeline(first.ID);
+        }
+        // The Bill.com customer is per company.
+        if (this.Record.AccountID) void this.CheckBillComCustomer();
     }
 
     public PipelineText(pipeline: PipelineOption): string {
@@ -2008,13 +2072,18 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     /**
      * Choosing a pipeline also chooses which stages exist, so it cannot be a plain field binding.
      *
-     * `CompanyID` is NOT set here. `DealEntityServer` forces it from the pipeline on every save,
-     * ignoring whatever a caller supplies, so writing it here would be stating something this form has
-     * no standing to know.
+     * The deal keeps its company. The picker offers only the selected company's pipelines, so they
+     * agree; the one case they do not is a deal with no company yet (a new deal, or the Company picker
+     * hidden because one company has every pipeline), which takes the selected company.
+     * `DealEntityServer` refuses a company the pipeline is not linked to.
      */
     public SetPipeline(pipelineID: string | null): void {
         if (!this.Record) return;
         this.Record.PipelineID = pipelineID as string;
+        const company = this.SelectedCompanyID;
+        if (!this.Record.CompanyID && company && PipelineServesCompany(this.offeredPipelines, pipelineID, company)) {
+            this.Record.CompanyID = company;
+        }
 
         // A stage from the previous pipeline is meaningless now. Cleared rather than remapped: there
         // is no honest translation from one pipeline's process to another's, which is the same
@@ -2023,7 +2092,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         if (!stages.some((st) => st.ID.toLowerCase() === String(this.Record?.PipelineStageID ?? '').toLowerCase())) {
             this.Record.PipelineStageID = null as unknown as string;
         }
-        // A new pipeline can mean a new selling company, and the Bill.com customer is per company.
+        // The Bill.com check reads the deal's pipeline too.
         if (this.Record.AccountID) void this.CheckBillComCustomer();
     }
 
@@ -2075,7 +2144,9 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public get CurrentPipelineName(): string | null {
         const id = String(this.Record?.PipelineID ?? '').toLowerCase();
         if (!id) return null;
-        const pipeline = this.pipelines().find((p) => p.ID.toLowerCase() === id);
+        const company = String(this.Record?.CompanyID ?? '').toLowerCase();
+        const rows = this.pipelines().filter((p) => p.ID.toLowerCase() === id);
+        const pipeline = rows.find((p) => p.CompanyID.toLowerCase() === company) ?? rows[0];
         return pipeline ? PipelineLabel(pipeline) : null;
     }
 
@@ -2500,6 +2571,20 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
         { name: 'DealTypeID', type: 'textbox', link: 'Record' },
         { name: 'ForecastCategoryTypeID', type: 'textbox', link: 'Record' },
         { name: 'Probability', type: 'number' },
+        // The business creation date the deal ages from (#532). Beside the forecast fields, because
+        // aging is read alongside them. NOT a mirror of `__mj_CreatedAt`: that column is the immutable
+        // row stamp, and for an imported deal it holds import day rather than deal day. This one is the
+        // editable business fact, which is why it is offered here at all.
+        //
+        // `datepicker` RENDERS `<input type="date">`, SO EDITING DROPS THE TIME. `mj-form-field` reads
+        // the value through `DateInputValue` (`toISOString().split('T')[0]`) and writes it back through
+        // `OnDateChange` (`new Date('2026-11-04')`, i.e. midnight UTC), so a rep who edits this field
+        // collapses its stored time. Accepted deliberately: the `GETUTCDATE()` default stores full
+        // precision, only a manual edit coarsens it, and aging is day-grained either way. MJ's
+        // form-field has no date+time type on the 6.1 LTS line (its Type union ends at `numerictextbox`)
+        // and this app may not grow a second editable control for a field the shared one already owns.
+        // Revisit when an MJ `datetimepicker` lands.
+        { name: 'CreationDate', type: 'datepicker' },
         // Beside stage and probability, where a rep forecasting the deal looks for it. It sat in
         // Commercial, and a rep who could not find it typed the expected day into Actual Close Date
         // instead (#252). One binding: it is no longer in COMMERCIAL_FIELDS.
@@ -2532,7 +2617,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                             <!-- THE OWNER IS CHANGED THROUGH THE DEAL TEAM, never typed. The column is a
                                  server-maintained stamp; SetOwner swaps the owner-role team row and the
                                  server derives the stamp from it on save. Saved deals only: a new deal
-                                 takes the account owner by default, and SetOwner reads the team first. -->
+                                 takes its creator as owner by default, and SetOwner reads the team first. -->
                             <div class="mj-forms-field mj-forms-field--editing">
                                 <label class="mj-forms-field-label" for="mjs-deal-owner">{{ OwnerLabel }}</label>
                                 <select id="mjs-deal-owner" data-testid="deal-owner-picker"
@@ -2557,7 +2642,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                                 (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                             @if (EditMode && f.name === 'CompanyID') {
-                                <small class="mjs-field__hint" data-testid="deal-company-hint">Set by the pipeline. Change it with Company on the Pipeline panel.</small>
+                                <small class="mjs-field__hint" data-testid="deal-company-hint">Change it with Company on the Pipeline panel.</small>
                             }
                         }
                     </div>
@@ -2620,7 +2705,7 @@ export class MJSDealPartyPanel extends MJSDealFieldPanel {
     /**
      * Whether the owner field renders as the picker rather than as the read-only stamp.
      *
-     * SAVED DEALS ONLY: a new deal takes the account owner by default when it is first saved, and
+     * SAVED DEALS ONLY: a new deal takes its creator as owner by default when it is first saved, and
      * `SetOwner` loads the deal team before changing it. NOT GATED ON THE LOCK: reassigning a rep after
      * close is record-keeping (golive#206), and the server allows it when the team drives the save.
      */
@@ -3718,17 +3803,39 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
                 <div class="mjs-deal-activity">
                     <mjs-deal-activity-timeline #compose [DealID]="Record.ID" [ComposeOnly]="true"
                         (Logged)="OnLogged()"></mjs-deal-activity-timeline>
-                    @if (ActivityEntity) {
+                    <!-- Mounted only once the deal's view exists: with no view the viewer loads every
+                         activity, and a view bound during that load is dropped (golive#432). -->
+                    @if (ActivityEntity && ActivityView) {
                         <div class="mjs-deal-activity__viewer">
                             <!-- New goes to the compose form above: it is the only path that links the new
                                  activity to this deal. -->
                             <mj-entity-viewer
                                 [Entity]="ActivityEntity"
                                 [ViewEntity]="ActivityView"
+                                (RecordSelected)="OnActivitySelected($event)"
                                 (RecordOpened)="OnActivityOpened($event)"
                                 (OpenRelatedRecordRequested)="OnActivityRelatedRecord($event)"
                                 (CreateRecordRequested)="compose.FocusCompose()">
                             </mj-entity-viewer>
+                        </div>
+                        <!-- Who the selected activity is linked to (#408): the grid has no column for it. -->
+                        <div class="mjs-deal-activity__links">
+                            @if (!Linked) {
+                                <span class="mjs-deal-activity__hint">Select an activity to see who it is linked to.</span>
+                            } @else {
+                                <span class="mjs-deal-activity__hint">Linked to:</span>
+                                @for (party of Linked; track $index) {
+                                    <span class="mjs-deal-activity__party" [title]="party.Role">
+                                        <i class="fa-solid" aria-hidden="true"
+                                            [class.fa-user]="party.Icon === 'person'"
+                                            [class.fa-building]="party.Icon === 'organization'"
+                                            [class.fa-at]="party.Icon === 'other'"></i>
+                                        {{ party.Name }}
+                                    </span>
+                                } @empty {
+                                    <span>this deal only</span>
+                                }
+                            }
                         </div>
                     }
                 </div>
@@ -3743,6 +3850,12 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
             min-height: 420px; height: 480px;
             display: flex; flex-direction: column;
             border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-md); overflow: hidden;
+        }
+        .mjs-deal-activity__links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mj-space-2); font-size: 0.8125rem; color: var(--mj-text-primary); }
+        .mjs-deal-activity__hint { color: var(--mj-text-muted); }
+        .mjs-deal-activity__party {
+            display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+            border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-sm);
         }
         .mjs-deal-activity__viewer mj-entity-viewer {
             display: flex; flex-direction: column; flex: 1 1 auto; height: 100%; width: 100%;
@@ -3764,8 +3877,58 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
         void this.refreshView();
     }
 
+    /** The selected activity's links, or null when none is selected. */
+    public Linked: LinkedParty[] | null = null;
+    private selectedActivityID: string | null = null;
+
     public OnLogged(): void {
+        this.selectedActivityID = null;
+        this.Linked = null;
         void this.refreshView();
+    }
+
+    public async OnActivitySelected(event: RecordSelectedEvent): Promise<void> {
+        const id = String(event.compositeKey?.GetValueByFieldName('ID') ?? event.record?.['ID'] ?? '');
+        if (!id) return;
+        this.selectedActivityID = id;
+        const linked = await this.readLinkedParties(id);
+        if (this.selectedActivityID !== id) return; // a later click won
+        this.Linked = linked;
+        this.cdr.detectChanges();
+    }
+
+    /** One read of the activity's links, then one `RunViews` for the people's and organizations' names. */
+    private async readLinkedParties(activityID: string): Promise<LinkedParty[] | null> {
+        const md = new Metadata();
+        const idOf = (name: string): string => md.Entities.find((e) => e.Name === name)?.ID ?? '';
+        const ids = { Deal: idOf(MJS_ENTITIES.Deal), Person: idOf(MJS_FOREIGN_ENTITIES.Person), Organization: idOf(MJS_FOREIGN_ENTITIES.Organization) };
+        const rv = new RunView();
+        const links = await rv.RunView<ActivityLinkFields>({
+            EntityName: MJS_FOREIGN_ENTITIES.ActivityLink,
+            ExtraFilter: `ActivityID = '${activityID.replace(/'/g, "''")}'`,
+            Fields: ['Role', 'EntityID', 'RecordID', 'IdentityValue', 'Entity'],
+            OrderBy: 'Sequence',
+            ResultType: 'simple',
+        });
+        if (!links.Success) {
+            console.error('Deal activity: could not read the activity links', links.ErrorMessage);
+            return null;
+        }
+        const rows = links.Results ?? [];
+        const inList = (entityID: string): string =>
+            rows.filter((l) => l.EntityID?.toLowerCase() === entityID.toLowerCase() && l.RecordID)
+                .map((l) => `'${String(l.RecordID).replace(/'/g, "''")}'`).join(', ') || 'NULL';
+        const [people, orgs] = await rv.RunViews([
+            { EntityName: MJS_FOREIGN_ENTITIES.Person, ExtraFilter: `ID IN (${inList(ids.Person)})`, Fields: ['ID', 'DisplayName'], ResultType: 'simple' },
+            { EntityName: MJS_FOREIGN_ENTITIES.Organization, ExtraFilter: `ID IN (${inList(ids.Organization)})`, Fields: ['ID', 'Name'], ResultType: 'simple' },
+        ]);
+        for (const r of [people, orgs].filter((x) => !x?.Success)) {
+            console.error('Deal activity: could not read linked names; showing IDs', r?.ErrorMessage);
+        }
+        const names = new Map<string, string>();
+        for (const r of (people?.Results ?? []) as { ID: string; DisplayName: string }[]) names.set(r.ID.toLowerCase(), r.DisplayName);
+        for (const r of (orgs?.Results ?? []) as { ID: string; Name: string }[]) names.set(r.ID.toLowerCase(), r.Name);
+        return LinkedParties(rows, ids, String(this.Record.ID), names);
     }
 
     public OnActivityOpened(event: RecordOpenedEvent): void {

@@ -46,6 +46,7 @@ import { IsBooked } from '@mj-biz-apps/orders-entities';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import {
     E_ACTIVITY,
+    AlreadyWonRefusal,
     SalesCloseDealOperation as SalesCloseDealOperationBase,
     SalesReopenDealOperation as SalesReopenDealOperationBase,
     StubDownstreamSeam,
@@ -88,6 +89,7 @@ const STAGE_ENTITY = 'MJ_BizApps_Sales: Pipeline Stages';
  * log is where the answer to "what stage was this deal in before it closed" already lives.
  */
 const STAGE_EVENT_ENTITY = 'MJ_BizApps_Sales: Deal Stage Events';
+const GUID_SHAPE = /^[0-9a-fA-F-]{36}$/;
 
 /** The behaviour flags a close reads off the target status. Never its name. */
 interface StatusFlags {
@@ -160,6 +162,9 @@ async function readStage(
     provider: IMetadataProvider,
     user: UserInfo,
 ): Promise<ClosingStageRow | null> {
+    if (!GUID_SHAPE.test(stageID)) {
+        return null;
+    }
     const view = provider as unknown as IRunViewProvider;
     const stages = await view.RunView(
         {
@@ -179,7 +184,7 @@ async function readStage(
 
     let isWon = false;
     let isLost = false;
-    if (row.DealStatusTypeID) {
+    if (row.DealStatusTypeID && GUID_SHAPE.test(row.DealStatusTypeID)) {
         const statuses = await view.RunView(
             {
                 EntityName: DEAL_STATUS_ENTITY,
@@ -487,9 +492,12 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
 
             const target = await this.loadStatusFlags(input.DealStatusTypeID, provider, user);
             if (!target) {
+                const message = !GUID_SHAPE.test(input.DealStatusTypeID)
+                    ? 'Deal status is not a valid ID.'
+                    : `Status ${input.DealStatusTypeID} was not found.`;
                 return {
                     ...empty,
-                    Issues: [issue('deal', `Status ${input.DealStatusTypeID} was not found.`, 'DealStatusTypeID')],
+                    Issues: [issue('deal', message, 'DealStatusTypeID')],
                 };
             }
 
@@ -498,6 +506,13 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 ? await this.loadStatusFlags(deal.DealStatusTypeID, provider, user)
                 : null;
             if (current?.LocksDeal) {
+                if (current.IsWon) {
+                    const contractNumber = await this.readContractNumber(deal.ContractID, provider, user);
+                    return {
+                        ...empty,
+                        Issues: [issue('deal', AlreadyWonRefusal(deal.DealNumber || deal.Name, contractNumber))],
+                    };
+                }
                 return {
                     ...empty,
                     Issues: [
@@ -884,6 +899,10 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         const issues: SalesCloseIssue[] = [];
         let lossReasonName: string | null = null;
 
+        if (input.ClosingStageID && !GUID_SHAPE.test(input.ClosingStageID)) {
+            issues.push(issue('deal', 'Closing stage is not a valid ID.', 'ClosingStageID'));
+        }
+
         if (target.IsLost) {
             /**
              * THE CALLER'S REASON, NEVER THE ONE THE ROW HAPPENS TO CARRY (#400).
@@ -897,6 +916,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             const lossReasonID = input.LossReasonID ?? null;
             if (!lossReasonID) {
                 issues.push(issue('deal', 'A loss reason is required to close a deal as lost.', 'LossReasonID'));
+            } else if (!GUID_SHAPE.test(lossReasonID)) {
+                issues.push(issue('deal', 'Loss reason is not a valid ID.', 'LossReasonID'));
             } else {
                 /**
                  * `RequiresNotes` decides; `Name` is carried out for the close event's note and decides
@@ -919,12 +940,18 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                     user,
                 );
                 const row = (r.Results ?? [])[0] as { RequiresNotes?: boolean; Name?: string } | undefined;
-                const notes = input.LossNotes ?? null;
-                if (r.Success && row?.RequiresNotes === true && !notes?.trim()) {
-                    issues.push(issue('deal', 'This loss reason requires notes explaining the loss.', 'LossNotes'));
+                if (!r.Success) {
+                    issues.push(issue('deal', 'Loss reason could not be read.', 'LossReasonID'));
+                } else if (!row) {
+                    issues.push(issue('deal', `Loss reason ${lossReasonID} was not found.`, 'LossReasonID'));
+                } else {
+                    const notes = input.LossNotes ?? null;
+                    if (row.RequiresNotes === true && !notes?.trim()) {
+                        issues.push(issue('deal', 'This loss reason requires notes explaining the loss.', 'LossNotes'));
+                    }
+                    // The id is the fallback: an id in an audit note is recoverable by hand, a blank is not.
+                    lossReasonName = row.Name?.trim() || `reason ${lossReasonID}`;
                 }
-                // The id is the fallback: an id in an audit note is recoverable by hand, a blank is not.
-                lossReasonName = row?.Name?.trim() || `reason ${lossReasonID}`;
             }
         }
 
@@ -958,8 +985,15 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         if (unanswered.length === 0) {
             return { Issues: [], RenewalNextTerm: [] };
         }
-        if (await this.dealTypeRequiresRenewalSource(deal.DealTypeID, provider, user)) {
-            return { Issues: [], RenewalNextTerm: unanswered };
+        try {
+            if (await this.dealTypeRequiresRenewalSource(deal.DealTypeID, provider, user)) {
+                return { Issues: [], RenewalNextTerm: unanswered };
+            }
+        } catch (err) {
+            if (err instanceof CloseRefusal) {
+                return { Issues: [issue('deal', err.message, err.Field)], RenewalNextTerm: [] };
+            }
+            throw err;
         }
         return { Issues: unanswered.map(SubscriptionChoiceIssue), RenewalNextTerm: [] };
     }
@@ -981,29 +1015,34 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
     ): Promise<SalesCloseWonPolicy> {
         let fromPipeline: SalesCloseWonPolicy = {};
 
-        const view = provider as unknown as IRunViewProvider;
-        const r = await view.RunView(
-            {
-                EntityName: PIPELINE_ENTITY,
-                ExtraFilter: `ID = '${deal.PipelineID}'`,
-                ResultType: 'simple',
-                Fields: ['CloseWonPolicy', 'CloseWonAssigneePersonID'],
-            },
-            user,
-        );
-        const row = (r.Results ?? [])[0] as
-            | { CloseWonPolicy?: string | null; CloseWonAssigneePersonID?: string | null }
-            | undefined;
-        const raw = row?.CloseWonPolicy;
-        if (r.Success && raw) {
-            try {
-                fromPipeline = JSON.parse(raw) as SalesCloseWonPolicy;
-            } catch {
-                LogError(`Sales.CloseDeal: pipeline ${deal.PipelineID} has unparseable CloseWonPolicy; using defaults`);
+        if (deal.PipelineID) {
+            if (!GUID_SHAPE.test(deal.PipelineID)) {
+                throw new CloseRefusal('Pipeline is not a valid ID.', 'PipelineID');
             }
+            const view = provider as unknown as IRunViewProvider;
+            const r = await view.RunView(
+                {
+                    EntityName: PIPELINE_ENTITY,
+                    ExtraFilter: `ID = '${deal.PipelineID}'`,
+                    ResultType: 'simple',
+                    Fields: ['CloseWonPolicy', 'CloseWonAssigneePersonID'],
+                },
+                user,
+            );
+            const row = (r.Results ?? [])[0] as
+                | { CloseWonPolicy?: string | null; CloseWonAssigneePersonID?: string | null }
+                | undefined;
+            const raw = row?.CloseWonPolicy;
+            if (r.Success && raw) {
+                try {
+                    fromPipeline = JSON.parse(raw) as SalesCloseWonPolicy;
+                } catch {
+                    LogError(`Sales.CloseDeal: pipeline ${deal.PipelineID} has unparseable CloseWonPolicy; using defaults`);
+                }
+            }
+            // The pipeline's assignee column outranks the assignee in its JSON; see WithPipelineAssignee.
+            fromPipeline = WithPipelineAssignee(fromPipeline, r.Success ? row?.CloseWonAssigneePersonID : null);
         }
-        // The pipeline's assignee column outranks the assignee in its JSON; see WithPipelineAssignee.
-        fromPipeline = WithPipelineAssignee(fromPipeline, r.Success ? row?.CloseWonAssigneePersonID : null);
 
         return { ...POLICY_DEFAULTS, ...fromPipeline, ...(input.PolicyOverrides ?? {}) };
     }
@@ -1190,7 +1229,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<string | null> {
-        if (!pipelineID || (!target.IsWon && !target.IsLost)) {
+        if (!pipelineID || !GUID_SHAPE.test(pipelineID) || (!target.IsWon && !target.IsLost)) {
             return null;   // an outcome that is neither won nor lost names no stage
         }
         const view = provider as unknown as IRunViewProvider;
@@ -1450,6 +1489,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<StatusFlags | null> {
+        if (!GUID_SHAPE.test(statusID)) {
+            return null;
+        }
         const view = provider as unknown as IRunViewProvider;
         const r = await view.RunView(
             {
@@ -1485,6 +1527,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         if (!dealTypeID) {
             return false;
         }
+        if (!GUID_SHAPE.test(dealTypeID)) {
+            throw new CloseRefusal('Deal type is not a valid ID.', 'DealTypeID');
+        }
         const view = provider as unknown as IRunViewProvider;
         const r = await view.RunView(
             {
@@ -1496,7 +1541,10 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             user,
         );
         const row = (r.Results ?? [])[0] as { RequiresRenewalSource?: boolean } | undefined;
-        return r.Success && row?.RequiresRenewalSource === true;
+        if (!r.Success || !row) {
+            throw new CloseRefusal('Deal type could not be read.', 'DealTypeID');
+        }
+        return row.RequiresRenewalSource === true;
     }
 
     private async buildContractInput(
@@ -1554,6 +1602,33 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              */
         };
     }
+
+    private async readContractNumber(
+        contractID: string | null | undefined,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<string | null> {
+        if (!contractID || !GUID_SHAPE.test(String(contractID))) {
+            return null;
+        }
+        try {
+            const rv = provider as unknown as IRunViewProvider | undefined;
+            if (!rv?.RunView) return null;
+            const result = await rv.RunView<{ ContractNumber: string | null }>(
+                {
+                    EntityName: 'MJ_BizApps_Contracts: Contracts',
+                    ExtraFilter: `ID = '${contractID}'`,
+                    ResultType: 'simple',
+                    Fields: ['ContractNumber'],
+                },
+                user,
+            );
+            if (!result?.Success) return null;
+            return (result.Results ?? [])[0]?.ContractNumber ?? null;
+        } catch {
+            return null;
+        }
+    }
 }
 
 /**
@@ -1577,6 +1652,12 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
         // §7.3 makes this mandatory: undoing a lock has to be explainable.
         if (!input.Reason?.trim()) {
             return { ...empty, Issues: [issue('deal', 'A reason is required to reopen a closed deal.', 'Reason')] };
+        }
+        if (input.StageID && !GUID_SHAPE.test(input.StageID)) {
+            return { ...empty, Issues: [issue('deal', 'Stage is not a valid ID.', 'StageID')] };
+        }
+        if (input.DealStatusTypeID && !GUID_SHAPE.test(input.DealStatusTypeID)) {
+            return { ...empty, Issues: [issue('deal', 'Deal status is not a valid ID.', 'DealStatusTypeID')] };
         }
 
         const db = provider as unknown as DatabaseProviderBase;
@@ -1868,6 +1949,9 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<{ ID: string; LocksDeal: boolean } | null> {
+        if (!GUID_SHAPE.test(statusID)) {
+            return null;
+        }
         const view = provider as unknown as IRunViewProvider;
         const r = await view.RunView(
             {
@@ -1933,6 +2017,9 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<{ FromStageID: string | null; ProbabilityAtTransition: number | null } | null> {
+        if (!dealID || !GUID_SHAPE.test(dealID)) {
+            return null;
+        }
         const view = provider as unknown as IRunViewProvider;
 
         const locking = await view.RunView(

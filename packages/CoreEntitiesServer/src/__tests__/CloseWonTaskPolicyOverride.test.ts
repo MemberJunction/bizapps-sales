@@ -32,7 +32,7 @@ async function wonClose(pipelineCreatesContract: boolean, overrides?: { CreateCo
     });
 
     const deal = {
-        ID: 'd1', Name: 'Override win', DealNumber: 'D-1', CompanyID: 'c1', PipelineID: 'p1', OrderID: 'o1',
+        ID: 'd1', Name: 'Override win', DealNumber: 'D-1', CompanyID: 'c1', PipelineID: 'aaaaaaaa-0000-4000-8000-000000000001', OrderID: 'o1',
         ContractID: null, AccountID: 'a1', DealStatusTypeID: null, PipelineStageID: null,
         LossReasonID: null, LossNotes: null, ClosedAt: null, ClosedByUserID: null, ActualCloseDate: null,
         OrderStatusWarnings: [], LastStageEventID: 'e1',

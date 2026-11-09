@@ -8,17 +8,20 @@
  *
  * SHAPE
  *   - one serial test, because each step depends on the previous record existing
- *   - a Pipeline is created FIRST because Deal.PipelineID is NOT NULL (L-14 makes Pipeline.CompanyID
- *     NOT NULL too, so a Company must exist — scripts/seed-dev-data.sh provides one)
+ *   - a Pipeline is created FIRST because Deal.PipelineID is NOT NULL, then linked to the dev Company
+ *     (PipelineCompany) because a deal's company must be actively linked to its pipeline —
+ *     scripts/seed-dev-data.sh provides the company
  *   - every created record is prefixed PW-VERIFY so cleanup is unambiguous
- *   - teardown deletes in FK order (Deal, then Pipeline) and runs even if the test fails
+ *   - teardown deletes in FK order (Deal, then the pipeline's links, then Pipeline) and runs even if
+ *     the test fails
  *   - the console-error KEYSTONE is asserted at the end: a UI that renders but logs errors is broken
  *     in a way presence assertions cannot see
  *
  * Screenshots land in artifacts/ — one per step, for the demo.
  */
 import { expect, test } from '../lib/test';
-import { ARTIFACTS_DIR, DEV_COMPANY_NAME, EXPLORER_BASE_URL, TEST_PREFIX } from '../lib/env';
+import { ARTIFACTS_DIR, DEV_COMPANY_ID, DEV_COMPANY_NAME, EXPLORER_BASE_URL, TEST_PREFIX } from '../lib/env';
+import { QueryAll } from '../lib/db';
 import {
   captureConsoleErrors,
   clickNew,
@@ -37,7 +40,6 @@ import {
   readField,
   saveForm,
   setField,
-  setLookup,
   shot,
 } from '../lib/explorer';
 import { PipelineByName, SetPipelineByID } from '../lib/deal-form';
@@ -104,21 +106,30 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
     await clickNew(page);
     await shot(page, '11-pipeline-new-form');
 
-    // The schema's NOT NULL columns should surface as required in the UI. This is a real assertion
-    // about the generated form honouring the schema, not decoration.
-    expect(await isRequiredEmpty(page, 'Company'), 'Pipeline.Company is NOT NULL and must render required').toBe(true);
-
+    // A pipeline has no company of its own any more: it serves the companies it is linked to through
+    // PipelineCompany, so the form asks only for the pipeline's own fields.
     await setField(page, 'Name', PIPELINE_NAME);
     await setField(page, 'Code', PIPELINE_CODE);
-    await setLookup(page, 'Company', DEV_COMPANY_NAME);
     await shot(page, '12-pipeline-filled');
 
     await saveForm(page);
     await shot(page, '13-pipeline-saved');
 
-    // Saved means the required-empty marker is gone from Company.
-    expect(await isRequiredEmpty(page, 'Company'), 'Company should be populated after save').toBe(false);
     expect(await readField(page, 'Name'), 'Name should have persisted').toContain(TEST_PREFIX);
+  });
+
+  /**
+   * LINK THE PIPELINE TO THE DEV COMPANY, in SQL rather than through the link's own form.
+   *
+   * Without an active link the Deal form offers this pipeline under no company and the server refuses a
+   * deal on it. The link's form needs two foreign-key lookups, the harness's flakiest verb; what this
+   * spec proves is the DEAL's create/read/update/delete, so the link is set up the way an import would.
+   */
+  await test.step('link the Pipeline to the dev Company', async () => {
+    const pipeline = await PipelineByName(PIPELINE_NAME);
+    await QueryAll(`
+      INSERT INTO __mj_BizAppsSales.PipelineCompany (PipelineID, CompanyID, IsActive)
+      VALUES ('${pipeline.ID}', '${DEV_COMPANY_ID}', 1)`);
   });
 
   // =============================================================================================
@@ -137,12 +148,12 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
     // A dedicated <select> since golive#291, not an FK lookup -- setLookup waits on
     // .mj-fk-search input, which this control does not render. Resolved by NAME so this spec still
     // gets the pipeline it just created, and matched on id the way the option is written.
-    await SetPipelineByID(page, (await PipelineByName(PIPELINE_NAME)).ID);
-    // NOT SET HERE. DealEntityServer forces Deal.CompanyID to the PIPELINE's company on every
-    // save, "ignoring whatever the caller supplied" -- so a typed value is discarded. The form
-    // reflects that by not offering the field: it exists only in the generic dump that the Overview
-    // panel replaces, on no section the rail shows. Verified on the host: 7 deals, 0 null companies,
-    // and ComposeDeal has never set one either.
+    //
+    // THE COMPANY IS PICKED FIRST. Deal.CompanyID is the rep's choice: the Company control (shown when
+    // more than one company has a pipeline) sets it and narrows the Pipeline list to the pipelines
+    // linked to that company. With one company the control is hidden and the form fills it.
+    // DealEntityServer refuses a company the pipeline is not actively linked to.
+    await SetPipelineByID(page, (await PipelineByName(PIPELINE_NAME)).ID, DEV_COMPANY_ID);
     await setField(page, 'Amount', '120000');
     /**
      * PROBABILITY IS NOT SET HERE, and that is the form working rather than a gap.
@@ -402,6 +413,12 @@ test('Deal CRUD through the Explorer UI', async ({ page }) => {
   //    (global-teardown also sweeps PW-VERIFY rows in SQL, for the case where this step never runs.)
   // =============================================================================================
   await test.step('delete the Pipeline', async () => {
+    // Its company links first: FK_PipelineCompany_Pipeline does not cascade, so the UI delete would be
+    // refused while a link exists.
+    await QueryAll(`
+      DELETE pc FROM __mj_BizAppsSales.PipelineCompany pc
+        JOIN __mj_BizAppsSales.Pipeline p ON p.ID = pc.PipelineID
+       WHERE p.Name = '${PIPELINE_NAME.replace(/'/g, "''")}'`);
     await openEntityGrid(page, 'Pipelines');
     await deleteRecordViaRecordView(page, PIPELINE_NAME);
     await openEntityGrid(page, 'Pipelines');

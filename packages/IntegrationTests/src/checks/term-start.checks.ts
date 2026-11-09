@@ -353,7 +353,7 @@ export const TermStartChecks: NamedCheck[] = [
                 {
                     EntityName: E_ORDERS_PRODUCT,
                     // Explicit company clause — see the note in sellableProduct above.
-                    ExtraFilter: `CompanyID = '${f.PipelineCompanyID.replace(/'/g, "''")}' `
+                    ExtraFilter: `CompanyID = '${f.CompanyID.replace(/'/g, "''")}' `
                         + `AND (${ProductFilterFor(await businessToday(ctx))})`,
                     OrderBy: 'Name ASC',
                     ResultType: 'simple',
@@ -416,7 +416,7 @@ export const TermStartChecks: NamedCheck[] = [
                 const deal = await newDeal(ctx, f);
                 await saveOk(deal, 'the first save of the deal');
 
-                const productID = await sellableProduct(ctx, f.PipelineCompanyID);
+                const productID = await sellableProduct(ctx, f.CompanyID);
                 const line = await deal.OrderID_EnsureObject().Lines.Create();
                 line.Set('ProductID', productID);
                 line.Set('Quantity', 1);

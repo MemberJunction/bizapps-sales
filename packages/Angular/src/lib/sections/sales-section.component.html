@@ -16,6 +16,11 @@
       <button type="button" mjButton variant="outline" (click)="Refresh()" aria-label="Refresh this page">
         <i class="fa-solid fa-arrow-rotate-right" aria-hidden="true"></i>
       </button>
+      @if (SecondaryAction; as action) {
+        <button type="button" mjButton variant="outline" data-testid="sales-secondary" (click)="Start(action)">
+          <i [class]="action.Icon" aria-hidden="true"></i> {{ action.Label }}
+        </button>
+      }
       @if (PrimaryAction; as action) {
         <button type="button" mjButton variant="primary" data-testid="sales-primary" (click)="StartPrimary()">
           <i [class]="action.Icon" aria-hidden="true"></i> {{ action.Label }}
@@ -306,6 +311,30 @@
           }
         </div>
 
+        <!-- ═════════════════════════ ACCOUNTS / CONTACTS ═════════════════════════ -->
+        <!-- The entity's own grid, mounted only while its page shows, so opening Sales reads neither.
+             New account / New contact are the header primary and the grid's own create button. -->
+        @if (Page === 'accounts' || Page === 'contacts') {
+          <div class="wrap wrap--list">
+            <div class="sechead">
+              <h2>{{ Page === 'accounts' ? 'Accounts' : 'Contacts' }}</h2>
+              <span class="r">{{ Page === 'accounts' ? 'The organizations deals are sold to' : 'The people at those accounts' }}</span>
+            </div>
+            @if (Page === 'accounts' ? AccountEntityInfo : ContactEntityInfo; as entity) {
+              <div class="mjs-viewer-host mjs-viewer-host--page">
+                <mj-entity-viewer
+                  [Entity]="entity"
+                  (RecordOpened)="OnPartyOpened($event)"
+                  (OpenRelatedRecordRequested)="OpenRelatedRecord($event)"
+                  (CreateRecordRequested)="StartPrimary()">
+                </mj-entity-viewer>
+              </div>
+            } @else {
+              <div class="empty">{{ Page === 'accounts' ? 'Account' : 'Contact' }} entity metadata is not loaded.</div>
+            }
+          </div>
+        }
+
         <!-- ═════════════════════════ BOARD ═════════════════════════ -->
         <!-- Rendered with @if rather than [hidden]: the board holds no unsaved state, so there is
              nothing to lose by tearing it down, and a hidden board with a horizontal scroller is a
@@ -319,7 +348,7 @@
             <ng-container *ngTemplateOutlet="filterBar"></ng-container>
           }
 
-          @if (Loading || DetailLoading) {
+          @if (Loading || BoardLoading) {
             <mj-loading></mj-loading>
           } @else if (LoadError) {
             <ng-container *ngTemplateOutlet="loadFailed"></ng-container>
@@ -346,7 +375,7 @@
               [SelectedPipelineID]="BoardPipelineID"
               (SelectedPipelineIDChange)="OnBoardPipeline($event)"
               (DealOpened)="OpenDeal($event)"
-              (StageMoved)="Refresh(true)"></mjs-deal-board>
+              (StageMoved)="RefreshAfterSave()"></mjs-deal-board>
           }
         </div>
 

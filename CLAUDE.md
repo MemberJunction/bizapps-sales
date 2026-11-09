@@ -422,8 +422,9 @@ Built on MJ's Angular Generic components — `kanban`, `timeline`, `filter-build
 Recorded in full in `docs/DECISIONS.md`; listed here so nobody "fixes" them:
 - **Quota / attainment** — v2. No `Quota` table (D2).
 - **Territory** — a label on `SalesAccount`, not a routing engine (D3).
-- **`Pipeline.CompanyID` stays NOT NULL**; each line takes its company from its product, so a deal can
-  still span companies (D5, ratified 2026-08-26).
+- **A pipeline links to its companies through `PipelineCompany`**, not a column; the rep picks the deal's
+  company and the server checks it is linked to the pipeline. Each line still takes its company from its
+  product, so a deal can span companies (D5, superseded 2026-11-05).
 - **`ForecastSnapshot` columns are `*Amount`-suffixed**, diverging from master plan §9.5's bare
   `Commit`/`BestCase`/`Pipeline`/`Closed`. **The shipped names are authoritative** — `COMMIT` is reserved
   in T-SQL and Postgres, and prod is Postgres (D6).

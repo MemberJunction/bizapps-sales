@@ -227,6 +227,11 @@ export interface DiscountConcessionRequest {
     OrderLineID: string;
     ReasonCategory: DiscountReasonCategory;
     Reason: string;
+    /**
+     * Client-generated UUID for this recording attempt, so a retry after a timeout finds the
+     * concession the first attempt already wrote instead of withdrawing and recreating it.
+     */
+    ConcessionID?: string | null;
 }
 
 /**
@@ -267,6 +272,7 @@ export async function RecordDiscountConcession(request: DiscountConcessionReques
             OrderLineID: request.OrderLineID,
             ReasonCategory: request.ReasonCategory,
             Reason: reason,
+            ...(request.ConcessionID ? { ConcessionID: request.ConcessionID } : {}),
         });
         const out = envelope.Output;
         if (!envelope.Success || !out) {

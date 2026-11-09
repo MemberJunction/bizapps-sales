@@ -310,6 +310,25 @@ async function execSql(ctx: Parameters<NamedCheck['Fn']>[0], sql: string, why: s
     await sqlProvider.ExecuteSQL(sql, {}, { isMutation: true, description: why }, ctx.User);
 }
 
+/** The words `DealEntityServer` refuses an unlinked company with; the checks match on them. */
+const NOT_LINKED = 'not available to its company';
+
+/**
+ * Removes the fixture company's link to the fixture pipeline (`'delete'`) or retires it (`'retire'`,
+ * `IsActive = 0`), inside the check's transaction so the rollback restores it.
+ */
+async function unlinkFixtureCompany(
+    ctx: Parameters<NamedCheck['Fn']>[0],
+    f: SalesFixture,
+    how: 'delete' | 'retire',
+): Promise<void> {
+    const where = `PipelineID = '${f.PipelineID}' AND CompanyID = '${f.CompanyID}'`;
+    const sql = how === 'delete'
+        ? `DELETE FROM ${SALES_SCHEMA}.PipelineCompany WHERE ${where}`
+        : `UPDATE ${SALES_SCHEMA}.PipelineCompany SET IsActive = 0 WHERE ${where}`;
+    await execSql(ctx, sql, `unlink the fixture company from the fixture pipeline (${how})`);
+}
+
 async function orderRow(
     ctx: Parameters<NamedCheck['Fn']>[0],
     orderID: string,
@@ -443,29 +462,43 @@ export const SaveDealChecks: NamedCheck[] = [
     },
     {
         Id: 'save-deal.SD2',
-        Name: 'SD2: CompanyID comes from the PIPELINE, not from whatever the client set',
+        Name: 'SD2: a deal whose company is NOT linked to its pipeline is refused, and nothing is written',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
+                /**
+                 * A pipeline serves every company it is linked to, so the deal's company is the rep's
+                 * choice and can no longer be copied from the pipeline. What the server still owes is
+                 * that the choice is one the pipeline offers: a CHECK cannot reach across the link table,
+                 * so `DealEntityServer` checks it on every save, for every caller.
+                 *
+                 * Before the link table this check asserted the opposite shape — a wrong company was
+                 * OVERWRITTEN from `Pipeline.CompanyID`. With several companies on a pipeline there is no
+                 * single right answer to overwrite with, so a wrong one is refused.
+                 *
+                 * The fixture company is unlinked inside the rolled-back transaction, so the check needs
+                 * no second company and leaves the link as it found it.
+                 */
                 const f = await ResolveSalesFixture(ctx);
-                // A deliberately wrong company. Deal.CompanyID must equal Pipeline.CompanyID and a CHECK
-                // cannot reach across the FK to compare them, so the server resolves it on every save —
-                // and a client that gets it wrong (or lies) must not be able to store a mismatch.
-                const bogus = '00000000-0000-0000-0000-000000000001';
-                const deal = await newDeal(ctx, f, (d) => {
-                    d.Name = 'SD2 company override';
-                    d.CompanyID = bogus;
-                });
-                await saveOk(deal, 'the save');
+                await unlinkFixtureCompany(ctx, f, 'delete');
 
-                const row = await TxOne<{ CompanyID: string }>(
-                    ctx, `SELECT CompanyID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
+                const name = 'SD2 unlinked company';
+                const deal = await newDeal(ctx, f, (d) => { d.Name = name; });
+                AssertEqual(await deal.Save(), false, 'a deal whose company is not linked to its pipeline must be refused');
+                Assert(
+                    (deal.LatestResult?.Message ?? '').includes(NOT_LINKED),
+                    `the refusal names the missing link; it reads '${deal.LatestResult?.Message ?? ''}'`,
                 );
                 AssertEqual(
-                    String(row.CompanyID).toLowerCase(),
-                    f.PipelineCompanyID.toLowerCase(),
-                    'the stored company must be the pipeline\'s, not the one the caller supplied',
+                    String(deal.CompanyID).toLowerCase(),
+                    f.CompanyID.toLowerCase(),
+                    'the caller\'s company is left as supplied, not overwritten from the pipeline',
                 );
+
+                const written = await TxOne<{ N: number }>(
+                    ctx, `SELECT COUNT(*) AS N FROM ${SALES_SCHEMA}.Deal WHERE Name = '${name}'`,
+                );
+                AssertEqual(Number(written.N), 0, 'the refused deal wrote no row');
             }),
     },
     {
@@ -913,8 +946,8 @@ export const SaveDealChecks: NamedCheck[] = [
                 AssertEqual(String(row.OrderType), 'Sale', 'OrderType is what SALES states it is');
                 AssertEqual(
                     String(row.CompanyID).toLowerCase(),
-                    f.PipelineCompanyID.toLowerCase(),
-                    'the selling company came from the PIPELINE, through the deal stamp',
+                    f.CompanyID.toLowerCase(),
+                    'the order\'s selling company is the DEAL\'s, which the server checked against the pipeline',
                 );
                 AssertEqual(
                     String(row.BillToOrganizationID).toLowerCase(),
@@ -989,7 +1022,7 @@ export const SaveDealChecks: NamedCheck[] = [
                  */
                 const f = await ResolveSalesFixture(ctx);
                 const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD19 engine pricing'; });
-                const [productID] = await sellableProducts(ctx, f.PipelineCompanyID, 1);
+                const [productID] = await sellableProducts(ctx, f.CompanyID, 1);
                 const line = await addLine(deal, productID, 3);
 
                 // `CompanyID` is the honest pre-save assertion: sales never writes it, and it is NOT NULL,
@@ -1261,7 +1294,7 @@ export const SaveDealChecks: NamedCheck[] = [
                 const row = await orderRow(ctx, after.OrderID as string, ['CompanyID', 'OrderType']);
                 AssertEqual(
                     String(row.CompanyID).toLowerCase(),
-                    f.PipelineCompanyID.toLowerCase(),
+                    f.CompanyID.toLowerCase(),
                     'STAMPED, which is the half that was failing: an unstamped order dies on CompanyID',
                 );
                 AssertEqual(String(row.OrderType), 'Sale', 'and carries the type sales states');
@@ -1362,9 +1395,10 @@ export const SaveDealChecks: NamedCheck[] = [
                  * read, is indistinguishable from a deliberate hand-set, and refused the save — losing
                  * an unrelated edit and telling the user to do the thing they had just done.
                  *
-                 * `CompanyID` settles which way round this belongs. It is `serverMaintained` in the
-                 * same field list, equally derived, and `stampCompanyFromPipeline` OVERWRITES a
-                 * supplied company rather than refusing. The two now behave alike.
+                 * `CompanyID` was the precedent then: derived from the pipeline, and a supplied company
+                 * was OVERWRITTEN rather than refused. It is the rep's choice now that a pipeline serves
+                 * several companies, and is checked rather than derived (SD2). The owner still has
+                 * exactly one right answer obtainable elsewhere, so overriding it still fits.
                  *
                  * What has NOT changed is the guarantee S-US1 asks for: the column still cannot be
                  * edited directly, and the owner column and the owner-role team row still cannot name
@@ -1609,6 +1643,7 @@ export const SaveDealChecks: NamedCheck[] = [
                 deal.DealTypeID = f.DealTypeID;
                 deal.DealStatusTypeID = f.OpenStatusID;
                 deal.AccountID = f.AccountID;
+                deal.CompanyID = f.CompanyID;
 
                 // Invalid on purpose: Name is NOT NULL, so `super.Save` refuses AFTER the number is drawn.
                 deal.Name = null as unknown as string;
@@ -2452,12 +2487,231 @@ export const SaveDealChecks: NamedCheck[] = [
     },
     {
         Id: 'save-deal.SD45',
-        Name: 'SD45: deactivating the Owner/AE team row clears Deal.OwnerEmployeeID (#409)',
+        Name: 'SD45: CreationDate defaults to the server save clock on create, preserves explicit values, and honours the backfill rule (#532)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                // 1. Default CreationDate on create: stamped at save time on the server clock (not NewRecord() time).
+                const f = await ResolveSalesFixture(ctx);
+                const defaulted = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD45 default CreationDate';
+                });
+                await new Promise((resolve) => setTimeout(resolve, 20));
+                const beforeSave = Date.now();
+                await saveOk(defaulted, 'create with default CreationDate');
+                const afterSave = Date.now();
+
+                Assert(
+                    defaulted.CreationDate instanceof Date && !Number.isNaN(defaulted.CreationDate.getTime()),
+                    `a new deal saved without setting CreationDate must land a valid Date — got ${String(defaulted.CreationDate)}`,
+                );
+                Assert(
+                    defaulted.CreationDate.getTime() >= beforeSave && defaulted.CreationDate.getTime() <= afterSave,
+                    `DealEntityServer must stamp CreationDate at Save() time (${beforeSave}..${afterSave}), not keep the earlier NewRecord() timestamp — got ${defaulted.CreationDate.getTime()}`,
+                );
+
+                const reloadedDefault = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await reloadedDefault.Load(defaulted.ID), 'reloading defaulted deal');
+                AssertEqual(
+                    reloadedDefault.CreationDate.toISOString(),
+                    defaulted.CreationDate.toISOString(),
+                    'reloaded CreationDate must match the saved server timestamp',
+                );
+
+                // Also verify a caller that explicitly clears CreationDate to null before saving gets a server stamp.
+                const nulled = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD45 nulled CreationDate';
+                    d.CreationDate = null as unknown as Date;
+                });
+                await saveOk(nulled, 'create with nulled CreationDate');
+                Assert(
+                    nulled.CreationDate instanceof Date && nulled.CreationDate.getTime() >= beforeSave,
+                    'a create with CreationDate cleared to null must still be stamped by DealEntityServer',
+                );
+
+                // 2. Explicit CreationDate survives create (e.g. an importer) and open-deal update (a rep correcting it).
+                const historical = new Date('2024-03-15T14:30:00.000Z');
+                const imported = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD45 explicit historical CreationDate';
+                    d.CreationDate = historical;
+                });
+                await saveOk(imported, 'create with explicit historical CreationDate');
+
+                const reloadedImported = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await reloadedImported.Load(imported.ID), 'reloading imported deal');
+                AssertEqual(
+                    reloadedImported.CreationDate.toISOString(),
+                    historical.toISOString(),
+                    'an explicit CreationDate on create must survive Save() without being overwritten by the server default',
+                );
+
+                const corrected = new Date('2024-04-01T09:15:00.000Z');
+                reloadedImported.CreationDate = corrected;
+                await saveOk(reloadedImported, 'update CreationDate on open deal');
+
+                const afterEdit = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await afterEdit.Load(imported.ID), 'reloading deal after CreationDate edit');
+                AssertEqual(
+                    afterEdit.CreationDate.toISOString(),
+                    corrected.toISOString(),
+                    'editing CreationDate on an open deal must persist',
+                );
+
+                // 3. Backfill rule: earliest pre-__mj_CreatedAt DealStageEvent.ChangedAt, else __mj_CreatedAt.
+                // Seed a historical stage event (2023) and a post-creation event (2030) on `imported`, and
+                // only a post-creation event (2030) on `defaulted`, then run the migration's backfill UPDATE
+                // scoped to those two deals and verify both branches of the rule.
+                const earliestEvent = '2023-06-10T11:20:00.000Z';
+                const laterPreEvent = '2023-09-01T08:00:00.000Z';
+                const postCreateEvent = '2030-01-01T00:00:00.000Z';
+                await TxOne(
+                    ctx,
+                    `INSERT INTO ${SALES_SCHEMA}.DealStageEvent
+                        (DealID, FromStageID, ToStageID, FromDealStatusTypeID, ToDealStatusTypeID, ChangedAt)
+                     VALUES
+                        ('${imported.ID}', NULL, '${f.StageID}', NULL, '${f.OpenStatusID}', '${earliestEvent}'),
+                        ('${imported.ID}', NULL, '${f.StageID}', NULL, '${f.OpenStatusID}', '${laterPreEvent}'),
+                        ('${imported.ID}', NULL, '${f.StageID}', NULL, '${f.OpenStatusID}', '${postCreateEvent}'),
+                        ('${defaulted.ID}', NULL, '${f.StageID}', NULL, '${f.OpenStatusID}', '${postCreateEvent}');
+
+                     UPDATE d
+                        SET d.CreationDate = ISNULL(
+                                (SELECT MIN(e.ChangedAt)
+                                   FROM ${SALES_SCHEMA}.DealStageEvent e
+                                  WHERE e.DealID = d.ID
+                                    AND e.ChangedAt < d.__mj_CreatedAt),
+                                d.__mj_CreatedAt)
+                       FROM ${SALES_SCHEMA}.Deal d
+                      WHERE d.ID IN ('${imported.ID}', '${defaulted.ID}');
+
+                     SELECT 1 AS Ok;`,
+                );
+
+                const backfilledImported = await TxOne<{ CreationDate: Date }>(
+                    ctx,
+                    `SELECT CreationDate FROM ${SALES_SCHEMA}.Deal WHERE ID = '${imported.ID}'`,
+                );
+                AssertEqual(
+                    new Date(backfilledImported.CreationDate).toISOString(),
+                    earliestEvent,
+                    'backfill must pick MIN(DealStageEvent.ChangedAt) when events predate __mj_CreatedAt',
+                );
+
+                const backfilledNative = await TxOne<{ MatchesCreatedAt: number }>(
+                    ctx,
+                    `SELECT CASE WHEN CreationDate = __mj_CreatedAt THEN 1 ELSE 0 END AS MatchesCreatedAt
+                       FROM ${SALES_SCHEMA}.Deal
+                      WHERE ID = '${defaulted.ID}'`,
+                );
+                AssertEqual(
+                    Number(backfilledNative.MatchesCreatedAt),
+                    1,
+                    'backfill must fall back to __mj_CreatedAt when no stage event predates __mj_CreatedAt',
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD46',
+        Name: 'SD46: a company linked to the pipeline is the rep\'s choice — it saves, and the deal and its order keep it',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * The other half of SD2. Saving the fixture company alone would pass under the old stamp
+                 * too, since it was the pipeline's one company; a SECOND company, linked inside the
+                 * transaction, is what shows the server keeps the rep's choice rather than picking one.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const others = await new RunView().RunView<{ ID: string }>(
+                    {
+                        EntityName: 'MJ: Companies',
+                        ExtraFilter: `ID <> '${f.CompanyID}'`,
+                        ResultType: 'simple',
+                        Fields: ['ID'],
+                        OrderBy: 'Name ASC, ID ASC',
+                    },
+                    ctx.User,
+                );
+                Assert(others.Success, `reading companies failed — ${others.ErrorMessage}`);
+                const otherID = (others.Results ?? [])[0]?.ID;
+                Assert(
+                    !!otherID,
+                    'setup: the host needs a second company for this check to mean anything — run scripts/seed-demo-data.sh',
+                );
+
+                await execSql(
+                    ctx,
+                    `IF EXISTS (SELECT 1 FROM ${SALES_SCHEMA}.PipelineCompany
+                                 WHERE PipelineID = '${f.PipelineID}' AND CompanyID = '${otherID}')
+                         UPDATE ${SALES_SCHEMA}.PipelineCompany SET IsActive = 1
+                          WHERE PipelineID = '${f.PipelineID}' AND CompanyID = '${otherID}'
+                     ELSE
+                         INSERT INTO ${SALES_SCHEMA}.PipelineCompany (PipelineID, CompanyID, IsActive)
+                         VALUES ('${f.PipelineID}', '${otherID}', 1)`,
+                    'SD46: link a second company to the fixture pipeline',
+                );
+
+                const deal = await newDeal(ctx, f, (d) => {
+                    d.Name = 'SD46 second linked company';
+                    d.CompanyID = otherID as string;
+                });
+                await saveOk(deal, 'the save with a second linked company');
+
+                const row = await TxOne<{ CompanyID: string }>(
+                    ctx, `SELECT CompanyID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
+                );
+                AssertEqual(
+                    String(row.CompanyID).toLowerCase(),
+                    String(otherID).toLowerCase(),
+                    'the stored company is the one the rep chose',
+                );
+                Assert(!!deal.OrderID, 'the save provisioned the embedded order');
+                const order = await orderRow(ctx, deal.OrderID as string, ['CompanyID']);
+                AssertEqual(
+                    String(order.CompanyID).toLowerCase(),
+                    String(otherID).toLowerCase(),
+                    'and the order sells for that company too',
+                );
+            }),
+    },
+    {
+        Id: 'save-deal.SD47',
+        Name: 'SD47: a RETIRED link (IsActive = 0) refuses a new deal, and an existing deal keeps saving ordinary edits',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * IsActive, not DELETE, retires a link, so a company that stops selling a motion keeps
+                 * its open deals on that pipeline. The check is keyed on the company or pipeline MOVING:
+                 * a new deal is refused, while an existing one that changes neither still saves.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const existing = await newDeal(ctx, f, (d) => { d.Name = 'SD47 deal from before the retirement'; });
+                await saveOk(existing, 'the save while the link is active');
+
+                await unlinkFixtureCompany(ctx, f, 'retire');
+
+                const fresh = await newDeal(ctx, f, (d) => { d.Name = 'SD47 deal after the retirement'; });
+                AssertEqual(await fresh.Save(), false, 'a new deal on a retired link must be refused');
+                Assert(
+                    (fresh.LatestResult?.Message ?? '').includes(NOT_LINKED),
+                    `the refusal names the missing link; it reads '${fresh.LatestResult?.Message ?? ''}'`,
+                );
+
+                const reopened = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await reopened.Load(existing.ID), 'the existing deal reloads');
+                reopened.NextStep = 'SD47 an ordinary edit after the retirement';
+                await saveOk(reopened, 'an ordinary edit to a deal whose link was retired');
+            }),
+    },
+    {
+        Id: 'save-deal.SD48',
+        Name: 'SD48: deactivating the Owner/AE team row clears Deal.OwnerEmployeeID (#409)',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
                 const f = await ResolveSalesFixture(ctx);
-                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD45 inactive owner'; });
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD48 inactive owner'; });
                 await deal.SetOwner(f.EmployeeID);
                 await saveOk(deal, 'create with owner');
 

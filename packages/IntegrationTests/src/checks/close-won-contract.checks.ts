@@ -119,7 +119,7 @@ async function createContract(
     const seam = new LiveContractsSeam(ctx.User, ProviderOf(ctx));
     return seam.CreateContractFromDeal({
         DealID: '00000000-0000-0000-0000-000000000000',
-        CompanyID: f.PipelineCompanyID,
+        CompanyID: f.CompanyID,
         ContractTypeCode: typeName,
         TermMonths: 12,
         AccountID: f.AccountID,
@@ -171,7 +171,7 @@ async function closeReopenClose(ctx: Ctx): Promise<{ ContractID: string; OrderID
     const seeded = await SeedDealOnPipeline(ctx, f, {
         PipelineID: f.ContractPolicyPipelineID,
         StageID: f.ContractPolicyStageID,
-        CompanyID: f.PipelineCompanyID,
+        CompanyID: f.ContractPolicyCompanyID,
         LineCount: 1,
     });
 
@@ -363,7 +363,7 @@ export const CloseWonContractChecks: SalesCheck[] = [
                 const seeded = await SeedDealOnPipeline(ctx, f, {
                     PipelineID: f.ContractPolicyPipelineID,
                     StageID: f.ContractPolicyStageID,
-                    CompanyID: f.PipelineCompanyID,
+                    CompanyID: f.ContractPolicyCompanyID,
                     LineCount: 1,
                 });
 

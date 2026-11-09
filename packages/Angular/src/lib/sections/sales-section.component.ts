@@ -40,7 +40,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey, LogError, Metadata, type EntityInfo } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
@@ -80,11 +80,13 @@ import {
     BuildLeftNavSections,
     DefaultPageFor,
     PrimaryActionFor,
+    SecondaryActionFor,
     SubPagesFor,
     type SalesNavBadges,
     type SalesPrimaryAction,
 } from '../nav/sales-nav.model';
 import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
+import { TimeLimitExceeded, WithinTimeLimit } from '../data/time-limit';
 import { DealBoardComponent, DEFAULT_DISPLAY_CURRENCY, StageIdleFor } from '../board/deal-board.component';
 import {
     DealWorkspaceService,
@@ -140,6 +142,7 @@ import {
     type FilterOption,
 } from '../pages/dashboard-filters';
 import { PipelineCompanies, PipelineLabel } from '../data/company-pipelines';
+import { WatchDealSaves } from '../data/deal-saves';
 import { MJSSalesFilterBarComponent, type FilterKind, type SalesFilterBarState } from './sales-filter-bar.component';
 
 /**
@@ -151,6 +154,9 @@ import { MJSSalesFilterBarComponent, type FilterKind, type SalesFilterBarState }
  */
 const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
+const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
+/** The entity each header action creates. */
+const CREATES: Record<SalesPrimaryAction['Creates'], string> = { deal: E_DEAL, account: E_ACCOUNT, contact: E_CONTACT };
 const E_DEAL_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_FORECAST_CATEGORY_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
@@ -159,6 +165,8 @@ const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
 /** The defaults a null URL field stands for. */
 const DEFAULT_PERIOD: PeriodKey = 'quarter';
 const DEFAULT_INSPECT: InspectKey = 'closing';
+/** How long a burst of deal saves may run before the section re-reads, in ms. */
+const SAVE_REFRESH_SETTLE_MS = 250;
 
 /** An entity's schema and base view from metadata, or null when it is not loaded. */
 function tableOf(entityName: string): { SchemaName: string; BaseView: string } | null {
@@ -243,6 +251,7 @@ export class MJSSalesSectionComponent implements OnInit {
 
     private readonly service = inject(DealWorkspaceService);
     private readonly cdr = inject(ChangeDetectorRef);
+    private readonly destroyRef = inject(DestroyRef);
     /**
      * Opens a RECORD as its own Explorer tab — deals AND accounts.
      */
@@ -252,11 +261,17 @@ export class MJSSalesSectionComponent implements OnInit {
     /** The dashboard's figures (roster and summary) have not landed yet. */
     public Loading = true;
     /**
-     * The reads the dashboard's figures do not need are still out: the board's lookups, the win rate
-     * and the grids' view. The tiles show without waiting for them (bizapps-sales#261); each surface
+     * The reads the dashboard's figures do not need are still out: the board's lookups, the win rate,
+     * the stage history and the grids' view. The tiles show without waiting for them (bizapps-sales#261); each surface
      * that does need them shows its own loading state until this clears.
      */
     public DetailLoading = true;
+    /**
+     * The board's own reads (the roster, pipelines and stages) have not landed yet. The board shows once
+     * they have, without waiting for the win rate, the stage history or the grids; the idle badges fill
+     * in when the stage history arrives.
+     */
+    public BoardLoading = true;
     /**
      * Every open deal, and the closed deals closed since the start of the current fiscal quarter
      * (bizapps-sales#209), whatever the filter bar holds. The filter lists' choices (owners, product
@@ -302,6 +317,10 @@ export class MJSSalesSectionComponent implements OnInit {
     public LoadError: string | null = null;
     /** Identifies the newest `Refresh()`, so a slower superseded one cannot apply its replies, clear its spinner or set its error. */
     private refreshToken = 0;
+    /** The pending re-read after a deal save; see {@link RefreshAfterSave}. */
+    private saveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    /** The `Refresh()` that ran out of time, whose replies are ignored when they finally arrive. */
+    private abandonedToken = 0;
     /** Identifies the newest deal list request, so a slower superseded one cannot replace the grid. */
     private inspectToken = 0;
     /** Which figure the deal list is showing. Default is closing in the next 30 days. */
@@ -353,6 +372,9 @@ export class MJSSalesSectionComponent implements OnInit {
      */
     public WinRateUnavailable = false;
     public DealEntityInfo: EntityInfo | null = null;
+    /** The Accounts and Contacts pages' grids. */
+    public AccountEntityInfo: EntityInfo | null = null;
+    public ContactEntityInfo: EntityInfo | null = null;
     public InspectView: MJUserViewEntityExtended | null = null;
     public AllDealsView: MJUserViewEntityExtended | null = null;
     /**
@@ -398,7 +420,39 @@ export class MJSSalesSectionComponent implements OnInit {
         this.InspectArg = url.InspectArg;
         this.BoardPipelineID = url.Pipeline;
         this.initialized = true;
+        this.watchDealSaves();
         await this.Refresh();
+    }
+
+    /**
+     * Re-reads the roster after any deal save in this browser (bc-aidp-next-golive#419).
+     *
+     * The board re-read after its own drags and nothing else, so an owner changed or a stage moved in a
+     * deal tab stayed stale here until the browser was refreshed. The save stream covers every place a
+     * deal is saved; the board's own drag arrives through it too.
+     */
+    private watchDealSaves(): void {
+        const stop = WatchDealSaves(() => this.RefreshAfterSave());
+        this.destroyRef.onDestroy(() => {
+            stop();
+            if (this.saveRefreshTimer !== null) {
+                clearTimeout(this.saveRefreshTimer);
+            }
+        });
+    }
+
+    /**
+     * A quiet `Refresh()` once a burst of saves has settled. An owner change saves a team row and then
+     * the deal, and a drag raises both the save and `StageMoved`; each burst costs one re-read.
+     */
+    public RefreshAfterSave(): void {
+        if (this.saveRefreshTimer !== null) {
+            clearTimeout(this.saveRefreshTimer);
+        }
+        this.saveRefreshTimer = setTimeout(() => {
+            this.saveRefreshTimer = null;
+            void this.Refresh(true);
+        }, SAVE_REFRESH_SETTLE_MS);
     }
 
     // ── URL state ──────────────────────────────────────────────────────────────
@@ -494,6 +548,10 @@ export class MJSSalesSectionComponent implements OnInit {
         return PrimaryActionFor(this.Page);
     }
 
+    public get SecondaryAction(): SalesPrimaryAction | null {
+        return SecondaryActionFor(this.Page);
+    }
+
     public get Title(): string {
         return 'Sales';
     }
@@ -511,7 +569,17 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** The header's primary verb. Opens a new Explorer record tab — never an in-rail workspace. */
     public StartPrimary(): void {
-        this.nav.OpenNewEntityRecord(E_DEAL);
+        this.Start(this.PrimaryAction ?? { Label: '', Icon: '', Creates: 'deal' });
+    }
+
+    /** Opens a new record of what the action creates, as an Explorer tab. */
+    public Start(action: SalesPrimaryAction): void {
+        this.nav.OpenNewEntityRecord(CREATES[action.Creates]);
+    }
+
+    /** A row on the Accounts or Contacts page: opens that record as an Explorer tab. */
+    public OnPartyOpened(event: RecordOpenedEvent): void {
+        this.nav.OpenEntityRecord(event.entity.Name, event.compositeKey);
     }
 
     // ── Data ───────────────────────────────────────────────────────────────────
@@ -525,35 +593,71 @@ export class MJSSalesSectionComponent implements OnInit {
      * read below can reject. Clearing the spinners in `finally` covers every exit; the failure is shown
      * as `LoadError` with a Retry instead.
      *
+     * The reads the board waits on get {@link BOARD_TIME_LIMIT_MS} between them; past it, the same
+     * `LoadError` and Retry show, and the replies still out are ignored when they arrive.
+     *
      * `quiet` re-reads without the spinners, so the pages stay mounted and show their current data
-     * until the new data lands. The board uses it after a drag.
+     * until the new data lands. The board uses it after a drag, and every deal save uses it through
+     * {@link RefreshAfterSave}. A quiet re-read that runs out of time keeps the board up instead of
+     * replacing it with a Retry.
      */
     public async Refresh(quiet = false): Promise<void> {
         const token = ++this.refreshToken;
         if (!quiet) {
             this.Loading = true;
             this.DetailLoading = true;
+            this.BoardLoading = true;
         }
         this.LoadError = null;
         this.cdr.detectChanges();
         try {
-            await this.load(token);
+            const rest = await WithinTimeLimit(this.load(token), BOARD_TIME_LIMIT_MS, BOARD_TOO_SLOW);
+            await rest.Detail;
         } catch (e) {
-            if (token === this.refreshToken) {
-                this.LoadError = reasonOf(e);
-                LogError(`Sales: the section failed to load - ${this.LoadError}`);
-            }
+            this.failRefresh(token, e, quiet);
         } finally {
             if (token === this.refreshToken) {
                 this.Loading = false;
                 this.DetailLoading = false;
+                this.BoardLoading = false;
                 this.cdr.detectChanges();
             }
         }
     }
 
-    /** The reads behind `Refresh()`. Throws on any failure the reads themselves do not absorb. */
-    private async load(token: number): Promise<void> {
+    /**
+     * Shows why the newest `Refresh()` stopped. One that ran out of time is abandoned: its reads are still
+     * out, and a reply landing under the error would show deals beside a message saying they did not load.
+     *
+     * A `quiet` one that ran out of time is only logged. The board on screen is still good, and leaving
+     * the token current lets the late reply land, so the board catches up without a Retry.
+     */
+    private failRefresh(token: number, e: unknown, quiet: boolean): void {
+        if (token !== this.refreshToken) {
+            return;
+        }
+        if (quiet && e instanceof TimeLimitExceeded) {
+            LogError(`Sales: a background refresh is slow and will apply when it lands - ${reasonOf(e)}`);
+            return;
+        }
+        if (e instanceof TimeLimitExceeded) {
+            this.abandonedToken = token;
+        }
+        this.LoadError = reasonOf(e);
+        LogError(`Sales: the section failed to load - ${this.LoadError}`);
+    }
+
+    /** True while `token` is the newest `Refresh()` and has not been abandoned. */
+    private isCurrent(token: number): boolean {
+        return token === this.refreshToken && token !== this.abandonedToken;
+    }
+
+    /**
+     * The reads behind `Refresh()`, up to the point the board can draw: the roster, the summary, then the
+     * pipelines and stages. Resolves with the reads still out, which never throw. Throws on any failure
+     * the reads themselves do not absorb.
+     */
+    private async load(token: number): Promise<RemainingReads> {
         // The business zone is loaded before anything asks what day it is (bc-aidp-next-golive#168):
         // the engine fails open to UTC when it has not been configured, silently the old behaviour.
         await BusinessTimeZoneEngine.Instance.Config(false);
@@ -564,6 +668,8 @@ export class MJSSalesSectionComponent implements OnInit {
         const filters = this.Filters;
         const figures = this.figuresKey();
         this.DealEntityInfo = new Metadata().Entities.find((e) => e.Name === E_DEAL) ?? null;
+        this.AccountEntityInfo = new Metadata().EntityByName(E_ACCOUNT) ?? null;
+        this.ContactEntityInfo = new Metadata().EntityByName(E_CONTACT) ?? null;
         this.MyEmployeeID = this.readMyEmployeeID();
 
         /**
@@ -583,8 +689,8 @@ export class MJSSalesSectionComponent implements OnInit {
             // The filter bar's deals. On the default period with no filter, the first read serves.
             this.readsOwnScope(window, filters) ? this.loadRoster(() => this.readScope(window, filters)) : Promise.resolve(null),
         ]);
-        if (token !== this.refreshToken) {
-            return;
+        if (!this.isCurrent(token)) {
+            return NOTHING_REMAINING;
         }
         this.Deals = roster ?? [];
         // A period or filter picked while this was out has already read its own figures; these are stale.
@@ -596,23 +702,35 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Loading = false;
         this.cdr.detectChanges();
 
-        await this.loadDetail(detail, figures, token);
+        const lookups = await detail.Lookups;
+        if (!this.isCurrent(token)) {
+            return NOTHING_REMAINING;
+        }
+        this.applyLookups(lookups);
+        this.BoardLoading = false;
+        this.cdr.detectChanges();
+        return { Detail: this.loadDetail(detail, figures, token) };
     }
 
-    /** The second half of `load()`: what the board, the win rate and the grids read. Never throws. */
-    private async loadDetail(detail: DetailReads, figures: string, token: number): Promise<void> {
-        const [lookups, winRate, pipelineView, entries] = await Promise.all([
-            detail.Lookups, detail.WinRate, detail.View, detail.StageEntries,
-        ]);
-        if (token !== this.refreshToken) {
-            return;
-        }
+    /** The pipelines, stages, statuses and companies the board's columns and the filter lists are built from. */
+    private applyLookups(lookups: Settled<DealWorkspaceLookups>): void {
         this.LookupsError = lookups.Error;
         const lists = lookups.Value;
         this.Pipelines = lists?.Pipelines ?? [];
         this.Stages = lists?.Stages ?? [];
         this.DealStatusTypes = lists?.DealStatusTypes ?? [];
         this.companies = lists?.Companies ?? [];
+        if (lookups.Error) {
+            LogError(`Sales: part of the section failed to load - ${lookups.Error}`);
+        }
+    }
+
+    /** The last part of `load()`, after the board has drawn: the win rate, the stage history and the grids. Never throws. */
+    private async loadDetail(detail: DetailReads, figures: string, token: number): Promise<void> {
+        const [winRate, pipelineView, entries] = await Promise.all([detail.WinRate, detail.View, detail.StageEntries]);
+        if (!this.isCurrent(token)) {
+            return;
+        }
         if (figures === this.figuresKey()) {
             this.WinRateError = winRate.Error;
             this.applyWinRate(winRate.Error ? null : winRate.Value);
@@ -623,7 +741,7 @@ export class MJSSalesSectionComponent implements OnInit {
         this.pipelineView = pipelineView.Value;
         this.cdr.detectChanges();
         await Promise.all([this.refreshInspectView(), this.refreshAllDealsView()]);
-        for (const failed of [lookups.Error, winRate.Error, pipelineView.Error, entries.Error]) {
+        for (const failed of [winRate.Error, pipelineView.Error, entries.Error]) {
             if (failed) {
                 LogError(`Sales: part of the section failed to load - ${failed}`);
             }
@@ -860,8 +978,10 @@ export class MJSSalesSectionComponent implements OnInit {
     /** Pipelines of the selected selling companies, or every pipeline when none is selected. */
     public get PipelineOptions(): FilterOption[] {
         const several = PipelineCompanies(this.Pipelines).length > 1 && !this.Filters.CompanyIDs.length;
+        // A pipeline shared by several companies is named alone: labelling it with one would be wrong.
+        const shared = (id: string): boolean => this.Pipelines.filter((p) => HasID([id], p.ID)).length > 1;
         return PipelineOptionsFor(this.Pipelines, this.Filters.CompanyIDs)
-            .map((p) => ({ ID: p.ID, Name: several ? PipelineLabel(p) : p.Name }));
+            .map((p) => ({ ID: p.ID, Name: several && !shared(p.ID) ? PipelineLabel(p) : p.Name }));
     }
 
     private companyName(id: string): string {
@@ -1435,6 +1555,21 @@ function settle<T>(read: Promise<T>): Promise<Settled<T>> {
         (e: unknown) => ({ Value: null, Error: reasonOf(e) }),
     );
 }
+
+/** What `load()` leaves running once the board can draw. */
+interface RemainingReads {
+    Detail: Promise<void>;
+}
+
+const NOTHING_REMAINING: RemainingReads = { Detail: Promise.resolve() };
+
+/**
+ * How long the board waits for its own reads before it shows a Retry (bc-aidp-next-golive#414). No read
+ * has a limit of its own, so one the server never answers left the board on its spinner until a browser
+ * refresh.
+ */
+const BOARD_TIME_LIMIT_MS = 30_000;
+const BOARD_TOO_SLOW = 'The deals took longer than 30 seconds to load.';
 
 /** The reads `load()` starts for the board, the win rate and the grids. */
 interface DetailReads {

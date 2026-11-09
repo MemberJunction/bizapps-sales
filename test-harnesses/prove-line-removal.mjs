@@ -42,9 +42,13 @@ const rv = new RunView();
 const one = async (entity, filter, fields, orderBy) =>
     (await rv.RunView({ EntityName: entity, ExtraFilter: filter, ResultType: 'simple', Fields: fields, ...(orderBy ? { OrderBy: orderBy } : {}) }, user)).Results?.[0];
 
-// The SAME pipeline the integration fixture picks -- first active -- so this harness and the checks are
-// talking about the same company and the same catalogue.
-const pipe = await one('MJ_BizApps_Sales: Pipelines', 'IsActive = 1', ['ID', 'Code', 'CompanyID']);
+// The SAME pipeline and company the integration fixture picks -- first active pipeline by name, then
+// its earliest active company link -- so this harness and the checks are talking about the same
+// company and the same catalogue.
+const pipe = await one('MJ_BizApps_Sales: Pipelines', 'IsActive = 1', ['ID', 'Code'], 'Name ASC');
+const link = await one('MJ_BizApps_Sales: Pipeline Companies', `PipelineID = '${pipe.ID}' AND IsActive = 1`,
+    ['CompanyID'], '__mj_CreatedAt ASC, CompanyID ASC');
+if (!link) { console.error('    PRECONDITION: the pipeline has no active company link'); process.exit(2); }
 const stage = await one('MJ_BizApps_Sales: Pipeline Stages', `PipelineID = '${pipe.ID}' AND IsActive = 1`, ['ID'], 'DisplayOrder ASC');
 const dtype = await one('MJ_BizApps_Sales: Deal Types', 'IsActive = 1', ['ID']);
 const status = await one('MJ_BizApps_Sales: Deal Status Types', 'IsOpen = 1 AND IsActive = 1', ['ID']);
@@ -57,7 +61,7 @@ const account = await one('MJ_BizApps_Sales: Sales Accounts', 'IsActive = 1', ['
 // the picker — a deal may sell any company's product — but this harness wants a product belonging to a
 // PARTICULAR company, so it says so itself rather than relying on a rule that no longer means that.
 const products = (await pool.request().query(
-    `SELECT ID FROM __mj_BizAppsOrders.Product WHERE CompanyID = '${String(pipe.CompanyID).replace(/'/g, "''")}' AND (${ProductFilterFor(new Date())}) ORDER BY Name`
+    `SELECT ID FROM __mj_BizAppsOrders.Product WHERE CompanyID = '${String(link.CompanyID).replace(/'/g, "''")}' AND (${ProductFilterFor(new Date())}) ORDER BY Name`
 )).recordset;
 if (products.length < 2) { console.error('    PRECONDITION: need 2 sellable products'); process.exit(2); }
 
@@ -72,6 +76,7 @@ deal.PipelineStageID = stage.ID;
 deal.DealTypeID = dtype.ID;
 deal.DealStatusTypeID = status.ID;
 deal.AccountID = account?.ID ?? null;
+deal.CompanyID = link.CompanyID;
 deal.TermMonths = 12;
 const order0 = deal.OrderID_EnsureObject();
 for (const p of products.slice(0, 2)) {

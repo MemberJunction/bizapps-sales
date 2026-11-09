@@ -163,7 +163,7 @@ async function discountedLine(ctx: Ctx, f: SalesFixture): Promise<string> {
     await saveOk(deal, 'the first save of the deal');
 
     const line = await deal.OrderID_EnsureObject().Lines.Create();
-    line.Set('ProductID', await sellableProduct(ctx, f.PipelineCompanyID));
+    line.Set('ProductID', await sellableProduct(ctx, f.CompanyID));
     line.Set('Quantity', 1);
     line.Set('DiscountPct', 0.1);
     await saveOk(deal, 'saving the deal with a discounted line');
