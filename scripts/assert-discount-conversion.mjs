@@ -14,6 +14,8 @@
 import {
     DiscountPercentToFraction,
     DiscountFractionToPercent,
+    DiscountAmountToPercent,
+    PricedLineListAmount,
     DISCOUNT_PERCENT_DECIMALS,
     DISCOUNT_FRACTION_DECIMALS,
 } from '../packages/Entities/dist/discount-conversion.js';
@@ -139,8 +141,8 @@ console.log('\n  round trip: fraction -> percent -> fraction, over EVERY storabl
  * at the rep. Pinned here so the display path cannot regress into arithmetic nobody can read.
  *
  * The saving half of the fix is not in this module and cannot be reached from here: the
- * workspace stops feeding its own output back through the entry guard, so an untouched
- * sub-percent discount saves. See `SetDiscountPercent` in `deal-workspace.component.ts`.
+ * line editor stops feeding its own output back through the entry guard, so an untouched
+ * sub-percent discount saves. See `SetDiscountPercent` in `deal-line-editor.component.ts`.
  */
 console.log('\n  sub-one-percent: displayed exactly, still refused on re-entry\n');
 ok('0.005 displays as exactly 0.5',    DiscountFractionToPercent(0.005),  0.5);
@@ -164,6 +166,46 @@ ok('12.345 is stored at the precision that exists, not the one typed',
  */
 refused('0.996 is refused, NOT rounded up into an accepted 1%', 0.996);
 refused('0.999 stays refused now that rounding exists',        0.999);
+
+/**
+ * ── A DOLLAR DISCOUNT BECOMES A PERCENT OF ORDERS' LIST AMOUNT ──────────────
+ *
+ * The line still stores only a fraction, so a typed amount is converted once, here, and held to
+ * the same bounds and precision as a typed percent. A derived percent is NOT refused in the
+ * `(0, 1)` band: it has no second reading, so $1 off $240 records 0.42%.
+ */
+console.log('\n  dollars -> percent (the amount path)\n');
+function amount(label, dollars, list, percent, fraction) {
+    const r = DiscountAmountToPercent(dollars, list);
+    const pass = r.Ok === true && r.Percent === percent && r.Fraction === fraction;
+    if (!pass) failures++;
+    console.log(`  ${pass ? 'PASS' : 'FAIL'}  ${label}${pass ? '' : `  — expected ${percent}% / ${fraction}, got ${r.Ok ? `${r.Percent}% / ${r.Fraction}` : 'REFUSED: ' + r.Reason}`}`);
+}
+function amountRefused(label, dollars, list) {
+    const r = DiscountAmountToPercent(dollars, list);
+    const pass = r.Ok === false && typeof r.Reason === 'string' && r.Reason.length > 0;
+    if (!pass) failures++;
+    console.log(`  ${pass ? 'PASS' : 'FAIL'}  ${label}${pass ? '' : '  — it was ACCEPTED, or refused with no reason'}`);
+}
+amount('$60 off $240 is 25%',                          60,   240,  25,    0.25);
+amount('$500 off $3,333 is held to 15.00%',            500,  3333, 15,    0.15);
+amount('$1 off $240 is 0.42%, not refused as ambiguous', 1,  240,  0.42,  0.0042);
+amount('the whole list amount is 100%',                240,  240,  100,   1);
+amount('$0 is no discount',                            0,    240,  0,     0);
+amount('not stated is no discount',                    null, 240,  0,     0);
+amount('29% of 100 survives the trip (float edge)',    29,   100,  29,    0.29);
+amountRefused('more than the list amount is refused',  241,  240);
+amountRefused('a negative amount is refused',          -5,   240);
+amountRefused('no list amount yet is refused',         10,   null);
+amountRefused('a $0 list amount is refused',           10,   0);
+amountRefused('under 0.01% of the line is refused',    0.01, 1000);
+amountRefused('NaN is refused',                        Number.NaN, 240);
+
+console.log('\n  orders\' list amount, read back from net + discount\n');
+ok('net 180 + discount 60 is list 240',        PricedLineListAmount(180, 60),     240);
+ok('no discount reported is the net',          PricedLineListAmount(240, null),   240);
+ok('no net reported is unknown',               PricedLineListAmount(null, 60),    null);
+ok('cents do not drift (0.1 + 0.2)',           PricedLineListAmount(0.1, 0.2),    0.3);
 
 console.log(`\n  ${failures === 0 ? 'discount-conversion: clean' : `discount-conversion: ${failures} FAILURE(S)`}\n`);
 process.exit(failures === 0 ? 0 : 1);

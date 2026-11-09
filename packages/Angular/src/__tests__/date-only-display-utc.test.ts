@@ -19,7 +19,7 @@ import { formatDate } from '@angular/common';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { DisplayDay } from '../lib/board/deal-board.component';
+import { CardCloseDay, CardClosed, CardDayLabel, DisplayDay } from '../lib/board/deal-board.component';
 
 /**
  * Put the process zone back. Assigning `undefined` to `process.env.TZ` stores the STRING "undefined",
@@ -44,10 +44,10 @@ function pipesOn(source: string, field: string): string[] {
 }
 
 describe('the templates pass a zone for DATE columns and none for instants', () => {
-    it('formats the board card close date in UTC', () => {
-        const pipes = pipesOn(BOARD, 'ExpectedCloseDate');
-        expect(pipes.length, 'the card must still render a close date').toBeGreaterThan(0);
-        for (const p of pipes) expect(p).toMatch(/'UTC'$/);
+    it('formats the board card close date through CardDayLabel, which reads the stored day\'s UTC parts', () => {
+        // The shared day format (bizapps-sales#371) replaced the card's date pipe; no zone can reach it.
+        expect(pipesOn(BOARD, 'CardCloseDay\\(deal\\)')).toEqual([]);
+        expect(BOARD).toMatch(/class="db-card__day">\{\{\s*CardDayLabel\(deal\)/);
     });
 
     it('formats NextStepDate in UTC on the overview and on the hero', () => {
@@ -133,9 +133,8 @@ describe('DisplayDay gives the board one shape to format', () => {
  * (and under CI's `TZ=UTC`) the card still reads correctly. It breaks only EAST of Greenwich for a bare
  * `YYYY-MM-DD`, which Angular parses as LOCAL midnight — in Tokyo that is 15:00 UTC the day before.
  *
- * So the card's interpolation is lifted out of the template and run: its pipe input is evaluated as
- * the expression it is (with the component's `DisplayDay` and a roster row in scope), and formatted
- * with the format and zone the template passes.
+ * The card now renders `CardDayLabel(deal)` (bizapps-sales#371), which formats the stored day from its
+ * UTC parts with no pipe and no zone, so these run that function under each zone.
  */
 describe('the board card renders a bare day correctly east of Greenwich', () => {
     const original = process.env.TZ;
@@ -143,24 +142,15 @@ describe('the board card renders a bare day correctly east of Greenwich', () => 
         restoreTZ(original);
     });
 
-    /** `COND ? (VALUE | date:'FMT':'ZONE') : 'FALLBACK'` inside the card's close-date span. */
-    function cardCloseBinding(): { value: string; format: string; zone: string | undefined } {
-        const span = BOARD.match(/class="db-card__close">\{\{([\s\S]*?)\}\}<\/span>/);
-        expect(span, 'the card must still render a close-date span').not.toBeNull();
-        const m = span![1].match(/\?\s*\((.+?)\|\s*date\s*:\s*'([^']+)'(?:\s*:\s*'([^']+)')?\s*\)\s*:/);
-        expect(m, 'the close date must still be a conditional date pipe').not.toBeNull();
-        return { value: m![1].trim(), format: m![2], zone: m![3] };
+    type CardRow = Parameters<typeof CardDayLabel>[0];
+
+    /** The card renders `CardDayLabel(deal)` (checked above), so this is what a reader sees. */
+    function renderCard(deal: CardRow): string {
+        return CardDayLabel(deal);
     }
 
     function renderCardClose(expectedCloseDate: string | Date): string {
-        const { value, format, zone } = cardCloseBinding();
-        // The template expression is plain JS here: a call and a property read.
-        const evaluate = new Function('DisplayDay', 'deal', `return (${value});`) as (
-            displayDay: typeof DisplayDay,
-            deal: { ExpectedCloseDate: string | Date },
-        ) => string | Date | null;
-        const input = evaluate(DisplayDay, { ExpectedCloseDate: expectedCloseDate });
-        return formatDate(input!, format, 'en-US', zone);
+        return renderCard({ IsClosed: false, ActualCloseDate: null, ExpectedCloseDate: expectedCloseDate });
     }
 
     for (const zone of ['Asia/Tokyo', 'America/Chicago']) {
@@ -174,4 +164,40 @@ describe('the board card renders a bare day correctly east of Greenwich', () => 
             expect(renderCardClose(new Date('2026-09-30T00:00:00.000Z'))).toBe('Sep 30, 2026');
         });
     }
+});
+
+/**
+ * A closed deal's card shows the day it closed, not the forecast (#304).
+ *
+ * The card picks the day by the roster's `IsClosed` flag. A closed row with no `ActualCloseDate` keeps
+ * its expected day and drops the "Closed" label, so a forecast is never presented as the close.
+ */
+describe('the board card shows the close day once a deal has closed', () => {
+    const fmt = (d: Date | null): string | null => (d ? formatDate(d, 'MMM d, y', 'en-US', 'UTC') : null);
+
+    it('shows the actual close day, labelled, for a closed deal', () => {
+        const deal = { IsClosed: true, ActualCloseDate: '2026-10-02', ExpectedCloseDate: '2026-09-30' };
+        expect(fmt(CardCloseDay(deal))).toBe('Oct 2, 2026');
+        expect(CardClosed(deal)).toBe(true);
+    });
+
+    it('falls back to the expected day, unlabelled, for a closed deal with no close day', () => {
+        const deal = { IsClosed: true, ActualCloseDate: null, ExpectedCloseDate: '2026-09-30' };
+        expect(fmt(CardCloseDay(deal))).toBe('Sep 30, 2026');
+        expect(CardClosed(deal)).toBe(false);
+    });
+
+    it('shows the expected day, unlabelled, for an open deal', () => {
+        const deal = { IsClosed: false, ActualCloseDate: null, ExpectedCloseDate: '2026-09-30' };
+        expect(fmt(CardCloseDay(deal))).toBe('Sep 30, 2026');
+        expect(CardClosed(deal)).toBe(false);
+    });
+
+    it('is null for an open deal with no expected day, so the card says "No date"', () => {
+        expect(CardCloseDay({ IsClosed: false, ActualCloseDate: null, ExpectedCloseDate: null })).toBeNull();
+    });
+
+    it('labels the card "Closed" only when CardClosed says so', () => {
+        expect(BOARD).toMatch(/@if \(CardClosed\(deal\)\) \{\s*<span class="db-card__closed">Closed<\/span>/);
+    });
 });

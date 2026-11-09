@@ -361,7 +361,7 @@ test.describe('pipeline board — a drag writes three things, and never closes a
         expect(drain(sink), 'no console errors during a drag').toEqual([]);
     });
 
-    test('a CLOSING column cannot be entered at all, and says why on the column itself', async ({ page }) => {
+    test('a CLOSING column cannot be entered, and the board says why when a card is let go over it', async ({ page }) => {
         const deal = await movableDeal(page);
         const stages = await stagesOf(deal.PipelineID);
         const closing = stages.find((s) => s.IsClosing === 1);
@@ -376,91 +376,55 @@ test.describe('pipeline board — a drag writes three things, and never closes a
         await shot(page, `board-refused-closing-${RUN_TAG}`);
 
         /**
-         * THE HINT MUST NAME THE WAY TO DO IT PROPERLY. A bare refusal teaches nothing and invites a second
-         * attempt; the column's title points at the deal form, where the explicit close lives, so the win
-         * or loss is recorded deliberately.
-         */
-        /**
-         * ── THE BOARD PREVENTS THE DROP; IT DOES NOT REFUSE IT AFTERWARDS ────────────────────────────
-         *
-         * This asserted a `.db-msg` naming the explicit close, and it failed three runs in a row — a
-         * consistent red, so actionable rather than flake. The reason is that the assertion described the
-         * wrong mechanism, and the better one:
+         * ── THE BOARD PREVENTS THE ENTRY, AND THEN SAYS WHY ──────────────────────────────────────────
          *
          *     [cdkDropListEnterPredicate]="CanDropInto(column)"
          *     CanDropInto = (column) => () => !column.IsClosing && !this.Moving;
          *
-         * CDK therefore refuses to let the card ENTER a closing column, `cdkDropListDropped` never fires,
-         * `OnDrop` never runs, and no message is set. `OnDrop`'s own `if (target.IsClosing)` block is
-         * labelled "belt and braces" in the source precisely because the predicate already handled it — so
-         * the only path that produces the message is one the UI cannot reach.
+         * CDK refuses to let the card ENTER a closing column, so the drop is reported on the last column
+         * that accepted it — its own, or one it crossed — with the pointer outside that column. `OnDrop`
+         * reads the column under the pointer (closing columns carry `data-closing`) and sets the message.
+         * Before that check the card snapped back with no word said, and the only explanation was the lock
+         * icon's tooltip, which a rep sees only by hovering it.
          *
-         * A card that will not enter is clearer to a rep than one that snaps back with an error, so the
-         * design is right and the spec was wrong. What IS asserted now is what the app actually guarantees:
-         * the deal does not move, and the column carries a permanent explanation rather than a transient
-         * one.
+         * THE HINT MUST NAME THE WAY TO DO IT PROPERLY. A bare refusal teaches nothing and invites a second
+         * attempt; it points at the deal form, where the explicit close lives.
          */
+        const message = page.locator('.db-msg');
+        await expect(message, 'a card let go over a closing column must say why it did not move').toBeVisible();
+        await expect(message).toContainText(closing!.Name);
+        await expect(message).toContainText(/deal form/i);
+
+        // The standing hint stays as well, for a rep who reads before dragging.
         const lockHint = page
             .locator('.db-col')
             .filter({ has: page.locator('.db-col__name', { hasText: closing!.Name }) })
             .locator('.db-col__lock');
-        await expect(
-            lockHint,
-            'the closing column must carry the lock affordance — it is the standing hint that replaces the '
-                + 'message a prevented drop never produces',
-        ).toBeVisible();
+        await expect(lockHint, 'the closing column must carry the lock affordance').toBeVisible();
         // The board renders "Deals cannot be moved here. Close a deal from the deal form."
         await expect(lockHint).toHaveAttribute('title', /cannot be moved/i);
         await expect(lockHint).toHaveAttribute('title', /deal form/i);
 
-        // And no transient message either, because nothing was dropped.
-        await expect(
-            page.locator('.db-msg'),
-            'a prevented drop reports nothing, because OnDrop never ran',
-        ).toHaveCount(0);
-
         /**
-         * ── THE GUARANTEE IS "NEVER LANDS IN A CLOSING STAGE", NOT "DOES NOT MOVE AT ALL" ────────────
+         * ── THE DEAL DOES NOT MOVE AT ALL ────────────────────────────────────────────────────────────
          *
-         * The first version asserted the stage was byte-identical afterwards, and it failed: the stage HAD
-         * changed. That is not a defect, it is how CDK works. A horizontal board puts other droppable
-         * columns between the card and the closing one, and a drag that crosses them leaves the card in the
-         * last container that ACCEPTED it. Dragging past Negotiation to reach Signed legitimately lands the
-         * card in Negotiation.
-         *
-         * So asserting "unchanged" was really asserting a pointer path, and it would keep breaking as
-         * columns were reordered. The property the app actually promises — and the one the rule cares
-         * about — is that a drag can never put a deal in a CLOSING stage, and can never close one. That
-         * holds regardless of what the pointer crossed on the way.
+         * A horizontal board puts other droppable columns between the card and the closing one, and CDK
+         * leaves the card in the last container that ACCEPTED it — dragging past Negotiation to reach
+         * Signed reports the drop on Negotiation. The pointer check runs before any move, so a release
+         * over a closing column is refused whatever the pointer crossed: no stage change, no stage event.
          */
         const after = await dealNow(deal.ID);
         expect(
             after.PipelineStageID.toLowerCase(),
-            'a drag must NEVER land a deal in a closing stage — closing is Sales.CloseDeal, an explicit act',
-        ).not.toBe(closing!.ID.toLowerCase());
+            'a card let go over a closing column stays where it was',
+        ).toBe(before.PipelineStageID.toLowerCase());
 
-        // Resolved from the stage list this test already loaded, rather than a new query.
-        const landed = stages.find((x) => x.ID.toLowerCase() === after.PipelineStageID.toLowerCase());
-        expect(landed, 'the deal must be in a stage this pipeline actually owns').toBeTruthy();
-        expect(
-            landed!.IsClosing,
-            'and whatever column it did land in must be a non-closing one, so nothing locked the deal',
-        ).toBe(0);
-
-        /**
-         * The event count may legitimately have grown by one, if the card came to rest in an intermediate
-         * column — that IS a real move and owes provenance. What must not happen is an event naming the
-         * closing stage as its destination.
-         */
         const events = await eventsFor(deal.ID);
         expect(
             events.filter((e) => String(e.ToStageID ?? '').toLowerCase() === closing!.ID.toLowerCase()).length,
             'no stage event may record a transition INTO the closing stage',
         ).toBe(0);
-        expect(
-            events.length - eventsBefore.length,
-            'and at most one event, for at most one landing',
-        ).toBeLessThanOrEqual(1);
+        expect(events.length, 'a refused drag records no stage event').toBe(eventsBefore.length);
     });
 });
 
@@ -493,16 +457,18 @@ test.describe('pipeline board — a drag writes three things, and never closes a
  *    SKIP, not fail, where the stage sets nothing — so check the seed has a stage that does, or this
  *    mutation proves nothing.
  *
- * 5. **The lock guard removed.** In `deal-board.component.ts`, change `CanDropInto` to
- *    `() => !this.Moving`. Deleting `OnDrop`'s `if (target.IsClosing)` block as well is optional and
- *    proves nothing on its own: that block is unreachable from the UI while the predicate stands, which
- *    is why this test asserts the PREVENTION and the column's own lock hint rather than a message.
- *    → the second test must fail — and it should fail on the STAGE assertion, not only on the missing
- *    message, which proves the guard was load-bearing rather than cosmetic.
+ * 5. **The lock guards removed.** In `deal-board.component.ts`, change `CanDropInto` to
+ *    `() => !this.Moving` AND delete `OnDrop`'s `if (target.IsClosing)` block. Either one alone keeps
+ *    the deal out of the closing stage, because each guards the other.
+ *    → the second test must fail on the STAGE assertion, which proves the guards are load-bearing.
  *
  * 6. **The hint loses its pointer.** Shorten the closing column's lock title to `'Not allowed.'`.
  *    → the `deal form` title assertion must fail while the stage assertion still passes. That separation
  *    is deliberate: it distinguishes "the guard works" from "the guard explains itself".
+ *
+ * 7. **The refusal goes quiet again.** In `OnDrop`, delete the `ClosingColumnUnder` check.
+ *    → the `.db-msg` assertion must fail while the stage assertion still passes, because
+ *    `CanDropInto` still keeps the card out.
  *
  * A mutation that leaves the suite green marks a decorative assertion. Fix it before trusting the spec —
  * `AC14` spent a day asserting a defect for exactly this reason.

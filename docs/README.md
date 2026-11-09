@@ -14,6 +14,12 @@ Open defects are GitHub issues, not documents: [bizapps-sales issues](https://gi
 | [`CLAUDE.md`](../CLAUDE.md) | The rules for working in this repository, for people and for Claude | Current |
 | [`.env.example`](../.env.example) | Every environment variable the repository reads, with placeholders | Current |
 
+## Using the app
+
+| Document | What it is for | Status |
+|---|---|---|
+| [`docs/WORKFLOWS.md`](WORKFLOWS.md) | For business users and administrators: the deal moments worth automating, the conditions that catch them, and the rules Sales adds. Builds on MemberJunction's workflow guides | Current |
+
 ## Decisions and known issues
 
 | Document | What it is for | Status |
@@ -32,9 +38,10 @@ Open defects are GitHub issues, not documents: [bizapps-sales issues](https://gi
 | [`docs/QA-GUIDE.md`](QA-GUIDE.md) | Configuration, seeding, the automated checks, and the manual test scenarios | Current |
 | [`docs/PUBLISHING.md`](PUBLISHING.md) | How a release is cut, and what the release gates check | Current |
 | [`.changeset/README.md`](../.changeset/README.md) | When a PR needs a changeset, and which bump level | Current |
-| [`docs/CODEGEN-PARTIAL-RUNS.md`](CODEGEN-PARTIAL-RUNS.md) | Why CodeGen is the wrong tool for filling a one-column metadata gap | Current |
+| [`docs/CODEGEN-PARTIAL-RUNS.md`](CODEGEN-PARTIAL-RUNS.md) | How a partial CodeGen run drops objects, and the preconditions for every run | Current |
 | [`docs/CHECK-MUTATION-EVIDENCE.md`](CHECK-MUTATION-EVIDENCE.md) | Which integration checks have been shown able to fail, by mutant | Current; updated by hand after a mutation run |
 | [`test-harnesses/playwright/README.md`](../test-harnesses/playwright/README.md) | Running the Explorer UI harness, and the traps found while building it | Current |
+| [`test-harnesses/MUTATION-RUNS.md`](../test-harnesses/MUTATION-RUNS.md) | Recovering from an interrupted mutation run, and the process rules for agents running one | Current |
 | [`test-harnesses/playwright/COVERAGE-MAP.md`](../test-harnesses/playwright/COVERAGE-MAP.md) | What each Explorer spec asserts, and what it does not | Current |
 | [`scripts/dev/README.md`](../scripts/dev/README.md) | The development-only seeds | Current |
 | [`.claude/skills/report-issue/SKILL.md`](../.claude/skills/report-issue/SKILL.md) | The `/report-issue` skill for filing bugs | Current |

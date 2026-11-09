@@ -3,11 +3,12 @@
 # findWorkspacePackageJsonFiles, and the publish workflow's jq steps) — pnpm itself
 # ignores it and uses this file. Keep the two glob lists in sync.
 
-# LOAD-BEARING. pnpm 10 defaults this to false, which makes internal deps pinned at
-# an exact version resolve from the REGISTRY instead of linking to the local package.
-# For an unpublished version that fails loudly; for a published one it silently
-# installs a stale copy. This repo pins its own workspace packages at exact
-# versions, so without this every workspace link becomes a registry download.
+# LOAD-BEARING. pnpm 10 defaults this to false, which makes internal deps declared at
+# a plain version range (here ^x.y.z) resolve from the REGISTRY instead of linking to
+# the local package. For an unpublished version that fails loudly; for a published one
+# it silently installs a stale copy. This repo declares its own workspace packages by
+# caret range rather than `workspace:`, so without this every workspace link becomes a
+# registry download.
 linkWorkspacePackages: true
 
 # Peer handling (strict-peer-dependencies, auto-install-peers) lives in .npmrc.
@@ -74,7 +75,13 @@ packages:
 # pnpm-lock.yaml, which CI installs frozen; the override only governs what a re-resolution may
 # pick. An exact pin here held this repo on common 5.46.3 after common had fixed its own install
 # (5.46.3's Tags metadata cannot be pushed to an MJ v6 host), and nothing prompted anyone to move
-# it. The floor is common's release whose Tags metadata carries the DisplayName MJ v6 requires.
+# it. The floor is common's first release with bizapps-party-field and the Person.EmailDomain /
+# Organization.WebsiteDomain columns the Deal form's pickers query (bc-aidp-next-golive#372); it also
+# carries [__mj_BizAppsCommon].[fnBusinessDayOf], which the Deal Cycle Time and Won Deals With
+# Unconfirmed Orders queries call. The floor is now 5.60.0, the Common AIDP Next runs: Sales
+# Accounts inherit Organization.Acronym (common 5.57), and CodeGen run against an older common
+# drops that field from the generated Sales Account code, which breaks every Sales Account load
+# on a host that has it. mj-app.json carries the same floor.
 # What travels to a consumer is the range in each package.json, which is what lets a host dedupe
 # instead of nesting a second copy.
 overrides:
@@ -91,11 +98,11 @@ overrides:
   '@angular/platform-browser-dynamic': '21.1.3'
   '@angular/router': '21.1.3'
   '@angular-devkit/build-angular': '21.1.3'
-  '@memberjunction/core': '^6.1.5'
-  '@memberjunction/global': '^6.1.5'
-  '@mj-biz-apps/common-entities': '^5.50.1'
-  '@mj-biz-apps/common-ng': '^5.50.1'
-  '@mj-biz-apps/common-activity-sync': '^5.50.1'
+  '@memberjunction/core': '^6.1.6'
+  '@memberjunction/global': '^6.1.6'
+  '@mj-biz-apps/common-entities': '^5.60.0'
+  '@mj-biz-apps/common-ng': '^5.60.0'
+  '@mj-biz-apps/common-activity-sync': '^5.60.0'
   graphql: '16.14.2'
   type-graphql: '2.0.0-beta.3'
   reflect-metadata: '0.2.2'

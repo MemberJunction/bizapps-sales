@@ -1,0 +1,66 @@
+[
+  {
+    "_comments": [
+      "bizapps-sales#272: a deal's Internal team grid had no DefaultInView field, so MJ showed the first",
+      "ten fields: Deal ID, Employee ID, Person ID, Deal Role ID and the rest as GUIDs. The role, which",
+      "answers 'who owns this deal', was visible only as an id. The grid is member, role, attribution and",
+      "the dates the member was on the deal.",
+      "",
+      "THE FLAG GOES ON THE VIRTUAL NAME FIELDS, NOT THE FOREIGN KEYS. Employee, Person and DealRole are",
+      "the names the base view already resolves; flagging EmployeeID, PersonID or DealRoleID would show",
+      "the GUIDs this file exists to remove.",
+      "",
+      "Employee and Person are two columns because a team member is exactly one of them and there is no",
+      "single member-name field in the view. Each row fills one of the two.",
+      "",
+      "IsActive and Notes are left off: EndDate already says whether a member is still on the deal, and",
+      "Notes is long text. Both stay available from the grid's column chooser."
+    ],
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Team Members&Name=Employee"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Team Members&Name=Person"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Team Members&Name=DealRole"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Team Members&Name=AttributionPct"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Team Members&Name=StartDate"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Team Members&Name=EndDate"
+    }
+  }
+]

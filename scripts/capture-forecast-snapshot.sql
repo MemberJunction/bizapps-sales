@@ -67,8 +67,17 @@
 -- later than the Action does.
 ---- ── WHAT A PERIOD IS ─────────────────────────────────────────────────────────
 --
--- The current calendar MONTH, in UTC. Everything stored is UTC and a snapshot
--- taken at 02:00 local must not land in the previous period for half the year.
+-- The current calendar MONTH of the BUSINESS day, from
+-- `[__mj_BizAppsCommon].[fnBusinessToday]()` -- the same zone the Action reads
+-- through BusinessTimeZoneEngine. The UTC day runs ahead of it every evening west
+-- of Greenwich, so a run on the last evening of a month took next month's period
+-- and replaced tomorrow's rows. "Today" for the same-day replace below is that
+-- business day too: `CapturedAt` is stored in UTC and compared through
+-- `fnBusinessDayOf()`, so both sides read one calendar.
+--
+-- `PeriodStart`/`PeriodEnd` themselves are DATE columns -- calendar days with no
+-- zone -- so only the choice of month depends on it.
+--
 -- Month is the smallest period a forecast review uses; a quarterly view is a
 -- sum of months, which the history query can do, while the reverse is not
 -- possible from quarterly captures.
@@ -77,7 +86,7 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @CapturedAt   DATETIMEOFFSET = SYSUTCDATETIME();
-DECLARE @Today        DATE           = CAST(SYSUTCDATETIME() AS DATE);
+DECLARE @Today        DATE           = (SELECT bt.Today FROM [__mj_BizAppsCommon].[fnBusinessToday]() AS bt);
 DECLARE @PeriodStart  DATE           = DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1);
 DECLARE @PeriodEnd    DATE           = EOMONTH(@Today);
 
@@ -86,7 +95,7 @@ BEGIN TRANSACTION;
 -- Today's capture, if one already ran. See the idempotency note above.
 DELETE FROM [__mj_BizAppsSales].ForecastSnapshot
  WHERE PeriodStart = @PeriodStart
-   AND CAST(CapturedAt AS DATE) = @Today;
+   AND [__mj_BizAppsCommon].[fnBusinessDayOf](CapturedAt) = @Today;
 
 INSERT INTO [__mj_BizAppsSales].ForecastSnapshot (
     ID, CompanyID, PipelineID, OwnerEmployeeID,

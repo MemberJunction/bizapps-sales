@@ -4,7 +4,7 @@
  *
  * ── IT BUILDS ITS OWN DEAL, AND THAT IS THE SCENARIO ────────────────────────────────────────────
  *
- * The deal and its Owner / AE row are inserted directly, which is precisely the case this change
+ * The deal and its Owner row are inserted directly, which is precisely the case this change
  * says it covers: "an importer, an Action or a direct write against DealTeamMember reaches the same
  * state". A row written that way never went through `DealEntityServer.Save()`, so nothing stamped
  * `Deal.OwnerEmployeeID` — the deal has a roster naming an owner and a column saying there is none,
@@ -81,25 +81,28 @@ async function ownerOf(id: string): Promise<string | null> {
 }
 
 test.describe('golive#291 — a team row saved on its own re-derives the deal owner', () => {
-    test('a deal imported without an owner stamp gets one when its Owner / AE row is saved', async ({ page }) => {
+    test('a deal imported without an owner stamp gets one when its Owner row is saved', async ({ page }) => {
         /**
          * Every ingredient is resolved by QUERY. Hardcoded ids would make this a description of one
          * host, and the ids here are seeded values that a rebuild is free to change.
          */
+        // The company from the pipeline's active link: the deal's company must be one its pipeline serves.
         const pipeline = await QueryOne<{ ID: string; CompanyID: string }>(
-            `SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID, CAST(CompanyID AS nvarchar(50)) AS CompanyID
-               FROM __mj_BizAppsSales.Pipeline WHERE IsActive = 1 ORDER BY Name`,
+            `SELECT TOP 1 CAST(p.ID AS nvarchar(50)) AS ID, CAST(pc.CompanyID AS nvarchar(50)) AS CompanyID
+               FROM __mj_BizAppsSales.Pipeline p
+               JOIN __mj_BizAppsSales.PipelineCompany pc ON pc.PipelineID = p.ID AND pc.IsActive = 1
+              WHERE p.IsActive = 1 ORDER BY p.Name, pc.CompanyID`,
         );
         const ownerRole = await QueryOne<{ ID: string }>(
-            `SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID FROM __mj_BizAppsSales.DealRole WHERE Name = 'Owner / AE'`,
+            `SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID FROM __mj_BizAppsSales.DealRole WHERE Code = 'OWNER'`,
         );
         const employee = await QueryOne<{ EmployeeID: string }>(
             `SELECT TOP 1 CAST(EmployeeID AS nvarchar(50)) AS EmployeeID
                FROM __mj_BizAppsSales.DealTeamMember WHERE EmployeeID IS NOT NULL`,
         );
 
-        expect(pipeline?.ID, 'the host needs an active pipeline with a company').toBeTruthy();
-        expect(ownerRole?.ID, 'the host needs an "Owner / AE" deal role').toBeTruthy();
+        expect(pipeline?.ID, 'the host needs an active pipeline with an active company link').toBeTruthy();
+        expect(ownerRole?.ID, 'the host needs the OWNER deal role').toBeTruthy();
         expect(employee?.EmployeeID, 'the host needs an employee to put on a deal team').toBeTruthy();
         employeeID = String(employee!.EmployeeID).toLowerCase();
 
@@ -158,7 +161,7 @@ test.describe('golive#291 — a team row saved on its own re-derives the deal ow
         await expect
             .poll(() => ownerOf(dealID), {
                 message:
-                    'saving the Owner / AE row on its own must stamp the deal owner from the roster — ' +
+                    'saving the Owner row on its own must stamp the deal owner from the roster — ' +
                     'this is the "grid shows an owner, deal says none" state from the issue',
                 timeout: 30_000,
                 intervals: [500, 1000, 2000],
@@ -172,7 +175,7 @@ test.describe('golive#291 — a team row saved on its own re-derives the deal ow
      * The test above saves the team row on its OWN record page, so the deal page is never open while
      * the owner moves — which is why it could not have caught what review found:
      *
-     *   open a deal with no owner, add yourself as Owner / AE, and the page still says "No owner
+     *   open a deal with no owner, add yourself as Owner, and the page still says "No owner
      *   assigned." Edit Next Step and save, and the page sends back the owner it LOADED. The server
      *   reads that stale value as a hand-set owner, refuses the WHOLE save, and tells you to change
      *   the owner on the Internal team panel — which is what you just did. The Next Step edit is lost.
@@ -183,26 +186,29 @@ test.describe('golive#291 — a team row saved on its own re-derives the deal ow
      *
      * ── WHAT THIS DOES NOT DRIVE, SAID PLAINLY ──────────────────────────────────────────────────
      *
-     * The Owner / AE row is saved from a SECOND page rather than typed into the grid's new-row editor.
+     * The Owner row is saved from a SECOND page rather than typed into the grid's new-row editor.
      * The grid's editor needs two lookups, and the harness's lookup verbs are the flakiest thing in
      * this suite. What matters for the defect is that the deal page is OPEN and STALE while the owner
      * moves underneath it, and a second page reproduces that exactly. Driving the new-row editor would
      * add failure modes without adding coverage of the fix.
      */
     test('a deal page left open catches up when the team grid reloads', async ({ page, context }) => {
+        // The company from the pipeline's active link: the deal's company must be one its pipeline serves.
         const pipeline = await QueryOne<{ ID: string; CompanyID: string }>(
-            `SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID, CAST(CompanyID AS nvarchar(50)) AS CompanyID
-               FROM __mj_BizAppsSales.Pipeline WHERE IsActive = 1 ORDER BY Name`,
+            `SELECT TOP 1 CAST(p.ID AS nvarchar(50)) AS ID, CAST(pc.CompanyID AS nvarchar(50)) AS CompanyID
+               FROM __mj_BizAppsSales.Pipeline p
+               JOIN __mj_BizAppsSales.PipelineCompany pc ON pc.PipelineID = p.ID AND pc.IsActive = 1
+              WHERE p.IsActive = 1 ORDER BY p.Name, pc.CompanyID`,
         );
         const ownerRole = await QueryOne<{ ID: string }>(
-            `SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID FROM __mj_BizAppsSales.DealRole WHERE Name = 'Owner / AE'`,
+            `SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID FROM __mj_BizAppsSales.DealRole WHERE Code = 'OWNER'`,
         );
         const employee = await QueryOne<{ EmployeeID: string }>(
             `SELECT TOP 1 CAST(EmployeeID AS nvarchar(50)) AS EmployeeID
                FROM __mj_BizAppsSales.DealTeamMember WHERE EmployeeID IS NOT NULL`,
         );
-        expect(pipeline?.ID, 'the host needs an active pipeline with a company').toBeTruthy();
-        expect(ownerRole?.ID, 'the host needs an "Owner / AE" deal role').toBeTruthy();
+        expect(pipeline?.ID, 'the host needs an active pipeline with an active company link').toBeTruthy();
+        expect(ownerRole?.ID, 'the host needs the OWNER deal role').toBeTruthy();
         expect(employee?.EmployeeID, 'the host needs an employee to put on a deal team').toBeTruthy();
 
         await QueryAll(`
