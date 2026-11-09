@@ -10,8 +10,8 @@
  * order, the value and the requester, and decides the concession, for a line saved through a deal.
  *
  * DC4 and DC5 raise the same line twice. Orders values the second concession at the line's whole
- * discount and sums every concession on the order that is not rejected, so the first one has to be
- * withdrawn or it is counted twice and the order cannot be confirmed.
+ * discount and sums every Pending and Approved concession on the order, so the first one has to be
+ * withdrawn or it is counted twice and the order cannot be confirmed. It stays on the line as Withdrawn.
  *
  * ── FIXTURE ─────────────────────────────────────────────────────────────────────────────────────
  *
@@ -198,19 +198,19 @@ async function raiseDiscount(ctx: Ctx, lineID: string, discountPct: number): Pro
     await saveOk(line, 'raising the line\'s discount');
 }
 
-/** The IDs of every concession recorded on the line. */
-async function concessionIDsOnLine(ctx: Ctx, lineID: string): Promise<string[]> {
-    const r = await new RunView().RunView<{ ID: string }>(
+/** Every concession recorded on the line, with when it was withdrawn (null while it stands). */
+async function concessionsOnLine(ctx: Ctx, lineID: string): Promise<Array<{ ID: string; WithdrawnAt: Date | null }>> {
+    const r = await new RunView().RunView<{ ID: string; WithdrawnAt: Date | null }>(
         {
             EntityName: ORDER_CONCESSION_ENTITY,
             ExtraFilter: `OrderLineID = '${lineID}'`,
             ResultType: 'simple',
-            Fields: ['ID'],
+            Fields: ['ID', 'WithdrawnAt'],
         },
         ctx.User,
     );
     Assert(r.Success, `reading the line's concessions failed: ${r.ErrorMessage ?? ''}`);
-    return (r.Results ?? []).map((row) => row.ID);
+    return r.Results ?? [];
 }
 
 /** Records a concession for the line, raises its discount, records again; returns both outcomes. */
@@ -226,10 +226,17 @@ async function recordRaiseRecord(
     return { first, second };
 }
 
-function assertOnlyTheSecondRemains(ids: string[], first: SalesRecordDiscountConcessionOutput, second: SalesRecordDiscountConcessionOutput): void {
-    Assert(!ids.some((id) => sameID(id, first.ConcessionID)), 'the concession for the earlier discount must be withdrawn');
-    AssertEqual(ids.length, 1, `the line must carry exactly one concession; it carries ${ids.length}`);
-    Assert(sameID(ids[0], second.ConcessionID), 'the remaining concession must be the one for the raised discount');
+/** The earlier concession stays on the line, withdrawn (golive #403); only the second one still stands. */
+function assertOnlyTheSecondStands(
+    rows: Array<{ ID: string; WithdrawnAt: Date | null }>,
+    first: SalesRecordDiscountConcessionOutput,
+    second: SalesRecordDiscountConcessionOutput,
+): void {
+    const earlier = rows.find((row) => sameID(row.ID, first.ConcessionID));
+    Assert(earlier != null && earlier.WithdrawnAt != null, 'the concession for the earlier discount must be kept, withdrawn');
+    const standing = rows.filter((row) => row.WithdrawnAt == null);
+    AssertEqual(standing.length, 1, `the line must carry exactly one standing concession; it carries ${standing.length}`);
+    Assert(sameID(standing[0].ID, second.ConcessionID), 'the standing concession must be the one for the raised discount');
 }
 
 async function record(ctx: Ctx, input: SalesRecordDiscountConcessionInput): Promise<SalesRecordDiscountConcessionOutput> {
@@ -339,7 +346,7 @@ export const DiscountConcessionChecks: NamedCheck[] = [
                 const { first, second } = await recordRaiseRecord(ctx, lineID);
                 AssertEqual(first.AwaitingApproval, false, 'setup: the first concession must be approved on the rep\'s authority');
                 AssertEqual(second.AwaitingApproval, false, 'the raised discount is still inside the rep\'s authority');
-                assertOnlyTheSecondRemains(await concessionIDsOnLine(ctx, lineID), first, second);
+                assertOnlyTheSecondStands(await concessionsOnLine(ctx, lineID), first, second);
             }),
     },
     {
@@ -357,7 +364,7 @@ export const DiscountConcessionChecks: NamedCheck[] = [
                 const { first, second } = await recordRaiseRecord(ctx, lineID);
                 AssertEqual(first.AwaitingApproval, true, 'setup: the first concession must wait for the approving role');
                 AssertEqual(second.AwaitingApproval, true, 'the raised discount is still outside the rep\'s authority');
-                assertOnlyTheSecondRemains(await concessionIDsOnLine(ctx, lineID), first, second);
+                assertOnlyTheSecondStands(await concessionsOnLine(ctx, lineID), first, second);
             }),
     },
 ];
