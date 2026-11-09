@@ -1600,6 +1600,9 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             clearTimeout(this.priceTimer);
             this.priceTimer = null;
             this.startPrice();
+        } else if (this.pricePending && !this.priceRequest) {
+            // A price is still owed with nothing asking for it: ask now rather than judge a stale one.
+            this.startPrice();
         }
         while (this.priceRequest || this.coveredRequest) {
             await Promise.all([this.priceRequest, this.coveredRequest]);
