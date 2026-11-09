@@ -53,10 +53,12 @@ import {
     type SalesReopenDealInput,
     type SalesReopenDealOutput,
     type DealEntity,
+    type DealTeamMemberEntity,
     type mjBizAppsSalesDealEntity,
     type mjBizAppsSalesPipelineStageEntity,
 } from '@mj-biz-apps/sales-entities';
 import {
+    CLOSED_TEAM_REMOVAL,
     DealLockRefusal,
     DEFAULT_DUE_IN_DAYS,
     OrdersIsInstalled,
@@ -3440,7 +3442,111 @@ export const CloseDealChecks: NamedCheck[] = [
                 Assert(row.ClosedAt !== null, 'and ran the close, rather than reporting success on an open deal');
             }),
     },
+    {
+        Id: 'close-deal.CD43',
+        Name: 'CD43: no one is removed from a closed deal\'s team, by either delete path, until it is reopened',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * bc-aidp-next-golive#465. Two paths delete a team row and each has its own check: a row
+                 * deleted ON ITS OWN (the Internal team grid) and a removal staged on the deal's `Team`
+                 * collection (the deal's graph save, which never calls the row's `Delete`). Both are
+                 * exercised, then the same delete is shown to work once the deal is reopened -- without
+                 * that control, a refusal for any other reason would pass as the lock.
+                 *
+                 * The owner swap the lock still allows on a closed deal is CD29's.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD43 team removal under lock',
+                );
+                const memberID = await addSupportingMember(ctx, f, dealID);
+
+                const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
+                Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
+                Assert(out.Locked, 'the won status carries LocksDeal, so the close must report Locked');
+
+                // ── A ROW DELETED ON ITS OWN ───────────────────────────────────────────────────
+                const row = await ProviderOf(ctx).GetEntityObject<DealTeamMemberEntity>(E_DEAL_TEAM_MEMBER, ctx.User);
+                Assert(await row.Load(memberID), 'the team row loads');
+                Assert((await row.Delete()) === false, 'deleting a team row on a closed deal must be refused');
+                AssertEqual(
+                    row.LatestResult?.Message ?? '', CLOSED_TEAM_REMOVAL,
+                    'and the refusal says why, in the words the user sees',
+                );
+                AssertEqual(await memberCount(ctx, memberID), 1, 'and the row is still there');
+
+                // ── A REMOVAL STAGED ON THE DEAL ───────────────────────────────────────────────
+                const locked = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await locked.Load(dealID), 'the closed deal loads');
+                await locked.Team.Load();
+                const staged = locked.Team.Items.find((m) => String(m.ID).toLowerCase() === memberID.toLowerCase());
+                Assert(!!staged, 'setup: the supporting member is on the loaded team');
+                locked.Team.Remove(staged!);
+                Assert((await locked.Save()) === false, 'a removal staged on a closed deal\'s team must be refused');
+                Assert(
+                    (locked.LatestResult?.Message ?? '').includes(CLOSED_TEAM_REMOVAL),
+                    `with the same sentence -- got: ${locked.LatestResult?.Message ?? '(none)'}`,
+                );
+                AssertEqual(await memberCount(ctx, memberID), 1, 'and the row is still there');
+
+                // ── THE CONTROL: reopened, the same delete goes through ────────────────────────
+                const reopened = await reopen(ctx, { DealID: dealID, Reason: 'CD43: reopening to correct the team.' });
+                Assert(reopened.Success, `the reopen failed — ${JSON.stringify(reopened.Issues)}`);
+                const again = await ProviderOf(ctx).GetEntityObject<DealTeamMemberEntity>(E_DEAL_TEAM_MEMBER, ctx.User);
+                Assert(await again.Load(memberID), 'the team row loads after the reopen');
+                Assert(
+                    await again.Delete(),
+                    `on an open deal the delete must go through — ${again.LatestResult?.Message ?? ''}`,
+                );
+                AssertEqual(await memberCount(ctx, memberID), 0, 'and the row is gone');
+            }),
+    },
 ];
+
+const E_DEAL_TEAM_MEMBER = 'MJ_BizApps_Sales: Deal Team Members';
+
+/**
+ * Adds a second employee to the deal in a role that is not the owner's and admits several holders,
+ * and returns the new row's ID. Read rather than seeded, like CD28's successor.
+ */
+async function addSupportingMember(ctx: Ctx, f: SalesFixture, dealID: string): Promise<string> {
+    const role = await TxOne<{ ID: string | null }>(
+        ctx,
+        `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.DealRole ` +
+            'WHERE IsOwnerRole = 0 AND IsActive = 1 AND AllowsMultiplePerDeal = 1',
+    );
+    Assert(!!role?.ID, 'needs an active, non-owner deal role that admits several holders. Re-seed deal roles.');
+    const others = await new RunView().RunView<{ ID: string }>(
+        {
+            EntityName: E_EMPLOYEE,
+            ExtraFilter: `Active = 1 AND ID <> '${f.EmployeeID}'`,
+            ResultType: 'simple',
+            Fields: ['ID'],
+        },
+        ctx.User,
+    );
+    Assert(others.Success, `reading employees failed — ${others.ErrorMessage}`);
+    const employee = (others.Results ?? [])[0];
+    Assert(!!employee?.ID, 'needs a SECOND active employee for the supporting role. Re-seed before reading anything into this.');
+
+    const member = await ProviderOf(ctx).GetEntityObject<DealTeamMemberEntity>(E_DEAL_TEAM_MEMBER, ctx.User);
+    member.NewRecord();
+    member.Set('DealID', dealID);
+    member.Set('EmployeeID', employee.ID);
+    member.Set('DealRoleID', role.ID);
+    member.Set('IsActive', true);
+    Assert(await member.Save(), `setup: the supporting member could not be added — ${member.LatestResult?.Message ?? ''}`);
+    return String(member.Get('ID'));
+}
+
+async function memberCount(ctx: Ctx, memberID: string): Promise<number> {
+    const row = await TxOne<{ n: number }>(
+        ctx, `SELECT COUNT(*) AS n FROM ${SALES_SCHEMA}.DealTeamMember WHERE ID = '${memberID}'`,
+    );
+    return Number(row.n);
+}
 
 /** Orders' line entity, named here for the same reason as `ORDERS_SCHEMA`. */
 const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';

@@ -156,8 +156,25 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
     }
 
     public override async Delete(options?: EntityDeleteOptions): Promise<boolean> {
-        // Captured before the delete, because afterwards the fields are gone.
-        const dealID = this.DealID ?? null;
+        // Captured before the delete, because afterwards the fields are gone. The PERSISTED deal: the
+        // row is removed from the deal it is on in the database, not one an unsaved edit points at.
+        const dealID = this.priorSnapshot().dealID;
+
+        /**
+         * NO ONE IS REMOVED FROM A CLOSED DEAL'S TEAM (bc-aidp-next-golive#465) — the deal decides,
+         * through `DealEntityServer.StandaloneTeamRemovalRefusal`, so this path and the deal's own save
+         * cannot disagree about what "closed" means.
+         *
+         * Only a row deleted ON ITS OWN reaches this override (the Internal team grid, an API call). A
+         * removal staged on the deal's `Team` collection — including `SetOwner`'s owner swap — is
+         * deleted by MJ's graph save without calling it, and `DealEntityServer.checkCloseLock` rules on
+         * that one instead.
+         */
+        const refusal = await this.closedDealRefusal(dealID);
+        if (refusal) {
+            return this.refuseSave(refusal, 'delete');
+        }
+
         const deleted = await super.Delete(options);
         if (deleted) {
             await this.restampDeals([dealID]);
@@ -266,12 +283,35 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
         );
     }
 
+    /**
+     * The refusal when the deal this row is on is closed, or null when it is open or there is no deal.
+     * Fails closed: a deal that cannot be read cannot be shown to be open.
+     */
+    private async closedDealRefusal(dealID: string | null): Promise<string | null> {
+        if (!dealID) {
+            return null;
+        }
+        try {
+            const provider = this.ProviderToUse as unknown as IMetadataProvider;
+            const deal = await provider.GetEntityObject<DealEntityServer>(DEAL_ENTITY, this.ContextCurrentUser);
+            if (!(await deal.Load(dealID))) {
+                return `Deal ${dealID} could not be read to check whether it is closed, so no one was removed from its team.`;
+            }
+            return await deal.StandaloneTeamRemovalRefusal();
+        } catch (err) {
+            return (
+                `Deal ${dealID} could not be checked for being closed, so no one was removed from its team. ` +
+                (err instanceof Error ? err.message : String(err))
+            );
+        }
+    }
+
     /** Mirrors `DealEntityServer.refuseSave`: log it, register a failed result, return false. */
-    private refuseSave(message: string): false {
-        LogError(`DealTeamMemberEntityServer.Save refused: ${message}`);
+    private refuseSave(message: string, type?: 'delete'): false {
+        LogError(`DealTeamMemberEntityServer.${type === 'delete' ? 'Delete' : 'Save'} refused: ${message}`);
         const failed = new BaseEntityResult();
         failed.Success = false;
-        failed.Type = this.IsSaved ? 'update' : 'create';
+        failed.Type = type ?? (this.IsSaved ? 'update' : 'create');
         failed.Message = message;
         failed.StartedAt = new Date();
         failed.EndedAt = new Date();
