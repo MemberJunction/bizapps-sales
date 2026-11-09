@@ -81,7 +81,7 @@ async function openDeal(ctx: Ctx, f: SalesFixture, name: string): Promise<{ ID: 
     deal.DealTypeID = f.DealTypeID;
     deal.DealStatusTypeID = f.OpenStatusID;
     deal.AccountID = f.AccountID;
-    deal.CompanyID = f.PipelineCompanyID;
+    deal.CompanyID = f.CompanyID;
     const row = await deal.Team.Create();
     row.EmployeeID = f.EmployeeID;
     row.DealRoleID = (await TxOne<{ ID: string }>(ctx, `SELECT TOP 1 ID FROM ${SALES_SCHEMA}.DealRole WHERE IsOwnerRole = 1`)).ID;
