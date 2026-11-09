@@ -596,7 +596,9 @@ export class MJSSalesSectionComponent implements OnInit {
      * `LoadError` and Retry show, and the replies still out are ignored when they arrive.
      *
      * `quiet` re-reads without the spinners, so the pages stay mounted and show their current data
-     * until the new data lands. The board uses it after a drag.
+     * until the new data lands. The board uses it after a drag, and every deal save uses it through
+     * {@link RefreshAfterSave}. A quiet re-read that runs out of time keeps the board up instead of
+     * replacing it with a Retry.
      */
     public async Refresh(quiet = false): Promise<void> {
         const token = ++this.refreshToken;
@@ -611,7 +613,7 @@ export class MJSSalesSectionComponent implements OnInit {
             const rest = await WithinTimeLimit(this.load(token), BOARD_TIME_LIMIT_MS, BOARD_TOO_SLOW);
             await rest.Detail;
         } catch (e) {
-            this.failRefresh(token, e);
+            this.failRefresh(token, e, quiet);
         } finally {
             if (token === this.refreshToken) {
                 this.Loading = false;
@@ -625,9 +627,16 @@ export class MJSSalesSectionComponent implements OnInit {
     /**
      * Shows why the newest `Refresh()` stopped. One that ran out of time is abandoned: its reads are still
      * out, and a reply landing under the error would show deals beside a message saying they did not load.
+     *
+     * A `quiet` one that ran out of time is only logged. The board on screen is still good, and leaving
+     * the token current lets the late reply land, so the board catches up without a Retry.
      */
-    private failRefresh(token: number, e: unknown): void {
+    private failRefresh(token: number, e: unknown, quiet: boolean): void {
         if (token !== this.refreshToken) {
+            return;
+        }
+        if (quiet && e instanceof TimeLimitExceeded) {
+            LogError(`Sales: a background refresh is slow and will apply when it lands - ${reasonOf(e)}`);
             return;
         }
         if (e instanceof TimeLimitExceeded) {
@@ -963,8 +972,10 @@ export class MJSSalesSectionComponent implements OnInit {
     /** Pipelines of the selected selling companies, or every pipeline when none is selected. */
     public get PipelineOptions(): FilterOption[] {
         const several = PipelineCompanies(this.Pipelines).length > 1 && !this.Filters.CompanyIDs.length;
+        // A pipeline shared by several companies is named alone: labelling it with one would be wrong.
+        const shared = (id: string): boolean => this.Pipelines.filter((p) => HasID([id], p.ID)).length > 1;
         return PipelineOptionsFor(this.Pipelines, this.Filters.CompanyIDs)
-            .map((p) => ({ ID: p.ID, Name: several ? PipelineLabel(p) : p.Name }));
+            .map((p) => ({ ID: p.ID, Name: several && !shared(p.ID) ? PipelineLabel(p) : p.Name }));
     }
 
     private companyName(id: string): string {
