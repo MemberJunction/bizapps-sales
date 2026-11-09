@@ -85,6 +85,7 @@
     "scheduled-jobs",
     "activity-sync-extensions",
     "applications",
+    "application-settings",
     "entity-fields",
     "user-views",
     "entity-relationships"
