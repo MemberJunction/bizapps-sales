@@ -1,7 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { IMetadataProvider, UserInfo } from '@memberjunction/core';
+import {
+    type EntityInfo,
+    EntityLifecyclePolicyEngine,
+    type IMetadataProvider,
+    ServerOperationScopeManager,
+    type UserInfo,
+} from '@memberjunction/core';
+import { DealCloseStampFields, DealFieldsEditableWhileLocked } from '@mj-biz-apps/sales-entities';
 import { CloseDealOperation } from '../CloseDealOperation.js';
-import { DealEntityServer } from '../DealEntityServer.js';
+import {
+    DEAL_CLOSE_OPERATION_KEY,
+    DEAL_LIFECYCLE_POLICY,
+    DEAL_REOPEN_OPERATION_KEY,
+    DealEntityServer,
+    RegisterDealLifecyclePolicy,
+} from '../DealEntityServer.js';
 
 /**
  * THE CLOSE STAMPS ARE WRITTEN BY THE CLOSE AND THE REOPEN, AND BY NOTHING ELSE (#252).
@@ -95,6 +108,51 @@ describe('the two paths that may write the stamps', () => {
         const d = stamped();
         await expect(d.BeginClose(async () => { throw new Error('boom'); })).rejects.toThrow('boom');
         expect(d.closeStampEditRefusal()).not.toBeNull();
+    });
+
+    it('registers the deal lifecycle & field-freeze policy on EntityLifecyclePolicyEngine and scopes BeginClose / BeginReopen via ServerOperationScopeManager', async () => {
+        RegisterDealLifecyclePolicy();
+        const entityInfo = { Name: 'MJ_BizApps_Sales: Deals' } as EntityInfo;
+        const policy = EntityLifecyclePolicyEngine.Instance.ResolvePolicy(entityInfo);
+        expect(policy?.stateMachine).toEqual(DEAL_LIFECYCLE_POLICY.stateMachine);
+        expect(policy?.stateMachine?.editableFieldsByState?.['LockedWon']).toEqual([
+            ...DealFieldsEditableWhileLocked(false),
+        ]);
+        expect(policy?.stateMachine?.editableFieldsByState?.['LockedLost']).toEqual([
+            ...DealFieldsEditableWhileLocked(true),
+        ]);
+        expect(policy?.stateMachine?.frozenFieldsByState?.['Open']).toEqual([...DealCloseStampFields()]);
+
+        const d = stamped();
+        await d.BeginClose(async () => {
+            expect(
+                ServerOperationScopeManager.Instance.IsOperationActive(
+                    [DEAL_CLOSE_OPERATION_KEY],
+                    'MJ_BizApps_Sales: Deals',
+                ),
+            ).toBe(true);
+        });
+        expect(
+            ServerOperationScopeManager.Instance.IsOperationActive(
+                [DEAL_CLOSE_OPERATION_KEY],
+                'MJ_BizApps_Sales: Deals',
+            ),
+        ).toBe(false);
+
+        await d.BeginReopen(async () => {
+            expect(
+                ServerOperationScopeManager.Instance.IsOperationActive(
+                    [DEAL_REOPEN_OPERATION_KEY],
+                    'MJ_BizApps_Sales: Deals',
+                ),
+            ).toBe(true);
+        });
+        expect(
+            ServerOperationScopeManager.Instance.IsOperationActive(
+                [DEAL_REOPEN_OPERATION_KEY],
+                'MJ_BizApps_Sales: Deals',
+            ),
+        ).toBe(false);
     });
 });
 

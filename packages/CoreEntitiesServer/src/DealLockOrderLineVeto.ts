@@ -46,9 +46,23 @@
  *
  * @module @mj-biz-apps/sales-core-entities-server
  */
-import { LogError, RunView, type UserInfo } from '@memberjunction/core';
+import {
+    type BaseEntity,
+    type CrossEntityBatchItem,
+    type CrossEntityEvaluationScope,
+    CrossEntityPolicyEngine,
+    type CrossEntityPolicyItemContext,
+    type CrossEntityPolicyVerdict,
+    type ICrossEntityPolicy,
+    type IMetadataProvider,
+    LogError,
+    Metadata,
+    RunView,
+    type UserInfo,
+} from '@memberjunction/core';
 import {
     RegisterOrderLineEditVeto,
+    type mjBizAppsOrdersOrderLineEntity,
     type OrderLineEditContext,
     type OrderLineEditKind,
     type OrderLineEditVeto,
@@ -58,6 +72,13 @@ import { CallerCanReadDeals, VetoReader } from './veto-reader.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
+const ORDER_LINE_ENTITY = 'MJ_BizApps_Orders: Order Lines';
+
+export const DEAL_LOCK_ORDER_LINE_POLICY_KEY = 'Sales.DealLockOrderLineVeto';
+export const DEAL_BY_ORDER_CACHE_NAMESPACE = 'entity:mj_bizapps_sales: deals:by-order';
+export const STATUS_LOCK_CACHE_NAMESPACE = 'entity:mj_bizapps_sales: deal status types:lock';
+
+const FALLBACK_SCOPE_PROVIDER = {} as IMetadataProvider;
 
 /**
  * The refusal, in the words golive#207 settled for the rest of the lock.
@@ -105,14 +126,25 @@ export function DealLockRefusalUnreadable(): string {
 type OwningDeal = { DealID: string; DealStatusTypeID: string | null } | null;
 
 export class DealLockOrderLineVeto implements OrderLineEditVeto {
-    public async MayEdit(context: OrderLineEditContext): Promise<string | null> {
-        const owner = await this.owningDeal(context.OrderHeaderID, context.ContextUser);
+    public constructor(private readonly provider?: IMetadataProvider) {}
+
+    public async MayEdit(
+        context: OrderLineEditContext,
+        evaluationScope?: CrossEntityEvaluationScope,
+    ): Promise<string | null> {
+        const scope =
+            evaluationScope ??
+            CrossEntityPolicyEngine.Instance.ResolveScope(
+                this.resolveProvider(),
+                context.ContextUser ?? undefined,
+            );
+        const owner = await this.owningDeal(context.OrderHeaderID, context.ContextUser, scope);
         if (!owner || !owner.DealStatusTypeID) {
             // No deal owns this order, or it has no status. Orders' own rules still apply; Sales has
             // no claim on it, and saying so is not the same as approving anything.
             return null;
         }
-        const lock = await this.statusLock(owner.DealStatusTypeID, context.ContextUser);
+        const lock = await this.statusLock(owner.DealStatusTypeID, context.ContextUser, scope);
         if (lock === 'Open') return null;
         // The read ran as the system user (#423): a caller who cannot read Deals is told no more than
         // that a closed deal holds the lines, and is not sent to a status control they cannot open.
@@ -120,60 +152,173 @@ export class DealLockOrderLineVeto implements OrderLineEditVeto {
         return lock === 'Absent' ? DealAbsentStatusLockRefusal(context.Kind) : DealLockRefusal(context.Kind);
     }
 
+    private resolveProvider(): IMetadataProvider {
+        return this.provider ?? Metadata.Provider ?? FALLBACK_SCOPE_PROVIDER;
+    }
+
     /** Which deal owns this order, and what status it is in right now. */
-    private async owningDeal(orderID: string, user: UserInfo | null): Promise<OwningDeal> {
-        const result = await new RunView().RunView<{ ID: string; DealStatusTypeID: string | null }>(
-            {
-                EntityName: DEAL_ENTITY,
-                ExtraFilter: `OrderID = '${SafeID(orderID)}'`,
-                Fields: ['ID', 'DealStatusTypeID'],
-                MaxRows: 1,
-                ResultType: 'simple',
-            },
-            VetoReader(user),
-        );
-        if (!result.Success) {
-            // Throwing is the seam's way of saying "could not tell"; the caller turns it into a
-            // refusal that names the fault. Returning null here would allow the edit instead.
-            LogError(`DealLockOrderLineVeto: could not read the deal for order ${orderID}: ${result.ErrorMessage}`);
-            throw new Error(`the deal behind this order could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
-        }
-        const row = (result.Results ?? [])[0];
-        return row ? { DealID: row.ID, DealStatusTypeID: row.DealStatusTypeID ?? null } : null;
+    private async owningDeal(
+        orderID: string,
+        user: UserInfo | null,
+        scope: CrossEntityEvaluationScope,
+    ): Promise<OwningDeal> {
+        const safeOrderID = SafeID(orderID);
+        return scope.GetOrLoad<OwningDeal>(DEAL_BY_ORDER_CACHE_NAMESPACE, safeOrderID, async () => {
+            const result = await new RunView().RunView<{ ID: string; DealStatusTypeID: string | null }>(
+                {
+                    EntityName: DEAL_ENTITY,
+                    ExtraFilter: `OrderID = '${safeOrderID}'`,
+                    Fields: ['ID', 'DealStatusTypeID'],
+                    MaxRows: 1,
+                    ResultType: 'simple',
+                },
+                VetoReader(user),
+            );
+            if (!result.Success) {
+                // Throwing is the seam's way of saying "could not tell"; the caller turns it into a
+                // refusal that names the fault. Returning null here would allow the edit instead.
+                LogError(
+                    `DealLockOrderLineVeto: could not read the deal for order ${orderID}: ${result.ErrorMessage}`,
+                );
+                throw new Error(
+                    `the deal behind this order could not be read: ${result.ErrorMessage ?? 'unknown error'}`,
+                );
+            }
+            const row = (result.Results ?? [])[0];
+            return row ? { DealID: row.ID, DealStatusTypeID: row.DealStatusTypeID ?? null } : null;
+        });
     }
 
     /**
-     * Does this status close a deal? The FLAG, read fresh every time.
+     * Does this status close a deal? The FLAG, read fresh outside a transaction or memoized within an
+     * active transaction epoch via {@link CrossEntityEvaluationScope}.
      *
      * A read that fails throws rather than defaulting. `DealEntityServer` defaults to `LocksDeal: true`
      * in the same situation, which is right THERE because it is deciding whether to refuse an edit it
      * already holds. Here the caller turns a throw into that same refusal AND names the fault, which
      * is strictly more useful than silently refusing with the ordinary lock message.
      */
-    private async statusLock(statusID: string, user: UserInfo | null): Promise<StatusLock> {
-        const result = await new RunView().RunView<{ LocksDeal: boolean }>(
-            {
-                EntityName: DEAL_STATUS_ENTITY,
-                ExtraFilter: `ID = '${SafeID(statusID)}'`,
-                Fields: ['LocksDeal'],
-                MaxRows: 1,
-                ResultType: 'simple',
-            },
-            VetoReader(user),
-        );
-        if (!result.Success) {
-            LogError(`DealLockOrderLineVeto: could not read status ${statusID}: ${result.ErrorMessage}`);
-            throw new Error(`the deal's status could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
-        }
-        const row = (result.Results ?? [])[0];
-        // A status row that is absent LOCKS, as it does for the deal header (#401): nothing proves the
-        // deal is open, and the header and its lines must not disagree about whether it is frozen.
-        if (!row) {
-            return 'Absent';
-        }
-        return row.LocksDeal === true ? 'Locks' : 'Open';
+    private async statusLock(
+        statusID: string,
+        user: UserInfo | null,
+        scope: CrossEntityEvaluationScope,
+    ): Promise<StatusLock> {
+        const safeStatusID = SafeID(statusID);
+        return scope.GetOrLoad<StatusLock>(STATUS_LOCK_CACHE_NAMESPACE, safeStatusID, async () => {
+            const result = await new RunView().RunView<{ LocksDeal: boolean }>(
+                {
+                    EntityName: DEAL_STATUS_ENTITY,
+                    ExtraFilter: `ID = '${safeStatusID}'`,
+                    Fields: ['LocksDeal'],
+                    MaxRows: 1,
+                    ResultType: 'simple',
+                },
+                VetoReader(user),
+            );
+            if (!result.Success) {
+                LogError(`DealLockOrderLineVeto: could not read status ${statusID}: ${result.ErrorMessage}`);
+                throw new Error(`the deal's status could not be read: ${result.ErrorMessage ?? 'unknown error'}`);
+            }
+            const row = (result.Results ?? [])[0];
+            // A status row that is absent LOCKS, as it does for the deal header (#401): nothing proves the
+            // deal is open, and the header and its lines must not disagree about whether it is frozen.
+            if (!row) {
+                return 'Absent';
+            }
+            return row.LocksDeal === true ? 'Locks' : 'Open';
+        });
     }
 }
+
+/**
+ * Batch- and transaction-epoch-aware {@link ICrossEntityPolicy} adapter for {@link DealLockOrderLineVeto}.
+ *
+ * When multiple `MJ_BizApps_Orders: Order Lines` records are saved or deleted inside one
+ * `EntityTransactionScope`, `MJ.SaveEntityGraph`, or `TransactionGroupBase`, all lines belonging to the
+ * same `OrderHeaderID` share a single transaction-scoped {@link CrossEntityEvaluationScope} lookup for
+ * the owning Deal and its `DealStatusType.LocksDeal` flag instead of issuing `2 * N` duplicate queries.
+ */
+export class DealLockOrderLineCrossEntityPolicy implements ICrossEntityPolicy {
+    public readonly PolicyKey = DEAL_LOCK_ORDER_LINE_POLICY_KEY;
+    public readonly TargetEntityNames: ReadonlyArray<string> = [ORDER_LINE_ENTITY];
+    private readonly veto: DealLockOrderLineVeto;
+
+    public constructor(veto?: DealLockOrderLineVeto) {
+        this.veto = veto ?? new DealLockOrderLineVeto();
+    }
+
+    public async EvaluateBeforeSave(ctx: CrossEntityPolicyItemContext): Promise<CrossEntityPolicyVerdict> {
+        const kind: OrderLineEditKind = ctx.Operation === 'Create' ? 'create' : 'update';
+        return this.evaluateLine(ctx.Entity, kind, ctx.Scope);
+    }
+
+    public async EvaluateBeforeDelete(ctx: CrossEntityPolicyItemContext): Promise<CrossEntityPolicyVerdict> {
+        return this.evaluateLine(ctx.Entity, 'delete', ctx.Scope);
+    }
+
+    public async EvaluateBatch(
+        items: ReadonlyArray<CrossEntityBatchItem>,
+        scope: CrossEntityEvaluationScope,
+    ): Promise<Map<BaseEntity, CrossEntityPolicyVerdict>> {
+        const verdicts = new Map<BaseEntity, CrossEntityPolicyVerdict>();
+        for (const item of items) {
+            const kind: OrderLineEditKind =
+                item.Operation === 'Create' ? 'create'
+                : item.Operation === 'Delete' ? 'delete'
+                : 'update';
+            const verdict = await this.evaluateLine(item.Entity, kind, scope);
+            verdicts.set(item.Entity, verdict);
+        }
+        return verdicts;
+    }
+
+    private async evaluateLine(
+        entity: BaseEntity,
+        kind: OrderLineEditKind,
+        scope: CrossEntityEvaluationScope,
+    ): Promise<CrossEntityPolicyVerdict> {
+        const line = entity as mjBizAppsOrdersOrderLineEntity;
+        const field = entity.GetFieldByName('OrderHeaderID');
+        const candidateIds: string[] = [];
+        const currentRaw = line.OrderHeaderID ?? field?.Value;
+        const currentId = currentRaw != null ? String(currentRaw).trim() : '';
+        if (currentId) {
+            candidateIds.push(currentId);
+        }
+        if (entity.IsSaved && field?.OldValue != null) {
+            const oldId = String(field.OldValue).trim();
+            if (oldId && !candidateIds.includes(oldId)) {
+                candidateIds.push(oldId);
+            }
+        }
+        if (candidateIds.length === 0) {
+            return { Allowed: true };
+        }
+        const rawLineID = line.ID ?? entity.GetFieldByName('ID')?.Value;
+        const orderLineID = rawLineID != null ? String(rawLineID).trim() || null : null;
+        for (const orderHeaderID of candidateIds) {
+            const refusal = await this.veto.MayEdit(
+                {
+                    OrderHeaderID: orderHeaderID,
+                    OrderLineID: orderLineID,
+                    Kind: kind,
+                    ContextUser: scope.ContextUser ?? entity.ContextCurrentUser ?? null,
+                },
+                scope,
+            );
+            if (refusal) {
+                return { Allowed: false, ErrorMessage: refusal, FieldName: 'OrderHeaderID' };
+            }
+        }
+        return { Allowed: true };
+    }
+}
+
+export function RegisterDealLockOrderLineCrossEntityPolicy(veto?: DealLockOrderLineVeto): void {
+    CrossEntityPolicyEngine?.Instance?.RegisterPolicy(new DealLockOrderLineCrossEntityPolicy(veto));
+}
+
+RegisterDealLockOrderLineCrossEntityPolicy();
 
 /**
  * Ids reach this from Orders, so they are not ours to trust. A UUID has no quotes in it; anything
@@ -237,5 +382,7 @@ function SafeID(id: string): string {
  * Last-call-wins in the registry, so a host that boots twice in one process ends up with one vetoer.
  */
 export function LoadDealLockOrderLineVeto(): void {
-    RegisterOrderLineEditVeto(new DealLockOrderLineVeto());
+    const veto = new DealLockOrderLineVeto();
+    RegisterOrderLineEditVeto(veto);
+    RegisterDealLockOrderLineCrossEntityPolicy(veto);
 }
