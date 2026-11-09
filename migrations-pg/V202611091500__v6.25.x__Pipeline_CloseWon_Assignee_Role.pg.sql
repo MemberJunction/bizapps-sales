@@ -1,5 +1,5 @@
 -- =============================================================================================
--- PostgreSQL counterpart of V202611062310__v6.25.x__Pipeline_CloseWon_Assignee_Role.sql
+-- PostgreSQL counterpart of V202611091500__v6.25.x__Pipeline_CloseWon_Assignee_Role.sql
 -- =============================================================================================
 -- `mj sql-convert --from tsql --to postgres --schema __mj_BizAppsSales` (MJ CLI 6.1.6) output,
 -- finished by hand. The converter reported 0 errors and 8 skipped objects.
