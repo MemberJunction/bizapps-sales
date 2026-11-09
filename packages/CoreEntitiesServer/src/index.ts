@@ -46,8 +46,15 @@
  */
 export * from './DealEntityServer.js';
 export * from './DealTeamMemberEntityServer.js';
+export * from './DealPaymentScheduleEntityServer.js';
+export * from './deal-schedule-to-order.js';
 export * from './PipelineStageEntityServer.js';
+export * from './PipelineEntityServer.js';
+export * from './DealStageEventEntityServer.js';
 export * from './CloseDealOperation.js';
+
+/** `Sales.RecordDiscountConcession`: a deal line's raised discount, recorded where orders' rules run (golive#340). */
+export * from './RecordDiscountConcessionOperation.js';
 
 /**
  * The REAL orders handoff. Selected automatically when orders' entities are registered; see
@@ -112,6 +119,7 @@ export type {
  */
 export * from './DealLockOrderLineVeto.js';
 export * from './DealNotWonConfirmVeto.js';
+export * from './DealOrderLink.js';
 export * from './forecast/ForecastSource.js';
 export * from './forecast/FixtureForecastSource.js';
 export * from './forecast/QueryForecastSource.js';
@@ -125,16 +133,20 @@ export * from './finance-exceptions/FinanceExceptionBridge.js';
 export * from './finance-exceptions/WonDealOrderDetector.js';
 
 /**
- * PER-COMPANY PIPELINES (#327). Copies the default pipeline and its stages onto every company that
- * lacks one; the `Sales.CopyDefaultPipelineToCompanies` Action calls it.
+ * PER-COMPANY PIPELINES (#327). Links the default pipeline to every company that has no link to it;
+ * the `Sales.LinkDefaultPipelineToCompanies` Action calls it.
  */
-export * from './pipelines/CopyDefaultPipeline.js';
+export * from './pipelines/LinkDefaultPipeline.js';
 
 import { LoadActivitySyncEngine } from '@mj-biz-apps/common-activity-sync';
 import { DealEntityServer } from './DealEntityServer.js';
 import { DealTeamMemberEntityServer } from './DealTeamMemberEntityServer.js';
+import { DealPaymentScheduleEntityServer } from './DealPaymentScheduleEntityServer.js';
 import { PipelineStageEntityServer } from './PipelineStageEntityServer.js';
+import { PipelineEntityServer } from './PipelineEntityServer.js';
+import { DealStageEventEntityServer } from './DealStageEventEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
+import { RecordDiscountConcessionOperation } from './RecordDiscountConcessionOperation.js';
 import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 
 /**
@@ -149,7 +161,7 @@ import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 export function LoadSalesCoreEntitiesServer(): void {
     LoadActivitySyncEngine();
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, PipelineStageEntityServer, CloseDealOperation, ReopenDealOperation, DealLinkerExtension];
+    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, DealPaymentScheduleEntityServer, PipelineStageEntityServer, PipelineEntityServer, DealStageEventEntityServer, CloseDealOperation, ReopenDealOperation, RecordDiscountConcessionOperation, DealLinkerExtension];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }

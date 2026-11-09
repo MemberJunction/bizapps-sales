@@ -91,3 +91,31 @@ describe('the Deal form marks Pipeline required when it is empty', () => {
         expect(pipelineFieldBlock(WITHOUT_COMMENTS)).toContain('[class.mj-forms-field--editing]');
     });
 });
+
+/**
+ * THE MODIFIER IS STYLED ON THE NATIVE SELECT (#416).
+ *
+ * MJ styles `mj-forms-field--required-empty` only on its own input classes, so binding it on the
+ * Pipeline select drew nothing. The rule lives in the panel's field styles; CSS comments are
+ * stripped first so the prose explaining the rule cannot satisfy the assertion.
+ */
+describe('the required-empty modifier is visible on the Pipeline select', () => {
+    const fieldStyles = (() => {
+        const start = SOURCE.indexOf('const FIELD_STYLES = `');
+        const end = SOURCE.indexOf('`;', start);
+        expect(start, 'FIELD_STYLES must exist').toBeGreaterThan(-1);
+        return SOURCE.slice(start, end).replace(/\/\*[\s\S]*?\*\//g, '');
+    })();
+
+    it('gives an empty required select the error underline', () => {
+        const rule = fieldStyles.match(/\.mj-forms-field--required-empty select\s*\{([^}]*)\}/);
+        expect(rule, 'a rule must target the select under the modifier').not.toBeNull();
+        expect(rule![1]).toContain('border-bottom-color: var(--mj-status-error)');
+    });
+
+    it('keeps the error underline while the select has focus', () => {
+        const rule = fieldStyles.match(/\.mj-forms-field--required-empty select:focus\s*\{([^}]*)\}/);
+        expect(rule, 'the focus rule would otherwise repaint the underline in the brand colour').not.toBeNull();
+        expect(rule![1]).toContain('border-bottom-color: var(--mj-status-error)');
+    });
+});

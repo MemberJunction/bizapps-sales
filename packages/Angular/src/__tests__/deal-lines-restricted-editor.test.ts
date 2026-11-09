@@ -98,15 +98,19 @@ describe('the restricted editor offers intent, never a price', () => {
         expect(EDITOR).not.toMatch(/ngModel\]?="[^"]*LineTotalNet/);
     });
 
-    it('offers a discount as a PERCENT and never as an amount (D-DL2)', () => {
-        expect(editorTemplate()).toMatch(/Discount %/);
+    it('offers a discount as a percent or in dollars, and never binds the DiscountAmount column (D-DL2)', () => {
+        const template = editorTemplate();
+        expect(template).toMatch(/data-testid="line-discount"/);
+        expect(template).toMatch(/data-testid="line-discount-amount"/);
         // `OrderLine.DiscountAmount` reads 0 exactly when a percentage discount exists, so binding it
-        // would show a rep "0" next to a real 10% discount.
-        expect(editorTemplate()).not.toMatch(/DiscountAmount/);
+        // would show a rep "0" next to a real 10% discount. Typed dollars are converted to a percent
+        // and stored on DiscountPct; the column itself is never on screen.
+        expect(template).not.toMatch(/Working\??\.DiscountAmount/);
+        expect(EDITOR).not.toMatch(/Working\??\.DiscountAmount\s*=/);
     });
 
     it('offers exactly the four fields the deal workspace allowed', () => {
-        for (const field of ['Product', 'Quantity', 'Discount %', 'Term start']) {
+        for (const field of ['Product', 'Quantity', 'Discount', 'Term start']) {
             expect(editorTemplate(), `the editor must offer ${field}`).toContain(field);
         }
     });
@@ -136,6 +140,8 @@ describe('the editor reuses the shared rules rather than restating them', () => 
         for (const rule of [
             'DiscountPercentToFraction',
             'DiscountFractionToPercent',
+            'DiscountAmountToPercent',
+            'PricedLineListAmount',
             'ShouldOfferTermStart',
             'EffectiveTermStart',
         ]) {

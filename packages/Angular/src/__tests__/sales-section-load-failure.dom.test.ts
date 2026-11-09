@@ -3,6 +3,7 @@ import '@angular/compiler';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { Metadata } from '@memberjunction/core';
+import type { MJLeftNavItem } from '@memberjunction/ng-ui-components';
 
 import { MJSSalesSectionComponent } from '../lib/sections/sales-section.component';
 import {
@@ -49,14 +50,14 @@ afterEach(() => {
 
 describe('a read that throws during load', () => {
     /**
-     * Each read the section makes, broken in turn. The roster is absent on purpose: it already had
-     * its own catch (bizapps-sales#137) and degrades to unavailable tiles rather than a failed load.
+     * Each read the dashboard's figures need, broken in turn. The roster is absent on purpose: it
+     * already had its own catch (bizapps-sales#137) and degrades to unavailable tiles rather than a
+     * failed load. The lookups, the win rate and the grids' view are absent too: each now fails only
+     * the part that reads it (bizapps-sales#371; see 'one part that fails' below).
      */
     const reads: Array<[string, (s: StubService) => void]> = [
         ['the fiscal year start', (s) => s.LoadFiscalYearStart.mockRejectedValue(new Error(GATEWAY_TIMEOUT))],
-        ['the lookups', (s) => s.LoadLookups.mockRejectedValue(new Error(GATEWAY_TIMEOUT))],
         ['the dashboard summary', (s) => s.LoadDashboardSummary.mockRejectedValue(new Error(GATEWAY_TIMEOUT))],
-        ['the win rate', (s) => s.RunNamedQuery.mockRejectedValue(new Error(GATEWAY_TIMEOUT))],
     ];
 
     it.each(reads)('clears the spinner and shows the failure when %s fails', async (_name, breakIt) => {
@@ -79,7 +80,7 @@ describe('a read that throws during load', () => {
     });
 
     it.each(['list', 'board'])('shows the same failure on the %s page instead of its spinner', async (pageId) => {
-        service.LoadLookups.mockRejectedValue(new Error(GATEWAY_TIMEOUT));
+        service.LoadFiscalYearStart.mockRejectedValue(new Error(GATEWAY_TIMEOUT));
         const page = visiblePage(await mount(pageId));
 
         expect(page.querySelector('mj-loading')).toBeNull();
@@ -87,16 +88,119 @@ describe('a read that throws during load', () => {
     });
 });
 
+describe('a deal list that fails while the rest loads', () => {
+    /**
+     * The roster's failure is soft on purpose: the dashboard keeps running with its tiles marked
+     * unavailable. The board has nothing to draw without the list, and drew every column empty at $0,
+     * which reads as "no deals" rather than "the deals could not be read".
+     */
+    const ROSTER_FAILURE = 'Sales: Deal Roster failed - timeout';
+
+    it('shows the load-failed panel with the reason on the board, not an empty board', async () => {
+        service.LoadRoster.mockRejectedValue(new Error(ROSTER_FAILURE));
+        const page = visiblePage(await mount('board'));
+
+        const alert = page.querySelector('[data-testid="sales-load-failed"]');
+        expect(alert, 'the failure must be on screen').not.toBeNull();
+        expect(alert?.textContent).toContain(ROSTER_FAILURE);
+        expect(page.querySelector('mjs-deal-board'), 'no board columns').toBeNull();
+        expect(page.querySelector('[data-testid="sales-load-retry"]')).not.toBeNull();
+    });
+
+    it('keeps the dashboard running, with the reason above its tiles', async () => {
+        service.LoadRoster.mockRejectedValue(new Error(ROSTER_FAILURE));
+        const page = visiblePage(await mount());
+
+        expect(page.querySelector('[data-testid="sales-load-failed"]')).toBeNull();
+        expect(page.querySelector('.kpis')).not.toBeNull();
+        expect(page.textContent).toContain(ROSTER_FAILURE);
+    });
+
+    it('reloads on Retry and shows the board once the list reads', async () => {
+        service.LoadRoster.mockRejectedValueOnce(new Error(ROSTER_FAILURE));
+        const fixture = await mount('board');
+
+        (visiblePage(fixture).querySelector('[data-testid="sales-load-retry"]') as HTMLButtonElement).click();
+        await vi.waitFor(() => {
+            expect(service.LoadRoster).toHaveBeenCalledTimes(2);
+            expect(fixture.componentInstance.DetailLoading).toBe(false);
+        });
+
+        const page = visiblePage(fixture);
+        expect(page.querySelector('[data-testid="sales-load-failed"]')).toBeNull();
+        expect(page.querySelector('mjs-deal-board')).not.toBeNull();
+    });
+});
+
+describe('one part that fails while the rest loads (bizapps-sales#371)', () => {
+    it('keeps the dashboard and shows the win rate failure in its own card, with a Retry', async () => {
+        service.LoadWinRate.mockRejectedValue(new Error(GATEWAY_TIMEOUT));
+        const page = visiblePage(await mount());
+
+        expect(page.querySelector('[data-testid="sales-load-failed"]'), 'not the whole page').toBeNull();
+        expect(page.querySelector('.kpis'), 'the tiles stay').not.toBeNull();
+        const part = page.querySelector('[data-testid="sales-part-failed"]');
+        expect(part?.textContent).toContain('win rate');
+        expect(part?.textContent).toContain(GATEWAY_TIMEOUT);
+        expect(part?.querySelector('[data-testid="sales-part-retry"]')).not.toBeNull();
+    });
+
+    it('keeps the dashboard when the pipelines and stages fail, and says so on the board', async () => {
+        service.LoadLookups.mockRejectedValue(new Error(GATEWAY_TIMEOUT));
+        const fixture = await mount();
+        expect(visiblePage(fixture).querySelector('.kpis')).not.toBeNull();
+        expect(visiblePage(fixture).querySelector('[data-testid="sales-load-failed"]')).toBeNull();
+
+        fixture.componentInstance.OnNav({ id: 'board' } as MJLeftNavItem);
+        fixture.detectChanges();
+        const board = visiblePage(fixture);
+        expect(board.querySelector('mjs-deal-board'), 'no board without its stages').toBeNull();
+        expect(board.querySelector('[data-testid="sales-part-failed"]')?.textContent).toContain('pipelines and stages');
+    });
+
+    it('reloads on the part Retry and clears the failure once the read succeeds', async () => {
+        service.LoadWinRate.mockRejectedValueOnce(new Error(GATEWAY_TIMEOUT));
+        const fixture = await mount();
+
+        (visiblePage(fixture).querySelector('[data-testid="sales-part-retry"]') as HTMLButtonElement).click();
+        await vi.waitFor(() => {
+            expect(service.LoadWinRate).toHaveBeenCalledTimes(2);
+            expect(fixture.componentInstance.DetailLoading).toBe(false);
+        });
+        fixture.detectChanges();
+        expect(visiblePage(fixture).querySelector('[data-testid="sales-part-failed"]')).toBeNull();
+    });
+});
+
+describe('a period change that fails (bizapps-sales#371)', () => {
+    it('says why under the selector, and Retry reads the same period again', async () => {
+        const fixture = await mount();
+        service.LoadDashboardSummary.mockRejectedValueOnce(new Error(GATEWAY_TIMEOUT));
+        await fixture.componentInstance.SetPeriod('year');
+        fixture.detectChanges();
+
+        const part = visiblePage(fixture).querySelector('[data-testid="sales-part-failed"]');
+        expect(part?.textContent).toContain('this year');
+        expect(part?.textContent).toContain(GATEWAY_TIMEOUT);
+
+        await fixture.componentInstance.RetryPeriod();
+        fixture.detectChanges();
+        expect(fixture.componentInstance.Period).toBe('year');
+        expect(fixture.componentInstance.PeriodError).toBeNull();
+        expect(visiblePage(fixture).querySelector('[data-testid="sales-part-failed"]')).toBeNull();
+    });
+});
+
 describe('Retry', () => {
     it('loads again and, when that succeeds, replaces the failure with the dashboard', async () => {
-        service.LoadLookups.mockRejectedValueOnce(new Error(GATEWAY_TIMEOUT));
+        service.LoadDashboardSummary.mockRejectedValueOnce(new Error(GATEWAY_TIMEOUT));
         const fixture = await mount();
 
         const retry = fixture.nativeElement.querySelector('[data-testid="sales-load-retry"]') as HTMLButtonElement | null;
         expect(retry, 'the Retry button is rendered').not.toBeNull();
         retry?.click();
         await vi.waitFor(() => {
-            expect(service.LoadLookups).toHaveBeenCalledTimes(2);
+            expect(service.LoadDashboardSummary).toHaveBeenCalledTimes(2);
             expect(fixture.componentInstance.Loading).toBe(false);
         });
 

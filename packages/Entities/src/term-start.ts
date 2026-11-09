@@ -36,9 +36,10 @@ export type DateLike = Date | string | null | undefined;
  *
  * ── THE PREDICATE IS ORDERS', NOT OURS ──
  *
- * `OrderEntityServer.subscriptionLines` selects the lines that will receive subscriptions with
- * `ID IN (...) AND SubscriptionTypeID IS NOT NULL` against this same column. Matching it exactly means
- * a line offering a term start is exactly a line that will receive a term at confirm. Any other test —
+ * `OrderEntityServer.subscriptionLines` gives a line a subscription when its product names a
+ * subscription type or inherits its product type's default. A `ProductLookup` carries that resolved
+ * value (`WithInheritedSubscriptionType`, golive #339), so a line offering a term start is exactly a
+ * line that will receive a term at confirm. Any other test —
  * a product-type string, a name convention — could drift from that and offer a term start on a line
  * which never gets one, which reads as a broken promise rather than a field that does nothing.
  *
@@ -59,7 +60,7 @@ export function IsSubscriptionProduct(
  * Three cases, and the third is the one worth reading:
  *
  * · **No product chosen** — nothing to say. A line with no `ProductID` cannot be a subscription, and it
- *   already blocks the save on its own account (`UnlinkedLineIssues`).
+ *   already blocks the save on its own account (the deal line editor's `CanSave` requires a product).
  * · **Product in the catalogue** — orders' predicate decides, and that is #32's requirement 3 exactly,
  *   BUT ONLY WHEN NOTHING IS STORED. A stored value short-circuits every case here: a term start that
  *   exists is always offered, whatever the product turns out to be, so it can be seen and cleared

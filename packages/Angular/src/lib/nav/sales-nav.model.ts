@@ -12,9 +12,10 @@
  * a second section later means adding an Application nav item plus a resource, not a widget here.
  *
  * ONE SECTION TODAY. Contracts has three (Contracts / Billing / Setup) because it has three distinct
- * jobs. Sales has one job worth its own section so far — working deals. Accounts and forecasting are real
- * sections later, and they are absent rather than stubbed because **a nav item pointing at an
- * unregistered component mounts a blank tab with no error anywhere**.
+ * jobs. Sales has one job worth its own section so far — working deals. Accounts and Contacts are rail
+ * pages here (the entity grids) until they have work of their own; forecasting is a section later, and
+ * absent rather than stubbed because **a nav item pointing at an unregistered component mounts a blank
+ * tab with no error anywhere**.
  *
  * The pipeline BOARD is a rail page here rather than a section of its own, and that is a claim about what
  * it is: another way to look at the same deals, alongside the dashboard and the roster — not a different
@@ -75,6 +76,10 @@ export const DEALS_SUB_PAGES: SalesSubPage[] = [
     { Id: 'dashboard', Label: 'Dashboard', Icon: 'fa-solid fa-gauge-high', Description: 'What is moving, what has stalled' },
     { Id: 'list', Label: 'All deals', Icon: 'fa-solid fa-table-list' },
     { Id: 'board', Label: 'Board', Icon: 'fa-solid fa-diagram-project', Description: 'Move deals through the pipeline' },
+    // The accounts and people deals are sold to. Each is the entity's own grid, opening records as
+    // Explorer tabs, so the app can find and create them without the generated entity browser.
+    { Id: 'accounts', Label: 'Accounts', Icon: 'fa-solid fa-building', Group: 'Customers' },
+    { Id: 'contacts', Label: 'Contacts', Icon: 'fa-solid fa-address-book', Group: 'Customers' },
 ];
 
 /** The rail for a section id. An unknown id gives an empty rail rather than throwing. */
@@ -95,9 +100,11 @@ export function DefaultPageFor(sectionId: string): string {
 /** Which badge, if any, belongs on a page. */
 function badgeFor(pageId: string, badges: SalesNavBadges): number | undefined {
     switch (pageId) {
-        case 'list':
+        case 'dashboard':
             // Slipped deals, not the total count. A deal count is the pipeline existing; a slipped one
-            // is a person's problem, and a badge should mean the second thing.
+            // is a person's problem, and a badge should mean the second thing. On Dashboard because
+            // its "Past expected close" tile and "Close date slipped" queue show the same count; All
+            // deals lists every deal with no marker, so a badge there matched nothing on the page.
             return badges.Slipped;
         default:
             return undefined;
@@ -149,6 +156,8 @@ export function BuildLeftNavSections(pages: SalesSubPage[], badges: SalesNavBadg
 export interface SalesPrimaryAction {
     Label: string;
     Icon: string;
+    /** What the button creates. */
+    Creates: 'deal' | 'account' | 'contact';
 }
 
 /**
@@ -163,8 +172,22 @@ export function PrimaryActionFor(pageId: string): SalesPrimaryAction | null {
         case 'dashboard':
         case 'list':
         case 'board':
-            return { Label: 'New deal', Icon: 'fa-solid fa-plus' };
+            return { Label: 'New deal', Icon: 'fa-solid fa-plus', Creates: 'deal' };
+        case 'accounts':
+            return NEW_ACCOUNT;
+        case 'contacts':
+            return { Label: 'New contact', Icon: 'fa-solid fa-plus', Creates: 'contact' };
         default:
             return null;
     }
+}
+
+const NEW_ACCOUNT: SalesPrimaryAction = { Label: 'New account', Icon: 'fa-solid fa-building', Creates: 'account' };
+
+/**
+ * A second, outline button beside the primary. Only the dashboard has one: a new account is the
+ * other thing someone starting work there needs, and the Accounts page is otherwise a click away.
+ */
+export function SecondaryActionFor(pageId: string): SalesPrimaryAction | null {
+    return pageId === 'dashboard' ? NEW_ACCOUNT : null;
 }

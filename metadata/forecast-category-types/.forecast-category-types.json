@@ -1,9 +1,12 @@
 [
   {
+    "_comments": [
+      "Former description, kept as the design note: Excluded from every forecast bucket. An explicit row rather than a null so that 'the rep deliberately left this out' is distinguishable from 'nobody has categorized it yet'."
+    ],
     "fields": {
       "Code": "OMITTED",
       "Name": "Omitted",
-      "Description": "Excluded from every forecast bucket. An explicit row rather than a null so that 'the rep deliberately left this out' is distinguishable from 'nobody has categorized it yet'.",
+      "Description": "Left out of every forecast total on purpose.",
       "IncludeInCommit": false,
       "IncludeInBestCase": false,
       "IncludeInPipeline": false,
@@ -19,10 +22,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: In the pipeline but not forecast. The widest of the three cumulative buckets."
+    ],
     "fields": {
       "Code": "PIPELINE",
       "Name": "Pipeline",
-      "Description": "In the pipeline but not forecast. The widest of the three cumulative buckets.",
+      "Description": "In the pipeline but not forecast to close.",
       "IncludeInCommit": false,
       "IncludeInBestCase": false,
       "IncludeInPipeline": true,
@@ -38,10 +44,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Upside. THE FLAGS ARE CUMULATIVE ON PURPOSE: best case also counts in pipeline, so a 'total pipeline' measure needs one flag test rather than a union of categories."
+    ],
     "fields": {
       "Code": "BESTCASE",
       "Name": "Best Case",
-      "Description": "Upside. THE FLAGS ARE CUMULATIVE ON PURPOSE: best case also counts in pipeline, so a 'total pipeline' measure needs one flag test rather than a union of categories.",
+      "Description": "Upside. Also counts in the pipeline total.",
       "IncludeInCommit": false,
       "IncludeInBestCase": true,
       "IncludeInPipeline": true,
@@ -57,10 +66,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: The rep is standing behind it. Counts in all three buckets, being the narrowest."
+    ],
     "fields": {
       "Code": "COMMIT",
       "Name": "Commit",
-      "Description": "The rep is standing behind it. Counts in all three buckets, being the narrowest.",
+      "Description": "The rep stands behind it. Counts in the commit, best case and pipeline totals.",
       "IncludeInCommit": true,
       "IncludeInBestCase": true,
       "IncludeInPipeline": true,
@@ -76,10 +88,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Already concluded, so it belongs to attainment rather than to the forecast — all three Include flags are 0 and ForecastSnapshot.ClosedAmount is its own bucket. Counting closed business inside 'commit' is the classic way a forecast quietly double-reports the quarter."
+    ],
     "fields": {
       "Code": "CLOSED",
       "Name": "Closed",
-      "Description": "Already concluded, so it belongs to attainment rather than to the forecast — all three Include flags are 0 and ForecastSnapshot.ClosedAmount is its own bucket. Counting closed business inside 'commit' is the classic way a forecast quietly double-reports the quarter.",
+      "Description": "Already closed. Counted in closed totals, not in the forecast.",
       "IncludeInCommit": false,
       "IncludeInBestCase": false,
       "IncludeInPipeline": false,

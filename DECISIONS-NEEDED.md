@@ -45,7 +45,8 @@ as a written question rather than becoming a GitHub issue.
 | D-30 | Should the forecast measures get their own sanity checks, and where? | Owner of the queries |
 | D-34 | Rename `Pipeline.RequiresDealLines`, or correct its description. | Sales |
 
-DN-19's remaining work is tracked in GitHub as #202 and #207.
+DN-19's sales workarounds are removed (#207): MJ 6.1.6 sends the written key on an IsA create. What
+remains is #202.
 
 ## Status of every entry
 
@@ -570,17 +571,9 @@ pipeline problem, though — it is **18 integration checks failing on `the host 
 sellable product(s) for company C0DEFA17-...`**, because the fixture resolves its pipelines by
 policy and then looks for products belonging to whatever company they now name.
 
-After any `mj sync push --dir metadata`, re-point them:
-
-```sql
-UPDATE __mj_BizAppsSales.Pipeline SET CompanyID = 'C0A5E100-0001-4A01-9E11-5B7C3D2F8A01'
- WHERE ID = '90111111-0000-4000-A000-000000000001';   -- B2B  -> Blue Cypress (Local Dev)
-UPDATE __mj_BizAppsSales.Pipeline SET CompanyID = 'B0111111-0000-4000-A000-000000000002'
- WHERE ID = '90111111-0000-4000-A000-000000000002';   -- D2C  -> BC Education Group (Local Dev)
-```
-
-Or re-run `scripts/seed-demo-data.sh`, which does the same two updates. No decision needed; this is a
-note for whoever meets the 18 failures next.
+**Resolved 2026-11-05 (PipelineCompany).** `Pipeline.CompanyID` is gone; the metadata links both
+pipelines to Default Company without setting `IsActive`, so a push never re-activates the links the
+seed retires (KNOWN-ISSUES KI-26). No action needed after a push.
 
 ---
 
@@ -732,10 +725,6 @@ those fields (always including `AutoRenew`, since the deal's checkbox is an answ
 `SeedRenewalDefaultsFromType()`, so the type fills only what the deal left unset. Sales still copies no
 default value itself, and a null override still means "use the standard". `close-won-contract.CT8`
 asserts both halves.
-
-The unmounted deal workspace still hardcodes placeholders for the same standards
-(`STANDARD_ANNUAL_INCREASE_PCT = 5` and `STANDARD_CANCELLATION_NOTICE_DAYS = 90` in
-`deal-workspace.types.ts`).
 
 ---
 
@@ -1341,9 +1330,11 @@ goes on reporting its own. That happens on every create. It looked intermittent 
 usually recovers the real row by its name, and binds nothing only when its reload has not caught up.
 `SalesContact` and `Person` have the same shape.
 
-**Meanwhile**, sales binds only an id it can show exists, else the one row with that name, else nothing
-(`create-related-unverified-id.test.ts`), and the server refuses a deal whose customer does not exist.
-Removing those workarounds once MJ's 6.1 line sends the key is #207. A new deal that still will not save
+**Workaround removed (#207).** Sales used to rebind an inline-created customer or contact to the key it
+was written under (the deal form's party fields), and to bind only an id it could show exists (the deal
+workspace, since deleted in #291). Both are gone because MJ 6.1.6 sends the written key on an IsA create,
+so the key the browser reports is the one in the database. The server still refuses a deal whose
+customer does not exist, which also covers a pick from a stale list. A new deal that still will not save
 after an inline create is #202.
 
 ---

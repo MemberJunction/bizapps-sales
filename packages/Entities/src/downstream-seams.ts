@@ -125,6 +125,15 @@ export interface ContractsCreateFromDealSeamInput {
     CommittedAmount?: number | null;
 }
 
+/**
+ * A won deal that already carries a contract, closed again after a reopen (#278). The same deal-sourced
+ * fields as a create, aimed at the contract the deal names, so one deal never produces two agreements.
+ */
+export interface ContractsUpdateFromDealSeamInput extends ContractsCreateFromDealSeamInput {
+    /** The contract the deal already names — sales' `Deal.ContractID`. */
+    ContractID: string;
+}
+
 /** Renewal path: used INSTEAD of CreateFromDeal when `DealType.RequiresRenewalSource` is set (§7.2). */
 export interface ContractsRenewTermSeamInput {
     /** The contract being renewed — sales' `Deal.RenewsContractID`. */
@@ -154,6 +163,23 @@ export interface ContractsSeamResult {
      * caller reports it as a note rather than a problem. Absent means a refusal.
      */
     Pending?: boolean;
+}
+
+/** What `UpdateContractFromDeal` returns: the common shape, plus what the close reports about reuse. */
+export interface ContractsUpdateSeamResult extends ContractsSeamResult {
+    /** The reused contract's number, for the note the close reports. */
+    ContractNumber?: string | null;
+    /**
+     * The contract is signed (`ExecutedDate` set), so nothing was written. `Success` is still true:
+     * the contract is reused as it stands, and `Message` carries the warning that the deal and the
+     * signed paper may differ.
+     */
+    Signed?: boolean;
+    /**
+     * The contract the deal names could not be read or no longer exists. The close refuses rather than
+     * creating a second contract or stamping one nobody can see.
+     */
+    Unreadable?: boolean;
 }
 
 /** What the orders call returns. */
@@ -191,6 +217,11 @@ export interface IDownstreamSeam {
      * because a renewal User Story is coming and the route is the shape it will land in.
      */
     CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult>;
+    /**
+     * Reuse the contract a re-closed deal already names (#278). Unsigned: rewrite the deal-sourced
+     * fields `CreateContractFromDeal` sets. Signed: write nothing and return a warning.
+     */
+    UpdateContractFromDeal(input: ContractsUpdateFromDealSeamInput): Promise<ContractsUpdateSeamResult>;
     RenewContractTerm(input: ContractsRenewTermSeamInput): Promise<ContractsSeamResult>;
     LinkOrderToContract(input: ContractsLinkOrderSeamInput): Promise<ContractsSeamResult>;
 }
@@ -214,6 +245,16 @@ export class StubDownstreamSeam implements IDownstreamSeam {
             Message:
                 'The contract route was planned but not executed: bizapps-contracts is not installed in ' +
                 'this deployment, so its entities cannot be resolved.',
+        };
+    }
+
+    public async UpdateContractFromDeal(input: ContractsUpdateFromDealSeamInput): Promise<ContractsUpdateSeamResult> {
+        this.Attempts.push({ Target: 'ContractUpdate', Payload: input });
+        return {
+            Success: false,
+            Message:
+                'The deal\'s contract was not refreshed: bizapps-contracts is not installed in this ' +
+                'deployment, so its entities cannot be resolved.',
         };
     }
 

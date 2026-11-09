@@ -1,19 +1,9 @@
 /**
  * @fileoverview S-US9's surface — a deal's activities in chronological order, plus logging one.
  *
- * ── WHY THIS IS NOT A WORKSPACE PANE ────────────────────────────────────────────────────────────
+ * A standalone component, so the deal form's Activity panel and any other host can mount it.
  *
- * `DEAL_WORKSPACE_PANES` keys are `DealWorkspaceSection` values, and that union is what
- * `ProjectValidation()` tags issues with so a pane can badge its own error count. An activity timeline
- * has no validation state — it is a record of what happened, not a part of the draft being composed — so
- * adding `'activity'` to that union would mean widening a type the whole validation layer reads in order
- * to describe a section that can never carry an issue.
- *
- * It is a standalone component instead, which also keeps the merge surface to one line in the
- * workspace template. That was a constraint worth designing around rather than working against: another
- * instance is editing `deal-workspace.*` in the same window.
- *
- * ── AND WHY IT READS FOR ITSELF ─────────────────────────────────────────────────────────────────
+ * ── WHY IT READS FOR ITSELF ─────────────────────────────────────────────────────────────────
  *
  * `ActivityReader` lives in `sales-core-entities-server`, and an Angular component must not import a
  * server package — that is the layering, and it is also how a server-only dependency ends up in a
@@ -24,9 +14,9 @@
  * @module @mj-biz-apps/sales-ng
  */
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, EventEmitter, Input, Output, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, Output, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Metadata, RunView, type IMetadataProvider } from '@memberjunction/core';
+import { Metadata, RunQuery, RunView, type IMetadataProvider } from '@memberjunction/core';
 import { GraphQLActionClient, type GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
 /**
  * The codes come from the SHARED package, not a list retyped here. That is why `activity-vocabulary`
@@ -36,6 +26,18 @@ import { GraphQLActionClient, type GraphQLDataProvider } from '@memberjunction/g
 import type { ActivityTypeCode } from '@mj-biz-apps/sales-entities';
 /** For `<mj-loading>` — the house rule is that spinner and no other. */
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
+import { MJComboboxComponent } from '@memberjunction/ng-ui-components';
+import { PARTY_LOOKUP_QUERIES, PartyLookupParamsFor, type PartyOption } from '@mj-biz-apps/common-ng';
+import { MJS_ENTITIES } from '../data/entity-names';
+import {
+    AddPartyChoice,
+    ChosenPartiesParam,
+    DealPartyChoices,
+    type BuyingTeamFields,
+    type DealPartyFields,
+    type PartyChoice,
+    type PartyKind,
+} from './deal-activity-parties';
 
 /** Common's entity names. Strings, because sales must not import contracts' or common's classes here. */
 const E_ACTIVITY = 'MJ_BizApps_Common: Activities';
@@ -64,7 +66,7 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
 @Component({
     selector: 'mjs-deal-activity-timeline',
     standalone: true,
-    imports: [CommonModule, FormsModule, SharedGenericModule],
+    imports: [CommonModule, FormsModule, SharedGenericModule, MJComboboxComponent],
     template: `
         <section class="dat">
             <header class="dat__head">
@@ -107,6 +109,43 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
                         <span>When</span>
                         <input type="datetime-local" [(ngModel)]="DraftWhen" name="when" />
                     </label>
+                    <!--
+                      WHO IT IS LINKED TO (#408). The deal itself is always linked and is not listed. When the
+                      list could not be read, nothing is sent and the server links the account and primary
+                      contact as it always has.
+                    -->
+                    <fieldset class="dat__field dat__field--wide dat__links">
+                        <legend>Linked to <span class="dat__hint">(the deal is always linked)</span></legend>
+                        @if (PartiesLoading) {
+                            <mj-loading></mj-loading>
+                        } @else if (!PartiesLoaded) {
+                            <p class="dat__hint">The deal's people could not be read, so its account and primary
+                                contact will be linked.</p>
+                        } @else {
+                            @for (party of Parties; track party.Kind + party.RecordID) {
+                                <label class="dat__check">
+                                    <input type="checkbox" [(ngModel)]="party.Checked"
+                                        [name]="'party-' + party.RecordID" />
+                                    <i class="fa-solid" [class.fa-building]="party.Kind === 'Organization'"
+                                        [class.fa-user]="party.Kind === 'Person'" aria-hidden="true"></i>
+                                    {{ party.Name }}
+                                    <span class="dat__hint">{{ party.Labels.join(', ') }}</span>
+                                </label>
+                            }
+                            <div class="dat__pickers">
+                                <mj-combobox #personPick class="dat__picker" TextField="Name" ValueField="ID"
+                                    [Data]="Options.Person" [ValuePrimitive]="true" [Filterable]="false"
+                                    Placeholder="Add person: type 2+ characters"
+                                    (FilterChange)="Search('Person', $event)"
+                                    (ValueChange)="AddParty('Person', $event, personPick)"></mj-combobox>
+                                <mj-combobox #orgPick class="dat__picker" TextField="Name" ValueField="ID"
+                                    [Data]="Options.Organization" [ValuePrimitive]="true" [Filterable]="false"
+                                    Placeholder="Add organization: type 2+ characters"
+                                    (FilterChange)="Search('Organization', $event)"
+                                    (ValueChange)="AddParty('Organization', $event, orgPick)"></mj-combobox>
+                            </div>
+                        }
+                    </fieldset>
                     @if (Error) {
                         <p class="dat__error">{{ Error }}</p>
                     }
@@ -189,6 +228,12 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
                 padding: 5px 7px; font: inherit; font-size: 0.8125rem;
             }
             .dat__actions { display: flex; gap: 8px; flex: 1 1 100%; }
+            .dat__links { border: 0; margin: 0; padding: 0; gap: 6px; }
+            .dat__links legend { padding: 0; margin-bottom: 4px; color: var(--mj-text-secondary); }
+            .dat__check { display: flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--mj-text-primary); }
+            .dat__hint { color: var(--mj-text-muted); font-size: 0.75rem; margin: 0; }
+            .dat__pickers { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+            .dat__picker { flex: 1 1 220px; }
             .dat__error { flex: 1 1 100%; margin: 0; color: var(--mj-status-error); font-size: 0.8125rem; }
             .dat__empty { margin: 0; color: var(--mj-text-muted); font-size: 0.8125rem; }
             .dat__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -212,6 +257,7 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
 })
 export class DealActivityTimelineComponent {
     private readonly cdr = inject(ChangeDetectorRef);
+    private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
     /**
      * When true, only the compose form is shown — the list is owned by `mj-entity-viewer`
@@ -247,6 +293,14 @@ export class DealActivityTimelineComponent {
     public DraftNotes = '';
     public DraftWhen = '';
 
+    /** The compose checklist (#408). Sent only when it loaded, so a failed read falls back to the server's choice. */
+    public Parties: PartyChoice[] = [];
+    public PartiesLoading = false;
+    public PartiesLoaded = false;
+    public Options: Record<PartyKind, PartyOption[]> = { Person: [], Organization: [] };
+    /** Drops a search answer that arrives after a newer one was asked. */
+    private searchSeq: Record<PartyKind, number> = { Person: 0, Organization: 0 };
+
     public StartAdd(): void {
         this.Adding = true;
         this.Error = null;
@@ -259,6 +313,101 @@ export class DealActivityTimelineComponent {
          */
         this.DraftWhen = localInputValue(new Date());
         this.cdr.detectChanges();
+        void this.loadParties();
+    }
+
+    /** The deal's account, contacts and buying team, read as the caller: one `RunViews` round trip. */
+    private async loadParties(): Promise<void> {
+        this.Parties = [];
+        this.PartiesLoaded = false;
+        this.PartiesLoading = true;
+        this.cdr.detectChanges();
+        try {
+            const id = escape(this.dealID ?? '');
+            const [deal, team] = await new RunView().RunViews([
+                {
+                    EntityName: E_DEAL,
+                    ExtraFilter: `ID = '${id}'`,
+                    Fields: ['AccountID', 'Account', 'PrimaryContactID', 'PrimaryContact', 'BillingContactID', 'BillingContact'],
+                    ResultType: 'simple',
+                },
+                {
+                    EntityName: MJS_ENTITIES.DealContactRole,
+                    ExtraFilter: `DealID = '${id}'`,
+                    Fields: ['SalesContactID', 'SalesContact', 'BuyingRoleType'],
+                    ResultType: 'simple',
+                },
+            ]);
+            if (!deal?.Success || !team?.Success) {
+                console.error('Deal activity: could not read the deal parties', deal?.ErrorMessage, team?.ErrorMessage);
+                return;
+            }
+            this.Parties = DealPartyChoices(
+                (deal.Results?.[0] as DealPartyFields | undefined) ?? null,
+                (team.Results ?? []) as BuyingTeamFields[],
+            );
+            this.PartiesLoaded = true;
+        } catch (err) {
+            console.error('Deal activity: could not read the deal parties', err);
+        } finally {
+            this.PartiesLoading = false;
+            this.cdr.detectChanges();
+        }
+    }
+
+    /**
+     * The search the deal form's own party fields run (common's lookup queries), so "Add person" finds
+     * the same people the Primary contact field does.
+     */
+    public async Search(kind: PartyKind, text: string): Promise<void> {
+        const seq = ++this.searchSeq[kind];
+        const params = PartyLookupParamsFor(kind, text);
+        if (!params) {
+            this.Options = { ...this.Options, [kind]: [] };
+            this.cdr.detectChanges();
+            return;
+        }
+        const parameters: Record<string, string> = { Term: params.Term };
+        if (params.Domain) parameters['Domain'] = params.Domain;
+        const result = await new RunQuery().RunQuery({ ...PARTY_LOOKUP_QUERIES[kind], Parameters: parameters });
+        if (seq !== this.searchSeq[kind]) return;
+        if (!result.Success) {
+            console.error(`Deal activity: ${kind} search failed`, result.ErrorMessage);
+        }
+        const rows = (result.Success ? result.Results : []) as PartyOption[];
+        this.Options = { ...this.Options, [kind]: rows };
+        this.cdr.detectChanges();
+    }
+
+    public AddParty(kind: PartyKind, value: unknown, picker: MJComboboxComponent): void {
+        const id = typeof value === 'string' ? value : null;
+        if (!id) return;
+        const name = this.Options[kind].find((o) => o.ID === id)?.Name ?? id;
+        this.Parties = AddPartyChoice(this.Parties, kind, id, name);
+        /**
+         * Cleared after the combobox finishes its own selection, so it is ready for the next one. Reset
+         * through `writeValue`, not an ngModel binding: a model that goes null -> ID -> null inside one
+         * change-detection pass never reaches the control, and the box was left showing the raw ID.
+         */
+        void Promise.resolve().then(() => {
+            picker.writeValue(null);
+            this.Options = { ...this.Options, [kind]: [] };
+            this.cdr.detectChanges();
+        });
+    }
+
+    /**
+     * Opens the compose form if it is closed, scrolls it into view and puts the cursor in its title. For
+     * a host whose own New button should log an activity here, such as the deal form's Activity grid.
+     * A draft already in progress is kept.
+     */
+    public FocusCompose(): void {
+        if (!this.Adding) {
+            this.StartAdd();
+        }
+        const form = this.host.nativeElement.querySelector('.dat__form');
+        form?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        form?.querySelector<HTMLInputElement>('input[name="title"]')?.focus();
     }
 
     public CancelAdd(): void {
@@ -333,6 +482,9 @@ export class DealActivityTimelineComponent {
                     Value: (this.DraftWhen ? new Date(this.DraftWhen) : new Date()).toISOString(),
                     Type: 'Input',
                 },
+                ...(this.PartiesLoaded
+                    ? [{ Name: 'Parties', Value: ChosenPartiesParam(this.Parties), Type: 'Input' as const }]
+                    : []),
             ]);
 
             if (result?.Success !== true) {

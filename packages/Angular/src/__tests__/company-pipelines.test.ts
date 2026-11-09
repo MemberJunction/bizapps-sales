@@ -2,17 +2,22 @@ import { describe, expect, it } from 'vitest';
 import {
     CompanyLabel,
     DefaultCompanyID,
+    DistinctPipelines,
+    ExpandPipelinesByCompany,
     InitialCompanyID,
     OrderPipelinesByCompany,
     PipelineCompanies,
     PipelineLabel,
+    PipelineServesCompany,
     PipelinesForCompany,
     type CompanyPipeline,
+    type PipelineCompanyLink,
+    type PipelineRecord,
 } from '../lib/data/company-pipelines';
 
 /**
- * #327: every company can carry its own copy of the default pipeline, so the pickers group pipelines
- * by company, put the default company first, and say which company each option sells as.
+ * #327: the pickers group pipelines by the companies they serve, put the default company first, and
+ * say which company each option sells as.
  */
 
 const HOME = 'C-HOME';
@@ -69,15 +74,69 @@ describe('the company filter', () => {
     });
 
     it('opens on the deal\'s own company, not the default one', () => {
-        expect(InitialCompanyID(PIPELINES, 'ACME-B2B'.toLowerCase())).toBe(ACME);
+        expect(InitialCompanyID(PIPELINES, ACME)).toBe(ACME);
     });
 
-    it('opens on the default company for a deal with no pipeline yet', () => {
+    it('opens on the default company for a deal with no company yet', () => {
         expect(InitialCompanyID(PIPELINES, null)).toBe(HOME);
+        expect(InitialCompanyID(PIPELINES, '')).toBe(HOME);
+    });
+});
+
+/**
+ * A pipeline serves every company it is actively linked to (`PipelineCompany`), so a shared pipeline
+ * becomes one `CompanyPipeline` row per company.
+ */
+describe('a pipeline shared by several companies', () => {
+    const SHARED = 'shared-b2b';
+    const RECORDS: PipelineRecord[] = [
+        { ID: SHARED, Name: 'B2B', Code: 'B2B', IsDefault: true, DisplayRank: 10 },
+        { ID: 'acme-only', Name: 'Acme Only', Code: 'ACME', IsDefault: false, DisplayRank: 20 },
+        { ID: 'unlinked', Name: 'Orphan', Code: 'ORPHAN', IsDefault: false, DisplayRank: 30 },
+    ];
+    const LINKS: PipelineCompanyLink[] = [
+        { PipelineID: SHARED, CompanyID: HOME, Company: 'Home Co' },
+        { PipelineID: 'SHARED-B2B', CompanyID: ACME, Company: 'Acme' },
+        { PipelineID: 'acme-only', CompanyID: ACME, Company: 'Acme' },
+    ];
+    const rows = ExpandPipelinesByCompany(RECORDS, LINKS);
+
+    it('expands to one row per linked company, matching ids in any case', () => {
+        expect(rows.map((r) => `${r.ID}/${r.CompanyID}/${r.CompanyName}`)).toEqual([
+            `${SHARED}/${HOME}/Home Co`,
+            `${SHARED}/${ACME}/Acme`,
+            `acme-only/${ACME}/Acme`,
+        ]);
     });
 
-    it('opens on the default company when the deal\'s pipeline is not offered', () => {
-        expect(InitialCompanyID(PIPELINES, 'inactive-pipeline')).toBe(HOME);
+    it('leaves out a pipeline with no link, since no deal could be saved on it', () => {
+        expect(rows.find((r) => r.ID === 'unlinked')).toBeUndefined();
+    });
+
+    it('offers the shared pipeline under each company it serves', () => {
+        expect(PipelinesForCompany(rows, HOME).map((p) => p.ID)).toEqual([SHARED]);
+        expect(PipelinesForCompany(rows, ACME).map((p) => p.ID)).toEqual([SHARED, 'acme-only']);
+    });
+
+    it('lists it once when no company is chosen', () => {
+        expect(PipelinesForCompany(rows, null).map((p) => p.ID)).toEqual([SHARED, 'acme-only']);
+    });
+
+    it('keeps the first row of each pipeline, in the order given', () => {
+        const distinct = DistinctPipelines(rows);
+        expect(distinct.map((p) => `${p.ID}/${p.CompanyID}`)).toEqual([`${SHARED}/${HOME}`, `acme-only/${ACME}`]);
+    });
+
+    it('says which companies a pipeline serves', () => {
+        expect(PipelineServesCompany(rows, SHARED, HOME)).toBe(true);
+        expect(PipelineServesCompany(rows, SHARED, ACME.toUpperCase())).toBe(true);
+        expect(PipelineServesCompany(rows, 'acme-only', HOME)).toBe(false);
+        expect(PipelineServesCompany(rows, null, HOME)).toBe(false);
+        expect(PipelineServesCompany(rows, SHARED, null)).toBe(false);
+    });
+
+    it('starts a new deal on the default pipeline\'s first company', () => {
+        expect(DefaultCompanyID(rows)).toBe(HOME);
     });
 });
 

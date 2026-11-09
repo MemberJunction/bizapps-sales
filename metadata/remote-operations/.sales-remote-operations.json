@@ -8,13 +8,15 @@
       "ONE TRANSACTION, all-or-none. A partial close — contract created, order missing — is exactly",
       "the failure the transaction exists to prevent (§7.2).",
       "",
-      "GenerationType=Manual: CodeGen emits the typed shell, CloseDealOperation supplies the body."
+      "GenerationType=Manual: CodeGen emits the typed shell, CloseDealOperation supplies the body.",
+      "",
+      "Former description, corrected: closing runs in ONE transaction and resolves the effective CloseWonPolicy (pipeline default plus caller overrides). It does not route lines to an order: the deal's own order changes status when the deal enters a stage that names one (PipelineStage.OrderStatusOnEntry). Behaviour is decided by the policy and by DealStatusType FLAGS, never by a pipeline or status NAME. Sales passes intent only; every figure is computed by orders."
     ],
     "fields": {
       "Name": "Close Deal",
       "OperationKey": "Sales.CloseDeal",
       "CategoryID": "@lookup:MJ: Remote Operation Categories.Name=Deal Lifecycle",
-      "Description": "Close a deal into a target status, in ONE transaction: validate it is closeable, resolve the effective CloseWonPolicy (pipeline default + caller overrides), route lines to a contract and/or an order per that policy, append the DealStageEvent, stamp ActualCloseDate/ClosedAt/ClosedByUserID, and apply the close lock when the status carries LocksDeal. Routing is decided by the policy and by DealStatusType FLAGS — never by a pipeline or status NAME. Sales passes intent only; every figure is computed downstream by orders.",
+      "Description": "Closes a deal into the chosen status in one step. It checks the deal can close, records the stage change and close details, follows the pipeline's close-won policy (contract and follow-up tasks), and locks the deal when the status locks.",
       "InputTypeName": "SalesCloseDealInput",
       "InputTypeDefinition": "@file:types/sales-close-deal.input.ts",
       "InputTypeIsArray": false,
@@ -41,13 +43,15 @@
       "Sales.ReopenDeal — master plan §7.3. The ONLY sanctioned way out of the close lock.",
       "Reason is required: a lock exists because the deal is now the provenance of a contract and an",
       "order, so undoing it has to be explainable. The reopen is itself appended to DealStageEvent,",
-      "so the fact that a close happened survives the close being undone."
+      "so the fact that a close happened survives the close being undone.",
+      "",
+      "Former description, kept as the design note: Reopen a locked deal into a non-locking status, recording a mandatory reason. Appends a DealStageEvent, clears the close stamps, and releases the immutability enforced by DealEntityServer.Save(). The only sanctioned exit from the close lock (§7.3)."
     ],
     "fields": {
       "Name": "Reopen Deal",
       "OperationKey": "Sales.ReopenDeal",
       "CategoryID": "@lookup:MJ: Remote Operation Categories.Name=Deal Lifecycle",
-      "Description": "Reopen a locked deal into a non-locking status, recording a mandatory reason. Appends a DealStageEvent, clears the close stamps, and releases the immutability enforced by DealEntityServer.Save(). The only sanctioned exit from the close lock (§7.3).",
+      "Description": "Reopens a locked deal into a status that does not lock, with a required reason. It records the stage change, clears the close details and unlocks the deal.",
       "InputTypeName": "SalesReopenDealInput",
       "InputTypeDefinition": "@file:types/sales-close-deal.input.ts",
       "InputTypeIsArray": false,
@@ -67,6 +71,47 @@
     "sync": {
       "lastModified": "2026-08-26T00:25:09.382Z",
       "checksum": "b0f39cf37b175094289f97017181dd45626cc1add244624df04ad5080932ec47"
+    }
+  },
+  {
+    "_comments": [
+      "Sales.RecordDiscountConcession: records a deal line's raised discount as the Price concession orders'",
+      "confirm gate holds on.",
+      "",
+      "SERVER-SIDE BECAUSE ORDERS FILLS THE CONCESSION THERE. Orders' table requires the order, the computed",
+      "value and the requesting user, and only orders' server subclass of the Order Concession entity sets them",
+      "(and decides whether the requester's Sales Authority covers it). Created in the browser, the generated",
+      "class ran instead, failed its own required-field validation and never reached the API, so no concession",
+      "was ever recorded and the rep saw a refusal with no reason.",
+      "",
+      "WHAT ORDERS DECIDES. The concession is created as the calling user with the rep's reason category and",
+      "reason. Orders values it and decides it on save: Approved when the requester's Sales Authority covers it,",
+      "Pending for the approving role otherwise, or refused with orders' own reason (for example a tier conflict",
+      "or a line orders does not value). The operation returns whether it was recorded, whether it awaits",
+      "approval, and orders' message when it refuses. Sales states intent only; orders computes every figure.",
+      "",
+      "GenerationType=Manual: CodeGen emits the typed shell, RecordDiscountConcessionOperation supplies the body."
+    ],
+    "fields": {
+      "Name": "Record Discount Concession",
+      "OperationKey": "Sales.RecordDiscountConcession",
+      "CategoryID": "@lookup:MJ: Remote Operation Categories.Name=Deal Lifecycle",
+      "Description": "Records a deal line's raised discount as a Price concession on its order line, replacing the line's earlier one, for orders to value and decide.",
+      "InputTypeName": "SalesRecordDiscountConcessionInput",
+      "InputTypeDefinition": "@file:types/sales-record-discount-concession.input.ts",
+      "InputTypeIsArray": false,
+      "OutputTypeName": "SalesRecordDiscountConcessionOutput",
+      "OutputTypeDefinition": "@file:types/sales-record-discount-concession.output.ts",
+      "OutputTypeIsArray": false,
+      "ExecutionMode": "Sync",
+      "RequiredScope": "sales:write",
+      "RequiresSystemUser": false,
+      "GenerationType": "Manual",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "59D32E09-65A4-4DC7-B515-5A129F1C5A1D"
     }
   }
 ]

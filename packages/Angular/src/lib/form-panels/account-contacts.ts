@@ -41,3 +41,22 @@ export function AccountContactsWhere(
         `ID IN (SELECT ToPersonID FROM ${view} WHERE FromOrganizationID = ${id} AND ToPersonID IS NOT NULL AND Status = 'Active'))`
     );
 }
+
+/**
+ * The filter on the Sales Accounts view that selects the accounts a contact works at (#442): the same
+ * Relationship rows read from the person's end. Same rules as {@link AccountContactsWhere}: both
+ * directions, every relationship type, active links only, base view, OR rather than UNION. An
+ * organization that is not a Sales Account is left out, because the rows are Sales Accounts.
+ */
+export function ContactAccountsWhere(
+    contactId: string,
+    relationshipView: { SchemaName: string; BaseView: string },
+): string {
+    const view = `[${relationshipView.SchemaName}].[${relationshipView.BaseView}]`;
+    const id = sqlString(contactId);
+    return (
+        `(ID IN (SELECT ToOrganizationID FROM ${view} WHERE FromPersonID = ${id} AND ToOrganizationID IS NOT NULL AND Status = 'Active')` +
+        ` OR ` +
+        `ID IN (SELECT FromOrganizationID FROM ${view} WHERE ToPersonID = ${id} AND FromOrganizationID IS NOT NULL AND Status = 'Active'))`
+    );
+}

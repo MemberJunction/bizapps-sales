@@ -38,6 +38,7 @@ export * from './downstream-seams';
  * all apply the same one.
  */
 export * from './product-filter';
+export * from './inherited-subscription-type';
 export * from './term-start';
 
 /**
@@ -52,6 +53,12 @@ export * from './close-lock';
  * stored figures, never a computation. See the file header for why it is no longer a timestamp test.
  */
 export * from './amount-freshness';
+
+/**
+ * The refusal a stage event edit or delete gets, shared by `DealStageEventEntityServer` and the Explorer
+ * form so both say the same thing (#348).
+ */
+export * from './stage-event-append-only';
 
 /**
  * Forces the generated entity subclasses to be loaded. Without an explicit

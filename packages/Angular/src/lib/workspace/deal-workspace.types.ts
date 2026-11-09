@@ -24,8 +24,9 @@ export interface DealLookup {
 }
 
 /**
- * A pipeline carries its company, because `Deal.CompanyID` is derived from it and never chosen. Code,
- * IsDefault and DisplayRank are what the pickers group and order by (#327, `company-pipelines.ts`).
+ * A pipeline as served by one linked company: a pipeline linked to several companies is one lookup per
+ * company, so a company filter narrows to that company's pipelines. Code, IsDefault and DisplayRank are
+ * what the pickers group and order by (#327, `company-pipelines.ts`).
  */
 export interface PipelineLookup extends DealLookup, CompanyPipeline {}
 
@@ -41,6 +42,11 @@ export interface StageLookup extends DealLookup {
      * Needed by any surface that must know whether arriving here would LOCK the deal.
      */
     DealStatusTypeID: string | null;
+    /**
+     * Days a deal may sit in this stage before the Board flags it, or null for no limit
+     * (bizapps-sales#450).
+     */
+    RottingDays: number | null;
 }
 
 
@@ -83,6 +89,11 @@ export interface DealWorkspaceLookups {
     Accounts: DealLookup[];
     Contacts: DealLookup[];
     Employees: DealLookup[];
+    /**
+     * Every company, by name. The dashboard's Product company filter labels its choices from this:
+     * a product's company need not own a pipeline, so the pipeline list cannot name it.
+     */
+    Companies: DealLookup[];
 }
 
 export function EmptyLookups(): DealWorkspaceLookups {
@@ -96,6 +107,7 @@ export function EmptyLookups(): DealWorkspaceLookups {
         Accounts: [],
         Contacts: [],
         Employees: [],
+        Companies: [],
     };
 }
 
@@ -117,14 +129,3 @@ export const DEAL_WORKSPACE_PANES: readonly DealWorkspacePane[] = [
     { Key: 'terms', Label: 'Terms', Icon: 'fa-solid fa-file-contract' },
     { Key: 'variances', Label: 'Variances', Icon: 'fa-solid fa-pen-nib' },
 ] as const;
-
-/**
- * The standard terms, shown as PLACEHOLDER text and never written into a draft.
- *
- * These live on the contracts `ContractType`, not on a deal. A deal stores an OVERRIDE, and null means
- * "use the standard" — a different fact from "we agreed a number that happens to equal today's
- * standard", and the only one of the two that survives a later policy change. So the form displays
- * them to tell the AD what they are departing from, and sends null unless something was typed.
- */
-export const STANDARD_ANNUAL_INCREASE_PCT = 5;
-export const STANDARD_CANCELLATION_NOTICE_DAYS = 90;

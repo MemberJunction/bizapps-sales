@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DealEntityServer } from '../DealEntityServer.js';
 
 /**
@@ -213,5 +213,141 @@ describe('a status that reads cleanly is unaffected', () => {
         // would refuse the write a moment later anyway — with a worse message.
         const d = deal({ target: 'aaaaaaaa-0000-4000-8000-00000000dead', prior: OPEN, rows: { [OPEN]: OPENING } });
         expect((await d.planStatusTransition())?.Kind).toBe('Unreadable');
+    });
+});
+
+/**
+ * A SAVE THAT DID NOT COMMIT KEEPS THE CALLER'S STATUS, AND ITS CHANGES.
+ *
+ * The status is reverted before the save so the lock and `super.Save()` do not write it. Only
+ * `refuseSave` used to put it back, so a save that failed later (`super.Save()` false, or a throw that
+ * rolled the transaction back) left the status clean, and a retry skipped the close and reported
+ * success. `Save()`'s `finally` now restores it whenever the save did not commit, and a rollback inside
+ * `saveWithinScope` restores the dirty state `super.Save()` cleared.
+ */
+describe('a save that did not commit', () => {
+    const parentSave = Object.getPrototypeOf(DealEntityServer.prototype) as { Save: () => Promise<boolean> };
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    function wrapper(body: (d: Record<string, unknown>) => Promise<boolean>) {
+        const sets: [string, unknown][] = [];
+        const d = Object.create(DealEntityServer.prototype) as Record<string, unknown> & {
+            Save(): Promise<boolean>;
+        };
+        const define = (name: string, value: unknown) => Object.defineProperty(d, name, { value, writable: true });
+        define('_declaredTransition', null);
+        define('_revertedStatusTarget', null);
+        define('_committed', false);
+        define('Set', (field: string, value: unknown) => {
+            sets.push([field, value]);
+        });
+        define('saveDeclared', () => body(d));
+        return { d, sets };
+    }
+
+    it('restores the status when the save returned false without committing', async () => {
+        const { d, sets } = wrapper(async (self) => {
+            self._revertedStatusTarget = WON;
+            return false;
+        });
+        expect(await d.Save()).toBe(false);
+        expect(sets).toEqual([['DealStatusTypeID', WON]]);
+    });
+
+    it('restores the status when the save threw', async () => {
+        const { d, sets } = wrapper(async (self) => {
+            self._revertedStatusTarget = WON;
+            throw new Error('connection reset');
+        });
+        await expect(d.Save()).rejects.toThrow('connection reset');
+        expect(sets).toEqual([['DealStatusTypeID', WON]]);
+    });
+
+    it('leaves the status alone once the save committed, even if the transition then failed', async () => {
+        const { d, sets } = wrapper(async (self) => {
+            self._revertedStatusTarget = WON;
+            self._committed = true;
+            return false;
+        });
+        expect(await d.Save()).toBe(false);
+        expect(sets).toEqual([]);
+    });
+
+    function scoped(opts: { superSaves: boolean; stageEventThrows?: boolean }) {
+        const field = { Name: 'Name', CodeName: 'Name', OldValue: 'before', RestoreOldValue(v: unknown) { this.OldValue = v as string; } };
+        const scope = { Commit: vi.fn(async () => undefined), Rollback: vi.fn(async () => undefined) };
+        const d = Object.create(DealEntityServer.prototype) as Record<string, unknown> & {
+            saveWithinScope(options: undefined, work: Record<string, unknown>): Promise<boolean>;
+        };
+        const define = (name: string, value: unknown) => Object.defineProperty(d, name, { value, writable: true });
+        define('IsSaved', true);
+        define('ID', 'deal-1');
+        define('_committed', false);
+        define('_orderStatusWarnings', []);
+        define('_declaredTransition', null);
+        define('Fields', [field]);
+        define('GetFieldByName', (name: string) => (name === 'Name' ? field : undefined));
+        define('Team', { Items: [] });
+        define('PaymentSchedule', { Items: [] });
+        define('OrderID_Object', null);
+        define('RegisterResultHistoryEntry', () => undefined);
+        define('ProviderToUse', { BeginEntityTransaction: async () => scope });
+        define('appendStageEvent', async () => {
+            if (opts.stageEventThrows) throw new Error('event insert failed');
+        });
+        vi.spyOn(parentSave, 'Save').mockImplementation(async () => {
+            // What a successful save does to the in-memory record: its fields read clean.
+            field.OldValue = 'after';
+            return opts.superSaves;
+        });
+        const work = {
+            stageOrder: null,
+            stageMove: { StageID: 's-1' },
+            stageDefaults: null,
+            amountMayHaveMoved: false,
+            assignNumber: false,
+            needsStatusDefault: false,
+        };
+        return { d, field, scope, run: () => d.saveWithinScope(undefined, work) };
+    }
+
+    it('puts the dirty state back when a step after the save throws', async () => {
+        const { d, field, scope, run } = scoped({ superSaves: true, stageEventThrows: true });
+        expect(await run()).toBe(false);
+        expect(scope.Rollback).toHaveBeenCalled();
+        expect(field.OldValue, 'the field must read dirty again so a retry writes it').toBe('before');
+        expect(d._committed).toBe(false);
+    });
+
+    it('puts the dirty state back when the save itself returned false', async () => {
+        const { d, field, run } = scoped({ superSaves: false });
+        expect(await run()).toBe(false);
+        expect(field.OldValue).toBe('before');
+        expect(d._committed).toBe(false);
+    });
+
+    it('marks the save committed only after the commit', async () => {
+        const { d, field, scope, run } = scoped({ superSaves: true });
+        expect(await run()).toBe(true);
+        expect(scope.Commit).toHaveBeenCalled();
+        expect(field.OldValue, 'a committed save stays clean').toBe('after');
+        expect(d._committed).toBe(true);
+    });
+
+    it('takes the commit flag from the fast path\'s own save', async () => {
+        const d = Object.create(DealEntityServer.prototype) as Record<string, unknown> & {
+            saveWithinScope(options: undefined, work: Record<string, unknown>): Promise<boolean>;
+        };
+        Object.defineProperty(d, '_committed', { value: false, writable: true });
+        vi.spyOn(parentSave, 'Save').mockResolvedValue(false);
+        const nothing = {
+            stageOrder: null, stageMove: null, stageDefaults: null,
+            amountMayHaveMoved: false, assignNumber: false, needsStatusDefault: false,
+        };
+        expect(await d.saveWithinScope(undefined, nothing)).toBe(false);
+        expect(d._committed).toBe(false);
     });
 });
