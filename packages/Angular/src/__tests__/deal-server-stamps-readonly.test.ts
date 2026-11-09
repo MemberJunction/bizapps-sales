@@ -4,10 +4,11 @@ import { readFileSync } from 'node:fs';
 /**
  * SERVER-MAINTAINED STAMPS MUST NOT BE EDITABLE, and the reason is not the close lock.
  *
- * `DealEntityServer` derives both values and will not accept a supplied one:
- *   · stampCompanyFromPipeline() OVERWRITES CompanyID from the pipeline's company
- *   · ownerStampEditRefusal()    REFUSES a supplied OwnerEmployeeID; the owner comes from the
- *                               deal team via stampOwnerFromTeam()
+ * Neither is a free choice in the party panel:
+ *   · CompanyID is chosen with Company on the Pipeline panel, which offers only companies linked to
+ *     a pipeline; companyLinkedToPipelineRefusal() REFUSES one the pipeline does not serve
+ *   · ownerStampEditRefusal() REFUSES a supplied OwnerEmployeeID; the owner comes from the deal team
+ *     via stampOwnerFromTeam()
  *
  * CLAUDE.md: "Deal.OwnerEmployeeID and DealLine.CompanyID are written by entity-server code.
  * Never hand-set them."
