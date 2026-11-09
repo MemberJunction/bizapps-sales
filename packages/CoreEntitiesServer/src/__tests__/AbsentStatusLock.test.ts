@@ -107,7 +107,7 @@ describe('the close lock on a deal whose status row is absent', () => {
     it('does not extend the status exemption to a deal whose status row exists', async () => {
         // A bare status write on a really closed deal stays refused: that move runs through the flow.
         const d = deal({ persisted: WON, target: OPEN, dirty: ['DealStatusTypeID'] });
-        expect(await d.checkCloseLock()).toContain('Deal Status');
+        expect(await d.checkCloseLock()).toContain('Status cannot be changed');
     });
 
     it('leaves a deal whose status row exists and does not lock unlocked', async () => {

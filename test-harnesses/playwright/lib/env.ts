@@ -83,6 +83,6 @@ export const ENTITY = {
  */
 export const TEST_PREFIX = 'PW-VERIFY';
 
-/** The dev Company seeded by scripts/seed-dev-data.sh — Pipeline.CompanyID is NOT NULL. */
+/** The dev Company seeded by scripts/seed-dev-data.sh — what a harness pipeline is linked to (PipelineCompany). */
 export const DEV_COMPANY_ID = 'C0A5E100-0001-4A01-9E11-5B7C3D2F8A01';
 export const DEV_COMPANY_NAME = 'Blue Cypress (Local Dev)';

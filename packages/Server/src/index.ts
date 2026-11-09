@@ -19,11 +19,14 @@ import '@mj-biz-apps/sales-core-entities-server';
 import {
     LoadDealLockOrderLineVeto,
     LoadDealNotWonConfirmVeto,
+    LoadDealOrderLink,
     LoadSalesCoreEntitiesServer,
 } from '@mj-biz-apps/sales-core-entities-server';
 import { LoadCaptureForecastSnapshotAction } from './custom/forecast-snapshot.action.js';
 import { LoadLogActivityAction } from './custom/log-activity.action.js';
 import { LoadDetectWonDealsWithUnconfirmedOrdersAction } from './custom/won-deal-order-detector.action.js';
+import { LoadRelinkWonDealOrdersToContractsAction } from './custom/contract-order-relink.action.js';
+import { LoadLinkDefaultPipelineToCompaniesAction } from './custom/link-default-pipeline.action.js';
 
 // Import generated GraphQL resolvers
 import './generated/generated.js';
@@ -87,9 +90,18 @@ export function LoadBizAppsSalesServer(): void {
      */
     LoadDealNotWonConfirmVeto();
 
+    /**
+     * And which deal created an order (bc-aidp-next-golive#320 §5), so orders' review-by-trigger can
+     * let a deal order confirm without the review a hand-entered one gets. The seam ships in
+     * orders-entities 5.36.0; on an older orders this registers nothing and logs that it did not.
+     */
+    LoadDealOrderLink();
+
     LoadCaptureForecastSnapshotAction();
     LoadLogActivityAction();
     LoadDetectWonDealsWithUnconfirmedOrdersAction();
+    LoadRelinkWonDealOrdersToContractsAction();
+    LoadLinkDefaultPipelineToCompaniesAction();
 
     // Referenced so the manifest import is not elided; MJ reads it during registration.
     void CLASS_REGISTRATIONS;
@@ -104,3 +116,11 @@ export {
     DetectWonDealsWithUnconfirmedOrdersAction,
     LoadDetectWonDealsWithUnconfirmedOrdersAction,
 } from './custom/won-deal-order-detector.action.js';
+export {
+    RelinkWonDealOrdersToContractsAction,
+    LoadRelinkWonDealOrdersToContractsAction,
+} from './custom/contract-order-relink.action.js';
+export {
+    LinkDefaultPipelineToCompaniesAction,
+    LoadLinkDefaultPipelineToCompaniesAction,
+} from './custom/link-default-pipeline.action.js';

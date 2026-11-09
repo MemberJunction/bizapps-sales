@@ -42,6 +42,11 @@ export interface DealRelatedLinkState {
      */
     IsWon: boolean;
     OrderID?: string | null;
+    /**
+     * The orders that reverse the deal's order (`OrderHeader.ReversesOrderHeaderID = OrderID`): a
+     * return, a cancellation or a credit memo. Read by the caller; the deal row does not hold them.
+     */
+    ReversalOrderIDs?: readonly string[] | null;
     ContractID?: string | null;
     RenewsContractID?: string | null;
 }
@@ -80,6 +85,25 @@ export function DealRelatedLinks(state: DealRelatedLinkState): BizAppsRelatedLin
             Label: 'Order',
             Icon: 'fa-solid fa-receipt',
         });
+
+        /**
+         * ONE CHIP PER REVERSAL, right after the order it reverses (MemberJunction/bizapps-orders#740).
+         *
+         * A return is a NEW order that points back at the original; the deal names only the original.
+         * Without these the deal goes quiet the moment its order is returned, and the reversal can be
+         * found only by order number. Gated with the order chip: a reversal exists only once that
+         * order has booked, and there is no order chip to sit beside before the win.
+         */
+        for (const id of state.ReversalOrderIDs ?? []) {
+            if (!holds(id)) continue;
+            links.push({
+                Key: `reversal:${id}`,
+                EntityName: MJS_FOREIGN_ENTITIES.OrderHeader,
+                RecordID: id,
+                Label: 'Reversal',
+                Icon: 'fa-solid fa-rotate-left',
+            });
+        }
     }
 
     if (state.IsWon && holds(state.ContractID)) {
@@ -132,6 +156,7 @@ export function DealRelatedLinksKey(recordID: string | null | undefined, state: 
         recordID ?? '',
         state.IsWon ? 'won' : 'open',
         state.OrderID ?? '',
+        (state.ReversalOrderIDs ?? []).join(','),
         state.ContractID ?? '',
         state.RenewsContractID ?? '',
     ].join(':');

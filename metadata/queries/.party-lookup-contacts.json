@@ -1,0 +1,19 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Party Lookup Contacts",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "Which sales contacts start with what I have typed?",
+      "Description": "Search for the Deal form's contact pickers: sales contacts whose last name, display name, email or email domain starts with the term.",
+      "SQL": "@file:SQL/party-lookup-contacts.sql",
+      "TechnicalDescription": "Grain: Person with a SalesContact row (the IsA subtype the Deal's contact FKs reference; subtype ID = Person ID). Party lookup contract (bc-aidp-next-golive#372): columns ID, Name (DisplayName), Detail (Email); parameters Term (required) and Domain (optional; matched against Person.EmailDomain). Prefix LIKE on indexed base columns, TOP 20 ordered by DisplayName, no view and no count. Called by bizapps-party-field from @mj-biz-apps/common-ng.",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 1,
+      "UsesTemplate": true
+    },
+    "primaryKey": {
+      "ID": "91CA1AC4-2598-4C64-B095-40467BADE081"
+    }
+  }
+]

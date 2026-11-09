@@ -126,7 +126,7 @@ export function DiscountPercentToFraction(percent: number | null | undefined): D
  * cannot be relaxed here without reintroducing the hundred-fold error this module exists to stop.
  * The resolution is on the caller's side and is stated where it lives: a value this function
  * produced is not an entry, so it must not be fed back through the entry guard. See
- * `SetDiscountPercent` in `deal-workspace.component.ts`.
+ * `SetDiscountPercent` in `deal-line-editor.component.ts` (sales-ng).
  *
  * @param fraction The value as stored on `OrderLine.DiscountPct` (0–1).
  */
@@ -136,3 +136,86 @@ export function DiscountFractionToPercent(fraction: number | null | undefined): 
     }
     return RoundDiscountPercent(fraction * 100);
 }
+
+/**
+ * Converts a rep-entered DOLLAR discount on a line into the PERCENT the line records.
+ *
+ * A signed order form often says "less $500" rather than a percent. The line still stores only
+ * `DiscountPct`, so the amount is turned into a percent of the line's list amount here and then held to
+ * the percent rules: bounded to 0–100 (no more than the list amount), rounded to
+ * `DISCOUNT_PERCENT_DECIMALS`, and, because it lands on `DiscountPct` like a typed percent, asked for a
+ * concession reason by the editor when it raises the discount.
+ *
+ * THE LIST AMOUNT IS ORDERS' FIGURE, never one sales builds. The caller passes what `Orders.PriceOrder`
+ * reported for the line before any discount; sales does not multiply quantity by price to get it.
+ *
+ * THE PERCENT IS HELD TO A HUNDREDTH, so the discount orders applies can differ from the typed amount
+ * by a few cents ($500 off $3,333.00 is 15.0015%, stored as 15.00%, which orders prices as $499.95).
+ * The caller shows orders' resulting discount so the rep sees the figure that will be booked.
+ *
+ * Not subject to the `(0, 1)` ambiguity refusal: that guards a typed percent that might already be a
+ * fraction. A percent derived from a dollar amount has no second reading, so `$1` off a `$240` line
+ * records 0.42% rather than being refused. The fraction is returned with the percent for that reason:
+ * feeding the derived percent back through `DiscountPercentToFraction` would refuse it.
+ *
+ * @param amount The dollar discount for the whole line, as typed. `null`/`undefined` means "not stated".
+ * @param listAmount The line's amount before any discount, as orders priced it.
+ * @returns the percent to show and the fraction to store, or a refusal naming what to do about it.
+ */
+export function DiscountAmountToPercent(
+    amount: number | null | undefined,
+    listAmount: number | null | undefined,
+): DiscountAmountConversion {
+    if (amount === null || amount === undefined) {
+        return { Ok: true, Percent: 0, Fraction: 0 };
+    }
+    if (!Number.isFinite(amount)) {
+        return { Ok: false, Reason: 'A discount must be a number.' };
+    }
+    if (amount < 0) {
+        return { Ok: false, Reason: 'A discount cannot be negative.' };
+    }
+    if (listAmount === null || listAmount === undefined || !Number.isFinite(listAmount) || listAmount <= 0) {
+        return {
+            Ok: false,
+            Reason: 'Orders has no list amount for this line yet, so a dollar discount cannot be converted. Enter a percent.',
+        };
+    }
+    if (amount > listAmount) {
+        return { Ok: false, Reason: `A discount of ${amount} is more than the line's list amount of ${listAmount}.` };
+    }
+    const percent = RoundDiscountPercent((amount / listAmount) * 100); // money-grep-allow: dollar-to-percent unit conversion, the one place D-DL2 allows it
+    if (amount > 0 && percent === 0) {
+        return {
+            Ok: false,
+            Reason: `A discount of ${amount} is under 0.01% of the line, the smallest discount a line can record.`,
+        };
+    }
+    return { Ok: true, Percent: percent, Fraction: round(percent / 100, DISCOUNT_FRACTION_DECIMALS) };
+}
+
+/**
+ * The line's amount before any discount, from what `Orders.PriceOrder` reported for it.
+ *
+ * Orders reports the line's net and its whole discount, and derives that discount as list minus net
+ * (`ReadPricedLineAmounts`). Adding them back is that same derivation read the other way, so the list
+ * amount is orders' own figure, including a tier's stored extended amount, which quantity times unit
+ * price would miss.
+ */
+export function PricedLineListAmount(
+    pricedNet: number | null | undefined,
+    pricedDiscount: number | null | undefined,
+): number | null {
+    if (pricedNet === null || pricedNet === undefined || !Number.isFinite(pricedNet)) {
+        return null;
+    }
+    const discount = pricedDiscount !== null && pricedDiscount !== undefined && Number.isFinite(pricedDiscount)
+        ? pricedDiscount
+        : 0;
+    return round(pricedNet + discount, 2); // money-grep-allow: orders' list − net read back as list, not a price sales builds
+}
+
+/** The outcome of converting one dollar discount entry. */
+export type DiscountAmountConversion =
+    | { Ok: true; Percent: number; Fraction: number }
+    | { Ok: false; Reason: string };

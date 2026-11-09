@@ -79,11 +79,15 @@ async function stageSelection(page: Page): Promise<{ id: string | null; index: n
     return { id: (value.match(GUID)?.[0] ?? '').toLowerCase() || null, index };
 }
 
-/** Every active stage of one pipeline, by id, from the database. */
+/**
+ * Every active stage of one pipeline a rep may pick, by id, from the database. A stage whose status
+ * locks the deal is where a close puts it, so the control leaves it out.
+ */
 async function stageIDsOf(pipelineID: string): Promise<string[]> {
     const rows = await QueryAll<{ ID: string }>(
-        `SELECT CAST(ID AS nvarchar(50)) AS ID FROM __mj_BizAppsSales.PipelineStage
-          WHERE PipelineID = '${pipelineID}' AND IsActive = 1`,
+        `SELECT CAST(s.ID AS nvarchar(50)) AS ID FROM __mj_BizAppsSales.PipelineStage s
+           LEFT JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = s.DealStatusTypeID
+          WHERE s.PipelineID = '${pipelineID}' AND s.IsActive = 1 AND ISNULL(t.LocksDeal, 0) = 0`,
     );
     return rows.map((r) => String(r.ID).toLowerCase()).sort();
 }

@@ -1,0 +1,201 @@
+[
+  {
+    "_comments": [
+      "#371 item 21: labels that still read as column names on the Deal form and the grids.",
+      "",
+      "For a foreign key the label is set on the VIRTUAL NAME FIELD (LeadSourceType, OwnerEmployee,",
+      "FromDealStatusType, ...), not the ...ID column: mj-form-field reads RelatedEntityNameFieldMap first and",
+      "grids show the name field. .deal-field-labels.json explains this in full. Plain columns are labelled",
+      "on themselves.",
+      "",
+      "AutoUpdateDisplayName goes to 0 so the label is a deliberate choice, not re-derived from the column",
+      "name. Labels are read from metadata at runtime; no generated code changes for them."
+    ],
+    "fields": {
+      "DisplayName": "Annual Increase Override (%)",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=AnnualIncreasePctOverride"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Cancellation Notice Override (Days)",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=CancellationNoticeDaysOverride"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Agreement Modified",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=StandardAgreementModified"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Lead Source",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=LeadSourceType"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Owner",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=OwnerEmployee"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Owner",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Forecast Snapshots&Name=OwnerEmployee"
+    }
+  },
+  {
+    "_comments": [
+      "Stage history grid. ToDealStatusType is labelled with FromDealStatusType so the two read as a pair."
+    ],
+    "fields": {
+      "DisplayName": "Previous Status",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Stage Events&Name=FromDealStatusType"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "New Status",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Stage Events&Name=ToDealStatusType"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Changed By",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Stage Events&Name=ChangedByUser"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Days in Previous Stage",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Stage Events&Name=DaysInPreviousStage"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Buying Role",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Contact Roles&Name=BuyingRoleType"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Attribution (%)",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Team Members&Name=AttributionPct"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Forecast Category",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Pipeline Stages&Name=ForecastCategoryType"
+    }
+  },
+  {
+    "_comments": [
+      "#371 item 24: Influence had no description, so nothing said its unit or range and an out-of-range",
+      "value surfaced as the raw CK_DealContactRole_Influence error. The CHECK allows 0 to 100; the column",
+      "is DECIMAL(5,2). The column has no extended property, so AutoUpdateDescription goes to 0 or CodeGen's",
+      "schema sync would put NULL back."
+    ],
+    "fields": {
+      "Description": "How much this contact sways the buying decision, from 0 (none) to 100 (decides alone). Up to two decimal places.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Contact Roles&Name=Influence"
+    }
+  },
+  {
+    "_comments": [
+      "#371 item 23: the old description promised a Board flag that did not exist yet. The Board's rotting",
+      "flag reads this column (#450), and the description now says what it does. The column carries an",
+      "extended property with the old wording, so AutoUpdateDescription goes to 0 or CodeGen's schema sync",
+      "would restore it."
+    ],
+    "fields": {
+      "Description": "Deals that stay in this stage longer than this many days are flagged on the Board. Empty means no flag.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Pipeline Stages&Name=RottingDays"
+    }
+  },
+  {
+    "_comments": [
+      "#371 item 23: Entry Criteria and Required Fields are editable on the Pipeline Stage form but nothing",
+      "reads them. They leave the generated form; the columns stay so existing data is kept and a later",
+      "feature can use them. IncludeInGeneratedForm is read by CodeGen when it writes the form, so the field",
+      "disappears from the committed form on the next CodeGen run, not on push alone."
+    ],
+    "fields": {
+      "IncludeInGeneratedForm": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Pipeline Stages&Name=EntryCriteria"
+    }
+  },
+  {
+    "fields": {
+      "IncludeInGeneratedForm": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Pipeline Stages&Name=RequiredFields"
+    }
+  },
+  {
+    "_comments": [
+      "#371 item 24: the Sales Contact form showed both 'Seniority' and 'Seniority Level ID'.",
+      "SeniorityLevelID is the live field: it is inherited from Common's People (bizapps-common v5.45.x)",
+      "and points at the shared SeniorityLevel type table that every app reads. Seniority is sales' older",
+      "free-text column; no sales code reads it. It leaves the generated form (the column and its data stay),",
+      "and SeniorityLevelID takes the plain label, set on its row in .sales-contact-field-labels.json so one",
+      "file owns that field's label. As above, the form changes on the next CodeGen run."
+    ],
+    "fields": {
+      "IncludeInGeneratedForm": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=Seniority"
+    }
+  }
+]

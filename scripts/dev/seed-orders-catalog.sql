@@ -5,8 +5,8 @@
     COMPANY-AGNOSTIC BY DESIGN. An earlier version hardcoded the company UUIDs of one host and was
     therefore useless anywhere else — including on a freshly rebuilt copy of the same host, because
     `seed-dev-data.sh` mints new IDs. This one DISCOVERS the companies: the "selling" company is
-    whichever one the first active pipeline belongs to, which is exactly what `ResolveSalesFixture`
-    picks, and the "other" company is any second one. Get that pairing wrong and PP2 — the
+    the first company actively linked (PipelineCompany) to the first active pipeline, which is exactly
+    what `ResolveSalesFixture` picks, and the "other" company is any second one. Get that pairing wrong and PP2 — the
     cross-tenant leak check — passes for the wrong reason.
 
     Chosen to make each filter dimension OBSERVABLE, not to look realistic:
@@ -21,13 +21,18 @@
 */
 SET NOCOUNT ON;
 
+-- Same choice as ResolveSalesFixture: the first active pipeline by name, then its earliest active link.
 DECLARE @sellCo  UNIQUEIDENTIFIER = (
-    SELECT TOP 1 p.CompanyID FROM __mj_BizAppsSales.Pipeline p WHERE p.IsActive = 1 ORDER BY p.Name);
+    SELECT TOP 1 pc.CompanyID
+      FROM __mj_BizAppsSales.PipelineCompany pc
+     WHERE pc.PipelineID = (SELECT TOP 1 ID FROM __mj_BizAppsSales.Pipeline WHERE IsActive = 1 ORDER BY Name)
+       AND pc.IsActive = 1
+     ORDER BY pc.__mj_CreatedAt, pc.CompanyID);
 DECLARE @otherCo UNIQUEIDENTIFIER = (
     SELECT TOP 1 c.ID FROM __mj.Company c WHERE c.ID <> @sellCo ORDER BY c.Name);
 
 IF @sellCo IS NULL
-    THROW 50010, 'No active pipeline exists — run scripts/seed-dev-data.sh first.', 1;
+    THROW 50010, 'No active pipeline with an active company link exists — run scripts/seed-dev-data.sh first.', 1;
 IF @otherCo IS NULL
     THROW 50011, 'Only one Company exists; PP2 (the cross-tenant leak check) needs a second one.', 1;
 
@@ -105,7 +110,7 @@ WHERE NOT EXISTS (SELECT 1 FROM __mj_BizAppsOrders.Product x WHERE x.ID = s.ID);
 
     Orders asks the rep for a line's service period when its recognition type requires one and nothing
     else dates it: not a subscription (the term dates it) and not an event (the event dates it). That is
-    the line the deal line editor shows Service start and end on, and close-deal.CD36 needs one. Chosen
+    the line the deal line editor shows Service start and end on, and close-deal.CD43 needs one. Chosen
     by the RequiresServicePeriod flag, never by a recognition type's code.
 
     Named to sort after the two Platform seats, so fixtures that take the first sellable products by
