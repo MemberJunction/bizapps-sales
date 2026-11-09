@@ -4,9 +4,9 @@
  * ── WHY THIS FILE EXISTS ────────────────────────────────────────────────────────────────────────
  *
  * Deals became Explorer record tabs: "New deal" is `OpenNewEntityRecord`, a list row is
- * `OpenEntityRecord`, and both render `mjs-deal-form`. `lib/workspace.ts` still drives
- * `mjs-deal-workspace`, which no template has mounted since the Workspace rail was removed, so every
- * spec reaching it failed in setup before any assertion ran. These helpers drive the live form.
+ * `OpenEntityRecord`, and both render `mjs-deal-form`. The old `lib/workspace.ts` drove
+ * `mjs-deal-workspace`, which no template mounted after the Workspace rail was removed, so every spec
+ * reaching it failed in setup before any assertion ran. These helpers drive the live form.
  *
  * ── THE SELECTOR CONVENTIONS ────────────────────────────────────────────────────────────────────
  *
@@ -330,6 +330,9 @@ export async function SetText(page: Page, fieldName: string, value: string): Pro
  */
 export async function PickLookup(page: Page, fieldName: string, search?: string): Promise<string> {
     const field = await Field(page, fieldName);
+    if ((await field.locator('bizapps-party-field').count()) > 0) {
+        return pickParty(page, field, fieldName, search);
+    }
     const input = field.locator('.mj-fk-search input').first();
     await expect(input, `lookup ${fieldName} must be editable`).toBeVisible({ timeout: 15_000 });
     await input.click();
@@ -372,6 +375,41 @@ export async function PickLookup(page: Page, fieldName: string, search?: string)
     return text;
 }
 
+/**
+ * The party picker's version of {@link PickLookup} (bc-aidp-next-golive#372): Account and the deal's
+ * contacts list nothing until two characters are typed, so a search is REQUIRED. Its dropdown is
+ * mj-combobox's, in a CDK overlay; the last row may be the inline-create row, which is never a pick.
+ */
+async function pickParty(page: Page, field: Locator, fieldName: string, search?: string): Promise<string> {
+    if (!search || search.trim().length < 2) {
+        throw new Error(`lookup ${fieldName} is a party picker: pass a search of 2+ characters (e.g. FirstSalesAccountName())`);
+    }
+    const input = field.locator('bizapps-party-field input.mj-combobox-input').first();
+    await expect(input, `lookup ${fieldName} must be editable`).toBeVisible({ timeout: 15_000 });
+    await input.click();
+    await input.fill('');
+    await input.pressSequentially(search, { delay: 40 });
+    const row = page
+        .locator('.mj-dropdown-panel .mj-dropdown-option:visible:not(:has(.mj-fk-create-footer))')
+        .filter({ hasText: search })
+        .first();
+    await expect(row, `lookup ${fieldName} offered no row containing "${search}"`).toBeVisible({ timeout: 20_000 });
+    const text = ((await row.innerText()) ?? '').trim();
+    await row.click();
+    await page.waitForTimeout(500);
+    return text;
+}
+
+/** A Sales Account's organization name: a search the Account picker is sure to answer. */
+export async function FirstSalesAccountName(): Promise<string> {
+    const row = await QueryOne<{ Name: string }>(
+        `SELECT TOP 1 o.Name FROM __mj_BizAppsCommon.Organization o
+           JOIN __mj_BizAppsSales.SalesAccount sa ON sa.ID = o.ID ORDER BY o.Name`,
+    );
+    expect(row?.Name, 'the host needs a Sales Account to pick').toBeTruthy();
+    return String(row!.Name);
+}
+
 /** The Pipeline panel's Status control — the one door to a status change on the form. */
 export async function StatusSelect(page: Page): Promise<Locator> {
     await Field(page, 'DealStatusTypeID');
@@ -401,9 +439,38 @@ export async function PipelineSelect(page: Page): Promise<Locator> {
  * Choosing a pipeline CLEARS a stage that does not belong to it -- the point of golive#291 -- so a
  * stage is picked AFTER this, never before.
  */
-export async function SetPipelineByID(page: Page, pipelineID: string): Promise<void> {
+export async function SetPipelineByID(page: Page, pipelineID: string, companyID?: string): Promise<void> {
+    await SetPipelineCompanyFor(page, pipelineID, companyID);
     await SelectOptionByID(await PipelineSelect(page), pipelineID, 'Pipeline');
     await page.waitForTimeout(300);
+}
+
+/**
+ * Picks the deal's company first (#327): the Pipeline list offers only the pipelines linked to the
+ * selected company, so a pipeline has no option until a company it serves is chosen. The control
+ * renders only when more than one company has a pipeline; with one, there is nothing to pick and the
+ * form fills the company itself.
+ *
+ * `companyID` names the company when the caller cares which; otherwise the pipeline's earliest active
+ * link (`PipelineCompany`), which is the choice the integration fixture makes too.
+ */
+async function SetPipelineCompanyFor(page: Page, pipelineID: string, companyID?: string): Promise<void> {
+    const company = ByTestId(page, 'deal-pipeline-company');
+    if ((await company.count()) === 0) return;
+    const chosen = companyID ?? (await LinkedCompanyOf(pipelineID));
+    await SelectOptionByID(company, chosen, 'Company');
+    await page.waitForTimeout(300);
+}
+
+/** The company a pipeline's earliest active `PipelineCompany` link names. */
+export async function LinkedCompanyOf(pipelineID: string): Promise<string> {
+    const row = await QueryOne<{ CompanyID: string }>(
+        `SELECT TOP 1 CAST(CompanyID AS nvarchar(50)) AS CompanyID FROM __mj_BizAppsSales.PipelineCompany
+          WHERE PipelineID = '${pipelineID.replace(/'/g, "''")}' AND IsActive = 1
+          ORDER BY __mj_CreatedAt, CompanyID`,
+    );
+    expect(row?.CompanyID, `pipeline ${pipelineID} must be actively linked to a company to pick one`).toBeTruthy();
+    return String(row!.CompanyID);
 }
 
 /**
@@ -456,8 +523,8 @@ export async function FirstOpenStatus(): Promise<{ ID: string; Name: string }> {
 /**
  * The first active pipeline by name -- the one the Pipeline select offers first.
  *
- * `LoadPipelines` filters `IsActive = 1` and orders by `Name`, so this row is guaranteed to BE in the
- * dropdown. A spec needing "any pipeline" takes this rather than whichever option rendered first.
+ * The form offers active pipelines on active company links, so this row is in the dropdown once a
+ * company it is linked to is selected (`SetPipelineByID` does that). A spec needing "any pipeline" takes this rather than whichever option rendered first.
  */
 export async function PipelineByName(name?: string): Promise<{ ID: string; Name: string }> {
     if (!name) return FirstPipeline();
@@ -564,4 +631,38 @@ export async function FieldIsEditable(page: Page, fieldName: string): Promise<bo
     const editing = field.locator('.mj-forms-field--editing');
     if ((await editing.count()) === 0) return false;
     return editing.locator('input, textarea, select').first().isEnabled();
+}
+
+/**
+ * The product names the line editor's type-ahead lists for `query` (golive#360).
+ *
+ * The box shows at most a capped page of rows, so a caller looking for one product types its name
+ * rather than reading the whole catalogue off the list.
+ */
+export async function OfferedLineProducts(editor: Locator, query: string): Promise<string[]> {
+    const box = editor.locator('[data-testid="line-product"]');
+    await expect(box, 'the line editor must offer a product box').toBeVisible({ timeout: 20_000 });
+    await box.click();
+    await box.fill(query);
+    const list = editor.locator('[data-testid="line-product-options"]');
+    await expect(list, 'typing in the product box must open its list').toBeVisible({ timeout: 10_000 });
+    const names = await list.locator('[data-testid="line-product-option"] .mjs-le__pick-name').allTextContents();
+    return names.map((n) => n.trim());
+}
+
+/**
+ * Chooses `productName` in the line editor's type-ahead: types it, then clicks the row with exactly
+ * that name. Fails, listing what was offered, when no row has it.
+ */
+export async function ChooseLineProduct(editor: Locator, productName: string): Promise<void> {
+    const offered = await OfferedLineProducts(editor, productName);
+    expect(offered, `the product box must offer "${productName}" — it offered ${JSON.stringify(offered)}`)
+        .toContain(productName);
+    await editor
+        .locator('[data-testid="line-product-option"]')
+        .filter({ has: editor.page().locator('.mjs-le__pick-name', { hasText: productName }) })
+        .first()
+        .dispatchEvent('mousedown');
+    await expect(editor.locator('[data-testid="line-product-options"]'), 'choosing a product must close the list')
+        .toBeHidden({ timeout: 10_000 });
 }

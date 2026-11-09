@@ -8,11 +8,15 @@
  * bug in one of the two implementations, and the useful thing is to find out WHICH before shipping
  * rather than to reconcile it quietly afterwards.
  *
- * The browser path cannot be exercised here, so this reimplements it EXACTLY as
- * `sales-section.component.ts` computes it — same RunView, same flag lookup through a separate
- * statuses fetch, same business-day "today" (golive#168), same reduce. That duplication is
- * deliberate and temporary: it is the control in the experiment, and it goes when the component's
- * client-side path goes.
+ * The browser path cannot be exercised here, so this recomputes every figure from plain deal rows
+ * with the rules the dashboard's predicates state — same flag lookup through a separate statuses
+ * fetch, same business-day "today" (golive#168), same reduce. That duplication is deliberate: it is
+ * the control in the experiment.
+ *
+ * It runs the summary under several periods and filter-bar choices (bc-aidp-next-golive#350): All
+ * time, the current calendar quarter, and one selling company, owner, pipeline and product company
+ * each, taken from the data. Each period-bound figure is checked on its own date: open figures on
+ * ExpectedCloseDate, Won on ActualCloseDate.
  *
  * Run:  node test-harnesses/compare-dashboard-measures.mjs
  */
@@ -58,8 +62,9 @@ const rv = await new RunView().RunViews(
             ResultType: 'simple',
             Fields: [
                 'ID', 'DealNumber', 'Name', 'AccountID', 'Amount', 'AmountIsComputed', 'Probability',
-                'ExpectedCloseDate', 'Pipeline', 'PipelineStage', 'DealType', 'DealStatusType',
-                'OwnerEmployee', 'ForecastCategoryType', 'DealStatusTypeID', 'PipelineID', 'PipelineStageID',
+                'ExpectedCloseDate', 'ActualCloseDate', 'Pipeline', 'PipelineStage', 'DealType', 'DealStatusType',
+                'OwnerEmployee', 'OwnerEmployeeID', 'CompanyID', 'OrderID', 'ForecastCategoryType', 'DealStatusTypeID',
+                'PipelineID', 'PipelineStageID', 'ForecastCategoryTypeID',
             ],
         },
         {
@@ -67,91 +72,144 @@ const rv = await new RunView().RunViews(
             ResultType: 'simple',
             Fields: ['ID', 'IsOpen', 'IsWon', 'IsLost', 'IsClosed'],
         },
+        {
+            EntityName: 'MJ_BizApps_Sales: Forecast Category Types',
+            ResultType: 'simple',
+            Fields: ['ID', 'IncludeInPipeline', 'IncludeInCommit', 'IncludeInBestCase'],
+        },
+        { EntityName: 'MJ_BizApps_Sales: Pipelines', ResultType: 'simple', Fields: ['ID', 'IncludeInForecast'] },
+        { EntityName: 'MJ_BizApps_Orders: Order Lines', ResultType: 'simple', Fields: ['OrderHeaderID', 'CompanyID'] },
     ],
     user,
 );
 const deals = rv?.[0]?.Results ?? [];
 const statuses = rv?.[1]?.Results ?? [];
+const categories = rv?.[2]?.Results ?? [];
+const pipelines = rv?.[3]?.Results ?? [];
+const lines = rv?.[4]?.Results ?? [];
+const id = (v) => String(v ?? '').toLowerCase();
+
+const category = (row) => categories.find((x) => id(x.ID) === id(row.ForecastCategoryTypeID));
+// An open deal counts toward the pipeline money unless its forecast category leaves it out (Omitted).
+// No category counts, as the dashboard's `InPipeline` and the summary query treat it.
+const inPipeline = (row) => (row.ForecastCategoryTypeID ? category(row)?.IncludeInPipeline !== false : true);
+const catFlag = (row, flag) => category(row)?.[flag] === true;
 
 // `hasFlag`, verbatim in behaviour: resolve the status row by ID, read the flag, default false.
 const hasFlag = (row, flag) => {
     if (!row.DealStatusTypeID) return false;
-    const s = statuses.find((x) => String(x.ID).toLowerCase() === String(row.DealStatusTypeID).toLowerCase());
+    const s = statuses.find((x) => id(x.ID) === id(row.DealStatusTypeID));
     return s ? s[flag] === true : false;
 };
+const pipelineInForecast = (row) => pipelines.find((p) => id(p.ID) === id(row.PipelineID))?.IncludeInForecast !== false;
+const productCompanies = (row) => new Set(lines.filter((l) => row.OrderID && id(l.OrderHeaderID) === id(row.OrderID)).map((l) => id(l.CompanyID)));
 
 /**
  * TODAY IS THE BUSINESS DAY (golive#168). The component takes it from BusinessTimeZoneEngine and the
- * queries from fnBusinessToday(); both read the same instance-configuration row. It used to be the UTC
- * day here and in the queries, which rolls over at 6 PM Central (7 PM in daylight time). Read from the
- * function rather than rebuilt in JS, so this harness cannot pick a different zone than the instance
- * is configured with.
+ * queries from fnBusinessToday(); both read the same instance-configuration row. Read from the function
+ * rather than rebuilt in JS, so this harness cannot pick a different zone than the instance uses.
  */
 const todayBusiness = (
     await pool.request().query('SELECT CONVERT(char(10), Today, 23) AS Today FROM __mj_BizAppsCommon.fnBusinessToday()')
 ).recordset[0].Today;
 const utcDatePart = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+const within = (day, window) => !!day && (!window.Start || utcDatePart(day) >= window.Start) && (!window.End || utcDatePart(day) <= window.End);
 
-const open = deals.filter((d) => hasFlag(d, 'IsOpen'));
-const won = deals.filter((d) => hasFlag(d, 'IsWon'));
 /**
- * ── PAST DUE, NOT "SLIPPED" — the naming matters and it used to collide ─────────────────────────
- *
- * This set is OPEN DEALS WHOSE EXPECTED CLOSE DATE HAS PASSED. It backs the dashboard's "Past expected
- * close" tile and it was called `slipped`, which is a different thing: `Sales: Slipped Deals` reports
- * deals whose expected close date was MOVED, reconstructed from __mj.RecordChange, and on the seeded data
- * the two answer with DIFFERENT deals -- DEAL-9002 is past due, DEAL-9003 is the one that slipped.
- *
- * Both user-facing labels were already distinct; only the internal name overlapped, which is the worst
- * place for it: a reader comparing this harness against that query would have found two "slipped" figures
- * that disagree and no way to tell which was wrong. Renamed here rather than in the query, because
- * "slipped" conventionally means the date moved and the query is the one using it correctly.
+ * THE CLIENT PATH, as the dashboard's predicates define each figure (bc-aidp-next-golive#350): the
+ * filter bar narrows the rows; open figures count open deals expected to close in the window; Won
+ * counts wins closed in it; the attention counts ignore the window. A named pipeline includes a
+ * pipeline flagged out of the forecast, as the query does.
  */
-const pastDue = deals.filter(
-    (d) => hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate && utcDatePart(d.ExpectedCloseDate) < todayBusiness,
-);
-const client = {
-    OpenAmount: open.reduce((sum, d) => sum + (d.Amount ?? 0), 0),
-    /**
-     * THE PRICED/STATED SPLIT, WHICH ONLY BECAME TESTABLE ONCE THE DATA CHANGED.
-     *
-     * Every deal carried AmountIsComputed = 0 when this harness was written, so these two columns
-     * were uniform: one was the whole open figure and the other was zero. A comparison over that data
-     * could not distinguish a correct split from a swapped one, or from a CASE that always took the
-     * same branch. Five deals are engine-priced now, so it can.
-     *
-     * That is the same lesson Slipped Deals taught -- a check is only as good as the data it was
-     * given -- applied before it costs anything rather than after.
-     */
-    OpenPricedAmount: open.filter((d) => d.AmountIsComputed === true).reduce((sum, d) => sum + (d.Amount ?? 0), 0),
-    OpenStatedAmount: open.filter((d) => d.AmountIsComputed !== true).reduce((sum, d) => sum + (d.Amount ?? 0), 0),
-    OpenCount: open.length,
-    TotalCount: deals.length,
-    PastExpectedCloseCount: pastDue.length,
-    WonCount: won.length,
-};
+function clientFigures(window, filters) {
+    const unbounded = !window.Start && !window.End;
+    const scoped = deals.filter((d) => {
+        if (filters.CompanyIDs && !filters.CompanyIDs.map(id).includes(id(d.CompanyID))) return false;
+        if (filters.OwnerEmployeeIDs && !filters.OwnerEmployeeIDs.map(id).includes(id(d.OwnerEmployeeID))) return false;
+        if (filters.PipelineIDs && !filters.PipelineIDs.map(id).includes(id(d.PipelineID))) return false;
+        if (!filters.PipelineIDs && hasFlag(d, 'IsOpen') && !pipelineInForecast(d)) return false;
+        return true;
+    });
+    const rows = filters.ProductCompanyIDs
+        ? scoped.filter((d) => filters.ProductCompanyIDs.some((c) => productCompanies(d).has(id(c))))
+        : scoped;
+    const open = rows.filter((d) => hasFlag(d, 'IsOpen'));
+    const openIn = open.filter((d) => !hasFlag(d, 'IsWon') && (unbounded || within(d.ExpectedCloseDate, window)));
+    const pipe = openIn.filter(inPipeline);
+    const sum = (set, f = (d) => d.Amount ?? 0) => set.reduce((n, d) => n + f(d), 0);
+    const commit = pipe.filter((d) => catFlag(d, 'IncludeInCommit'));
+    const best = pipe.filter((d) => !catFlag(d, 'IncludeInCommit') && catFlag(d, 'IncludeInBestCase'));
+    const rest = pipe.filter((d) => !catFlag(d, 'IncludeInCommit') && !catFlag(d, 'IncludeInBestCase'));
+    const won = rows.filter((d) => hasFlag(d, 'IsWon') && (unbounded || within(d.ActualCloseDate, window)));
+    return {
+        OpenAmount: sum(pipe),
+        OpenCount: openIn.length,
+        OpenOmittedCount: openIn.length - pipe.length,
+        CommitAmount: sum(commit),
+        CommitCount: commit.length,
+        BestCaseOnlyAmount: sum(best),
+        PipelineOnlyAmount: sum(rest),
+        // Rounded to the cent on both sides: a sum of products is not exact in floating point.
+        WeightedAmount: Math.round(sum(pipe, (d) => ((d.Amount ?? 0) * (d.Probability ?? 0)) / 100) * 100) / 100,
+        OpenPricedAmount: sum(pipe.filter((d) => d.AmountIsComputed === true)),
+        OpenStatedAmount: sum(pipe.filter((d) => d.AmountIsComputed !== true)),
+        TotalCount: rows.length,
+        PastExpectedCloseCount: open.filter((d) => !!d.ExpectedCloseDate && utcDatePart(d.ExpectedCloseDate) < todayBusiness).length,
+        NoOwnerCount: open.filter((d) => !d.OwnerEmployeeID).length,
+        NoCloseDateCount: open.filter((d) => !d.ExpectedCloseDate).length,
+        WonCount: won.length,
+        WonAmount: sum(won),
+        NoLinesDealCount: scoped.filter((d) => productCompanies(d).size === 0).length,
+    };
+}
 
 /* ── PATH B: the query ───────────────────────────────────────────────────────────────────────── */
 
-const q = await new RunQuery().RunQuery({ QueryName: 'Sales: Dashboard Summary', CategoryPath: 'Sales' }, user);
-if (!q?.Success) {
-    console.error(`\n  ✖ the query did not run: ${q?.ErrorMessage ?? 'unknown error'}\n`);
-    process.exit(2);
+async function serverFigures(window, filters) {
+    const Parameters = { ...filters };
+    if (window.Start) Parameters.PeriodStart = window.Start;
+    if (window.End) Parameters.PeriodEnd = window.End;
+    const q = await new RunQuery().RunQuery({ QueryName: 'Sales: Dashboard Summary', CategoryPath: 'Sales', Parameters }, user);
+    if (!q?.Success) {
+        console.error(`\n  ✖ the query did not run: ${q?.ErrorMessage ?? 'unknown error'}\n`);
+        process.exit(2);
+    }
+    return q.Results?.[0] ?? {};
 }
-const server = q.Results?.[0] ?? {};
 
-record('Open pipeline amount', client.OpenAmount, Number(server.OpenAmount ?? 0));
-record('Open deal count', client.OpenCount, Number(server.OpenCount ?? 0));
-record('Total deal count', client.TotalCount, Number(server.TotalCount ?? 0));
-record('Past expected close', client.PastExpectedCloseCount, Number(server.PastExpectedCloseCount ?? 0));
-record('Won count', client.WonCount, Number(server.WonCount ?? 0));
-record('Open priced amount', client.OpenPricedAmount, Number(server.OpenPricedAmount ?? 0));
-record('Open stated amount', client.OpenStatedAmount, Number(server.OpenStatedAmount ?? 0));
-// The split must also RECONSTITUTE the whole, or one branch is silently dropping rows.
-record(
-    'Priced + stated = open amount',
-    client.OpenAmount,
-    Number(server.OpenPricedAmount ?? 0) + Number(server.OpenStatedAmount ?? 0),
+/** The calendar quarter today falls in: a bounded window the seeded deals straddle. */
+const [ty, tm] = todayBusiness.split('-').map(Number);
+const qStart = new Date(Date.UTC(ty, Math.floor((tm - 1) / 3) * 3, 1));
+const qEnd = new Date(Date.UTC(ty, Math.floor((tm - 1) / 3) * 3 + 3, 0));
+const QUARTER = { Start: utcDatePart(qStart), End: utcDatePart(qEnd) };
+const ALL_TIME = { Start: null, End: null };
+
+// One filter of each kind, taken from the data so the case is not vacuous.
+const firstOf = (values) => [...new Set(values.filter(Boolean).map(String))].slice(0, 1);
+const CASES = [
+    ['all time', ALL_TIME, {}],
+    [`${QUARTER.Start}..${QUARTER.End}`, QUARTER, {}],
+    ['all time, one selling company', ALL_TIME, { CompanyIDs: firstOf(deals.map((d) => d.CompanyID)) }],
+    ['all time, one owner', ALL_TIME, { OwnerEmployeeIDs: firstOf(deals.map((d) => d.OwnerEmployeeID)) }],
+    ['all time, one pipeline', ALL_TIME, { PipelineIDs: firstOf(deals.map((d) => d.PipelineID)) }],
+    ['all time, one product company', ALL_TIME, { ProductCompanyIDs: firstOf(lines.map((l) => l.CompanyID)) }],
+];
+
+const FIGURES = Object.keys(clientFigures(ALL_TIME, {}));
+for (const [name, window, filters] of CASES) {
+    const client = clientFigures(window, filters);
+    const server = await serverFigures(window, filters);
+    for (const figure of FIGURES) {
+        const serverValue = figure === 'WeightedAmount' ? Math.round(Number(server[figure] ?? 0) * 100) / 100 : Number(server[figure] ?? 0);
+        record(`${name}: ${figure}`, client[figure], serverValue);
+    }
+    // The split must also RECONSTITUTE the whole, or one branch is silently dropping rows.
+    record(`${name}: priced + stated = open amount`, client.OpenAmount, Number(server.OpenPricedAmount ?? 0) + Number(server.OpenStatedAmount ?? 0));
+    record(`${name}: segments = open amount`, client.OpenAmount,
+        Number(server.CommitAmount ?? 0) + Number(server.BestCaseOnlyAmount ?? 0) + Number(server.PipelineOnlyAmount ?? 0));
+}
+const pastDue = deals.filter(
+    (d) => hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate && utcDatePart(d.ExpectedCloseDate) < todayBusiness,
 );
 
 /* ── The two tables ──────────────────────────────────────────────────────────────────────────── */
@@ -163,17 +221,14 @@ const roster = await new RunQuery().RunQuery(
 if (roster?.Success) {
     record('Roster row count', deals.length, roster.Results?.length ?? 0);
 
-    // ClosingSoon: open deals with an expected close, soonest first, capped at 8.
-    const clientSoon = deals
-        .filter((d) => hasFlag(d, 'IsOpen') && !!d.ExpectedCloseDate)
-        .slice()
-        .sort((a, b) => utcDatePart(a.ExpectedCloseDate).localeCompare(utcDatePart(b.ExpectedCloseDate)))
-        .slice(0, 8)
-        .map((d) => d.ID.toLowerCase());
-    const querySoon = (roster.Results ?? [])
-        .filter((d) => d.IsOpen === true && !!d.ExpectedCloseDate)
-        .sort((a, b) => utcDatePart(a.ExpectedCloseDate).localeCompare(utcDatePart(b.ExpectedCloseDate)))
-        .slice(0, 8)
+    // ClosingSoon: open deals expected to close from today through 30 days on, soonest first.
+    const [y, m, dd] = todayBusiness.split('-').map(Number);
+    const closingEnd = utcDatePart(new Date(Date.UTC(y, m - 1, dd + 30)));
+    const soon = (rows, isOpen, close) => rows
+        .filter((d) => isOpen(d) && !!close(d) && utcDatePart(close(d)) >= todayBusiness && utcDatePart(close(d)) <= closingEnd)
+        .sort((a, b) => utcDatePart(close(a)).localeCompare(utcDatePart(close(b))));
+    const clientSoon = soon(deals, (d) => hasFlag(d, 'IsOpen'), (d) => d.ExpectedCloseDate).map((d) => d.ID.toLowerCase());
+    const querySoon = soon(roster.Results ?? [], (d) => d.IsOpen === true || d.IsOpen === 1, (d) => d.ExpectedCloseDate)
         .map((d) => String(d.DealID).toLowerCase());
     record('Closing-soon deal IDs, in order', clientSoon.join(','), querySoon.join(','));
 

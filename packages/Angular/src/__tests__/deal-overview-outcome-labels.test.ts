@@ -54,8 +54,8 @@ describe('an OPEN deal still forecasts', () => {
         expect(open().OutcomeTileLabel).toBe('Forecast');
     });
 
-    it('labels the close tile "Closes"', () => {
-        expect(open().CloseTileLabel).toBe('Closes');
+    it('labels the close tile "Expected close" (#252)', () => {
+        expect(open().CloseTileLabel).toBe('Expected close');
     });
 
     it('shows no closed row and keeps the delivery rows', () => {
@@ -79,8 +79,8 @@ describe('an OPEN deal still forecasts', () => {
 describe('an OPEN deal with a winning status still forecasts', () => {
     const openWon = () => panelFor(deal({ ExpectedCloseDate: '2026-03-14' }), { IsWon: true });
 
-    it('reads "Closes", not "Won"', () => {
-        expect(openWon().CloseTileLabel).toBe('Closes');
+    it('reads "Expected close", not "Won"', () => {
+        expect(openWon().CloseTileLabel).toBe('Expected close');
     });
 
     it('still labels the outcome tile "Forecast"', () => {

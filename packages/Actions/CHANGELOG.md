@@ -1,5 +1,147 @@
 # @mj-biz-apps/sales-actions
 
+## 6.25.0
+
+### Patch Changes
+
+- Updated dependencies [dde07ee]
+  - @mj-biz-apps/sales-core-entities-server@6.25.0
+
+## 6.24.1
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.24.1
+
+## 6.24.0
+
+### Patch Changes
+
+- Updated dependencies [4a3226a]
+  - @mj-biz-apps/sales-core-entities-server@6.24.0
+
+## 6.23.4
+
+### Patch Changes
+
+- Updated dependencies [3c7b6da]
+  - @mj-biz-apps/sales-core-entities-server@6.23.4
+
+## 6.23.3
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.23.3
+
+## 6.23.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.23.2
+
+## 6.23.1
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.23.1
+
+## 6.23.0
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.23.0
+
+## 6.22.1
+
+### Patch Changes
+
+- Updated dependencies [9e6d67e]
+  - @mj-biz-apps/sales-core-entities-server@6.22.1
+
+## 6.22.0
+
+### Patch Changes
+
+- Updated dependencies [f5dbce2]
+- Updated dependencies [df7d0bb]
+  - @mj-biz-apps/sales-core-entities-server@6.22.0
+
+## 6.21.0
+
+### Patch Changes
+
+- Updated dependencies [f2ed582]
+- Updated dependencies [9daffcf]
+- Updated dependencies [f5aacda]
+  - @mj-biz-apps/sales-core-entities-server@6.21.0
+
+## 6.20.0
+
+### Patch Changes
+
+- Updated dependencies [4f5fddd]
+  - @mj-biz-apps/sales-core-entities-server@6.20.0
+
+## 6.19.0
+
+### Patch Changes
+
+- Updated dependencies [9510fd9]
+- Updated dependencies [3717a22]
+  - @mj-biz-apps/sales-core-entities-server@6.19.0
+
+## 6.18.0
+
+### Patch Changes
+
+- 7041a49: Dependency ranges are caret: `zod` is `^3.24.4` instead of `~3.24.4`.
+- Updated dependencies [6e77e8f]
+- Updated dependencies [20e1899]
+- Updated dependencies [7c5daa9]
+  - @mj-biz-apps/sales-core-entities-server@6.18.0
+
+## 6.17.0
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.17.0
+
+## 6.16.0
+
+### Patch Changes
+
+- Updated dependencies [17ff470]
+- Updated dependencies [966e18b]
+- Updated dependencies [fc1f0aa]
+- Updated dependencies [c8c11b3]
+- Updated dependencies [e475d61]
+- Updated dependencies [3929ba8]
+- Updated dependencies [5623093]
+- Updated dependencies [0b93b39]
+- Updated dependencies [a43114c]
+  - @mj-biz-apps/sales-core-entities-server@6.16.0
+
+## 6.15.2
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.15.2
+
+## 6.15.1
+
+### Patch Changes
+
+- 19ecdc2: The packages' dependencies on each other are caret ranges (`^6.15.0`) instead of exact versions. A host that pins or overrides one package of this app at a later compatible version no longer forces an exact-match copy of its siblings. Changesets keeps the caret and moves its floor on each release.
+- Updated dependencies [19ecdc2]
+  - @mj-biz-apps/sales-core-entities-server@6.15.1
+
+## 6.15.0
+
+### Patch Changes
+
+- Updated dependencies [dbacb4c]
+  - @mj-biz-apps/sales-core-entities-server@6.15.0
+
 ## 6.14.0
 
 ### Patch Changes

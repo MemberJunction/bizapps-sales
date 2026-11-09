@@ -166,6 +166,60 @@ describe('a picked price needs a reason', () => {
         expect(editor({ working: line({ overridden: true, reason: 'Band 2', unitPrice: 80 }) }).e.ProductLockedByPrice).toBe(true);
         expect(editor().e.ProductLockedByPrice).toBe(false);
     });
+
+    /**
+     * #408: a rep without an override grant has no price picker, so "put the price back on Default"
+     * named a control they do not have. They are told the line has a special price and who can change it.
+     */
+    it('names the remedy only to a rep who has the picker', () => {
+        const overridden = () => line({ overridden: true, reason: 'Band 2', unitPrice: 80 });
+        expect(editor({ overrideKind: 'list', working: overridden() }).e.ProductSelectTitle)
+            .toBe('Put the price back on Default before changing the product.');
+        const withoutGrant = editor({ overrideKind: 'none', working: overridden() }).e.ProductSelectTitle;
+        expect(withoutGrant).toContain('special price');
+        expect(withoutGrant).toContain('Someone who can override prices');
+        expect(withoutGrant).not.toContain('Put the price back');
+    });
+
+    it('lets the lock outrank the price, and says nothing extra on a line at its default', () => {
+        const overridden = line({ overridden: true, reason: 'Band 2', unitPrice: 80 });
+        const locked = editor({ locked: true, working: overridden }).e;
+        expect(locked.ProductSelectTitle).toBe(locked.BlockedReason);
+        const plain = editor().e;
+        expect(plain.ProductSelectTitle).toBe(plain.BlockedReason);
+    });
+
+    /**
+     * A product priced by revenue band, for a buyer whose revenue is unknown: Orders gives no default,
+     * so the rep picks the band. That pick is the rules' price, not an override, and the picker hides
+     * its reason box for it, so the editor must not ask for a reason the rep has nowhere to enter.
+     */
+    it('asks no reason for a revenue band the rules could not choose', async () => {
+        const bandLine = () => {
+            const l = line({ unitPrice: 80 });
+            const pick = l.GetFieldByName('ProductPriceID') as { Value: unknown; Dirty: boolean };
+            pick.Value = NAMED_PRICE;
+            pick.Dirty = true;
+            return { ...l, ProductPriceID: NAMED_PRICE };
+        };
+        const band = { ID: NAMED_PRICE, Name: 'Band 2', UnitPrice: 80, BandUndecided: true };
+
+        const { e, routed } = editor({ working: bandLine() });
+        e.Applicable = [band] as typeof e.Applicable;
+        expect(e.BlockedReason).not.toBe('Enter a reason for the price override.');
+        expect(e.CanSave).toBe(true);
+        expect(e.ProductLockedByPrice).toBe(false);
+
+        // The band is still sent pinned: with no default, Orders cannot choose it on its own.
+        await e['refreshPrice']();
+        expect(routed[0].input.Lines[0].UnitPrice).toBe(80);
+    });
+
+    it('binds the product box title to that rule', () => {
+        const at = SOURCE.indexOf('data-testid="line-product"');
+        const box = SOURCE.slice(at, SOURCE.indexOf('/>', at));
+        expect(box).toContain('[title]="ProductSelectTitle"');
+    });
 });
 
 describe('the product list names each price', () => {

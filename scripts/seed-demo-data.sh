@@ -3,8 +3,8 @@
 # Seed DEMO data — a pipeline that tells the story, not just rows that fill a grid.
 #
 # WHY THIS IS SEPARATE FROM seed-dev-data.sh. That script seeds the MINIMUM the app needs to be
-# usable at all (one Company, one Employee, your User) — without it, Pipeline.CompanyID has no target
-# and the app is literally uncreatable. This script is different: it exists so a DEMO has something
+# usable at all (one Company, one Employee, your User) — without it, a pipeline has no company to link
+# to, a deal has no company to sell as, and the app is literally uncreatable. This script is different: it exists so a DEMO has something
 # worth looking at, and every row in it is chosen to make one of the design decisions visible on
 # screen.
 #
@@ -18,8 +18,10 @@
 #      DealStatusType carrying IsWon=1. That single row is the master plan §3 argument made visible:
 #      rename the label, behaviour is unchanged. There is no string 'Closed Won' anywhere in the code.
 #
-#   2. A PIPELINE BELONGS TO A COMPANY (L-14). Two companies, each with its own pipeline and its own
-#      motion — which is what makes every rollup sliceable by company for free.
+#   2. A DEAL SELLS AS A COMPANY ITS PIPELINE SERVES (L-14). Two companies, each linked to its own
+#      pipeline (PipelineCompany) and its own motion — which is what makes every rollup sliceable by
+#      company for free. A pipeline can serve several companies; this demo keeps one each so the two
+#      motions stay distinct on screen.
 #
 #   3. IDENTITY IS SHARED, NOT FORKED. Every SalesAccount IS an Organization and every SalesContact IS
 #      a Person, same UUID. Open an account and the name comes from the parent row.
@@ -125,6 +127,9 @@ BEGIN
 END
 DELETE FROM __mj_BizAppsSales.ForecastSnapshot WHERE SnapshotJSON LIKE '%"demo":true%';
 DELETE FROM __mj_BizAppsSales.PipelineStage   WHERE PipelineID IN (SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE Code IN ('B2B','D2C','ENT-NEWBIZ','PARTNER-REF'));
+-- The company links first: FK_PipelineCompany_Pipeline does not cascade, so a pipeline with a link
+-- cannot be deleted. Every link on these pipelines goes, the metadata's Default Company ones included.
+DELETE FROM __mj_BizAppsSales.PipelineCompany WHERE PipelineID IN (SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE Code IN ('B2B','D2C','ENT-NEWBIZ','PARTNER-REF'));
 DELETE FROM __mj_BizAppsSales.Pipeline        WHERE Code IN ('B2B','D2C','ENT-NEWBIZ','PARTNER-REF');
 -- IDENTITY IS SHARED TOO, and for the same reason the selling company is.
 --
@@ -138,6 +143,8 @@ DELETE FROM __mj_BizAppsSales.Pipeline        WHERE Code IN ('B2B','D2C','ENT-NE
 -- script already applies to the company below: a record another app still points at is not sales' to
 -- delete. The SalesAccount/SalesContact rows go either way, because those ARE sales' -- it is only the
 -- shared parent that is spared.
+-- The Relationship rows go first: they reference both the demo Persons and Organizations below.
+DELETE FROM __mj_BizAppsCommon.Relationship   WHERE ID IN ('AC111111-0000-4000-A000-000000000001','AC111111-0000-4000-A000-000000000002','AC111111-0000-4000-A000-000000000003');
 DELETE FROM __mj_BizAppsSales.SalesContact    WHERE ID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
 BEGIN TRY
     DELETE FROM __mj_BizAppsCommon.ContactMethod WHERE PersonID IN ('C0111111-0000-4000-A000-000000000001','C0111111-0000-4000-A000-000000000002','C0111111-0000-4000-A000-000000000003','C0111111-0000-4000-A000-000000000004');
@@ -191,7 +198,7 @@ DECLARE @emp3 UNIQUEIDENTIFIER = 'E0111111-0000-4000-A000-000000000003';
 -- ============================ a second selling company (L-14 / §9.2) ============================
 IF NOT EXISTS (SELECT 1 FROM __mj.Company WHERE ID=@co2)
     EXEC __mj.spCreateCompany @ID=@co2, @Name=N'BC Education Group (Local Dev)',
-        @Description=N'Demo second operating company — shows that every rollup slices by company because Pipeline.CompanyID is required.',
+        @Description=N'Demo second operating company — shows that every rollup slices by company because every deal carries one.',
         @Domain=N'bced.example', @Website=N'https://bced.example';
 
 -- ============================ a real deal team needs real people ============================
@@ -284,6 +291,25 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.SalesContact WHERE ID=@c4)
   INSERT INTO __mj_BizAppsSales.SalesContact (ID, LifecycleStageTypeID, LeadSourceTypeID, Seniority, OptedOutOfOutreach)
     VALUES (@c4, @lcOpp, @lsPart, N'Partner Principal', 0);
 
+-- ==================== WHO WORKS WHERE — what fills an account's Contacts panel ====================
+--
+-- Sales Contacts carry no account column. The account's Contacts panel lists the people on the other
+-- end of an active Common Relationship with it (bizapps-sales#301), so without these rows every
+-- account opens with an empty list. Each contact is linked to the account its deals are on.
+--
+-- Ravi (@c4) is deliberately NOT linked: he is a partner rep (D-6), employed by a partner this seed
+-- does not model, and linking him to a customer would claim he works there.
+DECLARE @rtEmployee UNIQUEIDENTIFIER = (SELECT ID FROM __mj_BizAppsCommon.RelationshipType WHERE Name=N'Employee');
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsCommon.Relationship WHERE ID='AC111111-0000-4000-A000-000000000001')
+  INSERT INTO __mj_BizAppsCommon.Relationship (ID, RelationshipTypeID, FromPersonID, ToOrganizationID, Title, Status)
+    VALUES ('AC111111-0000-4000-A000-000000000001', @rtEmployee, @c1, @acc1, N'VP Operations', N'Active');
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsCommon.Relationship WHERE ID='AC111111-0000-4000-A000-000000000002')
+  INSERT INTO __mj_BizAppsCommon.Relationship (ID, RelationshipTypeID, FromPersonID, ToOrganizationID, Title, Status)
+    VALUES ('AC111111-0000-4000-A000-000000000002', @rtEmployee, @c2, @acc2, N'Director of Plant Systems', N'Active');
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsCommon.Relationship WHERE ID='AC111111-0000-4000-A000-000000000003')
+  INSERT INTO __mj_BizAppsCommon.Relationship (ID, RelationshipTypeID, FromPersonID, ToOrganizationID, Title, Status)
+    VALUES ('AC111111-0000-4000-A000-000000000003', @rtEmployee, @c3, @acc3, N'CFO', N'Active');
+
 -- ==================== CONTACT METHOD — what makes the Outlook demo show anything ====================
 --
 -- WITHOUT THIS ROW THE MAIL INGEST WRITES NOTHING, and it fails in the least obvious way: the run
@@ -334,9 +360,9 @@ INSERT INTO __mj_BizAppsCommon.ContactMethod (ID, PersonID, ContactTypeID, Value
 -- no lineage. Any future value here must satisfy that too.
 DECLARE @pipe1 UNIQUEIDENTIFIER='90111111-0000-4000-A000-000000000001';
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe1)
-  INSERT INTO __mj_BizAppsSales.Pipeline (ID, CompanyID, Name, Code, Description, DealTypeID, DefaultForecastCategoryTypeID,
+  INSERT INTO __mj_BizAppsSales.Pipeline (ID, Name, Code, Description, DealTypeID, DefaultForecastCategoryTypeID,
         RequiresDealLines, CloseWonPolicy, IsDefault, DisplayRank, IsActive)
-    VALUES (@pipe1, @co1, N'B2B', N'B2B',
+    VALUES (@pipe1, N'B2B', N'B2B',
       N'The main motion, per master plan §4.2. NOTE the winning stage is called "Signed", not "Closed Won" — the app still knows it is a win because the stage points at a DealStatusType with IsWon=1.',
       @dtNew, @fcPipe, 1,
       -- 'Order Form', not 'Standard'. THE THIRD PLACE THIS DEFECT LIVED: contracts ships Order Form,
@@ -355,15 +381,8 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe1)
       N'{"CreateContract":true,"ContractTypeCode":"Order Form","TermMonths":12,"SubscriptionLinesTo":"Contract","OneTimeLinesTo":"Order","RequireApprovalTaskTypeCode":null,"CloseWonTasks":{"AssigneeEntityName":"MJ_BizApps_Common: People","AssigneeRecordID":"C0111111-0000-4000-A000-000000000004","DueInDays":5}}',
       1, 10, 1);
 
--- REPOINTED, NOT RE-INSERTED, and this is the seam between two seeding mechanisms.
---
--- `metadata/pipelines/` now ships this same pipeline — same UUID — so that installing the app leaves
--- something a tester can put a deal on. It has to name a company, and on a bare install that is a
--- created-on-demand 'Default Company'. This seed owns the DEV companies, so it moves the row rather
--- than adding a second one: same pipeline, real company, one board.
---
--- The INSERT above still matters for a database seeded WITHOUT a metadata push. Either path ends here.
-UPDATE __mj_BizAppsSales.Pipeline SET CompanyID = @co1 WHERE ID = @pipe1 AND CompanyID <> @co1;
+-- The INSERT above matters only for a database seeded WITHOUT a metadata push: `metadata/pipelines/`
+-- ships this same pipeline, same UUID. Its company link is settled below, after PIPELINE 2.
 
 DECLARE @s1 UNIQUEIDENTIFIER='91111111-0000-4000-A000-000000000001';
 DECLARE @s2 UNIQUEIDENTIFIER='91111111-0000-4000-A000-000000000002';
@@ -406,17 +425,66 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.PipelineStage WHERE ID=@s1)
 -- ============================ PIPELINE 2 — a SIMPLE (header-only) motion ============================
 DECLARE @pipe2 UNIQUEIDENTIFIER='90111111-0000-4000-A000-000000000002';
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.Pipeline WHERE ID=@pipe2)
-  INSERT INTO __mj_BizAppsSales.Pipeline (ID, CompanyID, Name, Code, Description, DealTypeID, DefaultForecastCategoryTypeID,
+  INSERT INTO __mj_BizAppsSales.Pipeline (ID, Name, Code, Description, DealTypeID, DefaultForecastCategoryTypeID,
         RequiresDealLines, CloseWonPolicy, IsDefault, DisplayRank, IsActive)
-    VALUES (@pipe2, @co2, N'D2C', N'D2C',
+    VALUES (@pipe2, N'D2C', N'D2C',
       N'A different company, a different motion (master plan §4.2). RequiresDealLines = 0: these deals never carry catalog lines — the flag survived the DealLine retirement and now means the deal''s EMBEDDED ORDER stays empty, so the amount is entered by hand and AmountIsComputed stays 0.',
       @dtNew, @fcPipe, 0, N'{"CreateContract":false,"OneTimeLinesTo":"Order","CloseWonTasks":{"AssigneeEntityName":"MJ_BizApps_Common: People","AssigneeRecordID":"C0111111-0000-4000-A000-000000000004","DueInDays":5}}', 1, 20, 1);
 
--- Repointed for the same reason as B2B — and this one carries the multi-company case (L-14 / §9.2),
--- which is the whole point of it having a DIFFERENT selling company from the pipeline above. The
--- shipped metadata cannot express that: it has one company to work with and no basis for inventing a
--- second, so demonstrating two is this seed's job.
-UPDATE __mj_BizAppsSales.Pipeline SET CompanyID = @co2 WHERE ID = @pipe2 AND CompanyID <> @co2;
+-- ── THE COMPANY LINKS: B2B SELLS AS @co1, D2C AS @co2 (L-14 / §9.2) ───────────────────────────
+--
+-- This is the seam between two seeding mechanisms. `metadata/pipelines/` links both pipelines to a
+-- created-on-demand 'Default Company', because a bare install has no other company to offer. This
+-- seed owns the DEV companies, so it links each pipeline to its own one and RETIRES (IsActive = 0)
+-- the Default Company links: a deal on a dev host then sells as a dev company, and the Company picker
+-- offers the two dev companies rather than a third nobody uses. Retired, not deleted: an inactive link
+-- stops new deals choosing it without orphaning any deal already on it.
+--
+-- D2C carries the multi-company case, which is the whole point of it selling as a DIFFERENT company
+-- from B2B. The shipped metadata cannot express that: it has one company to work with and no basis
+-- for inventing a second, so demonstrating two is this seed's job.
+--
+-- A LATER METADATA PUSH RE-ACTIVATES the Default Company links (the metadata states IsActive true), so
+-- re-run this seed after a push. Upserted, so re-running is safe whichever path created the link.
+UPDATE __mj_BizAppsSales.PipelineCompany SET IsActive = 1
+ WHERE ((PipelineID = @pipe1 AND CompanyID = @co1) OR (PipelineID = @pipe2 AND CompanyID = @co2))
+   AND IsActive = 0;
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.PipelineCompany WHERE PipelineID = @pipe1 AND CompanyID = @co1)
+  INSERT INTO __mj_BizAppsSales.PipelineCompany (ID, PipelineID, CompanyID, IsActive)
+    VALUES ('94111111-0000-4000-A000-000000000001', @pipe1, @co1, 1);
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.PipelineCompany WHERE PipelineID = @pipe2 AND CompanyID = @co2)
+  INSERT INTO __mj_BizAppsSales.PipelineCompany (ID, PipelineID, CompanyID, IsActive)
+    VALUES ('94111111-0000-4000-A000-000000000002', @pipe2, @co2, 1);
+-- By name, not by the metadata's link IDs: a host upgraded by the PipelineCompany migration got its
+-- links from the backfill, under other IDs.
+UPDATE pc SET IsActive = 0
+  FROM __mj_BizAppsSales.PipelineCompany pc
+  JOIN __mj.Company c ON c.ID = pc.CompanyID
+ WHERE pc.PipelineID IN (@pipe1, @pipe2)
+   AND c.Name = N'Default Company'
+   AND pc.IsActive = 1;
+
+-- ── THE DEMO OWNS ITS OWN FINANCE ASSIGNEE (bc-aidp-next-golive#326) ──────────────────────────
+--
+-- The shipped policy in `metadata/pipelines/` no longer names a person. That id was THIS seed's
+-- partner rep (@c4 above), so on any host without this seed the close-won tasks pointed at somebody
+-- who does not exist -- they read as assigned while no queue held them, which is worse than
+-- unrouted because unrouted says so. The app now ships `AssigneeRecordID: null` and reports an
+-- unrouted task naming the key to set.
+--
+-- Which leaves the demo to say who ITS assignee is, and it says so on the pipeline's
+-- CloseWonAssigneePersonID column rather than in the policy JSON. The INSERTs above cannot do it:
+-- both are guarded by IF NOT EXISTS and a metadata push has already created these rows, so on every
+-- host that has one the INSERT never fires. And the JSON would not keep it: the next metadata push
+-- writes the shipped policy, assignee null, back over these rows. The column is not in the metadata
+-- files, so a push leaves it alone, and the close takes it over the JSON.
+--
+-- ONLY WHERE IT IS EMPTY: a host that has already configured a real finance assignee keeps the one
+-- it chose.
+UPDATE __mj_BizAppsSales.Pipeline
+   SET CloseWonAssigneePersonID = @c4
+ WHERE ID IN (@pipe1, @pipe2)
+   AND CloseWonAssigneePersonID IS NULL;
 
 DECLARE @t1 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000001';
 DECLARE @t2 UNIQUEIDENTIFIER='92111111-0000-4000-A000-000000000002';
@@ -500,7 +568,8 @@ UPDATE __mj_BizAppsSales.Deal SET ActualCloseDate='2026-07-14', ClosedAt='2026-0
 -- Closing the two and getting different order states out of the SAME close action is the clearest
 -- proof available that routing reads the pipeline's CloseWonPolicy rather than its name.
 --
--- Its product must belong to the ORDER-ONLY pipeline's selling company (@co2), not @co1 --
+-- Its product must belong to the company it sells as (@co2, the one the ORDER-ONLY pipeline is
+-- linked to), not @co1 --
 -- products are per-company and the picker filters on exactly that, so a @co1 product here would be
 -- unpickable in the UI and unroutable on close.
 --
@@ -537,9 +606,9 @@ INSERT INTO __mj_BizAppsSales.Deal (ID, DealNumber, Name, PipelineID, PipelineSt
 -- this deal negotiate payment terms?" is therefore a row count, not arithmetic.
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealPaymentSchedule WHERE DealID=@d1)
 INSERT INTO __mj_BizAppsSales.DealPaymentSchedule (DealID, PaymentDate, Amount, Description, DisplayOrder) VALUES
- (@d1, '2026-10-01', 80400.0000,  N'40% on execution',                    10),
- (@d1, '2027-01-01', 60300.0000,  N'30% on completion of Phase 1 rollout', 20),
- (@d1, '2027-04-01', 60300.0000,  N'30% on final acceptance',              30);
+ (@d1, '2026-10-01', 49760.0000,  N'40% on execution',                    10),
+ (@d1, '2027-01-01', 37320.0000,  N'30% on completion of Phase 1 rollout', 20),
+ (@d1, '2027-04-01', 37320.0000,  N'30% on final acceptance',              30);
 
 -- ============================ DEAL TEAM — including the D-6 partner rep ============================
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.DealTeamMember WHERE DealID=@d1)
@@ -630,6 +699,19 @@ INSERT INTO __mj_BizAppsSales.DealStageEvent (DealID, FromStageID, ToStageID, Fr
    ChangedAt, DaysInPreviousStage, AmountAtTransition, ProbabilityAtTransition, Notes) VALUES
  (@d5, @s4, @s5, @stOpen, @stWon, '2026-07-28T16:40:00Z', 12, 64000.0000, 100, N'Signed. A closing status with LocksDeal=1 freezes the deal from here.');
 
+-- Back-date CreationDate from the earliest pre-__mj_CreatedAt stage event when this seed runs
+-- AFTER V202611041530 (every fresh rebuild): DEAL-9001 and DEAL-9005 are inserted above with
+-- CreationDate = GETUTCDATE() before their historical DealStageEvent rows exist.
+UPDATE d
+   SET d.CreationDate = ISNULL(
+           (SELECT MIN(e.ChangedAt)
+              FROM __mj_BizAppsSales.DealStageEvent e
+             WHERE e.DealID = d.ID
+               AND e.ChangedAt < d.__mj_CreatedAt),
+           d.__mj_CreatedAt)
+  FROM __mj_BizAppsSales.Deal d
+ WHERE d.ID IN (@d1, @d2, @d3, @d4, @d5, @d6, @d7);
+
 -- ============================ POINT-IN-TIME FORECAST ============================
 IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsSales.ForecastSnapshot WHERE SnapshotJSON LIKE '%"demo":true%')
 INSERT INTO __mj_BizAppsSales.ForecastSnapshot (CompanyID, PipelineID, OwnerEmployeeID, PeriodStart, PeriodEnd, CapturedAt,
@@ -682,20 +764,20 @@ $SQLCMD -d "${DB_DATABASE}" -h -1 -W -i "$(cygpath -w "$TMP" 2>/dev/null || echo
 # every deal is hand-typed is still a working demo -- just a less complete story.
 # ── THE CATALOG, AFTER THE PIPELINE COMPANIES SETTLE AND BEFORE ANYTHING NEEDS A PRICE ──────────
 #
-# seed-orders-catalog.sql picks its selling company from the first active pipeline:
+# seed-orders-catalog.sql picks its selling company from the first active pipeline's active link:
 #
-#     SELECT TOP 1 p.CompanyID FROM Pipeline p WHERE p.IsActive = 1 ORDER BY p.Name
+#     the first active Pipeline by Name, then its earliest active PipelineCompany row
 #
-# and THIS script is what puts the pipelines on their final companies -- the two UPDATE statements
-# above, which move them off the Default Company the metadata seeds them with. Run the catalog before
-# that (as WORKSPACE-SETUP used to instruct) and it reads a company that is about to stop owning any
-# pipeline: the products land on Default Company, every deal then fails with "no active product
+# and THIS script is what settles those links -- the block above that links the dev companies and
+# retires the Default Company links the metadata seeds. Run the catalog before that (as
+# WORKSPACE-SETUP used to instruct) and it reads a company that is about to lose its last active
+# link: the products land on Default Company, every deal then fails with "no active product
 # PLAT-STD for its company", and the seed reports `deals w/ order 0` -- a symptom whose documented
 # cause ("the catalogue was not there when it ran") is the one thing that is NOT wrong.
 #
 # It goes HERE rather than earlier for the same reason the entity-layer half does: the SQL above has
-# committed, so the companies are final, and nothing downstream has to know the ordering rule.
-say "Seeding the orders catalog against the settled pipeline companies"
+# committed, so the links are final, and nothing downstream has to know the ordering rule.
+say "Seeding the orders catalog against the settled pipeline company links"
 $SQLCMD -d "${DB_DATABASE}" -b -i scripts/dev/seed-orders-catalog.sql
 $SQLCMD -d "${DB_DATABASE}" -b -i scripts/dev/seed-revenue-stack.sql
 $SQLCMD -d "${DB_DATABASE}" -b -i scripts/dev/seed-contract-template.sql
@@ -744,7 +826,8 @@ UNION ALL SELECT '  closed w/ team   ' + CAST(COUNT(DISTINCT d.ID) AS varchar)
 UNION ALL SELECT '  past due open    ' + CAST(COUNT(*) AS varchar)
   FROM __mj_BizAppsSales.Deal d
   JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = d.DealStatusTypeID
- WHERE t.IsOpen = 1 AND d.ExpectedCloseDate < CAST(SYSUTCDATETIME() AS date)
+ CROSS JOIN __mj_BizAppsCommon.fnBusinessToday() AS bt
+ WHERE t.IsOpen = 1 AND d.ExpectedCloseDate < bt.Today
 UNION ALL SELECT '  close-date moves ' + CAST(COUNT(*) AS varchar)
   FROM __mj.RecordChange rc
   JOIN __mj.Entity e ON e.ID = rc.EntityID

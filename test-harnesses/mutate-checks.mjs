@@ -181,9 +181,13 @@ const MUTATIONS = [
       from: "AND (AvailableTo IS NULL OR AvailableTo >= '${day}')",
       to: "AND (AvailableTo IS NULL OR AvailableTo >= '1900-01-01')" },
 
+    // RETARGETED when the pipeline stopped carrying a company: the server no longer stamps the deal's
+    // company from its pipeline, it refuses one the pipeline is not actively linked to. Accepting every
+    // company is the defect SD2 names.
     { id: 'M-SD2', file: DES, expect: ['SD2'],
-      from: '    private async stampCompanyFromPipeline(): Promise<void> {\n        if (!this.PipelineID) {',
-      to: '    private async stampCompanyFromPipeline(): Promise<void> {\n        if (true) { return; }\n        if (!this.PipelineID) {' },
+      from: "        if ((result.Results ?? []).length === 0) {\n            return 'the pipeline on this deal is not available to its company.",
+      to: "        if (false) {\n            return 'the pipeline on this deal is not available to its company.",
+      note: 'the link lookup still runs, but no answer refuses the save -- an unlinked company is stored' },
     { id: 'M-SD3', file: DES, expect: ['SD3'],
       from: '        this.OwnerEmployeeID = owner?.EmployeeID ?? null;',
       to: '        this.OwnerEmployeeID = null;' },
@@ -488,8 +492,8 @@ const MUTATIONS = [
       to: 'this._lockedAtSave ? null : await this.planStageDefaults()',
       note: 'a reopen loses the probability a human set, and disagrees with its own provenance row' },
 
-    // THE CREATE GUARD ON THE STAGE LOG. A new deal whose stage is set twice -- what NewDeal() plus a
-    // rep's choice does -- looked like a MOVE, because the first assignment becomes the OldValue.
+    // THE CREATE GUARD ON THE STAGE LOG. A new deal whose stage is set twice -- what the deal workspace's
+    // NewDeal() plus a rep's choice did -- looked like a MOVE, because the first assignment becomes the OldValue.
     { id: 'M-ST4', file: DES, expect: ['SD30'],
       from: 'if (!this.IsSaved) {\n            return null;\n        }\n\n        const priorStageID',
       to: 'if (false) {\n            return null;\n        }\n\n        const priorStageID',
@@ -591,7 +595,7 @@ const MUTATIONS = [
          * true raises a second task the policy never asked for.
          */
         { id: 'M-WT3P', file: CWT, expect: ['WT3'],
-          from: '        if (await this.policyRaisesContractTask(input.PipelineID, contextUser, result)) {',
+          from: '        if (input.CreateContract === true) {',
           to: '        if (true) {',
           note: 'every policy raises the contract task, including the ones that create no contract' },
 

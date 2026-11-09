@@ -1,0 +1,35 @@
+[
+  {
+    "_comments": [
+      "bizapps-sales#314 (and the Payment schedule part of #286): the deal's Payment schedule grid had",
+      "no DefaultInView field, so MJ showed the first ten fields: Deal ID, the deal's name and Display",
+      "Order. A rep reads an instalment as date, amount and description; those three are the grid.",
+      "",
+      "DisplayOrder is left off on purpose. It is the collection's sequence, used by the deal workspace",
+      "and as the form grid's tie-break within a date. Rows added through the form grid save it as 0, so",
+      "the number tells a rep nothing there. It stays available from the grid's column chooser."
+    ],
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Payment Schedules&Name=PaymentDate"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Payment Schedules&Name=Amount"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deal Payment Schedules&Name=Description"
+    }
+  }
+]

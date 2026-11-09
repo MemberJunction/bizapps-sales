@@ -50,7 +50,7 @@ beforeEach(() => {
 
     // Orders IS installed here — an absent entity is a supported state that returns [] before the
     // filter is ever built, so this check would be vacuous without it.
-    vi.spyOn(Metadata.prototype, 'Entities', 'get').mockReturnValue([{ Name: E_ORDERS_PRODUCT }] as never);
+    vi.spyOn(Metadata.prototype, 'Entities', 'get').mockReturnValue([{ Name: E_ORDERS_PRODUCT, Fields: [] }] as never);
 
     vi.spyOn(BusinessTimeZoneEngine.prototype, 'Config').mockResolvedValue(undefined);
     vi.spyOn(BusinessTimeZoneEngine.prototype, 'Zone', 'get').mockReturnValue(BUSINESS_ZONE);
@@ -107,5 +107,94 @@ describe('LoadProducts judges availability on the business day', () => {
         await new DealWorkspaceService().LoadProducts();
 
         expect(config).toHaveBeenCalled();
+    });
+});
+
+/**
+ * #380: a failed catalogue read returned an empty list with nothing logged, so the picker looked like a
+ * catalogue with nothing in it. It now throws with orders' reason, for the line editor to show.
+ */
+describe('LoadProducts on a failed read', () => {
+    it("throws with the read's own reason instead of returning an empty list", async () => {
+        vi.spyOn(RunView.prototype, 'RunView').mockResolvedValue(
+            { Success: false, ErrorMessage: 'permission denied on Products', Results: [] } as never,
+        );
+        await expect(new DealWorkspaceService().LoadProducts()).rejects.toThrow(
+            'The product catalogue could not be loaded: permission denied on Products',
+        );
+    });
+
+    it('still returns an empty list when the catalogue really is empty', async () => {
+        captureFilter();
+        await expect(new DealWorkspaceService().LoadProducts()).resolves.toEqual([]);
+    });
+});
+
+describe('LoadProducts leaves out products not sold new (golive#360)', () => {
+    it("filters on IsSellableNew when the host's orders has the column", async () => {
+        vi.spyOn(Metadata.prototype, 'Entities', 'get').mockReturnValue(
+            [{ Name: E_ORDERS_PRODUCT, Fields: [{ Name: 'Status' }, { Name: 'IsSellableNew' }] }] as never,
+        );
+        const seen = captureFilter();
+        await new DealWorkspaceService().LoadProducts('2026-08-31');
+        expect(seen.Filters[0]).toContain("Status = 'Active'");
+        expect(seen.Filters[0]).toMatch(/AND IsSellableNew = 1$/);
+    });
+
+    it('asks nothing of the column on an orders release without it', async () => {
+        const seen = captureFilter();
+        await new DealWorkspaceService().LoadProducts('2026-08-31');
+        expect(seen.Filters[0]).not.toContain('IsSellableNew');
+    });
+});
+
+/**
+ * golive#433: the Draft products a search matches, read once beside the catalogue so the picker can
+ * say they exist. Only the status differs from the catalogue read, and a failure must cost the rep
+ * nothing but the note.
+ */
+describe('LoadDraftProducts', () => {
+    function captureParams(): { readonly Params: { ExtraFilter?: string; Fields?: string[] }[] } {
+        const params: { ExtraFilter?: string; Fields?: string[] }[] = [];
+        vi.spyOn(RunView.prototype, 'RunView').mockImplementation(async (p?: { ExtraFilter?: string; Fields?: string[] }) => {
+            params.push({ ExtraFilter: p?.ExtraFilter, Fields: p?.Fields });
+            return { Success: true, Results: [{ ID: 'd1', Name: 'Draft Widget', SKU: null }] } as never;
+        });
+        return { get Params() { return params; } };
+    }
+
+    it('reads Draft products on the business day, under the not-sold-new rule, with only the search fields', async () => {
+        vi.spyOn(Metadata.prototype, 'Entities', 'get').mockReturnValue(
+            [{ Name: E_ORDERS_PRODUCT, Fields: [{ Name: 'IsSellableNew' }] }] as never,
+        );
+        const seen = captureParams();
+
+        const rows = await new DealWorkspaceService().LoadDraftProducts();
+
+        expect(rows).toEqual([{ ID: 'd1', Name: 'Draft Widget', SKU: null }]);
+        expect(seen.Params).toHaveLength(1);
+        expect(seen.Params[0].ExtraFilter).toContain("Status = 'Draft'");
+        expect(seen.Params[0].ExtraFilter).toContain("AvailableFrom <= '2026-08-31'");
+        expect(seen.Params[0].ExtraFilter).toMatch(/AND IsSellableNew = 1$/);
+        expect(seen.Params[0].Fields).toEqual(['ID', 'Name', 'SKU']);
+    });
+
+    it('returns no rows and logs, rather than throwing, when the read fails', async () => {
+        // LogError writes through console.error; the reason must reach it.
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        vi.spyOn(RunView.prototype, 'RunView').mockResolvedValue(
+            { Success: false, ErrorMessage: 'permission denied on Products', Results: [] } as never,
+        );
+
+        await expect(new DealWorkspaceService().LoadDraftProducts()).resolves.toEqual([]);
+        expect(logged.mock.calls.flat().join(' ')).toContain('permission denied on Products');
+    });
+
+    it('asks nothing when orders is not installed', async () => {
+        vi.spyOn(Metadata.prototype, 'Entities', 'get').mockReturnValue([] as never);
+        const seen = captureParams();
+
+        await expect(new DealWorkspaceService().LoadDraftProducts()).resolves.toEqual([]);
+        expect(seen.Params).toHaveLength(0);
     });
 });

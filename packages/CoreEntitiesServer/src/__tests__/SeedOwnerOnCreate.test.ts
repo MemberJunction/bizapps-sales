@@ -9,9 +9,9 @@ import { DealEntityServer } from '../DealEntityServer.js';
  * a deal created seconds earlier. The form's team panel is gated on the deal being saved, so at the
  * moment of creation there was no way to supply one either.
  *
- * The default is the ACCOUNT's owner when it has one, else whoever is creating the deal: a deal on an
- * existing customer belongs to whoever runs that customer, whether a rep, an SE or an admin typed it
- * in. The creator is the fallback, not the first answer.
+ * The default is whoever is creating the deal, else the ACCOUNT's owner: the people who enter deals
+ * are the people who work them, and the account's owner only steps in for a creator with no linked
+ * Employee (the importer, an agent, `System`).
  *
  * `Object.create` holds the server entity without standing up metadata, the way `StatusReadFailure`
  * does. Only what `seedOwnerOnCreate` touches is shadowed.
@@ -74,33 +74,38 @@ function deal(opts: Opts) {
 }
 
 describe('the owner a new deal is born with', () => {
-    it('takes the account owner when the account has one', async () => {
-        const d = deal({ AccountID: ACCOUNT, accountOwner: ACCOUNT_OWNER });
-        await d.seedOwnerOnCreate();
-        expect(d.SetOwnerCalls).toEqual([ACCOUNT_OWNER]);
-    });
-
     /**
-     * The account beats the creator even though both are available. Whoever runs the customer owns the
-     * deal; the person at the keyboard may be an admin entering it on their behalf.
+     * The creator beats the account's owner even though both are available. A rep entering a deal on
+     * someone else's account is the one working it; defaulting to the account's owner meant every such
+     * deal had to be reassigned by hand (bc-aidp-next-golive#415). The account is not even read.
      */
-    it('prefers the account owner over the creator', async () => {
+    it('prefers the creator over the account owner', async () => {
         const d = deal({ AccountID: ACCOUNT, accountOwner: ACCOUNT_OWNER, creatorEmployee: CREATOR });
         await d.seedOwnerOnCreate();
-        expect(d.SetOwnerCalls).toEqual([ACCOUNT_OWNER]);
+        expect(d.SetOwnerCalls).toEqual([CREATOR]);
+        expect(d.Views, 'a creator with an Employee needs no account read').toEqual([]);
     });
 
-    it('falls back to the creator when the account has no owner', async () => {
+    it('takes the creator when the account has no owner', async () => {
         const d = deal({ AccountID: ACCOUNT, accountOwner: null });
         await d.seedOwnerOnCreate();
         expect(d.SetOwnerCalls).toEqual([CREATOR]);
     });
 
-    it('falls back to the creator when there is no account at all', async () => {
+    it('takes the creator when there is no account at all', async () => {
         const d = deal({ AccountID: null });
         await d.seedOwnerOnCreate();
         expect(d.SetOwnerCalls).toEqual([CREATOR]);
-        expect(d.Views, 'no account means no reason to read one').toEqual([]);
+    });
+
+    /**
+     * The importer, an agent and `System` have no linked Employee. Their deals land on whoever runs the
+     * customer rather than on nobody.
+     */
+    it('falls back to the account owner when the creator has no Employee', async () => {
+        const d = deal({ AccountID: ACCOUNT, accountOwner: ACCOUNT_OWNER, creatorEmployee: null });
+        await d.seedOwnerOnCreate();
+        expect(d.SetOwnerCalls).toEqual([ACCOUNT_OWNER]);
     });
 });
 
@@ -132,10 +137,10 @@ describe('every way it declines to act', () => {
      * A FAILED READ IS NOT A FAILED SAVE. RunView does not throw, and refusing a create because the
      * account could not be read would cost someone the deal they were entering.
      */
-    it('falls back rather than failing when the account cannot be read', async () => {
-        const d = deal({ AccountID: ACCOUNT, readSucceeds: false });
+    it('leaves the deal unowned rather than failing when the account cannot be read', async () => {
+        const d = deal({ AccountID: ACCOUNT, readSucceeds: false, creatorEmployee: null });
         await expect(d.seedOwnerOnCreate()).resolves.toBeUndefined();
-        expect(d.SetOwnerCalls).toEqual([CREATOR]);
+        expect(d.SetOwnerCalls).toEqual([]);
     });
 
     /**
@@ -143,10 +148,10 @@ describe('every way it declines to act', () => {
      * Orders and stopping is right; here it is our own field on a deal somebody is creating.
      */
     it('skips the lookup on an id that is not a record id, without throwing', async () => {
-        const d = deal({ AccountID: "not-an-id' OR 1=1--", accountOwner: ACCOUNT_OWNER });
+        const d = deal({ AccountID: "not-an-id' OR 1=1--", accountOwner: ACCOUNT_OWNER, creatorEmployee: null });
         await expect(d.seedOwnerOnCreate()).resolves.toBeUndefined();
         expect(d.Views, 'a malformed id must never reach a filter string').toEqual([]);
-        expect(d.SetOwnerCalls).toEqual([CREATOR]);
+        expect(d.SetOwnerCalls).toEqual([]);
     });
 
     /**

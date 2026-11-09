@@ -50,16 +50,18 @@ destructive when interrupted or misfed.
 
 ## What to do instead
 
-**For a missing `EntityField` row, write the INSERT.** It is a dozen lines of SQL in a migration, it is
-reviewable, it changes exactly one thing, and it cannot drop an object. The generated `EntityField` INSERTs
-already in the migration set are the template.
+**For a missing `EntityField` row, run CodeGen under the preconditions below; do not hand-write the
+INSERT.** `CLAUDE.md` ("CodeGen output must be reproducible from this repo") rules that metadata CodeGen
+creates ships in a migration as CodeGen wrote it, and that generated output is never written by hand. A
+hand-written row is not what this repo's toolchain produces from its migrations, so the next CodeGen run
+on any host drifts from it. An earlier version of this page said to write the INSERT; that advice is
+withdrawn.
 
 **For a stale view or procedure, regenerate that object alone**, from the migration that owns it, rather
 than regenerating the schema.
 
-**If CodeGen genuinely is the right tool** — a real schema change, many entities, a rebuild — then the
-preconditions from `CLAUDE.md` are not optional and the reason each exists is now demonstrated rather than
-theoretical:
+**Whenever CodeGen runs**, the preconditions from `CLAUDE.md` are not optional and the reason each exists
+is now demonstrated rather than theoretical:
 
 * Take a `COPY_ONLY` backup first, and verify it with `RESTORE VERIFYONLY … WITH CHECKSUM`. `COPY_ONLY`
   specifically, if anyone else is working against the host: a normal full backup resets their differential
@@ -91,10 +93,10 @@ on anybody noticing an error message.
 
 ## The general lesson, stated plainly
 
-**A tool whose failure mode is "removes things and stops" must never be aimed at a small problem.** The
-blast radius is not proportional to the goal — it is proportional to what the tool regenerates, which is
-everything. Three incidents is enough evidence that the instinct to reach for it needs to be treated as
-the warning sign, not the plan.
+**A tool whose failure mode is "removes things and stops" must never be aimed at a small problem without
+a verified restore point.** The blast radius is not proportional to the goal — it is proportional to what
+the tool regenerates, which is everything. Three incidents is enough evidence that a small gap is no reason
+to skip the preconditions above.
 
 The question worth asking before running it is not "will this fix the gap?" but **"what does this drop on
 the way in, and do I have a verified restore point?"**

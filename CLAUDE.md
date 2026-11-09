@@ -77,8 +77,9 @@ watches for this; it is a heuristic, not a proof.
   take the order total (sales never sums lines). A typed figure survives only on a header-only deal.
 - An override price on a line is an **input** to orders' pricing, never a replacement for the totals
   orders computes on top of it.
-- A rep enters a discount as a **percent**; `OrderLine.DiscountPct` stores a **fraction**. Convert only
-  in `packages/Entities/src/discount-conversion.ts` (`pnpm run test:discount-gate`), never at a call
+- A rep enters a discount as a **percent** or a **dollar amount**; `OrderLine.DiscountPct` stores a
+  **fraction** either way (dollars become a percent of orders' list amount). Convert only in
+  `packages/Entities/src/discount-conversion.ts` (`pnpm run test:discount-gate`), never at a call
   site (D-DL2).
 - Closing does not create or price a second order. The deal's own order changes status when the deal
   enters a stage that names one (`PipelineStage.OrderStatusOnEntry`).
@@ -154,7 +155,8 @@ conflict list. When merging feature branches together, record the head you actua
   reach the `claude.exe` that is your own parent. Anything else belongs to another session.
 - **`ps -W` prints no command-line arguments**, so it can never find a run by script name. Use
   `Get-CimInstance Win32_Process` (it has `CommandLine` and `ParentProcessId`).
-- If you cannot establish ownership, **do not kill it.** Say what you see and ask.
+- If you cannot establish ownership, **do not kill it.** Say what you see and ask. The full procedure:
+  `test-harnesses/MUTATION-RUNS.md`.
 - **A Bash call that hits its ten-minute ceiling DETACHES the process; it does not kill it.** A run that
   seems stuck is most likely queued on the suite lock behind your own orphan.
 - The stranded-mutation recovery (`git checkout --` plus a rebuild) is **destructive against a live
@@ -171,7 +173,8 @@ Most defects here were **a claim that was true when somebody checked it, and sta
 stopped being true.** Make the check happen where the claim is USED, not where it was made:
 
 * Do not index a collection and then assert which row it is — **find the row, then assert about it.**
-* Run the anchor validator **after** an edit, not before. Before tells you the state you are leaving.
+* Check a mutant's anchor **after** an edit, not before. Before tells you the state you are leaving
+  (`test-harnesses/MUTATION-RUNS.md`).
 * **Filter, do not count.** `exactly one link` is a statement about today's data; `the link to the ORDER`
   is a statement about the requirement.
 * A guard keyed on a **cause** survives a new code path; one keyed on a **threshold** does not.
@@ -208,7 +211,21 @@ the thing it names is broken?"** The incidents behind rules 5–8: `docs/history
 - Never add `__mj_CreatedAt`/`__mj_UpdatedAt` columns or FK indexes — CodeGen does both.
 - **Author for PostgreSQL from day one.** Production is PG; keep the T-SQL converter-friendly and
   avoid reserved words as column names (this is why `ForecastSnapshot` has `CommitAmount`, not
-  `Commit`). No migration has a PostgreSQL counterpart yet (#197).
+  `Commit`). Newer migrations ship a counterpart in `migrations-pg/`; the older ones lack one (#197).
+- **A migration that ALTERs an existing column (length, type, nullability) syncs that entity's
+  fields itself.** `omitRecurringScriptsFromLog` is `true` in `mj.config.cjs`, so CodeGen no longer
+  captures the reconcilers it runs every pass (#345); without a sync, every host installed from
+  migrations keeps the old length, type or nullability in `EntityField`. After the entity's view
+  refresh, add the entity-scoped call:
+  `EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', @EntityIDs='<entity ID>', @IncludedSchemaNames='${flyway:defaultSchema}';`
+  Never the schema-wide form, and never `spDeleteUnneededEntityFields`: a shipped prune runs on
+  entities the migration never touched. In CI, `.github/scripts/check-migration-column-sync.mjs` fails a
+  new migration that alters a column without the scoped call, or that carries the schema-wide one.
+- **Known gap: CodeGen leaves regenerated CRUD procs out of the run log on a length-only change.** It
+  regenerates the procedures but writes nothing to `migrations/codegen/`, so the migration would ship
+  without them. Capture them with a temporary `forceRegeneration` block in `mj.config.cjs` (`enabled`,
+  `spUpdate`/`spCreate`, and an `entityWhereClause` naming that entity), copy the output into the
+  migration, and never commit the block.
 - `CONFIRM_DROP=<database> scripts/rebuild-db.sh` drops and rebuilds a local database from migrations:
   MJ core, then common, tasks, accounting, orders and contracts from sibling checkouts, then sales.
   It names the database to DESTROY; there is no default. It applies every migration as shipped and
@@ -250,7 +267,7 @@ PW_HEADLESS=1 pnpm run test:explorer   # unattended
   and view-vs-edit-mode traps that cost real time to find.
 
 ### CI (`.github/workflows/ci.yml`)
-**TWELVE gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
+**FOURTEEN gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
 listed the first and third; five more have been added since and went unrecorded. That understatement is
 not harmless — a reviewer who believes CI only greps and builds will reason that a template change, a
 copy change or a query comment cannot be caught by it, and will hand-check things CI already covers
@@ -262,7 +279,7 @@ while trusting things it does not:
 2. **`pnpm run test:money-gate`** — sales records intent; orders computes the number.
 3. **`pnpm run build`** — all turbo tasks including the Angular Explorer.
 4. **`pnpm run test:discount-gate`** — percent vs fraction, both directions.
-5. **`pnpm run test:validation-gate`** — pane attribution, and what blocks a save.
+5. **`pnpm run test:validation-gate`** — pane attribution, and no component writing a stage's defaults.
 6. **`python3 scripts/assert-no-comment-drift.py`** — a documented column that is not returned.
 7. **`npm run test:spec-gate`** — Playwright specs typecheck (it does NOT run them).
 8. **Unit tests**, guarded on any existing.
@@ -270,6 +287,8 @@ while trusting things it does not:
 10. **`node .github/scripts/check-dependency-model.mjs`** — runs first, before install: `@memberjunction/*` and other apps' `@mj-biz-apps/*` packages are caret peers (exact `devDependencies` anchors), never `dependencies`.
 11. **`npm run test:mutate-harness`** — an interrupted mutation run leaves no mutant in the tree or `dist/`.
 12. **`npm run test:one-copy-harness`** — on sibling-checkout hosts, each `@mj-biz-apps/*` import gets the copy its range or sales' override calls for.
+13. **`pnpm run test:token-gate`** — every `var(--mj-…)` in `packages/Angular` is a token MJ defines (`scripts/mj-tokens.json`). An unknown name drops its rule silently.
+14. **`npm run test:cleanup-harness`** — the Playwright teardown's sqlcmd call turns QUOTED_IDENTIFIER on (`-I`), so its deletes are not refused.
 
 Plus a non-blocking changeset presence check.
 
@@ -297,7 +316,7 @@ AIDP Next runs MemberJunction's 6.1 LTS line, pinned exactly in `aidp-next/packa
 - **Declared ranges.** A published package lists `@memberjunction/*` only in `peerDependencies`, as `^6.1.N`, where 6.1.N is the LTS release AIDP Next runs: a floor, not a cap. Its `devDependencies` anchor the same 6.1.N exactly for local builds; nothing goes in `dependencies` (CI's dependency model gate). Never an edge or prerelease range (`6.1.0-edge.x` sorts *before* 6.1.0 and has none of the LTS fixes). Packages MJ versions separately (`@memberjunction/connector-*`, `@memberjunction/skyway-*`) keep their own ranges.
 - **Overrides (`overrides:` in `pnpm-workspace.yaml`).** `@memberjunction/core` and `@memberjunction/global` carry the same floor (for example `"^6.1.5"`), so every request in the graph resolves to one copy. Two copies of `core` split the ClassFactory: registrations land in one factory while the resolver reads the other, and nothing errors. Overrides are workspace-local and never published. They do not go under `package.json`'s `pnpm` field: pnpm 10.33 warns that it no longer reads that field, and the field is deprecated. Do not exact-pin sibling `@mj-biz-apps/*` packages here; how the apps declare each other is bc-aidp-next-golive#265.
 - **One copy of each.** After any install, `pnpm why @memberjunction/core` must show a single version. A sibling app package that exact-pins an old MJ build brings a second copy in (for example `@mj-biz-apps/common-ng@5.37.0` pinned edge.3 packages); fix it by raising that package's floor, not with more overrides.
-- **Bumping to a new 6.1.N**, when AIDP Next moves: raise every `^6.1.N` floor, every exact `6.1.N` devDependencies anchor and both overrides; `pnpm install`; confirm one copy; set `mjVersionRange` in `mj-app.json` to `>=6.1.N <7.0.0` (the Version Packages PR re-derives it from `packages/Entities`' `@memberjunction/core` peer via `ci/sync-mj-app-version.mjs`, so the two must agree); rebuild the database from migrations on MJ core `v6.1.N` and regenerate (below); run the full test suite; add a `patch` changeset; commit the lockfile. If CI then fails on the lockfile although a clean local install works, GitHub is testing the merge with `next`: merge `next` in, run `pnpm install --no-frozen-lockfile`, and commit the lockfile.
+- **Bumping to a new 6.1.N**, when AIDP Next moves: raise every `^6.1.N` floor, every exact `6.1.N` devDependencies anchor and both overrides; `pnpm install`; confirm one copy; run `node scripts/refresh-mj-tokens.mjs` (the token gate fails until `scripts/mj-tokens.json` matches the new anchor); set `mjVersionRange` in `mj-app.json` to `>=6.1.N <7.0.0` (the Version Packages PR re-derives it from `packages/Entities`' `@memberjunction/core` peer via `ci/sync-mj-app-version.mjs`, so the two must agree); rebuild the database from migrations on MJ core `v6.1.N` and regenerate (below); run the full test suite; add a `patch` changeset; commit the lockfile. If CI then fails on the lockfile although a clean local install works, GitHub is testing the merge with `next`: merge `next` in, run `pnpm install --no-frozen-lockfile`, and commit the lockfile.
 - **Never patch MemberJunction.** No `pnpm patch`, `patchedDependencies`, patch-package or `sed` against `@memberjunction/*` `dist/`. That is AIDP Next's hard rule (`.github/workflows/MJ_PATCH_REGISTER.md` in aidp-next). Fix MJ on its `next` branch and bring the fix to the line with the `backport lts/6.1` label, or with a hand-port PR against `lts/6.1` when the fix can't be isolated; then wait for the patch release.
 
 ### CodeGen output must be reproducible from this repo
@@ -326,7 +345,7 @@ Generated files are committed, and AIDP Next ships them as they are: it excludes
   repository root**. **Never** run an install inside a package directory.
 - `pnpm run build` (all, Turborepo) · `build:generated` · `build:packages`
 - **No `start:*` scripts.** Sales ships no shells; the MJ host runs MJAPI/MJExplorer (`docs/QA-GUIDE.md`)
-- `pnpm run verify` — the vocabulary, money, comment-drift, distribution, spec-typecheck and selector
+- `pnpm run verify` — the vocabulary, money, token, comment-drift, distribution, spec-typecheck and selector
   gates, then the build and unit tests, then the discount and validation gates (they read `dist/`).
 
 ---
@@ -380,7 +399,8 @@ Built on MJ's Angular Generic components — `kanban`, `timeline`, `filter-build
 
 - Standalone components with `inject()`; `@if`/`@for`/`@switch`, not `*ngIf`/`*ngFor`
 - **PascalCase for public members** (properties, methods, `@Input()`, `@Output()`); camelCase private
-- **Semantic `--mj-*` tokens, no hardcoded colors.** Verify in dark mode.
+- **Semantic `--mj-*` tokens, no hardcoded colors.** Verify in dark mode. Only names in
+  `scripts/mj-tokens.json`; `pnpm run test:token-gate` rejects any other.
 - `<mj-loading>` only — never a custom spinner
 - **Confirm/submit LEFT, cancel RIGHT**
 - Font Awesome for icons
@@ -403,8 +423,9 @@ Built on MJ's Angular Generic components — `kanban`, `timeline`, `filter-build
 Recorded in full in `docs/DECISIONS.md`; listed here so nobody "fixes" them:
 - **Quota / attainment** — v2. No `Quota` table (D2).
 - **Territory** — a label on `SalesAccount`, not a routing engine (D3).
-- **`Pipeline.CompanyID` stays NOT NULL**; each line takes its company from its product, so a deal can
-  still span companies (D5, ratified 2026-08-26).
+- **A pipeline links to its companies through `PipelineCompany`**, not a column; the rep picks the deal's
+  company and the server checks it is linked to the pipeline. Each line still takes its company from its
+  product, so a deal can span companies (D5, superseded 2026-11-05).
 - **`ForecastSnapshot` columns are `*Amount`-suffixed**, diverging from master plan §9.5's bare
   `Commit`/`BestCase`/`Pipeline`/`Closed`. **The shipped names are authoritative** — `COMMIT` is reserved
   in T-SQL and Postgres, and prod is Postgres (D6).
