@@ -16,7 +16,7 @@ body:
     id: summary
     attributes:
       label: Summary
-      description: For a person. Three sentences at most, as concise as possible while still useful to a human — what breaks, where in the code, and what a fix would change. People read this and the title, little else.
+      description: For a person. Three sentences at most and under 40 words, as concise as possible while still useful to a human — what breaks, where in the code, and what a fix would change. People read this and the title, little else.
       placeholder: Confirming a saved draft that carries a promotion code books the discount twice in the adjustment trail. The pricing walk in OrderEntityServer re-adds promotion rows on every save instead of replacing the draft's set. A fix replaces only the rows a promotion re-decides, leaving manual discounts alone.
     validations:
       required: true
