@@ -139,13 +139,13 @@ describe('CloseDealOperation and ReopenDealOperation timeline activity (#381)', 
 
         const { CloseDealOperation, ReopenDealOperation } = await import('../CloseDealOperation.js');
         const dealStub = {
-            ID: 'deal-1',
+            ID: 'aaaaaaaa-0000-4000-8000-0000000000d1',
             Name: 'Timeline Deal',
             DealNumber: 'DEAL-1',
             PipelineID: 'pipe-1',
             PipelineStageID: 'stage-1',
             DealTypeID: 'type-1',
-            DealStatusTypeID: 'status-open',
+            DealStatusTypeID: 'aaaaaaaa-0000-4000-8000-0000000000a1',
             CompanyID: 'comp-1',
             AccountID: 'acc-1',
             PrimaryContactID: 'per-1',
@@ -177,21 +177,21 @@ describe('CloseDealOperation and ReopenDealOperation timeline activity (#381)', 
             GetEntityObject: vi.fn().mockResolvedValue(dealStub),
             RunView: vi.fn().mockImplementation(async (params: { EntityName: string; ExtraFilter?: string }) => {
                 if (params.EntityName === 'MJ_BizApps_Sales: Deal Status Types') {
-                    if (params.ExtraFilter?.includes('status-lost')) {
+                    if (params.ExtraFilter?.includes('aaaaaaaa-0000-4000-8000-0000000000a2')) {
                         return {
                             Success: true,
-                            Results: [{ ID: 'status-lost', IsWon: false, IsLost: true, IsClosed: true, LocksDeal: true }],
+                            Results: [{ ID: 'aaaaaaaa-0000-4000-8000-0000000000a2', IsWon: false, IsLost: true, IsClosed: true, LocksDeal: true }],
                         };
                     }
                     return {
                         Success: true,
-                        Results: [{ ID: 'status-open', IsWon: false, IsLost: false, IsClosed: false, LocksDeal: false }],
+                        Results: [{ ID: 'aaaaaaaa-0000-4000-8000-0000000000a1', IsWon: false, IsLost: false, IsClosed: false, LocksDeal: false }],
                     };
                 }
                 if (params.EntityName === 'MJ_BizApps_Sales: Loss Reasons') {
                     return {
                         Success: true,
-                        Results: [{ ID: 'lr-1', Name: 'Budget', IsActive: true, RequiresNotes: false }],
+                        Results: [{ ID: 'aaaaaaaa-0000-4000-8000-0000000000b1', Name: 'Budget', IsActive: true, RequiresNotes: false }],
                     };
                 }
                 return { Success: true, Results: [] };
@@ -203,9 +203,9 @@ describe('CloseDealOperation and ReopenDealOperation timeline activity (#381)', 
         };
         const closeOut = await closeOp.InternalExecute(
             {
-                DealID: 'deal-1',
-                DealStatusTypeID: 'status-lost',
-                LossReasonID: 'lr-1',
+                DealID: 'aaaaaaaa-0000-4000-8000-0000000000d1',
+                DealStatusTypeID: 'aaaaaaaa-0000-4000-8000-0000000000a2',
+                LossReasonID: 'aaaaaaaa-0000-4000-8000-0000000000b1',
                 Notes: 'Customer deferred budget',
             },
             provider,
@@ -224,7 +224,7 @@ describe('CloseDealOperation and ReopenDealOperation timeline activity (#381)', 
         };
         const reopenOut = await reopenOp.InternalExecute(
             {
-                DealID: 'deal-1',
+                DealID: 'aaaaaaaa-0000-4000-8000-0000000000d1',
                 Reason: 'Budget approved in Q4',
             },
             provider,

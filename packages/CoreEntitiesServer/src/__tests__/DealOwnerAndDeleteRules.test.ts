@@ -236,11 +236,11 @@ describe('DealEntityServer.Delete (#411)', () => {
         };
         Object.defineProperty(instance, 'ID', { value: DEAL_ID });
         Object.defineProperty(instance, 'OrderID', { value: opts.orderID ?? null });
-        Object.defineProperty(instance, 'DealStatusTypeID', { value: 'status-1' });
+        Object.defineProperty(instance, 'DealStatusTypeID', { value: 'aaaaaaaa-0000-4000-8000-0000000000c1' });
         Object.defineProperty(instance, 'ContextCurrentUser', { value: { ID: 'u1' } });
         Object.defineProperty(instance, 'Fields', { value: [] });
         Object.defineProperty(instance, 'GetFieldByName', {
-            value: () => ({ OldValue: 'status-1', Dirty: false }),
+            value: () => ({ OldValue: 'aaaaaaaa-0000-4000-8000-0000000000c1', Dirty: false }),
         });
         Object.defineProperty(instance, 'RegisterResultHistoryEntry', {
             value: (entry: { Message: string }) => refusals.push(entry.Message),

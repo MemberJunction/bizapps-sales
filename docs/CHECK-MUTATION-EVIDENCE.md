@@ -15,11 +15,11 @@ paths. The round-by-round narratives behind these results are in this file's his
 
 | | |
 |---|---|
-| Checks registered | **188** in 14 bundles (`scripts/expected-check-counts.json`) |
-| Mutants registered | **115** |
+| Checks registered | **202** in 15 bundles (`scripts/expected-check-counts.json`) |
+| Mutants registered | **113** |
 | Last full campaign | 2026-08-21/22: 68 mutants against a 121-check suite. It recorded totals, not per-mutant results, and its commit (`6d3add4`) is not in this repository |
 | Since then | single mutants only, recorded below |
-| Checks no mutant declares | **74** of 188, listed below the table |
+| Checks no mutant declares | **79** of 202, listed below the table |
 
 ## Per mutant
 
@@ -151,16 +151,16 @@ reached the running code.
 
 | Bundle | Checks |
 |---|---|
-| `save-deal` | SD1, SD6, SD7, SD13, SD14, SD17, SD19, SD20, SD28, SD38, SD39, SD42, SD43, SD44 |
+| `save-deal` | SD1, SD6, SD7, SD13, SD14, SD17, SD19, SD20, SD28, SD38, SD39, SD42, SD43, SD44, SD45, SD46, SD47 |
 | `close-deal` | CD3, CD12, CD19, CD25, CD31, CD32, CD33, CD34, CD35, CD36, CD37, CD38, CD41, CD42 |
 | `product-picker` | PP5 |
 | `close-won-order` | CO2, CO4 |
 | `close-won-contract` | CT1, CT7 |
 | `board-move` | BD1, BD3, BD4 |
 | `close-won-tasks` | WT17, WT18, WT9, WT10 |
-| `activities` | AC1, AC2, AC4, AC5, AC6, AC7, AC9, AC10, AC11, AC12, AC14, AC16, AC18, AC19, AC20, AC21, AC22, AC23 |
+| `activities` | AC1, AC2, AC4, AC5, AC6, AC7, AC9, AC10, AC11, AC12, AC14, AC16, AC18, AC19, AC20, AC21, AC22, AC23, AC24 |
 | `forecast` | FS1, FS2, FS4, FS5, FS9, FS10, FS13, FS14, FS15 |
-| `party-lookup` | PL1, PL2, PL3, PL4, PL5 |
+| `party-lookup` | PL1, PL2, PL3, PL4, PL6, PL5 |
 | `term-start` | TS5, TS6 |
 
 Some of these have fallen under a mutant aimed elsewhere — BD1 and BD4 under `M-ST1`, SD28 under
@@ -197,6 +197,6 @@ none: a figure without one describes no tree in particular.
 
 That the suite is adequate. An `OK` here shows that the checks a mutant declares fail for the reason
 they claim, against that one mutation, on the commit it ran against. Most recorded runs predate the
-current tree, and 74 of the 188 checks have no declared mutant. And no mutation run says anything about
+current tree, and 79 of the 202 checks have no declared mutant. And no mutation run says anything about
 behaviour no check covers — for that, see the Explorer specs under `test-harnesses/playwright/specs/`
 (`COVERAGE-MAP.md`).
