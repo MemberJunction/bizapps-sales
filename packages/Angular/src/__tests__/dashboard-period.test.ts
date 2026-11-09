@@ -288,11 +288,39 @@ describe('WithinWindow', () => {
 describe('presentation', () => {
     it('defaults to this quarter — the option the issue asked to land on', () => {
         expect(PERIOD_OPTIONS[0].Key).toBe('quarter');
-        expect(PERIOD_OPTIONS.map((o) => o.Key)).toEqual(['quarter', 'lastquarter', 'year', 'alltime']);
+        expect(PERIOD_OPTIONS.map((o) => o.Key)).toEqual(['quarter', 'lastquarter', 'nextquarter', 'year', 'lastyear', 'alltime', 'custom']);
     });
 
     it('states the bounds a reader would otherwise have to guess at', () => {
-        expect(FormatWindow(ResolvePeriod('quarter', JULY, '2026-08-15'))).toBe('1 Jul 2026 – 30 Sep 2026');
+        expect(FormatWindow(ResolvePeriod('quarter', JULY, '2026-08-15'))).toBe('Jul 1, 2026 – Sep 30, 2026');
         expect(FormatWindow(ResolvePeriod('alltime', JULY, '2026-08-15'))).toBe('all time');
+    });
+});
+
+describe('the periods added with the filter bar (bc-aidp-next-golive#350)', () => {
+    it('next quarter follows this one, across the fiscal year end', () => {
+        expect(ResolvePeriod('nextquarter', JULY, '2026-08-15')).toMatchObject({ Start: '2026-10-01', End: '2026-12-31' });
+        // Q4 of a July year is April-June; the next quarter is the next fiscal year's Q1.
+        expect(ResolvePeriod('nextquarter', JULY, '2027-05-10')).toMatchObject({ Start: '2027-07-01', End: '2027-09-30' });
+    });
+
+    it('last year is the fiscal year before the one today is in', () => {
+        expect(ResolvePeriod('lastyear', JULY, '2027-02-10')).toMatchObject({ Start: '2025-07-01', End: '2026-06-30' });
+        expect(ResolvePeriod('lastyear', JANUARY, '2026-08-09')).toMatchObject({ Start: '2025-01-01', End: '2025-12-31' });
+    });
+
+    it('a custom range takes its two dates, either of which may be open', () => {
+        expect(ResolvePeriod('custom', JULY, '2026-08-15', { Start: '2026-02-01', End: '2026-03-15' }))
+            .toMatchObject({ Key: 'custom', Label: 'Custom range', Start: '2026-02-01', End: '2026-03-15' });
+        expect(ResolvePeriod('custom', JULY, '2026-08-15', { Start: '2026-02-01', End: null }))
+            .toMatchObject({ Start: '2026-02-01', End: null });
+        expect(ResolvePeriod('custom', JULY, '2026-08-15', null)).toMatchObject({ Start: null, End: null });
+    });
+
+    it('reads dates picked the wrong way round as the range they describe, and drops a day that does not exist', () => {
+        expect(ResolvePeriod('custom', JULY, '2026-08-15', { Start: '2026-03-15', End: '2026-02-01' }))
+            .toMatchObject({ Start: '2026-02-01', End: '2026-03-15' });
+        expect(ResolvePeriod('custom', JULY, '2026-08-15', { Start: '2026-02-30', End: 'soon' }))
+            .toMatchObject({ Start: null, End: null });
     });
 });

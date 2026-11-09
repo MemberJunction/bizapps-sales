@@ -1,9 +1,12 @@
 [
   {
+    "_comments": [
+      "Former description, kept as the design note: Wants this to happen and will spend internal capital to make it so. High influence without formal authority — which is why IsDecisionMaker is 0 and InfluenceWeight is high."
+    ],
     "fields": {
       "Code": "CHAMPION",
       "Name": "Champion",
-      "Description": "Wants this to happen and will spend internal capital to make it so. High influence without formal authority — which is why IsDecisionMaker is 0 and InfluenceWeight is high.",
+      "Description": "Wants this to happen and will push for it internally, without the authority to decide.",
       "IsDecisionMaker": false,
       "IsBlocker": false,
       "InfluenceWeight": 80,
@@ -19,10 +22,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Controls the budget and can say yes on their own. The single most important contact to have identified before forecasting a deal as Commit."
+    ],
     "fields": {
       "Code": "ECONBUYER",
       "Name": "Economic Buyer",
-      "Description": "Controls the budget and can say yes on their own. The single most important contact to have identified before forecasting a deal as Commit.",
+      "Description": "Controls the budget and can approve the purchase alone.",
       "IsDecisionMaker": true,
       "IsBlocker": false,
       "InfluenceWeight": 100,
@@ -76,10 +82,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Opposed, or structurally in the way — procurement, security review, an incumbent's advocate. Weighted substantially, because an unmanaged blocker is the most common cause of a Commit deal slipping."
+    ],
     "fields": {
       "Code": "BLOCKER",
       "Name": "Blocker",
-      "Description": "Opposed, or structurally in the way — procurement, security review, an incumbent's advocate. Weighted substantially, because an unmanaged blocker is the most common cause of a Commit deal slipping.",
+      "Description": "Opposed, or in the way: procurement, a security review, or an advocate for the current supplier.",
       "IsDecisionMaker": false,
       "IsBlocker": true,
       "InfluenceWeight": 60,
@@ -95,10 +104,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Will use the product day to day. Low weight on the DECISION, which is not the same as low importance to renewal."
+    ],
     "fields": {
       "Code": "ENDUSER",
       "Name": "End User",
-      "Description": "Will use the product day to day. Low weight on the DECISION, which is not the same as low importance to renewal.",
+      "Description": "Will use the product day to day.",
       "IsDecisionMaker": false,
       "IsBlocker": false,
       "InfluenceWeight": 20,

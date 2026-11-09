@@ -49,14 +49,20 @@ function line(overrides: Partial<FakeLine> = {}): FakeLine {
     };
 }
 
-function deal(lines: FakeLine[], status = 'Draft', orderID: string | null = 'order-1'): DealEntityServer {
-    const order = {
+function deal(
+    lines: FakeLine[],
+    status = 'Draft',
+    orderID: string | null = 'order-1',
+    collection: { IsSaved?: boolean; IsLoaded?: boolean } = {},
+): DealEntityServer {
+    const order = orderID === null && collection.IsSaved === undefined ? null : {
+        IsSaved: collection.IsSaved ?? true,
         Status: status,
         ShipToOrganizationID: null,
         ShipToPersonID: null,
         BillToOrganizationID: ORG,
         BillToPersonID: null,
-        Lines: { Load: vi.fn().mockResolvedValue(undefined), Items: lines },
+        Lines: { Load: vi.fn().mockResolvedValue(undefined), IsLoaded: collection.IsLoaded ?? false, Items: lines },
     };
     return { OrderID: orderID, OrderID_Object: order, OrderID_LoadObject: vi.fn() } as unknown as DealEntityServer;
 }
@@ -96,6 +102,25 @@ describe('FindUnansweredSubscriptionLines', () => {
 
     it('skips a deal with no order', async () => {
         expect(await FindUnansweredSubscriptionLines(deal([line()], 'Draft', null), provider(), user)).toEqual([]);
+    });
+
+    it("reads a new deal's unsaved order from memory, before OrderID is written (#426)", async () => {
+        const d = deal([line()], 'Draft', null, { IsSaved: false });
+        const found = await FindUnansweredSubscriptionLines(d, provider(), user);
+        expect(found).toHaveLength(1);
+        expect(d.OrderID_Object?.Lines.Load).not.toHaveBeenCalled();
+    });
+
+    it('loads a saved order whose lines nothing has loaded yet', async () => {
+        const d = deal([line()]);
+        await FindUnansweredSubscriptionLines(d, provider(), user);
+        expect(d.OrderID_Object?.Lines.Load).toHaveBeenCalledOnce();
+    });
+
+    it("never reloads loaded lines, which would drop edits the deal's save is about to write (#426)", async () => {
+        const d = deal([line({ SubscriptionAction: 'CreateNew' })], 'Draft', 'order-1', { IsLoaded: true });
+        expect(await FindUnansweredSubscriptionLines(d, provider(), user)).toEqual([]);
+        expect(d.OrderID_Object?.Lines.Load).not.toHaveBeenCalled();
     });
 });
 

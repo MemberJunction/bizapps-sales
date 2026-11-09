@@ -27,9 +27,32 @@
  *
  * USAGE  node scripts/seed-demo-lines.mjs        (after scripts/seed-demo-data.sh, and after a build)
  */
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import dotenv from 'dotenv';
 import sql from 'mssql';
 dotenv.config();
+
+/**
+ * SALES-SERVER IS LOADED FROM ITS BUILD, so an unbuilt checkout is said before the database is touched.
+ * The setup guide once seeded before it built, and this step then failed with a generic fallback that
+ * did not name the build (sales#457).
+ */
+function salesServerBuilt() {
+    try {
+        return existsSync(fileURLToPath(import.meta.resolve('@mj-biz-apps/sales-server')));
+    } catch {
+        return false;
+    }
+}
+if (!salesServerBuilt()) {
+    console.error(
+        '\n  @mj-biz-apps/sales-server is not built, so order lines cannot be seeded. Build sales-server and\n' +
+        '  orders-server first (docs/WORKSPACE-SETUP.md §5e), then run: node scripts/seed-demo-lines.mjs\n',
+    );
+    process.exit(2);
+}
 
 const { DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_PASSWORD } = process.env;
 
@@ -62,6 +85,7 @@ try {
 } catch (err) {
     console.error(
         '\n  bizapps-orders is not resolvable from this repo or built beside it, so order lines cannot be seeded.\n' +
+        '  If it is checked out, build orders-server first (docs/WORKSPACE-SETUP.md §5e).\n' +
         '  The deals themselves are already seeded by scripts/seed-demo-data.sh; this step adds the\n' +
         '  lines that make Deal.Amount a computed figure rather than a stated one.\n' +
         `  (${err instanceof Error ? err.message : String(err)})\n`,

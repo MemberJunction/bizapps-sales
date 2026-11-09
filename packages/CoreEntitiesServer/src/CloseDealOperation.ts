@@ -45,6 +45,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { IsBooked } from '@mj-biz-apps/orders-entities';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import {
+    AlreadyWonRefusal,
     SalesCloseDealOperation as SalesCloseDealOperationBase,
     SalesReopenDealOperation as SalesReopenDealOperationBase,
     StubDownstreamSeam,
@@ -62,9 +63,10 @@ import {
 } from '@mj-biz-apps/sales-entities';
 
 import { DealEntityServer } from './DealEntityServer.js';
+import { SendDealScheduleToOrder } from './deal-schedule-to-order.js';
 import { OrdersIsInstalled } from './orders-availability.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
-import { CloseWonTaskDueAt, CloseWonTaskService, ReadCloseWonTaskConfig } from './CloseWonTaskService.js';
+import { CloseWonTaskDueAt, CloseWonTaskService, RaisesOrderReviewTask, ReadCloseWonTaskConfig, WithPipelineAssignee } from './CloseWonTaskService.js';
 import {
     AnswerAsNextTerm,
     FindUnansweredSubscriptionLines,
@@ -85,6 +87,7 @@ const STAGE_ENTITY = 'MJ_BizApps_Sales: Pipeline Stages';
  * log is where the answer to "what stage was this deal in before it closed" already lives.
  */
 const STAGE_EVENT_ENTITY = 'MJ_BizApps_Sales: Deal Stage Events';
+const GUID_SHAPE = /^[0-9a-fA-F-]{36}$/;
 
 /** The behaviour flags a close reads off the target status. Never its name. */
 interface StatusFlags {
@@ -157,6 +160,9 @@ async function readStage(
     provider: IMetadataProvider,
     user: UserInfo,
 ): Promise<ClosingStageRow | null> {
+    if (!GUID_SHAPE.test(stageID)) {
+        return null;
+    }
     const view = provider as unknown as IRunViewProvider;
     const stages = await view.RunView(
         {
@@ -176,7 +182,7 @@ async function readStage(
 
     let isWon = false;
     let isLost = false;
-    if (row.DealStatusTypeID) {
+    if (row.DealStatusTypeID && GUID_SHAPE.test(row.DealStatusTypeID)) {
         const statuses = await view.RunView(
             {
                 EntityName: DEAL_STATUS_ENTITY,
@@ -203,6 +209,17 @@ async function readStage(
 
 function issue(Section: SalesCloseIssue['Section'], Message: string, Field: string | null = null): SalesCloseIssue {
     return { Section, Field, Severity: 'error', Message };
+}
+
+/**
+ * A refusal raised inside the close's transaction. Thrown so the transaction rolls back, and reported
+ * as a plain error issue rather than as "the deal could not be closed: Error: ...".
+ */
+class CloseRefusal extends Error {
+    public constructor(message: string, public readonly Field: string | null = null) {
+        super(message);
+        this.name = 'CloseRefusal';
+    }
 }
 
 /**
@@ -255,9 +272,9 @@ function orderStatusIssues(deal: DealEntityServer): SalesCloseIssue[] {
  *
  * ── WHY THIS EXISTS WHEN `Routing` ALREADY CARRIES THE REASON ───────────────────────────────────
  *
- * It carries it for anyone who reads `Routing`. The workspace does — `deal-workspace.component.html`
- * renders `— not created: {{ r.Reason }}` on a `--failed` row — so a REP closing a deal already sees
- * the refusal and why. That surface is fine and is not what this is for.
+ * It carries it for anyone who reads `Routing`. The deal workspace did (it rendered
+ * `— not created: {{ r.Reason }}` on a failed row; deleted in #291), so a REP closing a deal there saw
+ * the refusal and why. That is not what this is for.
  *
  * The gap is programmatic. An API client, an agent or an importer that checks `Success` and reads
  * `Issues` — the two fields every other failure mode in this operation reports through — sees
@@ -429,9 +446,12 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
 
             const target = await this.loadStatusFlags(input.DealStatusTypeID, provider, user);
             if (!target) {
+                const message = !GUID_SHAPE.test(input.DealStatusTypeID)
+                    ? 'Deal status is not a valid ID.'
+                    : `The chosen status (ID ${input.DealStatusTypeID}) was not found. Refresh the page and pick the status again.`;
                 return {
                     ...empty,
-                    Issues: [issue('deal', `The chosen status (ID ${input.DealStatusTypeID}) was not found. Refresh the page and pick the status again.`, 'DealStatusTypeID')],
+                    Issues: [issue('deal', message, 'DealStatusTypeID')],
                 };
             }
 
@@ -440,6 +460,13 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 ? await this.loadStatusFlags(deal.DealStatusTypeID, provider, user)
                 : null;
             if (current?.LocksDeal) {
+                if (current.IsWon) {
+                    const contractNumber = await this.readContractNumber(deal.ContractID, provider, user);
+                    return {
+                        ...empty,
+                        Issues: [issue('deal', AlreadyWonRefusal(deal.DealNumber || deal.Name, contractNumber))],
+                    };
+                }
                 return {
                     ...empty,
                     Issues: [
@@ -544,8 +571,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             // Before the deal's save, which is what confirms the order and applies the answer.
             await AnswerAsNextTerm(validation.RenewalNextTerm);
 
+            const routeIssues: SalesCloseIssue[] = [];
             for (const plan of routing) {
-                await this.execute(plan, deal, policy, provider, user);
+                routeIssues.push(...(await this.execute(plan, deal, policy, provider, user)));
             }
 
             /**
@@ -576,11 +604,33 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 validation.LossReasonName,
             );
 
+            /**
+             * THE DEAL'S PAYMENT SCHEDULE GOES ONTO ITS ORDER (bc-aidp-next-golive#290).
+             *
+             * BEFORE the deal's save when the order already exists, because that save is what tells
+             * the order about the closing stage: a pipeline whose won stage moves the order further
+             * would otherwise do so with no schedule on it. A deal whose order is provisioned by the
+             * save itself is sent after it. Orders refusing (an incomplete row, rows that do not tie
+             * to the order) refuses the close, in orders' words: a deal must not win with a schedule
+             * its order cannot bill. A deal with no rows leaves the order's own schedule alone.
+             */
+            const orderBeforeSave = deal.OrderID ? String(deal.OrderID) : null;
+            const scheduleNotes: SalesCloseIssue[] = [];
+            const noteSchedule = (note: string | null): void => {
+                if (note) scheduleNotes.push({ Section: 'deal', Field: null, Severity: 'info', Message: note });
+            };
+            if (target.IsWon && orderBeforeSave) {
+                noteSchedule(await this.sendScheduleToOrder(deal.ID, orderBeforeSave, provider, user));
+            }
+
             // The close stamps are writable only inside this call (#252); every other save refuses them.
             if (!(await deal.BeginClose(() => deal.Save()))) {
                 throw new Error(
                     `The deal save failed: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
                 );
+            }
+            if (target.IsWon && !orderBeforeSave && deal.OrderID) {
+                noteSchedule(await this.sendScheduleToOrder(deal.ID, String(deal.OrderID), provider, user));
             }
 
             // The save appended the close's `DealStageEvent` — one row, whether or not the stage moved.
@@ -659,7 +709,12 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                         DealName: deal.Name?.trim() || deal.DealNumber || deal.ID,
                         // Read AFTER the save: provisioning happens inside it. See the note above.
                         OrderID: String(deal.OrderID ?? ''),
-                        PipelineID: deal.PipelineID,
+                        /**
+                         * The EFFECTIVE policy's answer, overrides applied, which is the same one
+                         * `planRouting` used to decide the contract (#354). The service used to re-read
+                         * the pipeline's raw policy, so an override split the task from the contract.
+                         */
+                        CreateContract: policy.CreateContract === true,
                         // Set by the routing loop above. Omitting it is what made the contract task link
                         // the deal, and made the service's own fallback message unreachable.
                         ContractID: deal.ContractID ?? undefined,
@@ -687,6 +742,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                                   RoleID: cfg.AssigneeRoleID ?? undefined,
                               }
                             : undefined,
+                        // Off only where the policy says `false` (golive#320 §5); absent keeps the task.
+                        RaiseOrderReviewTask: RaisesOrderReviewTask(cfg),
                     },
                     provider,
                     user,
@@ -719,7 +776,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                  */
                 Issues: [
                     ...closing.Issues,
+                    ...routeIssues,
                     ...taskIssues,
+                    ...scheduleNotes,
                     ...linkIssues,
                     ...orderStatusIssues(deal),
                     ...routingIssues(routing, false),
@@ -741,9 +800,24 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                     LogError(`Sales.CloseDeal: rollback failed: ${rollbackErr}`);
                 }
             }
+            if (err instanceof CloseRefusal) {
+                return { ...empty, Issues: [issue('deal', err.message, err.Field)] };
+            }
             LogError(`Sales.CloseDeal failed: ${err}`);
             return { ...empty, Issues: [issue('deal', `The deal could not be closed: ${err instanceof Error ? err.message : String(err)}`)] };
         }
+    }
+
+    /**
+     * Send the deal's schedule to its order at Close Won; throw orders' refusal so the close rolls back.
+     * Returns a note for the close's issues when the schedule was deliberately left on the deal.
+     */
+    private async sendScheduleToOrder(dealID: string, orderID: string, provider: IMetadataProvider, user: UserInfo): Promise<string | null> {
+        const outcome = await SendDealScheduleToOrder(dealID, orderID, provider, user, true);
+        if (outcome.Kind === 'Hard' || outcome.Kind === 'Soft') {
+            throw new Error(`its payment schedule could not be put on the order: ${outcome.Message}`);
+        }
+        return outcome.Kind === 'Skipped' ? (outcome.Note ?? null) : null;
     }
 
     /* ── Validation (§7.2 step 1–2) ─────────────────────────────────────────── */
@@ -764,10 +838,25 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         const issues: SalesCloseIssue[] = [];
         let lossReasonName: string | null = null;
 
+        if (input.ClosingStageID && !GUID_SHAPE.test(input.ClosingStageID)) {
+            issues.push(issue('deal', 'Closing stage is not a valid ID.', 'ClosingStageID'));
+        }
+
         if (target.IsLost) {
-            const lossReasonID = input.LossReasonID ?? deal.LossReasonID;
+            /**
+             * THE CALLER'S REASON, NEVER THE ONE THE ROW HAPPENS TO CARRY (#400).
+             *
+             * `LossReasonID` and `LossNotes` are ordinary fields on an OPEN deal, so a reason typed
+             * weeks ago, or left from an earlier close, used to satisfy this check for a caller who
+             * chose nothing. The close runs only from an open status (a locked one is refused above),
+             * so the row's values never describe THIS loss. A caller that means the stored values
+             * passes them, as the status-field trigger in `DealEntityServer` does.
+             */
+            const lossReasonID = input.LossReasonID ?? null;
             if (!lossReasonID) {
                 issues.push(issue('deal', 'A loss reason is required to close a deal as lost.', 'LossReasonID'));
+            } else if (!GUID_SHAPE.test(lossReasonID)) {
+                issues.push(issue('deal', 'Loss reason is not a valid ID.', 'LossReasonID'));
             } else {
                 /**
                  * `RequiresNotes` decides; `Name` is carried out for the close event's note and decides
@@ -776,8 +865,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                  * method already fetches is what keeps `stampClose` from needing a lookup of its own.
                  *
                  * It is read HERE rather than from `deal.LossReason` because the id being closed with is
-                 * `input.LossReasonID ?? deal.LossReasonID`: when the caller supplies one, the
-                 * denormalized name still describes the reason the deal used to carry, not this one.
+                 * the caller's: the denormalized name describes whatever reason the deal used to carry,
+                 * not this one.
                  */
                 const view = provider as unknown as IRunViewProvider;
                 const r = await view.RunView(
@@ -790,12 +879,18 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                     user,
                 );
                 const row = (r.Results ?? [])[0] as { RequiresNotes?: boolean; Name?: string } | undefined;
-                const notes = input.LossNotes ?? deal.LossNotes;
-                if (r.Success && row?.RequiresNotes === true && !notes?.trim()) {
-                    issues.push(issue('deal', 'This loss reason requires notes explaining the loss.', 'LossNotes'));
+                if (!r.Success) {
+                    issues.push(issue('deal', 'Loss reason could not be read.', 'LossReasonID'));
+                } else if (!row) {
+                    issues.push(issue('deal', `Loss reason ${lossReasonID} was not found.`, 'LossReasonID'));
+                } else {
+                    const notes = input.LossNotes ?? null;
+                    if (row.RequiresNotes === true && !notes?.trim()) {
+                        issues.push(issue('deal', 'This loss reason requires notes explaining the loss.', 'LossNotes'));
+                    }
+                    // The id is the fallback: an id in an audit note is recoverable by hand, a blank is not.
+                    lossReasonName = row.Name?.trim() || `reason ${lossReasonID}`;
                 }
-                // The id is the fallback: an id in an audit note is recoverable by hand, a blank is not.
-                lossReasonName = row?.Name?.trim() || `reason ${lossReasonID}`;
             }
         }
 
@@ -829,8 +924,15 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         if (unanswered.length === 0) {
             return { Issues: [], RenewalNextTerm: [] };
         }
-        if (await this.dealTypeRequiresRenewalSource(deal.DealTypeID, provider, user)) {
-            return { Issues: [], RenewalNextTerm: unanswered };
+        try {
+            if (await this.dealTypeRequiresRenewalSource(deal.DealTypeID, provider, user)) {
+                return { Issues: [], RenewalNextTerm: unanswered };
+            }
+        } catch (err) {
+            if (err instanceof CloseRefusal) {
+                return { Issues: [issue('deal', err.message, err.Field)], RenewalNextTerm: [] };
+            }
+            throw err;
         }
         return { Issues: unanswered.map(SubscriptionChoiceIssue), RenewalNextTerm: [] };
     }
@@ -852,23 +954,33 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
     ): Promise<SalesCloseWonPolicy> {
         let fromPipeline: SalesCloseWonPolicy = {};
 
-        const view = provider as unknown as IRunViewProvider;
-        const r = await view.RunView(
-            {
-                EntityName: PIPELINE_ENTITY,
-                ExtraFilter: `ID = '${deal.PipelineID}'`,
-                ResultType: 'simple',
-                Fields: ['CloseWonPolicy'],
-            },
-            user,
-        );
-        const raw = ((r.Results ?? [])[0] as { CloseWonPolicy?: string } | undefined)?.CloseWonPolicy;
-        if (r.Success && raw) {
-            try {
-                fromPipeline = JSON.parse(raw) as SalesCloseWonPolicy;
-            } catch {
-                LogError(`Sales.CloseDeal: pipeline ${deal.PipelineID} has unparseable CloseWonPolicy; using defaults`);
+        if (deal.PipelineID) {
+            if (!GUID_SHAPE.test(deal.PipelineID)) {
+                throw new CloseRefusal('Pipeline is not a valid ID.', 'PipelineID');
             }
+            const view = provider as unknown as IRunViewProvider;
+            const r = await view.RunView(
+                {
+                    EntityName: PIPELINE_ENTITY,
+                    ExtraFilter: `ID = '${deal.PipelineID}'`,
+                    ResultType: 'simple',
+                    Fields: ['CloseWonPolicy', 'CloseWonAssigneePersonID'],
+                },
+                user,
+            );
+            const row = (r.Results ?? [])[0] as
+                | { CloseWonPolicy?: string | null; CloseWonAssigneePersonID?: string | null }
+                | undefined;
+            const raw = row?.CloseWonPolicy;
+            if (r.Success && raw) {
+                try {
+                    fromPipeline = JSON.parse(raw) as SalesCloseWonPolicy;
+                } catch {
+                    LogError(`Sales.CloseDeal: pipeline ${deal.PipelineID} has unparseable CloseWonPolicy; using defaults`);
+                }
+            }
+            // The pipeline's assignee column outranks the assignee in its JSON; see WithPipelineAssignee.
+            fromPipeline = WithPipelineAssignee(fromPipeline, r.Success ? row?.CloseWonAssigneePersonID : null);
         }
 
         return { ...POLICY_DEFAULTS, ...fromPipeline, ...(input.PolicyOverrides ?? {}) };
@@ -917,17 +1029,25 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         return plans;
     }
 
-    /** Attempt one planned route through the seam, recording honestly whether it executed. */
+    /**
+     * Attempt one planned route through the seam, recording honestly whether it executed.
+     *
+     * @returns notes and warnings the route raised beyond its own `Routing` entry.
+     */
     private async execute(
         plan: SalesCloseRoutingResult,
         deal: DealEntityServer,
         policy: SalesCloseWonPolicy,
         provider: IMetadataProvider,
         user: UserInfo,
-    ): Promise<void> {
+    ): Promise<SalesCloseIssue[]> {
         const seam = resolveSeam(user, provider);
 
         if (plan.Target === 'Contract') {
+            // A deal that already names a contract reuses it, before either door below (#278).
+            if (deal.ContractID) {
+                return this.reuseContract(plan, deal, policy, provider, user, seam);
+            }
             // A renewal takes a different door: RenewTerm against the contract being renewed, not a
             // new agreement. Decided by DealType.RequiresRenewalSource — a flag, not a type name.
             const isRenewal = await this.dealTypeRequiresRenewalSource(deal.DealTypeID, provider, user);
@@ -946,12 +1066,67 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 // §7.2 step 4: stamp the agreement onto the deal.
                 deal.ContractID = result.ContractID;
             }
-            return;
+            return [];
         }
 
 
         // Subscription materialization has no seam at all yet; the plan already carries its reason.
         plan.Executed = false;
+        return [];
+    }
+
+    /**
+     * The contract route for a deal that already names a contract: closed Won, reopened, closed Won
+     * again (#278).
+     *
+     * Creating a second contract here is what orphaned the first: the deal's `ContractID` was
+     * overwritten and nothing pointed back at the original. So the deal's own contract is reused, and
+     * `ContractID` never changes. The seam refreshes it from the deal while it is unsigned and leaves it
+     * alone once signed; a signed contract comes back as a warning that the deal and the paper may
+     * differ.
+     *
+     * A contract the deal names but nobody can read REFUSES the close, the same way an unreadable
+     * current status does above: creating a new one would orphan it, and stamping it as reused would
+     * claim a record nobody has seen. The refusal is thrown so the transaction rolls back; the catch in
+     * `InternalExecute` turns it into an ordinary error issue.
+     */
+    private async reuseContract(
+        plan: SalesCloseRoutingResult,
+        deal: DealEntityServer,
+        policy: SalesCloseWonPolicy,
+        provider: IMetadataProvider,
+        user: UserInfo,
+        seam: IDownstreamSeam,
+    ): Promise<SalesCloseIssue[]> {
+        const contractID = String(deal.ContractID);
+        const result = await seam.UpdateContractFromDeal({
+            ...(await this.buildContractInput(deal, policy, provider, user)),
+            ContractID: contractID,
+        });
+        if (result.Unreadable) {
+            throw new CloseRefusal(result.Message ?? `Contract ${contractID} could not be read.`, 'ContractID');
+        }
+
+        plan.Executed = result.Success === true;
+        plan.RecordID = result.Success ? contractID : null;
+        plan.Reason = result.Success ? null : result.Message ?? 'not executed';
+        if (!result.Success) {
+            return [];   // reported through `routingIssues`, like any route that did not execute
+        }
+
+        const number = result.ContractNumber || contractID;
+        const issues: SalesCloseIssue[] = [
+            { Section: 'deal', Field: 'ContractID', Severity: 'info', Message: `Reused contract ${number}.` },
+        ];
+        if (result.Signed) {
+            issues.push({
+                Section: 'deal',
+                Field: 'ContractID',
+                Severity: 'warning',
+                Message: result.Message ?? `Contract ${number} is signed and was not changed; the deal may differ from it.`,
+            });
+        }
+        return issues;
     }
 
     /**
@@ -960,7 +1135,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
      * ── THE MIRROR OF `closeEventBeingUndone`, AND THE OTHER HALF OF DN-18 ───────────────────────
      *
      * `CD18` proves a reopen restores the stage the deal came from. It could not help a deal closed
-     * through the browser, because `DealWorkspaceComponent.ConfirmClose()` sends no `ClosingStageID` — so
+     * through the browser, because the deal workspace's `ConfirmClose()` sent no `ClosingStageID` — so
      * no browser-driven close ever moved the stage, every close event recorded
      * `FromStageID === ToStageID`, and the reopen correctly derived the stage the deal was already in.
      * The mechanism was right and the UI could not reach it. `71-lost-and-reopen` is the spec that names
@@ -993,7 +1168,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<string | null> {
-        if (!pipelineID || (!target.IsWon && !target.IsLost)) {
+        if (!pipelineID || !GUID_SHAPE.test(pipelineID) || (!target.IsWon && !target.IsLost)) {
             return null;   // an outcome that is neither won nor lost names no stage
         }
         const view = provider as unknown as IRunViewProvider;
@@ -1255,6 +1430,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<StatusFlags | null> {
+        if (!GUID_SHAPE.test(statusID)) {
+            return null;
+        }
         const view = provider as unknown as IRunViewProvider;
         const r = await view.RunView(
             {
@@ -1290,6 +1468,9 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         if (!dealTypeID) {
             return false;
         }
+        if (!GUID_SHAPE.test(dealTypeID)) {
+            throw new CloseRefusal('Deal type is not a valid ID.', 'DealTypeID');
+        }
         const view = provider as unknown as IRunViewProvider;
         const r = await view.RunView(
             {
@@ -1301,7 +1482,10 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             user,
         );
         const row = (r.Results ?? [])[0] as { RequiresRenewalSource?: boolean } | undefined;
-        return r.Success && row?.RequiresRenewalSource === true;
+        if (!r.Success || !row) {
+            throw new CloseRefusal('Deal type could not be read.', 'DealTypeID');
+        }
+        return row.RequiresRenewalSource === true;
     }
 
     private async buildContractInput(
@@ -1359,6 +1543,33 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
              */
         };
     }
+
+    private async readContractNumber(
+        contractID: string | null | undefined,
+        provider: IMetadataProvider,
+        user: UserInfo,
+    ): Promise<string | null> {
+        if (!contractID || !GUID_SHAPE.test(String(contractID))) {
+            return null;
+        }
+        try {
+            const rv = provider as unknown as IRunViewProvider | undefined;
+            if (!rv?.RunView) return null;
+            const result = await rv.RunView<{ ContractNumber: string | null }>(
+                {
+                    EntityName: 'MJ_BizApps_Contracts: Contracts',
+                    ExtraFilter: `ID = '${contractID}'`,
+                    ResultType: 'simple',
+                    Fields: ['ContractNumber'],
+                },
+                user,
+            );
+            if (!result?.Success) return null;
+            return (result.Results ?? [])[0]?.ContractNumber ?? null;
+        } catch {
+            return null;
+        }
+    }
 }
 
 /**
@@ -1382,6 +1593,12 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
         // §7.3 makes this mandatory: undoing a lock has to be explainable.
         if (!input.Reason?.trim()) {
             return { ...empty, Issues: [issue('deal', 'A reason is required to reopen a closed deal.', 'Reason')] };
+        }
+        if (input.StageID && !GUID_SHAPE.test(input.StageID)) {
+            return { ...empty, Issues: [issue('deal', 'Stage is not a valid ID.', 'StageID')] };
+        }
+        if (input.DealStatusTypeID && !GUID_SHAPE.test(input.DealStatusTypeID)) {
+            return { ...empty, Issues: [issue('deal', 'Deal status is not a valid ID.', 'DealStatusTypeID')] };
         }
 
         const db = provider as unknown as DatabaseProviderBase;
@@ -1466,10 +1683,9 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * when the peer is not. FK set + peer unresolved is not "no order" — it is "unknown
              * order", and an unknown ledger state cannot be certified safe to reopen.
              *
-             * THE SIBLING CALL SITE ALREADY DECIDED THIS. `DealWorkspaceService.LoadDeal` treats the same
-             * state as a hard failure and refuses to render, on the reasoning that a deal with an
-             * unreadable order must not be shown as a deal with no lines. Two files reading one state and
-             * returning opposite verdicts is the defect; this makes them agree.
+             * THE SAME VERDICT THE DEAL WORKSPACE'S LOADER REACHED (deleted in #291): it treated this
+             * state as a hard failure and refused to render, on the reasoning that a deal with an
+             * unreadable order must not be shown as a deal with no lines.
              */
             if (deal.OrderID && !deal.OrderID_Object) {
                 return {
@@ -1534,11 +1750,16 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * stage where it was, so this resolves to the stage the deal is already in and nothing fires.
              */
             const undone = await this.closeEventBeingUndone(deal.ID, provider, user);
-            const landingStage = input.StageID ?? undone?.FromStageID ?? null;
-            const stageMoves =
-                !!landingStage && landingStage.toLowerCase() !== (deal.PipelineStageID ?? '').toLowerCase();
+            const landing = this.reopenLanding(input.StageID ?? null, undone, deal.PipelineStageID ?? null);
+            const landingStage = landing.StageID;
+            const stageMoves = landing.StageMoves;
             if (landingStage) {
                 deal.PipelineStageID = landingStage;
+            } else if (landing.ClearsStage) {
+                deal.PipelineStageID = null;
+                // The stageless deal took the closing stage's category at the close, and the event keeps
+                // no prior one. "Closed" on an open deal is wrong in every case, so it is cleared.
+                deal.ForecastCategoryTypeID = null;
             }
 
             /**
@@ -1549,13 +1770,11 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * The category is only taken when the stage actually moves; a deal that stays where it is
              * keeps the category it has.
              */
-            if (undone && undone.ProbabilityAtTransition !== null) {
-                deal.Probability = undone.ProbabilityAtTransition;
-            }
+            deal.Probability = this.reopenProbability(undone, deal.Probability ?? null);
             if (stageMoves && landingStage) {
-                const landing = await readStage(landingStage, provider, user);
-                if (landing?.ForecastCategoryTypeID) {
-                    deal.ForecastCategoryTypeID = landing.ForecastCategoryTypeID;
+                const landingRow = await readStage(landingStage, provider, user);
+                if (landingRow?.ForecastCategoryTypeID) {
+                    deal.ForecastCategoryTypeID = landingRow.ForecastCategoryTypeID;
                 }
             }
             // The close stamps describe a close that is no longer in effect; clearing them keeps every
@@ -1564,6 +1783,8 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             deal.ClosedAt = null;
             deal.ClosedByUserID = null;
             deal.ActualCloseDate = null;
+            // `ContractID` stays on the deal on purpose: the next close reuses that contract and decides
+            // whether to refresh it (#278).
 
             /**
              * THE LOSS REASON IS A CLOSE STAMP TOO, and leaving it behind was not harmless
@@ -1571,7 +1792,7 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              *
              * It stayed set on a REOPENED deal, which is wrong twice over. The form shows "LOSS REASON"
              * on a deal that is Open -- a deal that has not been lost does not have a reason for being
-             * lost. And `validateClose` reads `input.LossReasonID ?? deal.LossReasonID`, so the stale
+             * lost. And `validateClose` then read `input.LossReasonID ?? deal.LossReasonID`, so the stale
              * value SATISFIED the next close: measured on this host, a deal closed Lost with a reason,
              * reopened, then closed Lost again supplying NO reason succeeded silently and re-used
              * `Price`. golive#205 asks that "Lost should require a loss reason" and `close-deal.CD8`
@@ -1598,12 +1819,9 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
              * this would then null it -- leaving the text only in an event the rep never sees. Two
              * correct changes combining into the silent loss both were written against.
              *
-             * The bypass argument does not rescue it either. `validate()` reads
-             * `input.LossNotes ?? deal.LossNotes`, so a stale note can satisfy a `RequiresNotes`
-             * reason -- but that is the SAME `??` fallback as the reason's, and clearing on reopen
-             * closes one route into a fallback rather than the fallback. It is ticketed separately and
-             * fixes both halves; clearing here would cost a rep their text and buy a partial fix of
-             * something already scheduled.
+             * The bypass argument does not rescue it either. `validate()` reads the caller's
+             * `LossNotes` only (#400), so a stale note on the row cannot satisfy a `RequiresNotes`
+             * reason; clearing here would cost a rep their text and buy nothing.
              *
              * The reason earned its clearing on evidence -- a measured, silent validation bypass on a
              * field a rep cannot correct by hand because it is frozen. Free text they can overwrite is
@@ -1661,6 +1879,9 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<{ ID: string; LocksDeal: boolean } | null> {
+        if (!GUID_SHAPE.test(statusID)) {
+            return null;
+        }
         const view = provider as unknown as IRunViewProvider;
         const r = await view.RunView(
             {
@@ -1726,6 +1947,9 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<{ FromStageID: string | null; ProbabilityAtTransition: number | null } | null> {
+        if (!dealID || !GUID_SHAPE.test(dealID)) {
+            return null;
+        }
         const view = provider as unknown as IRunViewProvider;
 
         const locking = await view.RunView(
@@ -1771,6 +1995,43 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             FromStageID: row.FromStageID ? String(row.FromStageID) : null,
             ProbabilityAtTransition: row.ProbabilityAtTransition ?? null,
         };
+    }
+
+    /**
+     * Where a reopened deal lands: the stage the caller named, else the stage the close event left.
+     *
+     * A close event whose `FromStageID` is NULL records a deal that had NO stage before the close; the
+     * close moved it into the outcome's stage. That is told apart from "no close event found" (`undone`
+     * null), and the reopen clears the stage so the deal goes back to "No stage set" rather than staying
+     * open in the closing stage.
+     */
+    private reopenLanding(
+        requestedStageID: string | null,
+        undone: { FromStageID: string | null } | null,
+        currentStageID: string | null,
+    ): { StageID: string | null; StageMoves: boolean; ClearsStage: boolean } {
+        const stageID = requestedStageID ?? undone?.FromStageID ?? null;
+        if (stageID) {
+            return {
+                StageID: stageID,
+                StageMoves: stageID.toLowerCase() !== (currentStageID ?? '').toLowerCase(),
+                ClearsStage: false,
+            };
+        }
+        const clears = !!undone && !!currentStageID;
+        return { StageID: null, StageMoves: clears, ClearsStage: clears };
+    }
+
+    /**
+     * The probability a reopened deal takes: the close event's pre-close stamp, NULL included, so a deal
+     * that had no probability before the close goes back to none rather than keeping the close's 100 or
+     * 0 (#275). With no close event found there is nothing to restore, and the deal keeps what it has.
+     */
+    private reopenProbability(
+        undone: { ProbabilityAtTransition: number | null } | null,
+        currentProbability: number | null,
+    ): number | null {
+        return undone ? undone.ProbabilityAtTransition : currentProbability;
     }
 
     /** The default landing status — chosen by the `IsOpen` FLAG, never by a status name. */

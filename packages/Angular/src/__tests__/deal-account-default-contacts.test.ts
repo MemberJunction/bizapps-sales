@@ -2,14 +2,13 @@ import '@angular/compiler';
 import { describe, expect, it } from 'vitest';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import { MJSDealPartyPanel, MJSDealPipelinePanel } from '../lib/form-panels/deal-form.panels';
-import { DealWorkspaceComponent } from '../lib/workspace/deal-workspace.component';
 import { ContactOptionLabel } from '../lib/workspace/deal-workspace.service';
 
 /**
- * CHOOSING AN ACCOUNT FILLS THE DEAL'S EMPTY CONTACTS FROM IT (#254), on both surfaces.
+ * CHOOSING AN ACCOUNT FILLS THE DEAL'S EMPTY CONTACTS FROM IT (#254), on the deal form.
  *
  * The rule itself is pinned in sales-entities (`account-contact-defaults.test.ts`). These check the
- * wiring: each surface calls the fill when the ACCOUNT changes and only then, redraws the contacts
+ * wiring: each panel calls the fill when the ACCOUNT changes and only then, redraws the contacts
  * after a fill, and reports a failed read instead of dropping it.
  */
 
@@ -72,43 +71,6 @@ describe('deal form: the account field fills the contacts', () => {
             expect(panel.AccountDefaultsError()).toBe("The account's default contacts were not filled in: read failed");
         });
     }
-});
-
-describe('deal workspace: the customer field fills the contacts', () => {
-    function workspace(): {
-        c: DealWorkspaceComponent;
-        touches: () => number;
-        message: () => string;
-    } {
-        let touches = 0;
-        const c = Object.create(DealWorkspaceComponent.prototype) as DealWorkspaceComponent;
-        const fields = c as unknown as {
-            Touch: () => void;
-            cdr: { detectChanges: () => void };
-            Message: string;
-            MessageIsError: boolean;
-        };
-        fields.Touch = () => {
-            touches++;
-        };
-        fields.cdr = { detectChanges: () => undefined };
-        fields.Message = '';
-        return { c, touches: () => touches, message: () => fields.Message };
-    }
-
-    it('fills and marks the deal changed again after a fill', async () => {
-        const { c, touches } = workspace();
-        const deal = dealStub(['BillingContactID']);
-        await c.OnAccountChange(deal);
-        expect(deal.Fills).toBe(1);
-        expect(touches()).toBe(2);
-    });
-
-    it('reports a failed read', async () => {
-        const { c, message } = workspace();
-        await c.OnAccountChange(dealStub(new Error('read failed')));
-        expect(message()).toBe("The account's default contacts were not filled in: read failed");
-    });
 });
 
 describe('ContactOptionLabel', () => {

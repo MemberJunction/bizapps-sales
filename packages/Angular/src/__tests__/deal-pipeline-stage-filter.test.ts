@@ -37,12 +37,17 @@ const LEGACY = 'p-legacy';
 const HOME = 'c-home';
 const OTHER = 'c-other';
 const OTHER_B2B = 'p-other-b2b';
+/** Retired: deactivated, so only a deal already in it may still name it (bc-aidp-next-golive#423). */
+const RETIRED = 'p-retired';
+/** A company whose only pipeline is retired. */
+const LEGACY_CO = 'c-legacy';
 
 const PIPELINES: PipelineOption[] = [
-    { ID: B2B, Name: 'B2B', Code: 'B2B', CompanyID: HOME, CompanyName: 'Home', IsDefault: true, DisplayRank: 10 },
-    { ID: D2C, Name: 'D2C', Code: 'D2C', CompanyID: HOME, CompanyName: 'Home', IsDefault: false, DisplayRank: 20 },
-    { ID: LEGACY, Name: 'Sidecar Legacy Pipeline', Code: 'LEGACY', CompanyID: HOME, CompanyName: 'Home', IsDefault: false, DisplayRank: 30 },
-    { ID: OTHER_B2B, Name: 'B2B', Code: 'B2B', CompanyID: OTHER, CompanyName: 'Other', IsDefault: false, DisplayRank: 10 },
+    { ID: B2B, Name: 'B2B', Code: 'B2B', CompanyID: HOME, CompanyName: 'Home', IsDefault: true, DisplayRank: 10, IsActive: true, LinkIsActive: true },
+    { ID: D2C, Name: 'D2C', Code: 'D2C', CompanyID: HOME, CompanyName: 'Home', IsDefault: false, DisplayRank: 20, IsActive: true, LinkIsActive: true },
+    { ID: LEGACY, Name: 'Sidecar Legacy Pipeline', Code: 'LEGACY', CompanyID: HOME, CompanyName: 'Home', IsDefault: false, DisplayRank: 30, IsActive: true, LinkIsActive: true },
+    { ID: OTHER_B2B, Name: 'B2B', Code: 'B2B', CompanyID: OTHER, CompanyName: 'Other', IsDefault: false, DisplayRank: 10, IsActive: true, LinkIsActive: true },
+    { ID: RETIRED, Name: 'Legacy', Code: 'LEG', CompanyID: LEGACY_CO, CompanyName: 'Legacy Co', IsDefault: false, DisplayRank: 10, IsActive: false, LinkIsActive: true },
 ];
 
 const STAGES: PipelineStageOption[] = [
@@ -54,15 +59,26 @@ const STAGES: PipelineStageOption[] = [
     { ID: 's-develop', Name: 'Develop', PipelineID: LEGACY },
 ];
 
-function panelWith(pipelineID: string | null, stageID: string | null = null, isSaved = true) {
+/** The company of each single-company pipeline above, so a saved deal carries the company it was saved with. */
+function companyOf(pipelineID: string | null): string | null {
+    return PIPELINES.find((p) => p.ID === pipelineID?.toLowerCase())?.CompanyID ?? null;
+}
+
+function panelWith(
+    pipelineID: string | null,
+    stageID: string | null = null,
+    isSaved = true,
+    companyID: string | null = isSaved ? companyOf(pipelineID) : null,
+    pipelines: PipelineOption[] = PIPELINES,
+) {
     const panel = new MJSDealPipelinePanel();
     Object.defineProperty(panel, 'Record', {
-        value: { PipelineID: pipelineID, PipelineStageID: stageID, IsSaved: isSaved } as unknown as DealEntity,
+        value: { PipelineID: pipelineID, PipelineStageID: stageID, CompanyID: companyID, IsSaved: isSaved } as unknown as DealEntity,
         configurable: true,
         writable: true,
     });
     // The loaded lists, as ngOnInit would have left them.
-    (panel as unknown as { pipelines: { set(v: PipelineOption[]): void } }).pipelines.set(PIPELINES);
+    (panel as unknown as { pipelines: { set(v: PipelineOption[]): void } }).pipelines.set(pipelines);
     (panel as unknown as { stages: { set(v: PipelineStageOption[]): void } }).stages.set(STAGES);
     return panel;
 }
@@ -128,15 +144,27 @@ describe('changing the pipeline', () => {
     });
 
     /**
-     * The form does NOT write CompanyID, unlike the workspace's SelectPipeline. `DealEntityServer`
-     * forces it from the pipeline on every save, ignoring whatever a caller supplies, so writing it
-     * here would state something this form has no standing to know.
+     * The deal's company is the rep's choice, made with Company. A pipeline pick keeps it: the picker
+     * only offers the chosen company's pipelines, and `DealEntityServer` refuses a mismatch.
      */
-    it('leaves CompanyID alone — the server owns it', () => {
+    it('keeps a company the deal already has', () => {
         const panel = panelWith(D2C, 's-intro');
-        (panel.Record as unknown as { CompanyID: string | null }).CompanyID = 'company-original';
         panel.SetPipeline(B2B);
-        expect((panel.Record as unknown as { CompanyID: string | null }).CompanyID).toBe('company-original');
+        expect(panel.Record.CompanyID).toBe(HOME);
+    });
+
+    /** The Company picker is hidden when one company has every pipeline, so nothing else would fill it. */
+    it('fills an empty CompanyID with the selected company the pipeline serves', () => {
+        const panel = panelWith(null, null, false);
+        expect(panel.Record.CompanyID).toBeNull();
+        panel.SetPipeline(D2C);
+        expect(panel.Record.CompanyID).toBe(HOME);
+    });
+
+    it('does not fill an empty CompanyID with a company the pipeline does not serve', () => {
+        const panel = panelWith(null, null, false);
+        panel.SetPipeline(OTHER_B2B);
+        expect(panel.Record.CompanyID).toBeNull();
     });
 });
 
@@ -191,8 +219,9 @@ describe('the template uses the dedicated controls', () => {
 });
 
 /**
- * #327: the Company control narrows the Pipeline list, and choosing a company moves the deal to that
- * company's first pipeline through the same path a pipeline pick takes, so a stale stage is cleared.
+ * #327: the Company control writes the deal's company and narrows the Pipeline list. Choosing a company
+ * the current pipeline does not serve moves the deal to that company's first pipeline through the same
+ * path a pipeline pick takes, so a stale stage is cleared.
  */
 describe('the company filter over the pipeline list', () => {
     it('offers the deal\'s own company\'s pipelines, each labelled with its company', () => {
@@ -211,14 +240,93 @@ describe('the company filter over the pipeline list', () => {
         expect(panelWith(B2B).CompanyOptions.map((c) => c.CompanyID)).toEqual([HOME, OTHER]);
     });
 
-    it('moves the deal to the company\'s first pipeline and clears the old stage', () => {
+    it('writes the deal\'s company, moves it to the company\'s first pipeline and clears the old stage', () => {
         const panel = panelWith(B2B, 's-qual');
         panel.SetCompany(OTHER);
+        expect(panel.Record?.CompanyID).toBe(OTHER);
         expect(panel.Record?.PipelineID).toBe(OTHER_B2B);
         expect(panel.Record?.PipelineStageID).toBeNull();
     });
 
+    it('opens on the deal\'s company, not on one its pipeline also serves', () => {
+        expect(panelWith(OTHER_B2B, null, true, OTHER).SelectedCompanyID).toBe(OTHER);
+    });
+
     it('reads the current pipeline with its company when not editing', () => {
         expect(panelWith(OTHER_B2B).CurrentPipelineName).toBe('B2B (Other)');
+    });
+});
+
+describe('an inactive pipeline is shown only on the deal already in it (bc-aidp-next-golive#423)', () => {
+    it('is not offered to a deal in another pipeline', () => {
+        const panel = panelWith(B2B);
+        expect(panel.CompanyOptions.map((c) => c.CompanyID)).not.toContain(LEGACY_CO);
+        expect(panelWith(null, null, false).PipelineOptions.map((p) => p.ID)).not.toContain(RETIRED);
+    });
+
+    it('stays selected, with its company, on a deal that sits in it', () => {
+        const panel = panelWith(RETIRED);
+        expect(panel.SelectedCompanyID).toBe(LEGACY_CO);
+        expect(panel.PipelineOptions.map((p) => p.ID)).toEqual([RETIRED]);
+        expect(panel.CompanyOptions.map((c) => c.CompanyID)).toContain(LEGACY_CO);
+    });
+
+    it('names it when not editing', () => {
+        expect(panelWith(RETIRED).CurrentPipelineName).toBe('Legacy (Legacy Co)');
+    });
+
+    it('drops out once the deal moves to an active pipeline', () => {
+        const panel = panelWith(RETIRED);
+        panel.SetCompany(HOME);
+        expect(panel.Record?.PipelineID).toBe(B2B);
+        expect(panel.CompanyOptions.map((c) => c.CompanyID)).not.toContain(LEGACY_CO);
+    });
+});
+
+/**
+ * A pipeline linked to two companies (`PipelineCompany`) is offered under each, and choosing the other
+ * company keeps the deal in it: only the company changes, so the stage survives.
+ */
+describe('a pipeline shared by two companies', () => {
+    const SHARED = 'p-shared';
+    const SHARED_PIPELINES: PipelineOption[] = [
+        { ID: SHARED, Name: 'B2B', Code: 'B2B', CompanyID: HOME, CompanyName: 'Home', IsDefault: true, DisplayRank: 10, IsActive: true, LinkIsActive: true },
+        { ID: SHARED, Name: 'B2B', Code: 'B2B', CompanyID: OTHER, CompanyName: 'Other', IsDefault: true, DisplayRank: 10, IsActive: true, LinkIsActive: true },
+        { ID: D2C, Name: 'D2C', Code: 'D2C', CompanyID: HOME, CompanyName: 'Home', IsDefault: false, DisplayRank: 20, IsActive: true, LinkIsActive: true },
+    ];
+    const SHARED_STAGES: PipelineStageOption[] = [{ ID: 's-shared', Name: 'Discovery', PipelineID: SHARED }];
+
+    function sharedPanel(companyID: string | null, stageID: string | null = 's-shared') {
+        const panel = panelWith(SHARED, stageID, true, companyID, SHARED_PIPELINES);
+        (panel as unknown as { stages: { set(v: PipelineStageOption[]): void } }).stages.set(SHARED_STAGES);
+        return panel;
+    }
+
+    it('offers it under both companies', () => {
+        expect(sharedPanel(HOME).PipelineOptions.map((p) => p.ID)).toEqual([SHARED, D2C]);
+        expect(sharedPanel(OTHER).PipelineOptions.map((p) => p.ID)).toEqual([SHARED]);
+        expect(sharedPanel(HOME).CompanyOptions.map((c) => c.CompanyID)).toEqual([HOME, OTHER]);
+    });
+
+    it('changes only the company when the new company is served by the same pipeline', () => {
+        const panel = sharedPanel(HOME);
+        panel.SetCompany(OTHER);
+        expect(panel.Record.CompanyID).toBe(OTHER);
+        expect(panel.Record.PipelineID).toBe(SHARED);
+        expect(panel.Record.PipelineStageID).toBe('s-shared');
+    });
+
+    it('names the pipeline with the deal\'s own company', () => {
+        expect(sharedPanel(OTHER).CurrentPipelineName).toBe('B2B (Other)');
+        expect(sharedPanel(HOME).CurrentPipelineName).toBe('B2B (Home)');
+    });
+
+    it('hides a retired link from other deals but keeps it on the deal that uses it', () => {
+        const retiredLink = SHARED_PIPELINES.map((p) => (p.CompanyID === OTHER ? { ...p, LinkIsActive: false } : p));
+        const onHome = panelWith(SHARED, null, true, HOME, retiredLink);
+        expect(onHome.CompanyOptions.map((c) => c.CompanyID)).toEqual([HOME]);
+        const onOther = panelWith(SHARED, null, true, OTHER, retiredLink);
+        expect(onOther.SelectedCompanyID).toBe(OTHER);
+        expect(onOther.CompanyOptions.map((c) => c.CompanyID)).toContain(OTHER);
     });
 });

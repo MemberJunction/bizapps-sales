@@ -14,6 +14,11 @@
 -- DATE DIMENSION: ActualCloseDate for closed deals, ExpectedCloseDate for open ones — the mix
 -- question is "what are we selling in this period", and an open deal belongs to the period it is
 -- expected to land in. Both are reported separately below so the two are never silently added.
+--
+-- PIPELINES FLAGGED OUT OF THE FORECAST LOSE THEIR OPEN DEALS, AS IN PIPELINE SUMMARY AND THE
+-- DASHBOARD. Pipeline.IncludeInForecast = 0 marks a pipeline that holds historical deals; its open
+-- rows are not the current book, so counting them here made OpenCount and OpenAmount disagree with
+-- every other forecast query. Its won and lost deals stay. Naming the pipeline in PipelineID includes it.
 SELECT
     d.DealTypeID,
     dt.Name                                     AS DealTypeName,
@@ -36,12 +41,16 @@ INNER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
 INNER JOIN [__mj_BizAppsSales].DealType dt
         ON dt.ID = d.DealTypeID
+INNER JOIN [__mj_BizAppsSales].Pipeline p
+        ON p.ID = d.PipelineID
 WHERE 1 = 1
   {% if CompanyID %}
   AND d.CompanyID = {{ CompanyID | sqlString }}
   {% endif %}
   {% if PipelineID %}
   AND d.PipelineID = {{ PipelineID | sqlString }}
+  {% else %}
+  AND (st.IsOpen = 0 OR p.IncludeInForecast = 1)
   {% endif %}
   {% if PeriodStart %}
   AND COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) >= {{ PeriodStart | sqlString }}

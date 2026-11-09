@@ -1,0 +1,79 @@
+[
+  {
+    "_comments": [
+      "The Sales Account form labelled fields from their column names (\"Owner Employee\",",
+      "\"Lifecycle Stage Type\", \"Organization Type ID\").",
+      "",
+      "The account's own foreign keys resolve their label through RelatedEntityNameFieldMap to the view's",
+      "name field, so the name-field rows are the ones relabelled here, as .deal-field-labels.json explains.",
+      "The inherited Organization foreign keys (OrganizationTypeID, ParentID) map to name columns the child",
+      "view does not have (.isa-inherited-fk-relationships.json), so their own row's DisplayName renders and",
+      "is relabelled directly. AutoUpdateDisplayName goes to false so the label is a deliberate choice."
+    ],
+    "fields": {
+      "DisplayName": "Owner",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=OwnerEmployee"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Account Type",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=AccountType"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Lifecycle Stage",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=LifecycleStageType"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Lead Source",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=LeadSourceType"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Organization Type",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=OrganizationTypeID"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Parent Organization",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=ParentID"
+    }
+  },
+  {
+    "_comments": [
+      "Is Active duplicated the inherited Organization Status (Active / Inactive /",
+      "Dissolved) on the form. Status is the one a user edits; the deal workspace's account list and the",
+      "integration fixture read Status too. The column stays, unused by the UI."
+    ],
+    "fields": {
+      "IncludeInGeneratedForm": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Accounts&Name=IsActive"
+    }
+  }
+]
