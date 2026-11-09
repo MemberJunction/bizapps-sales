@@ -365,6 +365,7 @@ export class MJSSalesSectionComponent implements OnInit {
     public WinRateByValue: number | null = null;
     public WinClosedCount = 0;
     public WinWonCount = 0;
+    public WinRateMixedCurrencies = false;
     /**
      * The win rate query did not run. The tile then shows "figures unavailable", as the others do,
      * rather than "0 won / 0 closed", which reads as nothing having closed.
@@ -822,9 +823,14 @@ export class MJSSalesSectionComponent implements OnInit {
 
     // ── Reporting period ───────────────────────────────────────────────────────
 
+    /** When exactly one selling company is selected, its ID so `BusinessToday` uses its time zone. */
+    private get singleCompanyID(): string | null {
+        return this.Filters.CompanyIDs.length === 1 ? this.Filters.CompanyIDs[0] : null;
+    }
+
     /** The resolved bounds of the selected period. Recomputed rather than cached — it is arithmetic. */
     public get Window(): PeriodWindow {
-        return ResolvePeriod(this.Period, this.FiscalStart.Start, BusinessToday(), { Start: this.CustomStart, End: this.CustomEnd });
+        return ResolvePeriod(this.Period, this.FiscalStart.Start, BusinessToday(this.singleCompanyID), { Start: this.CustomStart, End: this.CustomEnd });
     }
 
     /**
@@ -833,7 +839,7 @@ export class MJSSalesSectionComponent implements OnInit {
      * Board's header and its cards agree; another period reads its own (bc-aidp-next-golive#351).
      */
     public get BoardClosedWindow(): PeriodWindow {
-        return ResolvePeriod('quarter', this.FiscalStart.Start, BusinessToday());
+        return ResolvePeriod('quarter', this.FiscalStart.Start, BusinessToday(this.singleCompanyID));
     }
 
     /** What the Board's columns hold, for its header: open deals, and the period's closed ones. */
@@ -1064,7 +1070,9 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** Money for a tile, or pending while a period or filter change is in flight. */
     private tileMoney(value: number): string {
-        return this.PeriodLoading ? '…' : this.money(value);
+        if (this.PeriodLoading) return '…';
+        if (this.summary?.MixedCurrencies) return '—';
+        return this.money(value, this.summary?.CurrencyCode);
     }
 
     /**
@@ -1084,15 +1092,21 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private wonTile(s: DealDashboardSummary): SalesKpi {
+        const mixed = s.MixedCurrencies ? ' · mixed currencies' : '';
         return {
             ...KPI_SHELLS[0],
             Value: this.tileMoney(s.WonAmount),
-            Footnote: this.PeriodLoading ? 'counting…' : `${deals(s.WonCount)} won · ${this.PeriodPhrase}`,
+            Footnote: this.PeriodLoading ? 'counting…' : `${deals(s.WonCount)} won · ${this.PeriodPhrase}${mixed}`,
         };
     }
 
     private commitTile(s: DealDashboardSummary): SalesKpi {
-        return { ...KPI_SHELLS[1], Value: this.tileMoney(s.CommitAmount), Footnote: this.PeriodLoading ? 'counting…' : `${s.CommitCount} Commit ${s.CommitCount === 1 ? 'deal' : 'deals'}` };
+        const mixed = s.MixedCurrencies ? ' · mixed currencies' : '';
+        return {
+            ...KPI_SHELLS[1],
+            Value: this.tileMoney(s.CommitAmount),
+            Footnote: this.PeriodLoading ? 'counting…' : `${s.CommitCount} Commit ${s.CommitCount === 1 ? 'deal' : 'deals'}${mixed}`,
+        };
     }
 
     /**
@@ -1102,31 +1116,38 @@ export class MJSSalesSectionComponent implements OnInit {
      */
     private pipelineTile(s: DealDashboardSummary): SalesKpi {
         const pipelineCount = s.OpenCount - (s.OpenOmittedCount ?? 0);
-        const statedNote = s.OpenStatedAmount === 0
+        const mixed = s.MixedCurrencies ? ' · mixed currencies' : '';
+        const statedNote = s.MixedCurrencies || s.OpenStatedAmount === 0
             ? ''
             : s.OpenPricedAmount === 0
                 ? ' · all entered by hand'
-                : ` · ${this.money(s.OpenStatedAmount)} entered by hand`;
+                : ` · ${this.money(s.OpenStatedAmount, s.CurrencyCode)} entered by hand`;
         return {
             ...KPI_SHELLS[2],
             Value: this.tileMoney(s.OpenAmount),
-            Footnote: this.PeriodLoading ? 'counting…' : `${pipelineCount} open ${pipelineCount === 1 ? 'deal' : 'deals'}${statedNote}`,
+            Footnote: this.PeriodLoading ? 'counting…' : `${pipelineCount} open ${pipelineCount === 1 ? 'deal' : 'deals'}${statedNote}${mixed}`,
             // Every open deal in the period, Omitted ones included; the money leaves those out, so say how many.
             Footnote2: s.OpenOmittedCount && !this.PeriodLoading ? `${s.OpenCount} total · ${s.OpenOmittedCount} excluded from the forecast` : undefined,
         };
     }
 
     private weightedTile(s: DealDashboardSummary): SalesKpi {
-        return { ...KPI_SHELLS[3], Value: this.tileMoney(s.WeightedAmount), Footnote: 'each deal at its probability' };
+        const mixed = s.MixedCurrencies ? ' · mixed currencies' : '';
+        return {
+            ...KPI_SHELLS[3],
+            Value: this.tileMoney(s.WeightedAmount),
+            Footnote: `each deal at its probability${mixed}`,
+        };
     }
 
     /** By value, with the counts in the footnote. Pending while its own read is still out. */
     private winRateTile(): SalesKpi {
         const pending = this.PeriodLoading || this.DetailLoading;
+        const mixed = this.WinRateMixedCurrencies ? ' · mixed currencies' : '';
         return {
             ...KPI_SHELLS[4],
-            Value: pending ? '…' : this.Pct(this.WinRateByValue),
-            Footnote: pending ? 'counting…' : this.WinRateUnavailable ? 'figures unavailable' : `${this.WinWonCount} won / ${this.WinClosedCount} closed`,
+            Value: pending ? '…' : this.Pct(this.WinRateMixedCurrencies ? this.WinRateByCount : this.WinRateByValue),
+            Footnote: pending ? 'counting…' : this.WinRateUnavailable ? 'figures unavailable' : `${this.WinWonCount} won / ${this.WinClosedCount} closed${mixed}`,
         };
     }
 
@@ -1142,7 +1163,7 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** The default list: open deals expected to close in the next 30 days, soonest first. */
     public get ClosingSoon(): DealRosterRow[] {
-        return ClosingSoon(this.dashboardDeals, BusinessToday());
+        return ClosingSoon(this.dashboardDeals, BusinessToday(this.singleCompanyID));
     }
 
     /**
@@ -1153,7 +1174,7 @@ export class MJSSalesSectionComponent implements OnInit {
         if (this.InspectFilter === 'won' || this.InspectFilter === 'closed') {
             return [];
         }
-        return FilterInspect(this.dashboardDeals, this.InspectFilter, BusinessToday(), this.Window, this.InspectArg, this.IdleIDs);
+        return FilterInspect(this.dashboardDeals, this.InspectFilter, BusinessToday(this.singleCompanyID), this.Window, this.InspectArg, this.IdleIDs);
     }
 
     /** How many deals the list shows: the figure's own count where the query reports one. */
@@ -1260,7 +1281,7 @@ export class MJSSalesSectionComponent implements OnInit {
             // to the roster's IDs, which the filter bar has already narrowed.
             return key === 'won' || key === 'closed' ? '1 = 0' : DealInListWhere(this.InspectRows.map((d) => d.ID));
         }
-        return InspectCriteriaWhere(key, tables, BusinessToday(), { Window: this.Window, Filters: this.Filters, Arg: this.InspectArg });
+        return InspectCriteriaWhere(key, tables, BusinessToday(this.singleCompanyID), { Window: this.Window, Filters: this.Filters, Arg: this.InspectArg });
     }
 
     /**
@@ -1380,7 +1401,7 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** Expected to close: the dated buckets follow the period; No date lists every undated open deal. */
     public get Buckets(): CloseBucket[] {
-        return CloseBuckets(this.dashboardDeals, BusinessToday(), this.Window);
+        return CloseBuckets(this.dashboardDeals, BusinessToday(this.singleCompanyID), this.Window);
     }
 
     /** Commit by deal owner, for the period. */
@@ -1398,7 +1419,7 @@ export class MJSSalesSectionComponent implements OnInit {
      * the stage history the Board reads. Lower-cased IDs.
      */
     public get IdleIDs(): ReadonlySet<string> {
-        const today = BusinessToday();
+        const today = BusinessToday(this.singleCompanyID);
         const limits = new Map(this.Stages.map((s) => [s.ID.toLowerCase(), s.RottingDays]));
         const ids = new Set<string>();
         for (const d of this.dashboardDeals) {
@@ -1432,12 +1453,17 @@ export class MJSSalesSectionComponent implements OnInit {
             this.WinWonCount = 0;
             this.WinRateByCount = null;
             this.WinRateByValue = null;
+            this.WinRateMixedCurrencies = false;
             return;
         }
         const num = (v: unknown): number => {
             const n = Number(v);
             return Number.isFinite(n) ? n : 0;
         };
+        const currencies = new Set(
+            rows.map((r) => String(r['CurrencyCode'] ?? '').trim() || DEFAULT_DISPLAY_CURRENCY),
+        );
+        this.WinRateMixedCurrencies = currencies.size > 1;
         let closed = 0;
         let won = 0;
         let closedAmt = 0;
@@ -1445,13 +1471,15 @@ export class MJSSalesSectionComponent implements OnInit {
         for (const r of rows) {
             closed += num(r['ClosedCount']);
             won += num(r['WonCount']);
-            closedAmt += num(r['WonAmount']) + num(r['LostAmount']);
-            wonAmt += num(r['WonAmount']);
+            if (!this.WinRateMixedCurrencies) {
+                closedAmt += num(r['WonAmount']) + num(r['LostAmount']);
+                wonAmt += num(r['WonAmount']);
+            }
         }
         this.WinClosedCount = closed;
         this.WinWonCount = won;
         this.WinRateByCount = closed > 0 ? won / closed : null;
-        this.WinRateByValue = closedAmt > 0 ? wonAmt / closedAmt : null;
+        this.WinRateByValue = !this.WinRateMixedCurrencies && closedAmt > 0 ? wonAmt / closedAmt : null;
     }
 
     // ── Display helpers ────────────────────────────────────────────────────────
@@ -1462,7 +1490,7 @@ export class MJSSalesSectionComponent implements OnInit {
      * COERCE BEFORE FORMATTING, because `toLocaleString` fails SILENTLY on a string: a value arriving as
      * "27480.0000" would render as `27480.0000` with no symbol and no error.
      */
-    private money(value: number | string | null | undefined): string {
+    private money(value: number | string | null | undefined, currencyCode: string = DEFAULT_DISPLAY_CURRENCY): string {
         const n = Number(value);
         if (!Number.isFinite(n)) {
             // Never render NaN as money. An em dash is the same "no figure" the roster already uses.
@@ -1470,7 +1498,7 @@ export class MJSSalesSectionComponent implements OnInit {
         }
         return n.toLocaleString(undefined, {
             style: 'currency',
-            currency: DEFAULT_DISPLAY_CURRENCY,
+            currency: currencyCode || DEFAULT_DISPLAY_CURRENCY,
             maximumFractionDigits: 0,
         });
     }

@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "tsc && tsc-alias -f",
-    "test": "vitest run"
+    "test": "vitest run --root ../.. --passWithNoTests packages/IntegrationTests"
   },
   "author": "MemberJunction.com",
   "license": "BUSL-1.1",

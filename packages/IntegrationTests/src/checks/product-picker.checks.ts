@@ -13,11 +13,9 @@
  *
  * ── WHAT IT READS ───────────────────────────────────────────────────────────────────────────────
  *
- * `MJ_BizApps_Orders: Products`, which on this host is a **DEV-ONLY STAND-IN** — orders' real `Product`
- * DDL transcribed verbatim, because orders' full schema cannot be applied here (it has hard foreign keys
- * into `__mj_BizAppsAccounting`, which in turn has one into `__mj_BizAppsTasks`). The columns, the CHECK
- * constraints and the filtered-unique SKU index are orders' own, so the rule proved here is the rule that
- * will hold against the real schema. What is NOT proved is anything about orders' other 44 tables.
+ * `MJ_BizApps_Orders: Products` from the installed BizApps Orders schema, seeded with active,
+ * non-active, foreign-company and availability-windowed rows so the picker's status, cross-company
+ * and date-window clauses are exercised against live records.
  *
  * @module @mj-biz-apps/sales-integration-tests
  */
@@ -461,7 +459,7 @@ for (const check of ProductPickerChecks) {
 
 IntegrationCheckRegistry.Instance.RegisterLifecycle('product-picker', {
     Setup: async () => {
-        // Nothing to create: the stand-in catalogue is seeded with the host, like the rest of the fixture.
+        // Nothing to create: the product catalogue is seeded with the host, like the rest of the fixture.
     },
     Teardown: async () => {
         // Nothing to sweep: PP1-PP4 only read, and PP5 writes inside a rolled-back transaction.

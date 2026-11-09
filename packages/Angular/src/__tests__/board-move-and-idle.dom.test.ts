@@ -57,7 +57,9 @@ describe('a move', () => {
         board.PendingMove.set('D1', 'S2');
         const pending = board.MoveToPicked(row);
         await vi.waitFor(() => expect(service.Save).toHaveBeenCalled());
-        expect(board.Columns.find((c) => c.StageID === 'S2')?.Cards).toContain(row);
+        // The shared roster row passed in is NOT mutated in place; the board replaces its entry with a copy.
+        expect(row.PipelineStageID).toBe('S1');
+        expect(board.Columns.find((c) => c.StageID === 'S2')?.Cards.map((c) => c.ID)).toEqual(['D1']);
 
         finish({ Success: true });
         await pending;

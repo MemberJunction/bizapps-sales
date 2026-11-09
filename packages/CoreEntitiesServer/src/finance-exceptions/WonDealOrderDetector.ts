@@ -3,7 +3,9 @@
  *
  * A deal closed Won whose order is missing or never confirmed is never billed. The saved query
  * `Sales: Won Deals With Unconfirmed Orders` finds them; this raises one finance exception per deal
- * through accounting, keyed on the deal so a deal found again tomorrow is not raised twice.
+ * through accounting, keyed on the deal and the month (`${DealID}:${YYYY-MM}`) so a deal found again
+ * tomorrow in the same month is not raised twice, while a deal dismissed once and still unconfirmed in
+ * a later month is raised again.
  *
  * The threshold (`MinDaysSinceClose`) is read from the exception type's Configuration in accounting.
  * A missing or inactive type means the check is switched off, and the run skips. It never falls back
@@ -297,7 +299,7 @@ function buildException(row: WonDealRow, creator: CreatorResolution, today: stri
         Amount: row.DealAmount,
         ExceptionDate: today,
         Summary: BuildWonDealSummary(row, creator),
-        DedupeKey: row.DealID,
+        DedupeKey: `${row.DealID}:${today.slice(0, 7)}`,
         SourceCreatedByUserID: creator.UserID,
         CreatorUnresolved: creator.Unresolved,
     };

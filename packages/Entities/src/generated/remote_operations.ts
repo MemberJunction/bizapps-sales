@@ -77,7 +77,7 @@ export interface SalesCloseDealInput {
 
     /**
      * Per-deal overrides merged OVER the pipeline's policy. This is how §7.1's "a deal may override
-     * it" is expressed without a per-deal policy column — see CLOSE-FLOW-DECISIONS.md D-CF6.
+     * it" is expressed without a per-deal policy column — see `docs/DECISIONS.md`.
      */
     PolicyOverrides?: SalesCloseWonPolicy;
 
@@ -137,17 +137,17 @@ export interface SalesCloseIssue {
 /**
  * What the policy decided, per downstream target.
  *
- * RETURNED EVEN WHEN THE CALL WAS STUBBED, and `Executed` is what says which. Today both downstreams
- * are stubs (CLOSE-FLOW-DECISIONS.md D-CF3/D-CF4), so a close reports `Planned: true,
- * Executed: false` with a reason — the intent is auditable now and the flag flips to true when the
- * seam lands, with no shape change.
+ * RETURNED EVEN WHEN THE CALL WAS STUBBED OR REFUSED, and `Executed` is what says which. The contract
+ * route is live through `LiveContractsSeam` and the order is embedded at deal creation (see
+ * `docs/DECISIONS.md` D-CF1, D-CF3 and D-CF4); when a route is declined or stubbed in a test, a close
+ * reports `Planned: true, Executed: false` with a reason so the intent remains auditable.
  */
 export interface SalesCloseRoutingResult {
     /** `Contract` | `Order` | `Subscription`. */
     Target: string;
     /** The policy said this should happen. */
     Planned: boolean;
-    /** It actually happened. False while the downstream is stubbed. */
+    /** It actually happened. False when the downstream route was declined or stubbed. */
     Executed: boolean;
     /** How many deal lines were routed here. */
     LineCount: number;

@@ -177,10 +177,10 @@ describe('the sentence the user actually reads', () => {
  *
  * Tested by calling `ResolveDealLockState` with a mocked `RunView` (#398).
  */
-describe('#226 — the won flag survives the resolver', () => {
+describe('#226 / #460 — the won and open flags survive the resolver', () => {
     afterEach(() => vi.restoreAllMocks());
 
-    it('asks the status row for IsWon', async () => {
+    it('asks the status row for IsWon and IsOpen', async () => {
         const spy = vi.spyOn(RunView.prototype, 'RunView').mockResolvedValue({
             Success: true,
             Results: [{ LocksDeal: true, Name: 'Won', IsLost: false, IsWon: true }],
@@ -192,16 +192,16 @@ describe('#226 — the won flag survives the resolver', () => {
             'a flag that is never selected is always undefined, and undefined is not won',
         ).toHaveBeenCalledWith(
             expect.objectContaining({
-                Fields: expect.arrayContaining(['LocksDeal', 'Name', 'IsLost', 'IsWon']),
+                Fields: expect.arrayContaining(['LocksDeal', 'Name', 'IsLost', 'IsWon', 'IsOpen']),
             }),
             undefined,
         );
     });
 
-    it('carries it out of the unlocked exit rather than resetting it', async () => {
+    it('carries them out of the unlocked exit rather than resetting them', async () => {
         vi.spyOn(RunView.prototype, 'RunView').mockResolvedValue({
             Success: true,
-            Results: [{ LocksDeal: false, Name: 'Signed', IsLost: false, IsWon: true }],
+            Results: [{ LocksDeal: false, Name: 'Signed', IsLost: false, IsWon: true, IsOpen: false }],
         } as never);
         const lock = await ResolveDealLockState('aaaaaaaa-0000-4000-8000-000000000003');
 
@@ -210,9 +210,22 @@ describe('#226 — the won flag survives the resolver', () => {
             StatusName: null,
             IsLost: false,
             IsWon: true,
+            IsOpen: false,
             IsStatusMissing: false,
             Notice: null,
         });
+    });
+
+    it('reports an open status as open, read from the flag', async () => {
+        // IsOpen decides the header tone on an open deal without reading status names.
+        vi.spyOn(RunView.prototype, 'RunView').mockResolvedValue({
+            Success: true,
+            Results: [{ LocksDeal: false, Name: 'Negotiating', IsLost: false, IsWon: false, IsOpen: true }],
+        } as never);
+        const lock = await ResolveDealLockState('aaaaaaaa-0000-4000-8000-000000000007');
+
+        expect(lock.IsOpen).toBe(true);
+        expect(lock.IsLocked).toBe(false);
     });
 
     it('reads the flag and never a status name', async () => {

@@ -51,26 +51,27 @@ export function DealPipelineGridState(): { sortSettings: { field: string; dir: '
                     ],
                 },
             },
-            { Name: 'Amount', DisplayName: 'Amount', orderIndex: 6, width: 120, format: { type: 'currency', currencyCode: 'USD', decimals: 0, align: 'right' } },
+            { Name: 'Amount', DisplayName: 'Amount', orderIndex: 6, width: 120, format: { type: 'number', decimals: 0, align: 'right' } },
+            { Name: 'CurrencyID', DisplayName: 'Currency', orderIndex: 7, width: 110 },
             // Stored as 0-100; the grid's percent format divides by 100, so 40 renders "40%" (bizapps-sales#371).
-            { Name: 'Probability', DisplayName: 'Prob', orderIndex: 7, width: 80, format: { type: 'percent', decimals: 0, align: 'right' } },
+            { Name: 'Probability', DisplayName: 'Prob', orderIndex: 8, width: 80, format: { type: 'percent', decimals: 0, align: 'right' } },
             /**
              * TWO DATE COLUMNS, because a grid column binds one field (bizapps-sales#371). A single "Close"
              * column showed the forecast day even on a won or lost deal. "Expected close" is the forecast;
              * "Closed on" is the day a closed deal closed and is empty on an open one.
              */
-            { Name: 'ExpectedCloseDate', DisplayName: 'Expected close', orderIndex: 8, width: 130, format: { type: 'date', dateFormat: GRID_DAY_FORMAT } },
-            { Name: 'ActualCloseDate', DisplayName: 'Closed on', orderIndex: 9, width: 120, format: { type: 'date', dateFormat: GRID_DAY_FORMAT } },
-            { Name: 'OwnerEmployee', DisplayName: 'Owner', orderIndex: 10, width: 140 },
-            { Name: 'ForecastCategoryType', DisplayName: 'Forecast', orderIndex: 11, width: 130 },
-            { Name: 'NextStep', DisplayName: 'Next step', orderIndex: 12, width: 200 },
+            { Name: 'ExpectedCloseDate', DisplayName: 'Expected close', orderIndex: 9, width: 130, format: { type: 'date', dateFormat: GRID_DAY_FORMAT } },
+            { Name: 'ActualCloseDate', DisplayName: 'Closed on', orderIndex: 10, width: 120, format: { type: 'date', dateFormat: GRID_DAY_FORMAT } },
+            { Name: 'OwnerEmployee', DisplayName: 'Owner', orderIndex: 11, width: 140 },
+            { Name: 'ForecastCategoryType', DisplayName: 'Forecast', orderIndex: 12, width: 130 },
+            { Name: 'NextStep', DisplayName: 'Next step', orderIndex: 13, width: 200 },
             /**
              * Hidden, and here only because it is the first sort key (bizapps-sales#371). The grid can
              * show a sort only on one of its columns; with ClosedAt missing, its sort never matched
              * the saved one, it reported the difference as a user's sort, and the viewer then re-sorted
              * by Expected close and rebuilt the columns with the entity's own headers.
              */
-            { Name: 'ClosedAt', DisplayName: 'Closed at', orderIndex: 13, width: 120, hidden: true },
+            { Name: 'ClosedAt', DisplayName: 'Closed at', orderIndex: 14, width: 120, hidden: true },
         ],
     };
 }

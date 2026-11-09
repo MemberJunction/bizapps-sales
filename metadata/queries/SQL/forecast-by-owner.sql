@@ -57,6 +57,7 @@ SELECT
     d.Company                                   AS CompanyName,
     d.PipelineID,
     d.Pipeline                                  AS PipelineName,
+    ISNULL(cur.Code, N'USD')                    AS CurrencyCode,
     SUM(CASE WHEN fc.IncludeInCommit    = 1 AND st.IsOpen = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END) AS CommitAmount,
     SUM(CASE WHEN fc.IncludeInBestCase  = 1 AND st.IsOpen = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END) AS BestCaseAmount,
     SUM(CASE WHEN fc.IncludeInPipeline  = 1 AND st.IsOpen = 1 THEN ISNULL(d.Amount, 0) ELSE 0 END) AS PipelineAmount,
@@ -76,9 +77,10 @@ INNER JOIN [__mj_BizAppsSales].Pipeline p
         ON p.ID = d.PipelineID
 LEFT OUTER JOIN [__mj_BizAppsSales].ForecastCategoryType fc
         ON fc.ID = d.ForecastCategoryTypeID
-       AND fc.IsActive = 1
 LEFT OUTER JOIN [__mj].Employee emp
         ON emp.ID = d.OwnerEmployeeID
+LEFT OUTER JOIN [__mj_BizAppsAccounting].Currency cur
+        ON cur.ID = d.CurrencyID
 WHERE 1 = 1
   {% if CompanyID %}
   AND d.CompanyID = {{ CompanyID | sqlString }}
@@ -107,6 +109,7 @@ WHERE 1 = 1
   {% endif %}
 GROUP BY
     d.OwnerEmployeeID, emp.FirstName, emp.LastName,
-    d.CompanyID, d.Company, d.PipelineID, d.Pipeline
+    d.CompanyID, d.Company, d.PipelineID, d.Pipeline,
+    ISNULL(cur.Code, N'USD')
 ORDER BY
-    CommitAmount DESC, OwnerName;
+    CommitAmount DESC, OwnerName, CurrencyCode;

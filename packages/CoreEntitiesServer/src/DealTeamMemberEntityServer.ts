@@ -60,13 +60,15 @@ import {
 import { RegisterClass } from '@memberjunction/global';
 import { DealTeamMemberEntity } from '@mj-biz-apps/sales-entities';
 import { DealEntityServer } from './DealEntityServer.js';
+import {
+    type DealRoleRules,
+    OwnerWithoutEmployeeRefusal,
+    PersistedDuplicateRoleRefusal,
+    ReadDealRoleRules,
+} from './team-role-rules.js';
 
 const DEAL_TEAM_MEMBER_ENTITY = 'MJ_BizApps_Sales: Deal Team Members';
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
-const DEAL_ROLE_ENTITY = 'MJ_BizApps_Sales: Deal Roles';
-
-/** The `DealRole` columns the save checks read. */
-type DealRoleRules = { Name: string | null; AllowsMultiplePerDeal: boolean | null; IsOwnerRole: boolean | null };
 
 @RegisterClass(BaseEntity, DEAL_TEAM_MEMBER_ENTITY)
 export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
@@ -94,19 +96,15 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
          *
          * The seed sets this false for Owner / AE and true for every other role, and NOTHING read it.
          * So a rep "taking" a deal added a SECOND Owner / AE row, saw themselves listed as owner, and
-         * the deal stayed with the first one — because `stampOwnerFromTeam()` resolves with
-         *
-         *     this.Team.Items.find((m) => m.DealRoleID === ownerRoleID)
-         *
-         * and `find` returns the OLDEST matching row. Reports, rollups and anything crediting the
+         * the deal stayed with the first one — because `stampOwnerFromTeam()` resolves with `find`,
+         * which returns the OLDEST matching active row. Reports, rollups and anything crediting the
          * owner kept pointing at the previous rep while the grid showed the new one. Refusing here is
          * what the flag already means, and it is read from the ROLE rather than keyed on Owner, so a
          * future single-holder role is covered without another change.
          *
-         * INACTIVE ROWS COUNT. `stampOwnerFromTeam` never reads `IsActive` — an inactive Owner / AE
-         * row still owns the deal — so an inactive row still holds the seat here. Counting it keeps
-         * this check and the derivation answering the same question. Whether ownership should respect
-         * `IsActive` at all is open and deliberately not decided here.
+         * INACTIVE ROWS COUNT FOR THE SEAT. Even though `stampOwnerFromTeam` only credits an active
+         * Owner / AE row as the deal's owner, an inactive row still occupies the single-holder seat in
+         * the roster until its employee is changed or the row is removed.
          */
         let refusal: string | null;
         try {
@@ -130,13 +128,13 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
          * UNCONDITIONAL ON PURPOSE — there is no "did anything owner-relevant change" gate here, and
          * one should not be added from the snapshot above.
          *
-         * `stampOwnerFromTeam()` derives the owner by finding the row whose `DealRoleID` is the owner
-         * role and taking its `EmployeeID`:
+         * `stampOwnerFromTeam()` derives the owner by finding the active row whose `DealRoleID` is the
+         * owner role and taking its `EmployeeID`:
          *
-         *     const owner = this.Team.Items.find((m) => m.DealRoleID === ownerRoleID);
+         *     const owner = this.Team.Items.find((m) => m.IsActive !== false && UUIDsEqual(m.DealRoleID, ownerRoleID));
          *     this.OwnerEmployeeID = owner?.EmployeeID ?? null;
          *
-         * So the fields that can change the answer are `DealID`, `DealRoleID` and `EmployeeID`.
+         * So the fields that can change the answer are `DealID`, `DealRoleID`, `IsActive` and `EmployeeID`.
          * `priorSnapshot()` carries the first two and NOT the third, so a gate built from it would
          * miss an employee swap: same deal, same role, different person, no re-stamp, and the deal
          * keeps the old owner — which is the exact defect this class exists to fix, arriving through
@@ -166,28 +164,20 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
     }
 
     /**
+     * Deletes this team row without re-saving the parent deal to refresh its owner stamp. Used by
+     * `DealEntityServer.Delete()` when the deal itself is being deleted in the same transaction.
+     */
+    public async DeleteWithoutRestamp(options?: EntityDeleteOptions): Promise<boolean> {
+        return super.Delete(options);
+    }
+
+    /**
      * The role this row names, read once for both role checks. NULL when the row names no role or the
      * role row cannot be found; a failed READ throws, and `Save` turns that into a refusal.
      */
     private async readRole(): Promise<DealRoleRules | null> {
-        const roleID = this.DealRoleID;
-        if (!roleID) {
-            return null;
-        }
         const view = this.ProviderToUse as unknown as IRunViewProvider;
-        const roleRead = await view.RunView<DealRoleRules>(
-            {
-                EntityName: DEAL_ROLE_ENTITY,
-                ExtraFilter: `ID = '${roleID}'`,
-                ResultType: 'simple',
-                Fields: ['Name', 'AllowsMultiplePerDeal', 'IsOwnerRole'],
-            },
-            this.ContextCurrentUser,
-        );
-        if (!roleRead.Success) {
-            throw new Error(`could not read the deal role: ${roleRead.ErrorMessage}`);
-        }
-        return (roleRead.Results ?? [])[0] ?? null;
+        return ReadDealRoleRules(this.DealRoleID, view, this.ContextCurrentUser);
     }
 
     /**
@@ -202,14 +192,7 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
      * Read from `DealRole.IsOwnerRole`, the same flag the stamp resolves the owner role by.
      */
     private ownerWithoutEmployeeRefusal(role: DealRoleRules | null): string | null {
-        if (!role?.IsOwnerRole || this.EmployeeID) {
-            return null;
-        }
-        const roleName = role.Name ?? 'owner';
-        return (
-            `The ${roleName} must be an employee, because the deal's owner is read from the Employee field. `
-            + `Choose them in Employee and leave Person empty.`
-        );
+        return OwnerWithoutEmployeeRefusal(role, this.EmployeeID);
     }
 
     /**
@@ -225,45 +208,15 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
      * throws instead, and `Save` turns that into a refusal that names the lookup.
      */
     private async duplicateRoleRefusal(role: DealRoleRules | null): Promise<string | null> {
-        const dealID = this.DealID;
-        const roleID = this.DealRoleID;
-        // Truthy means the role admits several, which is the default for everything but Owner / AE.
-        if (!dealID || !roleID || !role || role.AllowsMultiplePerDeal) {
-            return null;
-        }
-
         const view = this.ProviderToUse as unknown as IRunViewProvider;
-
-        /**
-         * EXCLUDE SELF, or every later edit to the owner row refuses itself. `IsSaved` is the test
-         * rather than `ID`, because an unsaved row has no id to exclude and no row to collide with.
-         */
-        const notSelf = this.IsSaved && this.ID ? ` AND ID <> '${this.ID}'` : '';
-        const held = await view.RunView<{ Employee: string | null }>(
-            {
-                EntityName: DEAL_TEAM_MEMBER_ENTITY,
-                ExtraFilter: `DealID = '${dealID}' AND DealRoleID = '${roleID}'${notSelf}`,
-                ResultType: 'simple',
-                Fields: ['Employee'],
-            },
-            this.ContextCurrentUser,
-        );
-        if (!held.Success) {
-            throw new Error(`could not check the deal's existing ${role.Name ?? 'role'} rows: ${held.ErrorMessage}`);
-        }
-        const existing = (held.Results ?? [])[0];
-        if (!existing) {
-            return null;
-        }
-
-        // "someone in the X role" rather than "a X": the article would depend on the role name's first
-        // letter, and the seeded name reads "a Owner / AE".
-        const inRole = role.Name ? `the ${role.Name} role` : 'that role';
-        const who = existing.Employee ? ` (${existing.Employee})` : '';
-        return (
-            `This deal already has someone in ${inRole}${who}. Change that row's employee instead `
-            + `of adding a second one.`
-        );
+        return PersistedDuplicateRoleRefusal({
+            dealID: this.DealID,
+            roleID: this.DealRoleID,
+            role,
+            excludeMemberID: this.IsSaved && this.ID ? this.ID : null,
+            view,
+            user: this.ContextCurrentUser,
+        });
     }
 
     /** Mirrors `DealEntityServer.refuseSave`: log it, register a failed result, return false. */

@@ -92,6 +92,12 @@ const AWS = 'packages/CoreEntitiesServer/src/activities/ActivityWriterService.ts
 const AV = 'packages/Entities/src/activities/activity-vocabulary.ts';
 const FSJ = 'packages/CoreEntitiesServer/src/forecast/ForecastSnapshotJob.ts';
 const QFS = 'packages/CoreEntitiesServer/src/forecast/QueryForecastSource.ts';
+const DLV = 'packages/CoreEntitiesServer/src/DealLockOrderLineVeto.ts';
+const DSE = 'packages/CoreEntitiesServer/src/DealStageEventEntityServer.ts';
+const DSO = 'packages/CoreEntitiesServer/src/deal-schedule-to-order.ts';
+const RDC = 'packages/CoreEntitiesServer/src/RecordDiscountConcessionOperation.ts';
+const PSE = 'packages/CoreEntitiesServer/src/PipelineStageEntityServer.ts';
+const SUB = 'packages/CoreEntitiesServer/src/subscription-choice.ts';
 
 /**
  * id · file · the exact text to replace · its replacement · which checks SHOULD go red.
@@ -108,7 +114,8 @@ const MUTATIONS = [
     // all. Both reported SKIP, which reads like ordinary anchor drift rather than "the mutation you
     // rely on has not run since August". Measured before repair: "anchor appears 0 times".
     { id: 'M-PP1', file: PF, expect: ['PP1'],
-      from: "`Status = 'Active' ` +", to: "`Status <> 'not-a-status' ` +" },
+      from: "    return statusAndWindowFilter('Active', asOfDay, 'ProductFilterFor');",
+      to: "    return statusAndWindowFilter('Active', asOfDay, 'ProductFilterFor').replace(\"Status = 'Active' \", \"Status <> 'not-a-status' \");" },
     // M-PP2 is INVERTED by #29: the defect is no longer a missing company clause, it is a PRESENT one.
     //
     // THIS DOES NOT PROVE 'PP2 AND ONLY PP2', AND IT USED TO SAY IT DID. `expect` is checked as a
@@ -122,8 +129,8 @@ const MUTATIONS = [
     // What it cannot do is localise the blame, and saying so is cheaper than a reader trusting the
     // old claim and concluding PP2 is independent of its neighbours when nothing here established it.
     { id: 'M-PP2', file: PF, expect: ['PP2'],
-      from: "`Status = 'Active' ` +",
-      to: "`CompanyID = 'C0A5E100-0001-4A01-9E11-5B7C3D2F8A01' AND Status = 'Active' ` +" },
+      from: "    return statusAndWindowFilter('Active', asOfDay, 'ProductFilterFor');",
+      to: "    return `CompanyID = 'C0A5E100-0001-4A01-9E11-5B7C3D2F8A01' AND ` + statusAndWindowFilter('Active', asOfDay, 'ProductFilterFor');" },
     // ── #32's term start ────────────────────────────────────────────────────────────────────────
     //
     // Two of these are the mutations that SURVIVED the original suite, found by a separate audit: the
@@ -178,7 +185,7 @@ const MUTATIONS = [
     // else in this catalogue touches.
 
     { id: 'M-PP3', file: PF, expect: ['PP3', 'PP4'],
-      from: "AND (AvailableTo IS NULL OR AvailableTo >= '${day}')",
+      from: "AND (AvailableTo IS NULL OR AvailableTo >= '${asOfDay}')",
       to: "AND (AvailableTo IS NULL OR AvailableTo >= '1900-01-01')" },
 
     // RETARGETED when the pipeline stopped carrying a company: the server no longer stamps the deal's
@@ -225,7 +232,7 @@ const MUTATIONS = [
     // PR reads both flags at once through `readStatusLockFlags`, so that text is gone. Same
     // mutation as before -- the lock never engages -- against the guard that now decides it.
     { id: 'M-CD5', file: DES, expect: ['CD5', 'CD13', 'CD14'],
-      from: '        if (!persisted.LocksDeal) {\n            return null;\n        }',
+      from: '        if (!persisted.LocksDeal && !persisted.Absent) {\n            return null;\n        }',
       to: '        if (true) {\n            return null;\n        }' },
     // RE-AIMED at what CD6 actually claims. The old anchor was the `LOCK_EDITABLE_FIELDS` static,
     // which golive#206 item 3 turned into a call because the answer now depends on the outcome.
@@ -240,7 +247,7 @@ const MUTATIONS = [
     // editable-set term and the lock becomes a WALL, refusing every dirty field including
     // Description, which is exactly what CD6 says it must not be.
     { id: 'M-CD6', file: DES, expect: ['CD6', 'CD14'],
-      from: '            && !editable.has(f.Name)\n            && !(f.Name === \'OwnerEmployeeID\' && this.RosterDrivesThisSave);',
+      from: '            && !editable.has(f.Name)\n            && !statusRepair(f.Name)\n            && !(f.Name === \'OwnerEmployeeID\' && this.RosterDrivesThisSave);',
       to: '            && true;' },
     { id: 'M-CD7', file: SEAM, expect: ['CD7'],
       from: "    public async CreateContractFromDeal(input: ContractsCreateFromDealSeamInput): Promise<ContractsSeamResult> {\n        this.Attempts.push({ Target: 'Contract', Payload: input });\n        return {\n            Success: false,",
@@ -249,8 +256,8 @@ const MUTATIONS = [
       from: "            if (!lossReasonID) {\n                issues.push(issue('deal', 'A loss reason is required to close a deal as lost.', 'LossReasonID'));",
       to: "            if (false) {\n                issues.push(issue('deal', 'A loss reason is required to close a deal as lost.', 'LossReasonID'));" },
     { id: 'M-CD9', file: CDO, expect: ['CD9'],
-      from: '                if (r.Success && row?.RequiresNotes === true && !notes?.trim()) {',
-      to: '                if (r.Success && row?.RequiresNotes === false && !notes?.trim()) {' },
+      from: '                    if (row.RequiresNotes === true && !notes?.trim()) {',
+      to: '                    if (row.RequiresNotes === false && !notes?.trim()) {' },
     { id: 'M-CD10', file: CDO, expect: ['CD10'],
       from: "        if (!input.Reason?.trim()) {\n            return { ...empty, Issues: [issue('deal', 'A reason is required to reopen a closed deal.', 'Reason')] };\n        }",
       to: "        if (false) {\n            return { ...empty, Issues: [issue('deal', 'A reason is required to reopen a closed deal.', 'Reason')] };\n        }" },
@@ -281,8 +288,8 @@ const MUTATIONS = [
     // message leaves the registration intact and the result still failed, so this isolates the text
     // rather than the mechanism.
     { id: 'M-CD30', file: DES, expect: ['CD30'],
-      from: '        failed.Message = message;',
-      to: "        failed.Message = '';" },
+      from: '        LogError(`DealEntityServer.Save refused: ${message}`);\n        const failed = new BaseEntityResult();\n        failed.Success = false;\n        failed.Type = this.IsSaved ? \'update\' : \'create\';\n        failed.Message = message;',
+      to: '        LogError(`DealEntityServer.Save refused: ${message}`);\n        const failed = new BaseEntityResult();\n        failed.Success = false;\n        failed.Type = this.IsSaved ? \'update\' : \'create\';\n        failed.Message = \'\';' },
     // The Team allow-list is what lets a roster change through the lock. Dropping it freezes the
     // team panel on every closed deal -- golive#206 item 2 in reverse, and the SILENT direction:
     // nobody reports being unable to do a thing they were told was frozen anyway.
@@ -317,15 +324,15 @@ const MUTATIONS = [
     // on the outcome, so it became a call. An anchor that no longer matches is SKIPPED, not failed --
     // CD14 would have looked mutation-covered while nothing tested it.
     { id: 'M-CD14', file: DES, expect: ['CD14'],
-      from: '        return DealFieldsEditableWhileLocked(isLost);',
+      from: '        return DealFieldsEditableWhileLocked(isLost, accountBlank);',
       to: "        return new Set<string>(['Description']);" },
 
     // The conditional member itself, which is the whole of this round. Making the WON set carry
     // LossNotes is the regression that reverts golive#206 item 3, and it is the SILENT direction:
     // nobody reports a field they did not need being accepted.
     { id: 'M-CD14-LOSSNOTES', file: CL, expect: ['CD14'],
-      from: '    if (!isLost) {\n        return EDITABLE_ON_ANY_LOCKED_DEAL;\n    }',
-      to: '    if (false) {\n        return EDITABLE_ON_ANY_LOCKED_DEAL;\n    }' },
+      from: '    if (!isLost && !accountBlank) {\n        return EDITABLE_ON_ANY_LOCKED_DEAL;\n    }\n    return new Set<string>([\n        ...EDITABLE_ON_ANY_LOCKED_DEAL,\n        ...(isLost ? EDITABLE_ON_A_LOST_DEAL : []),',
+      to: '    if (false) {\n        return EDITABLE_ON_ANY_LOCKED_DEAL;\n    }\n    return new Set<string>([\n        ...EDITABLE_ON_ANY_LOCKED_DEAL,\n        ...EDITABLE_ON_A_LOST_DEAL,' },
 
     // The stage → order-status writer (D-OS1).
     { id: 'M-OS1', file: DES, expect: ['CO3', 'CO5'],
@@ -333,8 +340,8 @@ const MUTATIONS = [
       to: '        const stageOrder: StageOrderPlan | null = null;\n        void this.planStageOrderStatus;',
       note: 'the provisioned order never consults the stage, so it takes Draft whatever the stage declares' },
     { id: 'M-OS2', file: DES, expect: ['CO3'],
-      from: '        const target = (result.Results ?? [])[0]?.OrderStatusOnEntry;\n        if (!target) {',
-      to: "        const target = (result.Results ?? [])[0]?.OrderStatusOnEntry ?? 'Draft';\n        if (false) {" },
+      from: '        const row = (result.Results ?? [])[0];\n        const target = row?.OrderStatusOnEntry;\n        if (!target) {',
+      to: "        const row = (result.Results ?? [])[0];\n        const target = row?.OrderStatusOnEntry ?? 'Draft';\n        if (false) {" },
     // The Deal.Amount cache (item 2).
     { id: 'M-AM1', file: DES, expect: ['SD21'],
       from: '            await this.refreshAmountFromOrder();',
@@ -352,8 +359,8 @@ const MUTATIONS = [
     // against is now RE-ADDING the carve-out, so that is what this puts back. It declares SD41,
     // which had no mutant at all. SD22 keeps one -- see M-AM3 below.
     { id: 'M-AM2', file: DES, expect: ['SD41'],
-      from: '    private async refreshAmountFromOrder(): Promise<void> {\n        if (!this.OrderID) {\n            return;\n        }',
-      to: '    private async refreshAmountFromOrder(): Promise<void> {\n        if (!this.OrderID) {\n            return;\n        }\n        if (this.AmountIsComputed === false && this.Amount !== null && this.Amount !== undefined) {\n            return;\n        }',
+      from: '    private async refreshAmountFromOrder(): Promise<void> {\n        if (!this.OrderID || !GUID_SHAPE.test(this.OrderID)) {\n            return;\n        }',
+      to: '    private async refreshAmountFromOrder(): Promise<void> {\n        if (!this.OrderID || !GUID_SHAPE.test(this.OrderID)) {\n            return;\n        }\n        if (this.AmountIsComputed === false && this.Amount !== null && this.Amount !== undefined) {\n            return;\n        }',
       note: 'the deleted hand-typed carve-out is back, so a lined deal keeps a stale typed figure' },
     // SD22 IS A DELIBERATE PROMOTION, not arithmetic on a collateral column. Measured on next at
     // 9e22e1e: this mutant fells SD22 as well as SD23, and the guard it removes is genuinely on
@@ -382,7 +389,7 @@ const MUTATIONS = [
     // The other half of the same question. M-PV1 asks whether an existing deal can GET an order; this
     // asks whether the order it gets is in the right state. Reverting the gate is the DEAL-9003 defect.
     { id: 'M-PV2', file: DES, expect: ['SD25'],
-      from: 'if (this.IsSaved && !this._orderJustProvisioned) {',
+      from: 'if (this.IsSaved && !this._orderJustProvisioned && !closing) {',
       to: 'if (this.IsSaved) {',
       note: 'a provisioned order never asks the stage, so it stays Draft' },
 
@@ -390,8 +397,8 @@ const MUTATIONS = [
     // against the database: a header-only save keeps a hand-set stamp, so the owner column and the
     // owner-role team row name different people, with no error anywhere.
     { id: 'M-OW1', file: DES, expect: ['SD26'],
-      from: '        const ownerRefusal = this.ownerStampEditRefusal();',
-      to: '        const ownerRefusal: string | null = null;   void this.ownerStampEditRefusal;',
+      from: '        await this.overrideSuppliedOwnerStamp();',
+      to: '        void this.overrideSuppliedOwnerStamp;',
       note: 'the owner stamp is writable again' },
 
     // S-US7's negative, which had no check until the story audit went looking and no mutant until now.
@@ -454,7 +461,7 @@ const MUTATIONS = [
 
     // DEFECT 5. Un-gate provisioning and a permitted edit to a frozen deal mints an order again.
     { id: 'M-LK1', file: DES, expect: ['SD27'],
-      from: '        if (!this._lockedAtSave) {\n            this.provisionEmbeddedOrder();',
+      from: '        if (!this._lockedAtSave && !(await this.isBornClosedWithoutOrder())) {\n            this.provisionEmbeddedOrder();',
       to: '        if (true) {\n            this.provisionEmbeddedOrder();',
       note: 'a locked deal provisions an order from a description edit' },
 
@@ -525,16 +532,16 @@ const MUTATIONS = [
     // The reopen's derivation. Without it no stage is re-entered, OrderStatusOnEntry never fires, and a
     // reopened deal keeps pointing at an order nothing asked to come back -- DN-18, verbatim.
     { id: 'M-RO1', file: CDO, expect: ['CD18'],
-      from: 'const landingStage = input.StageID ?? (await this.priorStageFromCloseEvent(deal.ID, provider, user));',
-      to: 'const landingStage = input.StageID ?? null;',
+      from: '            const undone = await this.closeEventBeingUndone(deal.ID, provider, user);\n            const landing = this.reopenLanding(input.StageID ?? null, undone, deal.PipelineStageID ?? null);',
+      to: '            const undone = await this.closeEventBeingUndone(deal.ID, provider, user);\n            const landing = this.reopenLanding(input.StageID ?? null, null, deal.PipelineStageID ?? null);',
       note: 'a reopen leaves the deal in the closing stage, so nothing asks the order back' },
 
     // And the other direction: if the derivation returned the stage the deal moved TO rather than the one
     // it came FROM, a stage-moving close would reopen into the closing stage (CD18) while a status-only
     // close would still look correct -- which is exactly why CD19 alone is not enough.
     { id: 'M-RO2', file: CDO, expect: ['CD18'],
-      from: "Fields: ['FromStageID', 'ChangedAt'],",
-      to: "Fields: ['ToStageID' + ' AS FromStageID', 'ChangedAt'],",
+      from: "                Fields: ['FromStageID', 'ProbabilityAtTransition', 'ChangedAt'],",
+      to: "                Fields: ['ToStageID' + ' AS FromStageID', 'ProbabilityAtTransition', 'ChangedAt'],",
       note: 'the reopen restores the stage the close moved TO, not the one it came from' },
 
     // THE GATE THAT KEEPS A STAGE FROM CLOSING A DEAL. Without it an ordinary save into a winning or
@@ -564,21 +571,21 @@ const MUTATIONS = [
     // The due date. Tasks ships DueAt, IsOverdue, an Overdue KPI and an OnOverdue hook; a null makes all
     // of it inert, which is how orders' own overdue arithmetic stayed wrong for months.
     { id: 'M-DA1', file: CDO, expect: ['CD21'],
-      from: 'DueAt: CloseWonTaskDueAt(deal.ClosedAt ?? new Date(), cfg.DueInDays),',
-      to: 'DueAt: undefined,',
+      from: '                        DueAt: this.closeWonTaskDueAt(deal, cfg.DueInDays),',
+      to: '                        DueAt: undefined,',
       note: 'every close-won task goes back to a null due date' },
 
     // And that the arithmetic is a DATE offset rather than milliseconds-as-days -- the 46,264-day shape.
     { id: 'M-DA2', file: CWT, expect: ['CD21'],
-      from: 'Date.UTC(closedAt.getUTCFullYear(), closedAt.getUTCMonth(), closedAt.getUTCDate() + days),',
-      to: 'closedAt.getTime() + days,',
+      from: '        Date.UTC(closeDay.getUTCFullYear(), closeDay.getUTCMonth(), closeDay.getUTCDate() + days),',
+      to: '        closeDay.getTime() + days,',
       note: 'days are added as MILLISECONDS, so the due date lands microscopically after the close' },
 
     // The derived closing stage. Without it no close driven from a browser moves the stage, so no reopen
     // driven from a browser can restore one -- DN-18, verbatim.
     { id: 'M-CS1', file: CDO, expect: ['CD22'],
-      from: 'const closingStage = input.ClosingStageID ?? derivedClosingStageID;',
-      to: 'const closingStage = input.ClosingStageID;',
+      from: '        const stageID = input.ClosingStageID\n            ?? (await this.closingStageForOutcome(deal.PipelineID, target, provider, user));',
+      to: '        const stageID = input.ClosingStageID;\n        void this.closingStageForOutcome;',
       note: 'a close with no ClosingStageID leaves the stage alone, and the reopen has nothing to restore' },
 
     // And that the stage is chosen by the OUTCOME's flag rather than by display order alone: swapping the
@@ -665,7 +672,7 @@ const MUTATIONS = [
          * WT2.
          */
         { id: 'M-WT7S', file: CWT, expect: ['WT7'],
-          from: '            result.Issues.push(\n                `The ${kind} task was created but NOT routed: no finance assignee is configured on the `\n                    + \'pipeline\\\'s CloseWonPolicy (CloseWonTasks.AssigneeRecordID).\',\n            );',
+          from: '            result.Issues.push(\n                `The ${kind} task was created but NOT routed: no finance assignee is configured. Set the `\n                    + "pipeline\'s Close Won Assignee (or CloseWonTasks.AssigneeRecordID in its CloseWonPolicy).",\n            );',
           to: '',
           note: 'the unrouted task no longer SAYS it is unrouted -- it just quietly has no assignee' },
 
@@ -700,7 +707,7 @@ const MUTATIONS = [
          * guards that independently), so this isolates the explanation.
          */
         { id: 'M-WT8O', file: CWT, expect: ['WT8'],
-          from: '        if (!input.OrderID) {',
+          from: '        if (raiseOrderReview && !input.OrderID) {',
           to: '        if (false) {',
           note: 'a deal with no order stops saying why it raised no order-review task' },
 
@@ -861,8 +868,8 @@ const MUTATIONS = [
     // Half one: the warning stops reaching Issues. Routing still carries the reason, the workspace still
     // renders it, and a programmatic caller is blind again -- which is exactly the state before the fix.
     { id: 'M-RI1', file: CDO, expect: ['CD23'],
-      from: 'Issues: [...taskIssues, ...orderStatusIssues(deal), ...routingIssues(routing, false)],',
-      to: 'Issues: [...taskIssues, ...orderStatusIssues(deal)],',
+      from: '                Issues: [\n                    ...closing.Issues,\n                    ...routeIssues,\n                    ...taskIssues,\n                    ...scheduleNotes,\n                    ...linkIssues,\n                    ...orderStatusIssues(deal),\n                    ...routingIssues(routing, false),\n                ],',
+      to: '                Issues: [\n                    ...closing.Issues,\n                    ...routeIssues,\n                    ...taskIssues,\n                    ...scheduleNotes,\n                    ...linkIssues,\n                    ...orderStatusIssues(deal),\n                ],',
       note: 'a refused downstream route is reported in Routing only, so a caller reading Success and Issues sees unqualified success' },
 
     // Half two: THE ONE THAT MATTERS. Somebody reads a warning-severity Issue as a defect and "fixes" it
@@ -939,9 +946,67 @@ const MUTATIONS = [
     // until its sample moved: it used 23:30Z on the 31st, which is still the 31st locally on this host,
     // so the two readings agreed exactly where it was looking.
     { id: 'M-FS5', file: FSJ, expect: ['FS7'],
-      from: '    const year = now.getUTCFullYear();\n    const month = now.getUTCMonth();',
-      to: '    const year = now.getFullYear();\n    const month = now.getMonth();',
-      note: 'the month boundary is read in the host timezone, so a snapshot lands in the previous period' }
+      from: '    const day = CalendarDayIn(now, zone);\n    const year = Number(day.slice(0, 4));\n    const month = Number(day.slice(5, 7)) - 1;',
+      to: '    const day = CalendarDayIn(now, zone); void day;\n    const year = now.getFullYear();\n    const month = now.getMonth();',
+      note: 'the month boundary is read in the host timezone, so a snapshot lands in the previous period' },
+
+    // ── POST-GO-LIVE ADDITIONS (#384, #385, #393, #409, #439, #461) ─────────────────────────────
+    { id: 'M-SD40', file: DES, expect: ['SD40'],
+      from: '            this._declaredTransition = null;\n            this._revertedStatusTarget = null;',
+      to: '            this._revertedStatusTarget = null;',
+      note: 'a refused save leaves a declared transition standing on the entity (#385)' },
+    { id: 'M-SD48', file: DES, expect: ['SD48'],
+      from: '        const owner = this.Team.Items.find(\n            (m) => m.IsActive !== false && UUIDsEqual(m.DealRoleID, ownerRoleID),\n        );',
+      to: '        const owner = this.Team.Items.find(\n            (m) => UUIDsEqual(m.DealRoleID, ownerRoleID),\n        );',
+      note: 'deactivating the Owner/AE team row leaves Deal.OwnerEmployeeID pointing at the inactive row (#409)' },
+    { id: 'M-CD39', file: PSE, expect: ['CD39'],
+      from: '            if (!(await this.pipelineHasAnother(before.PipelineID, outcome))) {',
+      to: '            if (false && !(await this.pipelineHasAnother(before.PipelineID, outcome))) {',
+      note: 'a pipeline can lose its last active closing stage through a stage save (#345)' },
+    { id: 'M-CD40', file: DLV, expect: ['CD40'],
+      from: '        const lock = await this.statusLock(owner.DealStatusTypeID, context.ContextUser);\n        if (lock === \'Open\') return null;',
+      to: '        const lock = await this.statusLock(owner.DealStatusTypeID, context.ContextUser);\n        if (lock === \'Open\' || true) return null;',
+      note: 'the order-line veto always permits the edit, so a closed deal\'s order lines can be changed and deleted (#393)' },
+    { id: 'M-CD43', file: DES, expect: ['CD43'],
+      from: '        const stampRefusal = this.closeStampEditRefusal();\n        if (stampRefusal) {',
+      to: '        const stampRefusal = this.closeStampEditRefusal();\n        if (false && stampRefusal) {',
+      note: 'direct writes to ClosedAt, ClosedByUserID and ActualCloseDate bypass the close-stamp guard (#439, #461)' },
+    { id: 'M-BD7', file: DSE, expect: ['BD7'],
+      from: '        if (this.IsSaved) {\n            return this.refuse(\'update\');\n        }',
+      to: '        if (false && this.IsSaved) {\n            return this.refuse(\'update\');\n        }',
+      note: 'an appended DealStageEvent can be updated in place (#348)' },
+    { id: 'M-SCH1', file: DSO, expect: ['CS1', 'CS2', 'CS4', 'CS5'],
+      from: '    if (!orderID || !OrdersIsInstalled()) return { Kind: \'Skipped\' };',
+      to: '    if (true || !orderID || !OrdersIsInstalled()) return { Kind: \'Skipped\' };',
+      note: 'the deal schedule is never sent to the order at Close Won or on post-Won edits (#290)' },
+    { id: 'M-SCH2', file: DSO, expect: ['CS3'],
+      from: 'const SOFT_REFUSALS = new Set([\'TIE_FAILED\', \'INVALID_ROW\']);',
+      to: 'const SOFT_REFUSALS = new Set<string>();',
+      note: 'an incomplete or untied deal schedule edit is treated as a hard refusal instead of staying on the deal (#290)' },
+    { id: 'M-DC1', file: RDC, expect: ['DC1', 'DC2', 'DC3'],
+      from: '        concession.OrderLineID = input.OrderLineID;\n        concession.DeliveryForm = \'Price\';',
+      to: '        concession.OrderLineID = input.OrderLineID;\n        concession.DeliveryForm = \'Price\';\n        return refused(\'mutant refused\');',
+      note: 'recording a discount concession fails before delegating to orders (#340)' },
+    { id: 'M-DC2', file: RDC, expect: ['DC4', 'DC5'],
+      from: '            const existing = await this.withdrawSuperseded(input.OrderLineID, concessionID, provider, user);',
+      to: '            const existing = null as Awaited<ReturnType<typeof this.withdrawSuperseded>>; void concessionID;',
+      note: 'raising a discount leaves the earlier concession standing on the line (#340)' },
+    { id: 'M-CO6', file: SUB, expect: ['CO6'],
+      from: '    const held = await FindUnansweredHeldLines(order, lines, provider, user);',
+      to: '    const held: UnansweredHeldLine[] = []; void FindUnansweredHeldLines;',
+      note: 'Close Won skips the unanswered held-subscription check (#504, #439)' },
+    { id: 'M-CT9', file: LCS, expect: ['CT9'],
+      from: '            const stated = this.applyDealTerms(contract, input);\n            await this.reseedUnstatedTerms(contract, stated);',
+      to: '            const stated = this.applyDealTerms(contract, input); void stated;\n            return { Success: false, ContractID: input.ContractID, Message: \'mutant failed refresh\' };',
+      note: 're-closing a won deal fails to refresh the existing contract (#278)' },
+    { id: 'M-CT10', file: LCS, expect: ['CT10'],
+      from: '    if (existing.Results.length > 0) {\n        return { Success: true, ContractID: input.ContractID };\n    }',
+      to: '    if (false && existing.Results.length > 0) {\n        return { Success: true, ContractID: input.ContractID };\n    }',
+      note: 're-closing a won deal inserts a duplicate ContractOrder link instead of reusing the existing one' },
+    { id: 'M-AC25', file: AWS, expect: ['AC25'],
+      from: '        const parties = await this.dealParties(input.DealID, provider, contextUser);\n        if (!parties.Found) {',
+      to: '        const parties = await this.dealParties(input.DealID, provider, contextUser);\n        if (false && !parties.Found) {',
+      note: 'LogActivity writes an activity for an unknown DealID instead of refusing (#381, #355)' }
 ];
 
 /**

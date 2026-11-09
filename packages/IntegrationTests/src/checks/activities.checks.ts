@@ -13,6 +13,12 @@
 import { RunView, type IMetadataProvider, type UserInfo } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 import {
+    SalesCloseDealOperation,
+    SalesReopenDealOperation,
+    type SalesCloseDealOutput,
+    type SalesReopenDealOutput,
+} from '@mj-biz-apps/sales-entities';
+import {
     ActivitySyncEngine,
     FixtureActivitySyncProvider,
     IdentityResolver,
@@ -31,7 +37,7 @@ import type {
     mjBizAppsCommonContactMethodEntity,
 } from '@mj-biz-apps/common-entities';
 
-import { InRolledBackTransaction, ProviderOf, TxOne } from '../fixture.js';
+import { InRolledBackTransaction, ProviderOf, ResolveSalesFixture, TxOne } from '../fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -1482,6 +1488,61 @@ export const ActivitiesChecks: NamedCheck[] = [
                     ].join(' | '),
                     'exactly the deal (first, Regarding), the account and the person once — no primary contact',
                 );
+            }),
+    },
+    {
+        Id: 'activities.AC25',
+        Name: 'AC25: close and reopen each add a timeline Activity, and LogActivity refuses an unknown DealID (#381, #355)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const f = await ResolveSalesFixture(ctx);
+                const deal = await openDeal(ctx);
+
+                const unknown = await writer.LogActivity(
+                    {
+                        DealID: '00000000-0000-0000-0000-000000000999',
+                        TypeCode: 'Note',
+                        Title: 'AC25 unknown deal',
+                        StartedAt: new Date('2026-08-19T12:00:00.000Z'),
+                    },
+                    ProviderOf(ctx),
+                    ctx.User,
+                );
+                Assert(
+                    unknown.Success === false && unknown.Issues.some((i) => i.includes('was not found')),
+                    `LogActivity must refuse an unknown DealID — got ${JSON.stringify(unknown)}`,
+                );
+
+                const closeRes = await new SalesCloseDealOperation().Execute(
+                    {
+                        DealID: deal.DealID,
+                        DealStatusTypeID: f.LostStatusID,
+                        LossReasonID: f.LossReasonPlainID,
+                        Notes: 'AC25 close note',
+                    },
+                    { provider: ctx.Provider, user: ctx.User },
+                );
+                const closeOut = (closeRes as { Output?: SalesCloseDealOutput })?.Output;
+                Assert(closeOut?.Success === true, `setup: close failed — ${JSON.stringify(closeOut?.Issues)}`);
+
+                const reopenRes = await new SalesReopenDealOperation().Execute(
+                    {
+                        DealID: deal.DealID,
+                        Reason: 'AC25 reopen reason',
+                    },
+                    { provider: ctx.Provider, user: ctx.User },
+                );
+                const reopenOut = (reopenRes as { Output?: SalesReopenDealOutput })?.Output;
+                Assert(reopenOut?.Success === true, `setup: reopen failed — ${JSON.stringify(reopenOut?.Issues)}`);
+
+                const timeline = await reader.TimelineForDeal(deal.DealID, ProviderOf(ctx), ctx.User);
+                Assert(timeline.Success, `timeline read failed — ${timeline.Issues.join(' | ')}`);
+                const closedEntry = timeline.Entries.find((e) => e.Title === 'Deal closed' && e.Description?.includes('AC25 close note'));
+                const reopenedEntry = timeline.Entries.find((e) => e.Title === 'Deal reopened' && e.Description?.includes('AC25 reopen reason'));
+                Assert(!!closedEntry, 'closing the deal must write a Deal closed Activity onto the timeline');
+                Assert(!!reopenedEntry, 'reopening the deal must write a Deal reopened Activity onto the timeline');
             }),
     },
 ];

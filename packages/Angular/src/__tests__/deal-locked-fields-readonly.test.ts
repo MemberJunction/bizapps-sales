@@ -207,4 +207,20 @@ describe("item 1's form half: the lines stop offering Add on a locked deal", () 
         expect(linesPanel, 'a second ResolveDealLockState call is a second answer to a settled question')
             .not.toContain('ResolveDealLockState');
     });
+
+    it('narrows FormComponent through the shared DealFormLockState interface (#394)', () => {
+        const formSource = readFileSync(new URL('../lib/custom/deal-form.component.ts', import.meta.url), 'utf8');
+        expect(formSource).toContain('export interface DealFormLockState');
+        expect(formSource).toContain('implements DealFormLockState');
+        expect(PANELS).toContain('Partial<DealFormLockState>');
+        expect(PANELS).not.toContain('{ IsLocked?: boolean');
+    });
+
+    it('derives hero StatusTone from flags (IsWon, IsOpen, IsLost, IsLocked) rather than status names (#460)', () => {
+        const hero = readFileSync(new URL('../lib/form-panels/deal-hero.panel.ts', import.meta.url), 'utf8');
+        const statusTone = hero.slice(hero.indexOf('public get StatusTone()'), hero.indexOf('public get RelatedLinks()'));
+        expect(statusTone).toContain('this.IsWon || this.IsOpen');
+        expect(statusTone).toContain('this.IsLost || this.IsLocked');
+        expect(statusTone).not.toMatch(/toLowerCase|includes\(/);
+    });
 });

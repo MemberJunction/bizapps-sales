@@ -53,7 +53,7 @@ import {
     ValidationErrorType,
     ValidationResult,
 } from '@memberjunction/core';
-import { RegisterClass } from '@memberjunction/global';
+import { RegisterClass, UUIDsEqual } from '@memberjunction/global';
 
 // THE PEER'S GENERATED CLASS, imported across the app boundary. This is the first hard import from
 // another BizApp in this repo, and it is deliberate: the standalone-Sales premise is retired (Amith —
@@ -458,10 +458,15 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
         // twice does not re-read — nor does it discard roster edits already staged.
         await this.Team.Load();
 
-        const existing = this.Team.Items.filter((m) => m.DealRoleID === ownerRoleID);
-        if (existing.length === 1 && existing[0].EmployeeID === employeeID) {
+        const existing = this.Team.Items.filter((m) => UUIDsEqual(m.DealRoleID, ownerRoleID));
+        const activeExisting = existing.filter((m) => m.IsActive !== false);
+        if (
+            existing.length === 1
+            && activeExisting.length === 1
+            && UUIDsEqual(activeExisting[0].EmployeeID, employeeID)
+        ) {
             this.OwnerEmployeeID = employeeID;
-            return; // already the owner — nothing to write
+            return; // already the active owner — nothing to write
         }
 
         // Exactly one member may hold the owner role, so every current holder goes.

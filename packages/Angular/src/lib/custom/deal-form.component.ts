@@ -43,6 +43,24 @@ import { MJS_ENTITIES } from '../data/entity-names';
 import { SameDealID, WatchDealSaves, type DealSave } from '../data/deal-saves';
 import { OnlyLinkedCompany, ShouldStampCompanyFromPipeline, type PipelineCompanyRow } from './company-from-pipeline';
 
+/**
+ * The lock state and refresh hook `DealFormComponentExtended` exposes to its panels (#394).
+ *
+ * `BaseFormPanel.FormComponent` is typed as `BaseFormComponent`, so each panel has to narrow it to
+ * read these members. Exporting ONE interface that `DealFormComponentExtended` implements means a
+ * rename on the form fails to compile at the form itself, instead of silently evaluating `undefined`
+ * on every panel and rendering a closed deal editable.
+ */
+export interface DealFormLockState {
+    readonly IsLocked: boolean;
+    readonly IsLost: boolean;
+    readonly IsWon: boolean;
+    readonly IsStatusMissing: boolean;
+    /** The PERSISTED account is blank, which keeps Account editable on a closed deal (golive#306). */
+    readonly IsPersistedAccountBlank: boolean;
+    RefreshDealState(): Promise<void>;
+}
+
 /** See `deal-stage-event-form.component.ts` for why the priority is explicit rather than import-order. */
 @RegisterClass(BaseFormComponent, 'MJ_BizApps_Sales: Deals', 2)
 @Component({
@@ -50,7 +68,7 @@ import { OnlyLinkedCompany, ShouldStampCompanyFromPipeline, type PipelineCompany
     selector: 'mjs-deal-form',
     templateUrl: '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component.html',
 })
-export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
+export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent implements DealFormLockState {
     /** True when the PERSISTED status locks the deal. Resolved once per load. */
     public IsLocked = false;
 

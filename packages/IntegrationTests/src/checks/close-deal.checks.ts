@@ -3440,6 +3440,92 @@ export const CloseDealChecks: NamedCheck[] = [
                 Assert(row.ClosedAt !== null, 'and ran the close, rather than reporting success on an open deal');
             }),
     },
+    {
+        Id: 'close-deal.CD43',
+        Name: 'CD43: direct saves writing close stamps are refused, status-driven closes stamp them, and deactivating the locking status does not prevent reopen (#439, #461)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD43 close-stamp guard',
+                );
+                const md = new Metadata();
+
+                for (const [field, value] of [
+                    ['ClosedAt', new Date('2026-08-01T12:00:00Z')],
+                    ['ActualCloseDate', new Date('2026-08-01T00:00:00Z')],
+                    ['ClosedByUserID', ctx.User.ID],
+                ] as const) {
+                    const attempt = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                    Assert(await attempt.Load(dealID), `the open deal loads before setting ${field}`);
+                    attempt.Set(field, value);
+                    Assert(
+                        !(await attempt.Save()),
+                        `a direct save setting ${field} outside Sales.CloseDeal must be refused`,
+                    );
+                }
+
+                const viaStatus = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await viaStatus.Load(dealID), 'the open deal loads for a status-driven close');
+                viaStatus.DealStatusTypeID = f.WonStatusID;
+                Assert(
+                    await viaStatus.Save(),
+                    `a status-driven close must succeed: ${viaStatus.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const stamped = await TxOne<{
+                    ClosedAt: Date | null;
+                    ActualCloseDate: Date | null;
+                    ClosedByUserID: string | null;
+                }>(
+                    ctx,
+                    `SELECT ClosedAt, ActualCloseDate, ClosedByUserID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(stamped.ClosedAt !== null, 'status-driven close stamped ClosedAt');
+                Assert(stamped.ActualCloseDate !== null, 'status-driven close stamped ActualCloseDate');
+                AssertEqual(
+                    String(stamped.ClosedByUserID ?? '').toLowerCase(),
+                    String(ctx.User.ID).toLowerCase(),
+                    'status-driven close stamped ClosedByUserID',
+                );
+
+                // Deactivate the locking status and verify ReopenDeal still unlocks and clears close stamps (#461).
+                const db = ctx.Provider as unknown as {
+                    ExecuteSQL: (
+                        sql: string,
+                        params: Record<string, unknown>,
+                        options: { isMutation: boolean; description: string },
+                        user: unknown,
+                    ) => Promise<unknown>;
+                };
+                await db.ExecuteSQL(
+                    `UPDATE ${SALES_SCHEMA}.DealStatusType SET IsActive = 0 WHERE ID = '${f.WonStatusID}'`,
+                    {},
+                    { isMutation: true, description: 'CD43 deactivate won status' },
+                    ctx.User,
+                );
+
+                const out = await reopen(ctx, {
+                    DealID: dealID,
+                    Reason: 'CD43: reopen while locking status is inactive (#461).',
+                });
+                Assert(out.Success, `reopen with inactive locking status failed — ${JSON.stringify(out.Issues)}`);
+                Assert(out.Unlocked, 'reopen reports Unlocked');
+
+                const reopened = await TxOne<{
+                    ClosedAt: Date | null;
+                    ActualCloseDate: Date | null;
+                    ClosedByUserID: string | null;
+                }>(
+                    ctx,
+                    `SELECT ClosedAt, ActualCloseDate, ClosedByUserID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(reopened.ClosedAt === null, 'reopen cleared ClosedAt');
+                Assert(reopened.ActualCloseDate === null, 'reopen cleared ActualCloseDate');
+                Assert(reopened.ClosedByUserID === null, 'reopen cleared ClosedByUserID');
+            }),
+    },
 ];
 
 /** Orders' line entity, named here for the same reason as `ORDERS_SCHEMA`. */

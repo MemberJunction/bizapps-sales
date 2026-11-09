@@ -46,6 +46,7 @@
  */
 export * from './DealEntityServer.js';
 export * from './DealTeamMemberEntityServer.js';
+export * from './team-role-rules.js';
 export * from './DealPaymentScheduleEntityServer.js';
 export * from './deal-schedule-to-order.js';
 export * from './PipelineStageEntityServer.js';
