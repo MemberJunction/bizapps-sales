@@ -24,6 +24,13 @@
  * deal and nothing else, the caller has already passed the deal's own delete check, and the whole delete
  * runs in one transaction, so removing them directly is the narrow path. The order is deleted through
  * orders' own entity, which owns its rules.
+ *
+ * THE CHECKS' READS AND THE ORDER DELETE RUN AS THE SYSTEM USER (`VetoReader`). The caller's right to
+ * delete this deal is decided above, from their own authorizations and ownership; what the order holds
+ * and whether it may go is a rule the server enforces the same for every caller. Running the order
+ * delete as the caller would need the Sales roles to hold delete on the order header and its ten child
+ * entities, and several of those have no status guard of their own, so the grant would let a Sales
+ * User delete rows of a Confirmed order directly. The roles hold delete on Deals only.
  */
 import {
     AuthorizationEvaluator,
@@ -38,6 +45,7 @@ import { IsBooked } from '@mj-biz-apps/orders-entities';
 import type { SQLServerDataProvider } from '@memberjunction/sqlserver-dataprovider';
 
 import { SALES_SCHEMA } from './SequenceService.js';
+import { VetoReader } from './veto-reader.js';
 
 export const DEAL_DELETE_AUTH = {
     /** Delete any open deal that was never closed. Parent of `Own`, so it implies it. */
@@ -128,7 +136,8 @@ export function UserEmployeeID(user: UserInfo | null | undefined): string | null
 
 /**
  * Read everything the check needs in one round trip: the locking status types, the deal's stage
- * history and its order's status. Throws on a failed read so the caller refuses.
+ * history and its order's status. Throws on a failed read so the caller refuses. The reads run as the
+ * system user, so a Sales role needs no read grant on orders; the grant scope is the caller's own.
  */
 export async function ReadDealDeleteFacts(
     subject: DealDeleteSubject,
@@ -145,7 +154,7 @@ export async function ReadDealDeleteFacts(
     if (subject.OrderID) {
         params.push({ EntityName: ORDER_HEADER_ENTITY, ExtraFilter: `ID = '${subject.OrderID}'`, ResultType: 'simple', Fields: ['Status'] });
     }
-    const reads = await views.RunViews(params, user);
+    const reads = await views.RunViews(params, VetoReader(user));
     if (reads?.length !== params.length) throw new Error('the reads returned no result');
     for (const read of reads) {
         if (!read?.Success) throw new Error(read?.ErrorMessage || 'a read returned no result');

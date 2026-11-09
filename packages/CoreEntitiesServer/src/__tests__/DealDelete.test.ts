@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BaseEntity, type AuthorizationInfo, type UserInfo } from '@memberjunction/core';
+import { UserCache } from '@memberjunction/generic-database-provider';
 import { DealEntityServer } from '../DealEntityServer.js';
 import {
     DEAL_DELETE_AUTH,
@@ -123,14 +124,16 @@ describe('DealEntityServer.Delete', () => {
         orderDeletes?: boolean;
         scope?: 'any' | 'own';
         failRead?: boolean;
+        owner?: string;
     }
 
     function deal(world: World) {
         const log: string[] = [];
+        const usedAs: { reads?: unknown; order?: unknown } = {};
         const instance = Object.create(DealEntityServer.prototype) as DealEntityServer;
         const persisted: Record<string, string | null> = {
             DealStatusTypeID: OPEN,
-            OwnerEmployeeID: ME,
+            OwnerEmployeeID: world.owner ?? ME,
             OrderID: world.orderStatus ? ORDER : null,
         };
         const results: Array<{ Success: boolean; Message: string }> = [];
@@ -150,7 +153,8 @@ describe('DealEntityServer.Delete', () => {
                 { ID: 'any', Name: DEAL_DELETE_AUTH.Any, ParentID: null, IsActive: true, UserCanExecute: (u: UserInfo) => u.UserRoles.some((r) => r.RoleID === 'admin') },
                 { ID: 'own', Name: DEAL_DELETE_AUTH.Own, ParentID: 'any', IsActive: true, UserCanExecute: (u: UserInfo) => u.UserRoles.some((r) => r.RoleID === 'user') },
             ],
-            RunViews: async (params: Array<{ EntityName: string }>) => {
+            RunViews: async (params: Array<{ EntityName: string }>, user: unknown) => {
+                usedAs.reads = user;
                 if (world.failRead) return params.map(() => ({ Success: false, ErrorMessage: 'connection reset' }));
                 return params.map((p) => {
                     if (p.EntityName.endsWith('Deal Status Types')) return { Success: true, Results: world.lockingStatuses.map((ID) => ({ ID })) };
@@ -166,7 +170,7 @@ describe('DealEntityServer.Delete', () => {
                 log.push('begin');
                 return { Commit: async () => log.push('commit'), Rollback: async () => log.push('rollback') };
             },
-            GetEntityObject: async () => ({
+            GetEntityObject: async (_name: string, user: unknown) => (usedAs.order = user, {
                 Load: async () => true,
                 Delete: async () => {
                     log.push('order');
@@ -179,7 +183,7 @@ describe('DealEntityServer.Delete', () => {
             log.push('deal');
             return true;
         });
-        return { instance, log, results };
+        return { instance, log, results, usedAs };
     }
 
     it('deletes children, the deal and its order in one transaction, in that order', async () => {
@@ -206,6 +210,25 @@ describe('DealEntityServer.Delete', () => {
         expect(await instance.Delete()).toBe(false);
         expect(log).toEqual([]);
         expect(results.at(-1)?.Message).toContain('closed before and reopened');
+    });
+
+    it('deletes the order and reads the facts as the system user, so the Sales roles need no order grants', async () => {
+        const system = { ID: 'system', Name: 'System' } as unknown as UserInfo;
+        vi.spyOn(UserCache.Instance, 'GetSystemUser').mockReturnValue(system);
+        const { instance, log, usedAs } = deal({ lockingStatuses: [WON], historyTo: [OPEN], orderStatus: 'Draft' });
+        expect(await instance.Delete()).toBe(true);
+        expect(log).toEqual(['begin', 'sql:4', 'deal', 'order', 'commit']);
+        expect(usedAs.order).toBe(system);
+        expect(usedAs.reads).toBe(system);
+    });
+
+    it('still decides the grant from the caller, not the system user', async () => {
+        // A Sales User (own) on someone else's deal: the system user's rights must not widen this.
+        vi.spyOn(UserCache.Instance, 'GetSystemUser').mockReturnValue({ ID: 'system', UserRoles: [{ RoleID: 'admin' }] } as unknown as UserInfo);
+        const { instance, log, results } = deal({ lockingStatuses: [WON], historyTo: [], orderStatus: 'Draft', owner: SOMEONE_ELSE });
+        expect(await instance.Delete()).toBe(false);
+        expect(log).toEqual([]);
+        expect(results.at(-1)?.Message).toContain('only deals you own');
     });
 
     it('refuses when a read fails, rather than guessing', async () => {

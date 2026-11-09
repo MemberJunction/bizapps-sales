@@ -9,7 +9,9 @@
  * WHO IS DELETING. Each check acts as a copy of the context user whose roles are replaced by `UI` plus
  * the Sales role under test, and whose Employee is set to the deal's owner (or to someone else). That
  * is the shape of a real account director: read access from `UI`, delete from the Sales role, and no
- * `Developer` grant to hide a missing permission. The metadata under `metadata/roles`,
+ * `Developer` grant to hide a missing permission. The Sales roles hold no delete on orders' entities;
+ * the deal's order is deleted as the system user, so DD1 and DD3 prove that path and DD8 that the
+ * roles cannot delete order rows on their own. The metadata under `metadata/roles`,
  * `metadata/authorizations`, `metadata/authorization-roles` and `metadata/entity-permissions` must be
  * pushed first; DD0 says so if it is not.
  */
@@ -36,6 +38,21 @@ import {
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
 const ORDERS_SCHEMA = '__mj_BizAppsOrders';
+
+/** Orders' header and the ten entities a draft order's delete removes. */
+const ORDER_ENTITIES = [
+    'Order Headers',
+    'Order Lines',
+    'Order Line Price Components',
+    'Order Line Dimensions',
+    'Order Concessions',
+    'Order Adjustments',
+    'Order Adjustment Allocations',
+    'Order Charges',
+    'Order Charge Allocations',
+    'Order Checkout Answers',
+    'Order Header Payment Schedules',
+].map((n) => `MJ_BizApps_Orders: ${n}`);
 const SOMEONE_ELSE = '00000000-0000-4000-8000-00000000d429';
 
 /** A copy of the context user holding `UI` plus `salesRole` (or nothing else), with the given Employee. */
@@ -227,6 +244,25 @@ export const DealDeleteChecks: NamedCheck[] = [
                 Assert(out.Message.includes('order is Confirmed'), `the refusal does not say why: ${out.Message}`);
                 AssertEqual(JSON.stringify(await remains(ctx, deal.ID, deal.OrderID)), JSON.stringify(before), 'a refused delete removed rows');
             }),
+    },
+    {
+        Id: 'deal-delete.DD8',
+        Name: 'DD8: neither Sales role may delete order rows directly',
+        RequiresMutation: false,
+        Fn: async (ctx) => {
+            const md = new Metadata();
+            for (const role of ['Sales User', 'Sales Admin'] as const) {
+                const user = actingAs(ctx, role, SOMEONE_ELSE);
+                for (const name of ORDER_ENTITIES) {
+                    const entity = md.EntityByName(name);
+                    Assert(!!entity, `entity "${name}" is not in this host's metadata`);
+                    Assert(
+                        !entity!.GetUserPermisions(user).CanDelete,
+                        `${role} may delete ${name} directly, which reaches rows of a booked order`,
+                    );
+                }
+            }
+        },
     },
 ];
 

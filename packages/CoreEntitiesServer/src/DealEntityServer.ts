@@ -79,6 +79,7 @@ import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
 import { FindUnansweredSubscriptionLines } from './subscription-choice.js';
 import { KeptOnDealNote, SendDealScheduleToOrder, StatusIsWon } from './deal-schedule-to-order.js';
 import { OrdersIsInstalled } from './orders-availability.js';
+import { VetoReader } from './veto-reader.js';
 import {
     DealDeleteRefusal,
     DeleteDealChildRows,
@@ -3929,10 +3930,16 @@ export class DealEntityServer extends DealEntity {
         }
     }
 
-    /** Delete the order through orders' own entity, which refuses a booked order. Null on success. */
+    /**
+     * Delete the order through orders' own entity, which refuses a booked order. Null on success.
+     *
+     * Loaded as the system user, so orders' delete of the order's lines, charges and schedule runs as
+     * that user too. The caller's right to delete this deal was already checked; giving the Sales roles
+     * delete on the order entities instead would let them delete rows of a booked order directly.
+     */
     private async deleteEmbeddedOrder(orderID: string): Promise<string | null> {
         const provider = this.ProviderToUse as unknown as IMetadataProvider;
-        const order = await provider.GetEntityObject<mjBizAppsOrdersOrderHeaderEntity>(ORDER_HEADER_ENTITY, this.ContextCurrentUser);
+        const order = await provider.GetEntityObject<mjBizAppsOrdersOrderHeaderEntity>(ORDER_HEADER_ENTITY, VetoReader(this.ContextCurrentUser));
         if (!(await order.Load(orderID))) {
             return `order ${orderID} could not be read`;
         }

@@ -843,10 +843,19 @@ caller, and only for a deal that never closed, so no close provenance is lost.
 
 **Why authorizations and not a row-level filter on the permission.** The owner rule needs the user's
 Employee, and a refusal should name the rule it broke. Entity permissions only grant `CanDelete` (to the
-two roles on Deals and on the order entities a draft order's delete removes); the rule itself lives in
-code, beside the close lock.
+two roles, on Deals); the rule itself lives in code, beside the close lock.
 
-Pinned by `DealDelete.test.ts`.
+**Why the order goes as the system user.** Orders' delete removes the order's lines, charges,
+allocations and schedule through their own entities, as the user the order was loaded with. Run as the
+caller, that needs the Sales roles to hold delete on the order header and ten child entities, and
+several of those (charges, allocations, price components, dimensions, checkout answers) have no status
+guard, so the grant would let a Sales User delete rows of a Confirmed order directly. The caller's
+right to delete the deal is decided first, from their own grants; the order is then loaded as the
+system user (`VetoReader`, as the order vetoes read Deals), and orders still refuses a booked order.
+The facts read (lock statuses, stage history, order status) runs as the system user for the same
+reason. Integration check DD8 pins that neither role may delete order rows.
+
+Pinned by `DealDelete.test.ts` and integration checks DD1-DD8.
 
 ---
 

@@ -62,8 +62,7 @@
   ],
   "_comment_permissions": [
     "authorizations and roles precede everything that looks them up: authorization-roles resolves both",
-    "by Name, and entity-permissions resolves the role. Both of those go last because entity-permissions",
-    "also looks up orders' entities, which only need to exist, and nothing here references either (golive#429)."
+    "by Name, and entity-permissions resolves the role. Both go last; nothing here references either (golive#429)."
   ],
   "directoryOrder": [
     "deal-status-types",
