@@ -17,7 +17,7 @@ import { MaxLength } from 'class-validator';
 import * as mj_core_schema_server_object_types from '@memberjunction/server'
 
 
-import { mjBizAppsSalesAccountTypeEntity, mjBizAppsSalesBuyingRoleTypeEntity, mjBizAppsSalesDealContactRoleEntity, mjBizAppsSalesDealPaymentScheduleEntity, mjBizAppsSalesDealRoleEntity, mjBizAppsSalesDealSequenceEntity, mjBizAppsSalesDealStageEventEntity, mjBizAppsSalesDealStatusTypeEntity, mjBizAppsSalesDealTeamMemberEntity, mjBizAppsSalesDealTypeEntity, mjBizAppsSalesDealEntity, mjBizAppsSalesForecastCategoryTypeEntity, mjBizAppsSalesForecastSnapshotEntity, mjBizAppsSalesLeadSourceTypeEntity, mjBizAppsSalesLifecycleStageTypeEntity, mjBizAppsSalesLossReasonEntity, mjBizAppsSalesPipelineStageEntity, mjBizAppsSalesPipelineEntity, mjBizAppsSalesSalesAccountEntity, mjBizAppsSalesSalesContactEntity } from '@mj-biz-apps/sales-entities';
+import { mjBizAppsSalesAccountTypeEntity, mjBizAppsSalesBuyingRoleTypeEntity, mjBizAppsSalesDealContactRoleEntity, mjBizAppsSalesDealPaymentScheduleEntity, mjBizAppsSalesDealRoleEntity, mjBizAppsSalesDealSequenceEntity, mjBizAppsSalesDealStageEventEntity, mjBizAppsSalesDealStatusTypeEntity, mjBizAppsSalesDealTeamMemberEntity, mjBizAppsSalesDealTypeEntity, mjBizAppsSalesDealEntity, mjBizAppsSalesForecastCategoryTypeEntity, mjBizAppsSalesForecastSnapshotEntity, mjBizAppsSalesLeadSourceTypeEntity, mjBizAppsSalesLifecycleStageTypeEntity, mjBizAppsSalesLossReasonEntity, mjBizAppsSalesPipelineCompanyEntity, mjBizAppsSalesPipelineStageEntity, mjBizAppsSalesPipelineEntity, mjBizAppsSalesSalesAccountEntity, mjBizAppsSalesSalesContactEntity } from '@mj-biz-apps/sales-entities';
     
 
 //****************************************************************************
@@ -2096,7 +2096,7 @@ export class mjBizAppsSalesDeal_ {
     @MaxLength(36)
     BillingContactID?: string;
         
-    @Field({nullable: true, description: "The company selling the deal. It must match the pipeline's company."}) 
+    @Field({nullable: true, description: "The SELLING company, chosen by the rep. Must be actively linked to the deal's pipeline through PipelineCompany; enforced by the entity server, since a CHECK cannot reach across the link. FK to __mj.Company."}) 
     @MaxLength(36)
     CompanyID?: string;
         
@@ -3813,6 +3813,177 @@ export class mjBizAppsSalesLossReasonResolver extends ResolverBase {
 }
 
 //****************************************************************************
+// ENTITY CLASS for MJ_BizApps_Sales: Pipeline Companies
+//****************************************************************************
+@ObjectType({ description: "Links a pipeline to a company that sells through it. A pipeline can serve several companies; a deal's company must be actively linked to the deal's pipeline." })
+export class mjBizAppsSalesPipelineCompany_ {
+    @Field() 
+    @MaxLength(36)
+    ID: string;
+        
+    @Field({nullable: true, description: "The pipeline the company sells through."}) 
+    @MaxLength(36)
+    PipelineID?: string;
+        
+    @Field({nullable: true, description: "The selling company. Deals for this company can use the pipeline while the link is active."}) 
+    @MaxLength(36)
+    CompanyID?: string;
+        
+    @Field(() => Boolean, {nullable: true, description: "Whether new deals for the company can choose the pipeline. Clearing it retires the link without touching existing deals on the pipeline."}) 
+    IsActive?: boolean;
+        
+    @Field() 
+    _mj__CreatedAt: Date;
+        
+    @Field() 
+    _mj__UpdatedAt: Date;
+        
+    @Field({nullable: true}) 
+    @MaxLength(200)
+    Pipeline?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(50)
+    Company?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
+        
+}
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Sales: Pipeline Companies
+//****************************************************************************
+@InputType()
+export class CreatemjBizAppsSalesPipelineCompanyInput {
+    @Field({ nullable: true })
+    ID?: string;
+
+    @Field({ nullable: true })
+    PipelineID?: string;
+
+    @Field({ nullable: true })
+    CompanyID?: string;
+
+    @Field(() => Boolean, { nullable: true })
+    IsActive?: boolean;
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Sales: Pipeline Companies
+//****************************************************************************
+@InputType()
+export class UpdatemjBizAppsSalesPipelineCompanyInput {
+    @Field()
+    ID: string;
+
+    @Field({ nullable: true })
+    PipelineID?: string;
+
+    @Field({ nullable: true })
+    CompanyID?: string;
+
+    @Field(() => Boolean, { nullable: true })
+    IsActive?: boolean;
+
+    @Field(() => [KeyValuePairInput], { nullable: true })
+    OldValues___?: KeyValuePairInput[];
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+//****************************************************************************
+// RESOLVER for MJ_BizApps_Sales: Pipeline Companies
+//****************************************************************************
+@ObjectType()
+export class RunmjBizAppsSalesPipelineCompanyViewResult {
+    @Field(() => [mjBizAppsSalesPipelineCompany_])
+    Results: mjBizAppsSalesPipelineCompany_[];
+
+    @Field(() => String, {nullable: true})
+    UserViewRunID?: string;
+
+    @Field(() => Int, {nullable: true})
+    RowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    TotalRowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    ExecutionTime: number;
+
+    @Field({nullable: true})
+    ErrorMessage?: string;
+
+    @Field(() => Boolean, {nullable: false})
+    Success: boolean;
+}
+
+@Resolver(mjBizAppsSalesPipelineCompany_)
+export class mjBizAppsSalesPipelineCompanyResolver extends ResolverBase {
+    @Query(() => RunmjBizAppsSalesPipelineCompanyViewResult)
+    async RunmjBizAppsSalesPipelineCompanyViewByID(@Arg('input', () => RunViewByIDInput) input: RunViewByIDInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByIDGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsSalesPipelineCompanyViewResult)
+    async RunmjBizAppsSalesPipelineCompanyViewByName(@Arg('input', () => RunViewByNameInput) input: RunViewByNameInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByNameGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsSalesPipelineCompanyViewResult)
+    async RunmjBizAppsSalesPipelineCompanyDynamicView(@Arg('input', () => RunDynamicViewInput) input: RunDynamicViewInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        input.EntityName = 'MJ_BizApps_Sales: Pipeline Companies';
+        return super.RunDynamicViewGeneric(input, provider, userPayload, pubSub);
+    }
+    @Query(() => mjBizAppsSalesPipelineCompany_, { nullable: true })
+    async mjBizAppsSalesPipelineCompany(@Arg('ID', () => String) ID: string, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine): Promise<mjBizAppsSalesPipelineCompany_ | null> {
+        this.CheckUserReadPermissions('MJ_BizApps_Sales: Pipeline Companies', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwPipelineCompanies')} WHERE ${provider.QuoteIdentifier('ID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Pipeline Companies', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.MapFieldNamesToCodeNames('MJ_BizApps_Sales: Pipeline Companies', rows && rows.length > 0 ? rows[0] : null, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+    
+    @Mutation(() => mjBizAppsSalesPipelineCompany_)
+    async CreatemjBizAppsSalesPipelineCompany(
+        @Arg('input', () => CreatemjBizAppsSalesPipelineCompanyInput) input: CreatemjBizAppsSalesPipelineCompanyInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.CreateRecord('MJ_BizApps_Sales: Pipeline Companies', input, provider, userPayload, pubSub)
+    }
+        
+    @Mutation(() => mjBizAppsSalesPipelineCompany_)
+    async UpdatemjBizAppsSalesPipelineCompany(
+        @Arg('input', () => UpdatemjBizAppsSalesPipelineCompanyInput) input: UpdatemjBizAppsSalesPipelineCompanyInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.UpdateRecord('MJ_BizApps_Sales: Pipeline Companies', input, provider, userPayload, pubSub);
+    }
+    
+    @Mutation(() => mjBizAppsSalesPipelineCompany_)
+    async DeletemjBizAppsSalesPipelineCompany(@Arg('ID', () => String) ID: string, @Arg('options___', () => DeleteOptionsInput) options: DeleteOptionsInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadWriteProvider(providers);
+        const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
+        return this.DeleteRecord('MJ_BizApps_Sales: Pipeline Companies', key, options, provider, userPayload, pubSub);
+    }
+    
+}
+
+//****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Pipeline Stages
 //****************************************************************************
 @ObjectType({ description: "An ordered stage within a pipeline. Each stage sets the status a deal takes on when it enters the stage." })
@@ -4093,21 +4264,17 @@ export class mjBizAppsSalesPipelineStageResolver extends ResolverBase {
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Sales: Pipelines
 //****************************************************************************
-@ObjectType({ description: "A sales pipeline, owned by exactly one company. A company may have any number of pipelines; a pipeline may have any number of deals." })
+@ObjectType({ description: "A sales pipeline: an ordered set of stages a deal moves through. Serves every company it is actively linked to through PipelineCompany." })
 export class mjBizAppsSalesPipeline_ {
     @Field() 
     @MaxLength(36)
     ID: string;
         
-    @Field({nullable: true, description: "The company that owns this pipeline. Every deal in the pipeline belongs to this company."}) 
-    @MaxLength(36)
-    CompanyID?: string;
-        
     @Field({nullable: true}) 
     @MaxLength(200)
     Name?: string;
         
-    @Field({nullable: true, description: "Short identifier for the pipeline, unique within its company."}) 
+    @Field({nullable: true, description: "Short code for the pipeline. Not unique: deployments that copied the default pipeline per company hold several pipelines with the same code."}) 
     @MaxLength(40)
     Code?: string;
         
@@ -4151,10 +4318,6 @@ export class mjBizAppsSalesPipeline_ {
     CloseWonAssigneePersonID?: string;
         
     @Field({nullable: true}) 
-    @MaxLength(50)
-    Company?: string;
-        
-    @Field({nullable: true}) 
     @MaxLength(200)
     DealType?: string;
         
@@ -4178,9 +4341,6 @@ export class mjBizAppsSalesPipeline_ {
 export class CreatemjBizAppsSalesPipelineInput {
     @Field({ nullable: true })
     ID?: string;
-
-    @Field({ nullable: true })
-    CompanyID?: string;
 
     @Field({ nullable: true })
     Name?: string;
@@ -4230,9 +4390,6 @@ export class CreatemjBizAppsSalesPipelineInput {
 export class UpdatemjBizAppsSalesPipelineInput {
     @Field()
     ID: string;
-
-    @Field({ nullable: true })
-    CompanyID?: string;
 
     @Field({ nullable: true })
     Name?: string;
@@ -4504,6 +4661,10 @@ export class mjBizAppsSalesSalesAccount_ {
     @MaxLength(753)
     DefaultBillingContact?: string;
         
+    @Field({nullable: true}) 
+    @MaxLength(20)
+    Acronym?: string;
+        
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
         
@@ -4598,6 +4759,9 @@ export class CreatemjBizAppsSalesSalesAccountInput {
     @Field({ nullable: true })
     Status?: string;
 
+    @Field({ nullable: true })
+    Acronym: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -4691,6 +4855,9 @@ export class UpdatemjBizAppsSalesSalesAccountInput {
 
     @Field({ nullable: true })
     Status?: string;
+
+    @Field({ nullable: true })
+    Acronym?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

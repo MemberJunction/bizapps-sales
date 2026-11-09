@@ -41,7 +41,7 @@ import { EntitySaveOptions, RunView } from '@memberjunction/core';
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
 import { MJS_ENTITIES } from '../data/entity-names';
 import { SameDealID, WatchDealSaves, type DealSave } from '../data/deal-saves';
-import { ShouldStampCompanyFromPipeline, type PipelineCompanyRow } from './company-from-pipeline';
+import { OnlyLinkedCompany, ShouldStampCompanyFromPipeline, type PipelineCompanyRow } from './company-from-pipeline';
 
 /** See `deal-stage-event-form.component.ts` for why the priority is explicit rather than import-order. */
 @RegisterClass(BaseFormComponent, 'MJ_BizApps_Sales: Deals', 2)
@@ -218,7 +218,8 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     }
 
     /**
-     * Fills the selling company from the pipeline before the save is validated.
+     * Fills the selling company from the pipeline before the save is validated, when the pipeline
+     * serves only one company.
      *
      * WHY IT IS HERE AND NOT IN `Validate()`. `SaveRecord` calls `Validate()` and returns early when it
      * fails, so a stamp applied inside validation would be racing the thing it exists to satisfy. This
@@ -276,7 +277,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         return freshness.IsStale;
     }
 
-    /** Reads the chosen pipeline's company and writes it to the deal. See `SaveRecord` for why. */
+    /** Writes the chosen pipeline's only linked company to the deal. See `SaveRecord` for why. */
     private async stampCompanyFromPipeline(): Promise<void> {
         const record = this.record;
         const should = ShouldStampCompanyFromPipeline({
@@ -288,14 +289,10 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             return;
         }
 
-        /**
-         * `ResultType: 'simple'` returns plain rows, which is what is wanted: CodeGen generates no
-         * `PipelineEntity` subclass, and nothing here mutates the pipeline — only reads one column off it.
-         */
         const rv = new RunView();
         const result = await rv.RunView<PipelineCompanyRow>({
-            EntityName: MJS_ENTITIES.Pipeline,
-            ExtraFilter: `ID='${String(record.Get('PipelineID')).replace(/'/g, "''")}'`,
+            EntityName: MJS_ENTITIES.PipelineCompany,
+            ExtraFilter: `PipelineID='${String(record.Get('PipelineID')).replace(/'/g, "''")}' AND IsActive=1`,
             ResultType: 'simple',
             Fields: ['CompanyID'],
         });
@@ -304,7 +301,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             return;
         }
 
-        const companyID = result.Results?.[0]?.CompanyID ?? null;
+        const companyID = OnlyLinkedCompany(result.Results ?? []);
         if (companyID) {
             record.Set('CompanyID', companyID);
         }

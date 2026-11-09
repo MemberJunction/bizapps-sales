@@ -39,15 +39,15 @@
     "both, because the interesting failure is a bundle that registers 4 and runs 0."
   ],
   "bundles": {
-    "save-deal": { "count": 41, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD45" },
+    "save-deal": { "count": 43, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD47" },
     "close-deal": { "count": 42, "requires": "orders", "ids": "CD1-CD42" },
     "product-picker": { "count": 5, "requires": "orders", "ids": "PP1-PP5" },
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
     "close-won-schedule": { "count": 5, "requires": "orders", "ids": "CS1-CS5 — a deal's payment schedule reaches its order at Close Won and after (golive #290)" },
     "close-won-contract": { "count": 8, "requires": "contracts", "ids": "CT1, CT4, CT5, CT6, CT7, CT8, CT9, CT10 — the CT0 tripwire fired twice and is retired; CT2/CT3 unwritable after the v2 rebuild; CT10 needs contract-order-links and is left out where contracts has none" },
     "board-move": { "count": 7, "requires": "orders", "ids": "BD1-BD7" },
-    "pipeline-copy": { "count": 2, "requires": null, "ids": "PC1-PC2" },
-    "party-lookup": { "count": 5, "requires": null, "ids": "PL1-PL5" },
+    "pipeline-link": { "count": 2, "requires": null, "ids": "PL1-PL2" },
+    "party-lookup": { "count": 6, "requires": null, "ids": "PL1-PL6" },
     "$comment_close_won_tasks": [
       "12, AND THE TRANSIENT STATE THAT MADE THIS NUMBER ODD IS NOW RESOLVED -- it resolved exactly here.",
       "",
@@ -63,11 +63,12 @@
       "should be able to find the reasoning rather than re-derive it."
     ],
     "close-won-tasks": { "count": 18, "requires": "tasks", "ids": "WT1-WT18" },
-    "activities": { "count": 21, "requires": "common", "ids": "AC1-AC14, AC16, AC18-AC23" },
+    "activities": { "count": 22, "requires": "common", "ids": "AC1-AC14, AC16, AC18-AC24" },
     "forecast": { "count": 15, "requires": null, "ids": "FS1-FS15" },
     "discount-concession": { "count": 5, "requires": "orders", "ids": "DC1-DC5 — a deal line's raised discount recorded as orders' Price concession through Sales.RecordDiscountConcession: decided inside authority, Pending outside it, orders' reason on refusal, and a second raise withdrawing the line's earlier concession, approved (DC4) or Pending (DC5) (golive#340)." },
     "deal-delete": { "count": 8, "requires": "orders", "ids": "DD1-DD8 — who may delete a deal, never a closed, reopened or booked one, what goes with it, and no direct delete of order rows (golive#429)" },
-    "term-start": { "count": 6, "requires": "orders", "ids": "TS1-TS6 — the term start a deal states for a subscription line (#32). TS1-TS4 are pure rule checks; TS5 reads the catalogue; TS6 round-trips OrderLine.ServicePeriodStart through a deal save." }
+    "term-start": { "count": 6, "requires": "orders", "ids": "TS1-TS6 — the term start a deal states for a subscription line (#32). TS1-TS4 are pure rule checks; TS5 reads the catalogue; TS6 round-trips OrderLine.ServicePeriodStart through a deal save." },
+    "sales-isa": { "count": 9, "requires": "common", "ids": "IS1-IS9 — MemberJunction's IS-A contract through SalesContact IsA Person and SalesAccount IsA Organization. IS7 runs outside a rolled-back transaction by design. IS9 needs a second app extending People; without one it prints a SKIPPED warning and still counts as run, so read the log, not only the tally." }
   },
   "schemas": {
     "orders": "__mj_BizAppsOrders",
