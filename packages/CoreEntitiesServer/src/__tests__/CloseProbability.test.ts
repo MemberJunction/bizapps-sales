@@ -60,13 +60,19 @@ function providerWith(stages: StageRow[], statuses: StatusRow[]): unknown {
     };
 }
 
+const ST_WON = 'aaaaaaaa-0000-4000-8000-000000000001';
+const ST_LOST = 'aaaaaaaa-0000-4000-8000-000000000002';
+const ST_OPEN = 'aaaaaaaa-0000-4000-8000-000000000003';
+const STAGE_SIGNED = 'bbbbbbbb-0000-4000-8000-000000000001';
+const STAGE_PROPOSAL = 'bbbbbbbb-0000-4000-8000-000000000002';
+
 const STATUSES: StatusRow[] = [
-    { ID: 'st-won', IsWon: true, IsLost: false },
-    { ID: 'st-lost', IsWon: false, IsLost: true },
-    { ID: 'st-open', IsWon: false, IsLost: false },
+    { ID: ST_WON, IsWon: true, IsLost: false },
+    { ID: ST_LOST, IsWon: false, IsLost: true },
+    { ID: ST_OPEN, IsWon: false, IsLost: false },
 ];
 
-const DEAL = { PipelineID: 'p1', Pipeline: 'Direct', PipelineStage: 'Proposal' };
+const DEAL = { PipelineID: 'cccccccc-0000-4000-8000-000000000001', Pipeline: 'Direct', PipelineStage: 'Proposal' };
 
 async function resolve(
     target: typeof WON,
@@ -87,22 +93,22 @@ async function resolve(
 
 describe('resolveClosing: the figures a close writes', () => {
     it('takes the closing stage\'s probability and forecast category when its status declares the same outcome', async () => {
-        const r = await resolve(WON, 'signed', [
-            { ID: 'signed', Probability: 100, ForecastCategoryTypeID: 'fc-closed', DealStatusTypeID: 'st-won' },
+        const r = await resolve(WON, STAGE_SIGNED, [
+            { ID: STAGE_SIGNED, Probability: 100, ForecastCategoryTypeID: 'fc-closed', DealStatusTypeID: ST_WON },
         ]);
-        expect(r).toEqual({ StageID: 'signed', Probability: 100, ForecastCategoryTypeID: 'fc-closed', Issues: [] });
+        expect(r).toEqual({ StageID: STAGE_SIGNED, Probability: 100, ForecastCategoryTypeID: 'fc-closed', Issues: [] });
     });
 
     it('uses a stage value that is not 100, so the number really comes from the stage', async () => {
-        const r = await resolve(WON, 'signed', [
-            { ID: 'signed', Probability: 95, ForecastCategoryTypeID: 'fc-closed', DealStatusTypeID: 'st-won' },
+        const r = await resolve(WON, STAGE_SIGNED, [
+            { ID: STAGE_SIGNED, Probability: 95, ForecastCategoryTypeID: 'fc-closed', DealStatusTypeID: ST_WON },
         ]);
         expect(r.Probability).toBe(95);
     });
 
     it('falls back to 100 for a won close when the stage carries no probability', async () => {
-        const r = await resolve(WON, 'signed', [
-            { ID: 'signed', Probability: null, ForecastCategoryTypeID: 'fc-closed', DealStatusTypeID: 'st-won' },
+        const r = await resolve(WON, STAGE_SIGNED, [
+            { ID: STAGE_SIGNED, Probability: null, ForecastCategoryTypeID: 'fc-closed', DealStatusTypeID: ST_WON },
         ]);
         expect(r.Probability).toBe(100);
         expect(r.ForecastCategoryTypeID).toBe('fc-closed');
@@ -125,10 +131,10 @@ describe('resolveClosing: the figures a close writes', () => {
         const r = await resolve(
             LOST,
             null,
-            [{ ID: 'signed', Probability: 100, ForecastCategoryTypeID: 'fc-closed', DealStatusTypeID: 'st-won' }],
-            'signed',
+            [{ ID: STAGE_SIGNED, Probability: 100, ForecastCategoryTypeID: 'fc-closed', DealStatusTypeID: ST_WON }],
+            STAGE_SIGNED,
         );
-        expect(r.StageID).toBe('signed');
+        expect(r.StageID).toBe(STAGE_SIGNED);
         expect(r.Probability).toBe(0);
         expect(r.ForecastCategoryTypeID).toBeNull();
         expect(r.Issues).toEqual([]);
@@ -138,8 +144,8 @@ describe('resolveClosing: the figures a close writes', () => {
         const r = await resolve(
             WON,
             null,
-            [{ ID: 'proposal', Probability: 50, ForecastCategoryTypeID: 'fc-best', DealStatusTypeID: 'st-open' }],
-            'proposal',
+            [{ ID: STAGE_PROPOSAL, Probability: 50, ForecastCategoryTypeID: 'fc-best', DealStatusTypeID: ST_OPEN }],
+            STAGE_PROPOSAL,
         );
         expect(r.Probability).toBe(100);
         expect(r.ForecastCategoryTypeID).toBeNull();

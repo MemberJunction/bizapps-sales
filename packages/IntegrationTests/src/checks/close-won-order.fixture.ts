@@ -56,7 +56,10 @@ async function wonStatusID(ctx: Ctx): Promise<string> {
 export interface SeedTarget {
     PipelineID: string;
     StageID: string;
-    /** The pipeline's OWN company — products are per-company, so this drives the picker's filter. */
+    /**
+     * A company actively linked to the pipeline — the server refuses any other. Products are per-company,
+     * so this also drives the picker's filter.
+     */
     CompanyID: string;
     /** Zero is meaningful: a header-only deal, which is the whole point on a lineless motion. */
     LineCount: number;

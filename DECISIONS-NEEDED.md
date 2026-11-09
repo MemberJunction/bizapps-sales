@@ -571,17 +571,9 @@ pipeline problem, though — it is **18 integration checks failing on `the host 
 sellable product(s) for company C0DEFA17-...`**, because the fixture resolves its pipelines by
 policy and then looks for products belonging to whatever company they now name.
 
-After any `mj sync push --dir metadata`, re-point them:
-
-```sql
-UPDATE __mj_BizAppsSales.Pipeline SET CompanyID = 'C0A5E100-0001-4A01-9E11-5B7C3D2F8A01'
- WHERE ID = '90111111-0000-4000-A000-000000000001';   -- B2B  -> Blue Cypress (Local Dev)
-UPDATE __mj_BizAppsSales.Pipeline SET CompanyID = 'B0111111-0000-4000-A000-000000000002'
- WHERE ID = '90111111-0000-4000-A000-000000000002';   -- D2C  -> BC Education Group (Local Dev)
-```
-
-Or re-run `scripts/seed-demo-data.sh`, which does the same two updates. No decision needed; this is a
-note for whoever meets the 18 failures next.
+**Resolved 2026-11-05 (PipelineCompany).** `Pipeline.CompanyID` is gone; the metadata links both
+pipelines to Default Company without setting `IsActive`, so a push never re-activates the links the
+seed retires (KNOWN-ISSUES KI-26). No action needed after a push.
 
 ---
 

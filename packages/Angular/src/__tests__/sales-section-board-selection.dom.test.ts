@@ -2,9 +2,14 @@
 import '@angular/compiler';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
-import { Metadata } from '@memberjunction/core';
+import { BaseEntity, BaseEntityEvent, Metadata } from '@memberjunction/core';
+import { MJEventType, MJGlobal } from '@memberjunction/global';
+
+import { MJS_ENTITIES } from '../lib/data/entity-names';
 
 import { BoardPipelines, DealBoardComponent } from '../lib/board/deal-board.component';
+import { MJSSalesSectionComponent } from '../lib/sections/sales-section.component';
+import { NO_FILTERS } from '../lib/pages/dashboard-filters';
 import type { MJLeftNavItem } from '@memberjunction/ng-ui-components';
 import type { DealRosterRow } from '../lib/workspace/deal-workspace.service';
 import {
@@ -89,6 +94,45 @@ describe('the board selection, owned by the section', () => {
     });
 });
 
+/**
+ * AN OWNER OR STAGE SAVED IN A DEAL TAB NEVER REACHED THE BOARD (bc-aidp-next-golive#419).
+ *
+ * The section re-read only after its own board's drag. It now re-reads quietly after any deal save in
+ * this browser, once per burst, and stops listening when it is destroyed.
+ */
+describe('the section re-reads after a deal is saved anywhere', () => {
+    function raiseDealSave(entityName = MJS_ENTITIES.Deal): void {
+        const record = { EntityInfo: { Name: entityName }, Get: (f: string) => (f === 'ID' || f === 'DealID' ? 'DEAL-1' : null) } as unknown as BaseEntity;
+        const args = new BaseEntityEvent();
+        args.type = 'save';
+        args.baseEntity = record;
+        MJGlobal.Instance.RaiseEvent({ component: record, event: MJEventType.ComponentEvent, eventCode: BaseEntity.BaseEventCode, args });
+    }
+
+    it('re-reads the roster once for a burst of saves, without the spinner', async () => {
+        const fixture = await mount('board');
+        const before = board(fixture);
+        expect(service.LoadRoster).toHaveBeenCalledTimes(1);
+
+        raiseDealSave(MJS_ENTITIES.DealTeamMember);
+        raiseDealSave();
+        await vi.waitFor(() => expect(service.LoadRoster).toHaveBeenCalledTimes(2));
+
+        await new Promise((r) => setTimeout(r, 400));
+        expect(service.LoadRoster, 'one burst, one re-read').toHaveBeenCalledTimes(2);
+        expect(board(fixture), 'a quiet re-read keeps the board mounted').toBe(before);
+    });
+
+    it('stops listening when destroyed', async () => {
+        const fixture = await mount('board');
+        fixture.destroy();
+
+        raiseDealSave();
+        await new Promise((r) => setTimeout(r, 400));
+        expect(service.LoadRoster).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('the filter bar carries over between the Dashboard and the Board (bc-aidp-next-golive#351)', () => {
     const row = (id: string): DealRosterRow => ({ ID: id }) as DealRosterRow;
 
@@ -155,10 +199,10 @@ describe('the Board tabs (bc-aidp-next-golive#351)', () => {
         expect(BoardPipelines(PIPELINES, ['company-a'], ['p-b1'])).toEqual([]);
     });
 
-    function boardWith(selected: string | null, companyIDs: string[], pipelineIDs: string[]) {
+    function boardWith(selected: string | null, companyIDs: string[], pipelineIDs: string[], pipelines = PIPELINES) {
         const b = Object.create(DealBoardComponent.prototype) as DealBoardComponent;
         Object.assign(b, {
-            Pipelines: PIPELINES,
+            Pipelines: pipelines,
             Stages: [{ ID: 's1', PipelineID: 'p-a2' }, { ID: 's2', PipelineID: 'p-b1' }],
             CompanyIDs: companyIDs,
             PipelineIDs: pipelineIDs,
@@ -181,6 +225,59 @@ describe('the Board tabs (bc-aidp-next-golive#351)', () => {
     it('names the company on a tab only when the tabs span companies', () => {
         expect(boardWith(null, [], []).TabLabel(PIPELINES[0])).toBe('p-b1 (company-b)');
         expect(boardWith(null, ['company-a'], []).TabLabel(PIPELINES[1])).toBe('p-a1');
+    });
+
+    /** A pipeline linked to two companies is one lookup row per company; the board shows it as one tab. */
+    describe('a pipeline shared by two companies', () => {
+        const SHARED = [...PIPELINES, P('p-shared', 'company-a'), P('P-SHARED', 'company-b')];
+
+        it('is one tab, under no filter or either company', () => {
+            expect(BoardPipelines(SHARED, [], []).map((p) => p.ID)).toEqual(['p-a1', 'p-a2', 'p-shared', 'p-b1']);
+            expect(BoardPipelines(SHARED, ['company-a', 'company-b'], []).filter((p) => p.ID.toLowerCase() === 'p-shared')).toHaveLength(1);
+            expect(BoardPipelines(SHARED, ['company-b'], []).map((p) => p.ID)).toEqual(['p-b1', 'P-SHARED']);
+            expect(BoardPipelines(SHARED, [], ['p-shared'])).toHaveLength(1);
+        });
+
+        it('names no company on its tab, since it sells as either', () => {
+            const board = boardWith(null, [], [], SHARED);
+            expect(board.TabLabel(SHARED[3])).toBe('p-shared');
+            // The other tabs still name theirs: the tabs span companies.
+            expect(board.TabLabel(PIPELINES[0])).toBe('p-b1 (company-b)');
+        });
+
+        it('still names the company on a one-company tab when only the shared tab spans both', () => {
+            // A shared pipeline whose first row is company-b, beside a pipeline only company-b uses:
+            // the tabs span two companies through the shared one, so the single-company tab says whose it is.
+            const pipelines = [P('p-shared', 'company-b'), P('p-shared', 'company-a'), P('p-b-only', 'company-b')];
+            const board = boardWith(null, [], [], pipelines);
+            expect(board.TabLabel(pipelines[2])).toBe('p-b-only (company-b)');
+            expect(board.TabLabel(pipelines[0])).toBe('p-shared');
+        });
+    });
+});
+
+describe('the Sales section\'s Pipeline filter, over a pipeline shared by two companies', () => {
+    const P = (ID: string, CompanyID: string, IsDefault = false) => ({
+        ID, Name: ID, Code: ID, CompanyID, CompanyName: CompanyID, IsDefault, DisplayRank: 0,
+    });
+    const PIPELINES = [P('p-a1', 'company-a', true), P('p-shared', 'company-a'), P('p-shared', 'company-b'), P('p-b1', 'company-b')];
+
+    function sectionWith(companyIDs: string[]): MJSSalesSectionComponent {
+        const section = Object.create(MJSSalesSectionComponent.prototype) as MJSSalesSectionComponent;
+        Object.assign(section, { Pipelines: PIPELINES, Filters: { ...NO_FILTERS, CompanyIDs: companyIDs } });
+        return section;
+    }
+
+    it('offers it once, named without a company', () => {
+        expect(sectionWith([]).PipelineOptions).toEqual([
+            { ID: 'p-a1', Name: 'p-a1 (company-a)' },
+            { ID: 'p-shared', Name: 'p-shared' },
+            { ID: 'p-b1', Name: 'p-b1 (company-b)' },
+        ]);
+    });
+
+    it('offers it under either company', () => {
+        expect(sectionWith(['company-b']).PipelineOptions.map((o) => o.ID)).toEqual(['p-shared', 'p-b1']);
     });
 });
 

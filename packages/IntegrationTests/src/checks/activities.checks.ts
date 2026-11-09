@@ -1442,7 +1442,57 @@ export const ActivitiesChecks: NamedCheck[] = [
     },
     {
         Id: 'activities.AC24',
-        Name: 'AC24: close and reopen each add a timeline Activity, and LogActivity refuses an unknown DealID (#381, #355)',
+        Name: 'AC24: a chosen party list replaces the deal parties, one link per target, deal first (#408)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+
+                /**
+                 * The compose form's shape: the deal parties are NOT added by the service, and the list
+                 * names the deal's own account plus the same person twice. The primary contact is left
+                 * out on purpose, so a service that still added it would show up here.
+                 */
+                const [someone] = await rows(ctx, E_PERSON, `ID <> '${deal.ContactID}'`);
+                Assert(!!someone, 'setup: no Person besides the deal contact on this host');
+                const personID = String(someone['ID']);
+                const out = await writer.LogActivity(
+                    {
+                        DealID: deal.DealID,
+                        TypeCode: 'Call',
+                        Title: 'AC24 call',
+                        StartedAt: new Date('2026-11-04T09:00:00.000Z'),
+                        IncludeDealParties: false,
+                        Parties: [
+                            { Kind: 'Organization', RecordID: deal.AccountID, Role: 'Participant' },
+                            { Kind: 'Person', RecordID: personID, Role: 'Participant' },
+                            { Kind: 'Person', RecordID: personID.toLowerCase(), Role: 'Participant' },
+                        ],
+                    },
+                    ProviderOf(ctx),
+                    ctx.User,
+                );
+                Assert(out.Success, `the writer reported failure — ${out.Issues.join(' | ')}`);
+
+                const links = await rows(ctx, E_ACTIVITY_LINK, `ActivityID = '${out.ActivityID}'`);
+                const targets = links
+                    .sort((a, b) => Number(a['Sequence']) - Number(b['Sequence']))
+                    .map((l) => `${String(l['Role'])}:${String(l['RecordID']).toLowerCase()}`);
+                AssertEqual(
+                    targets.join(' | '),
+                    [
+                        `Regarding:${deal.DealID.toLowerCase()}`,
+                        `Participant:${deal.AccountID.toLowerCase()}`,
+                        `Participant:${personID.toLowerCase()}`,
+                    ].join(' | '),
+                    'exactly the deal (first, Regarding), the account and the person once — no primary contact',
+                );
+            }),
+    },
+    {
+        Id: 'activities.AC25',
+        Name: 'AC25: close and reopen each add a timeline Activity, and LogActivity refuses an unknown DealID (#381, #355)',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -1454,7 +1504,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                     {
                         DealID: '00000000-0000-0000-0000-000000000999',
                         TypeCode: 'Note',
-                        Title: 'AC24 unknown deal',
+                        Title: 'AC25 unknown deal',
                         StartedAt: new Date('2026-08-19T12:00:00.000Z'),
                     },
                     ProviderOf(ctx),
@@ -1470,7 +1520,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                         DealID: deal.DealID,
                         DealStatusTypeID: f.LostStatusID,
                         LossReasonID: f.LossReasonPlainID,
-                        Notes: 'AC24 close note',
+                        Notes: 'AC25 close note',
                     },
                     { provider: ctx.Provider, user: ctx.User },
                 );
@@ -1480,7 +1530,7 @@ export const ActivitiesChecks: NamedCheck[] = [
                 const reopenRes = await new SalesReopenDealOperation().Execute(
                     {
                         DealID: deal.DealID,
-                        Reason: 'AC24 reopen reason',
+                        Reason: 'AC25 reopen reason',
                     },
                     { provider: ctx.Provider, user: ctx.User },
                 );
@@ -1489,8 +1539,8 @@ export const ActivitiesChecks: NamedCheck[] = [
 
                 const timeline = await reader.TimelineForDeal(deal.DealID, ProviderOf(ctx), ctx.User);
                 Assert(timeline.Success, `timeline read failed — ${timeline.Issues.join(' | ')}`);
-                const closedEntry = timeline.Entries.find((e) => e.Title === 'Deal closed' && e.Description?.includes('AC24 close note'));
-                const reopenedEntry = timeline.Entries.find((e) => e.Title === 'Deal reopened' && e.Description?.includes('AC24 reopen reason'));
+                const closedEntry = timeline.Entries.find((e) => e.Title === 'Deal closed' && e.Description?.includes('AC25 close note'));
+                const reopenedEntry = timeline.Entries.find((e) => e.Title === 'Deal reopened' && e.Description?.includes('AC25 reopen reason'));
                 Assert(!!closedEntry, 'closing the deal must write a Deal closed Activity onto the timeline');
                 Assert(!!reopenedEntry, 'reopening the deal must write a Deal reopened Activity onto the timeline');
             }),

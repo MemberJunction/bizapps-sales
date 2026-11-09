@@ -147,10 +147,10 @@ function windowCovers(row: CatalogueRow, day: CalendarDay): boolean {
     return verdict === 'Covers';
 }
 
-/** The company Sales' pipelines sell for — the same source the server stamps `Deal.CompanyID` from. */
+/** The company the fixture's deals sell for: one actively linked to the fixture pipeline, so the server accepts it. */
 async function sellingCompany(ctx: Ctx): Promise<string> {
     const f = await ResolveSalesFixture(ctx);
-    return f.PipelineCompanyID;
+    return f.CompanyID;
 }
 
 /**
@@ -382,7 +382,7 @@ ProductPickerChecks.push({
 
             const foreign = catalogue.find(
                 (x) =>
-                    x.CompanyID.toLowerCase() !== f.PipelineCompanyID.toLowerCase() &&
+                    x.CompanyID.toLowerCase() !== f.CompanyID.toLowerCase() &&
                     x.Status === 'Active', // vocabulary-grep-allow: Status belongs to ORDERS' Product, not to Sales
             );
             Assert(
@@ -409,7 +409,7 @@ ProductPickerChecks.push({
             deal.DealTypeID = f.DealTypeID;
             deal.DealStatusTypeID = f.OpenStatusID;
             deal.AccountID = f.AccountID;
-            deal.CompanyID = f.PipelineCompanyID;
+            deal.CompanyID = f.CompanyID;
             deal.TermMonths = 12;
             Assert(
                 await deal.Save(),
@@ -447,7 +447,7 @@ ProductPickerChecks.push({
                 "the line must book to the PRODUCT's company",
             );
             Assert(
-                rows[0].CompanyID.toLowerCase() !== f.PipelineCompanyID.toLowerCase(),
+                rows[0].CompanyID.toLowerCase() !== f.CompanyID.toLowerCase(),
                 'the line took the DEAL\'s company — the whole point of #29 is that it should not',
             );
         }),

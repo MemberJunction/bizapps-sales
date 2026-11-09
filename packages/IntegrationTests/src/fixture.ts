@@ -63,6 +63,7 @@ export const E_DEAL = 'MJ_BizApps_Sales: Deals';
 export const E_SCHEDULE = 'MJ_BizApps_Sales: Deal Payment Schedules';
 export const E_TEAM = 'MJ_BizApps_Sales: Deal Team Members';
 export const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
+export const E_PIPELINE_COMPANY = 'MJ_BizApps_Sales: Pipeline Companies';
 export const E_STAGE = 'MJ_BizApps_Sales: Pipeline Stages';
 export const E_DEAL_TYPE = 'MJ_BizApps_Sales: Deal Types';
 export const E_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
@@ -74,7 +75,12 @@ export const E_LOSS_REASON = 'MJ_BizApps_Sales: Loss Reasons';
 /** The rows the checks build payloads from. All discovered, none created. */
 export interface SalesFixture {
     PipelineID: string;
-    PipelineCompanyID: string;
+    /**
+     * A company ACTIVELY LINKED to `PipelineID` through `PipelineCompany` — the one {@link linkedCompanyOf}
+     * picks. A pipeline serves every company it is linked to, so this is one valid choice for a deal on
+     * that pipeline, not "the pipeline's company": a deal saved with it passes the server's link check.
+     */
+    CompanyID: string;
     StageID: string;
     DealTypeID: string;
     OpenStatusID: string;
@@ -109,13 +115,14 @@ export interface SalesFixture {
     /** The pipeline whose `CloseWonPolicy` says `CreateContract: true`. B2B, as seeded. */
     ContractPolicyPipelineID: string;
     ContractPolicyStageID: string;
-    /** The contract pipeline's OWN company — products are per-company, as above. */
+    /** A company linked to the contract pipeline (see {@link linkedCompanyOf}) — products are per-company. */
     ContractPolicyCompanyID: string;
     /** The pipeline whose policy does NOT create a contract. D2C, as seeded. */
     OrderOnlyPolicyPipelineID: string;
     OrderOnlyPolicyStageID: string;
     /**
-     * The order-only pipeline's OWN company — which is NOT the same company as the contract pipeline's.
+     * A company linked to the order-only pipeline, picked the same way — which need not be the company
+     * picked for the contract pipeline.
      *
      * It has to be carried separately because products are per-company: a deal seeded on the order-only
      * pipeline must pick products from THAT company's catalogue, or the picker's own filter returns
@@ -173,14 +180,15 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
         return cached;
     }
 
-    const pipeline = await one<{ ID: string; CompanyID: string }>(
+    const pipeline = await one<{ ID: string }>(
         // ORDERED, per this helper's own rule: "every caller that takes the first of several rows
         // should pass it". It mattered less when checks only needed A pipeline. #32's TS5 and TS6 both
         // need the fixture's company to own a product with a SubscriptionTypeID, and on the seeded host
         // exactly one of the two active pipelines' companies does — so unordered, they pass or fail by
         // luck of plan choice.
-        ctx, E_PIPELINE, 'IsActive = 1', ['ID', 'CompanyID'], 'active pipeline', 'Name ASC',
+        ctx, E_PIPELINE, 'IsActive = 1', ['ID'], 'active pipeline', 'Name ASC',
     );
+    const companyID = await linkedCompanyOf(ctx, pipeline.ID);
     const stage = await one<{ ID: string }>(
         // ORDERED AND FILTERED, for a sharper version of the reason the pipeline lookup above is.
         // Unordered, this took the first of the pipeline's active stages, and on the seeded host that
@@ -223,7 +231,7 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
 
     cached = {
         PipelineID: pipeline.ID,
-        PipelineCompanyID: pipeline.CompanyID,
+        CompanyID: companyID,
         StageID: stage.ID,
         DealTypeID: dealType.ID,
         OpenStatusID: openStatus.ID,
@@ -245,6 +253,28 @@ export async function ResolveSalesFixture(ctx: IntegrationCheckContext): Promise
         LossReasonNeedsNotesID: lossNeedsNotes.ID,
     };
     return cached;
+}
+
+/**
+ * The fixture's company for a deal on `pipelineID` — one of the three pipelines the fixture resolved.
+ *
+ * A deal's company is the rep's choice and the server refuses one not actively linked to the deal's
+ * pipeline, so a check that seeds on the contract or order-only pipeline must pass THAT pipeline's
+ * company, not `CompanyID`. Before the link table the server overwrote the company from the pipeline,
+ * which hid a mismatch here; now it refuses the save.
+ */
+export function CompanyForPipeline(f: SalesFixture, pipelineID: string): string {
+    const id = pipelineID.toLowerCase();
+    if (id === f.PipelineID.toLowerCase()) {
+        return f.CompanyID;
+    }
+    if (id === f.ContractPolicyPipelineID.toLowerCase()) {
+        return f.ContractPolicyCompanyID;
+    }
+    if (id === f.OrderOnlyPolicyPipelineID.toLowerCase()) {
+        return f.OrderOnlyPolicyCompanyID;
+    }
+    throw new Error(`fixture: pipeline ${pipelineID} is not one the fixture resolved, so it has no company for it`);
 }
 
 /** A status that may legitimately not be seeded. Returns null rather than failing the whole fixture. */
@@ -271,12 +301,12 @@ async function resolvePipelinesByPolicy(
     ctx: IntegrationCheckContext,
 ): Promise<{ withContract: PolicyPipeline; withoutContract: PolicyPipeline }> {
     const rv = new RunView();
-    const r = await rv.RunView<{ ID: string; CompanyID: string; CloseWonPolicy: string | null }>(
+    const r = await rv.RunView<{ ID: string; CloseWonPolicy: string | null }>(
         {
             EntityName: E_PIPELINE,
             ExtraFilter: 'IsActive = 1',
             ResultType: 'simple',
-            Fields: ['ID', 'CompanyID', 'CloseWonPolicy'],
+            Fields: ['ID', 'CloseWonPolicy'],
         },
         ctx.User,
     );
@@ -288,9 +318,9 @@ async function resolvePipelinesByPolicy(
     for (const row of r.Results ?? []) {
         const creates = policyCreatesContract(row.CloseWonPolicy);
         if (creates && !withContract) {
-            withContract = { ID: row.ID, CompanyID: row.CompanyID, StageID: await firstStageOf(ctx, row.ID) };
+            withContract = await policyPipeline(ctx, row.ID);
         } else if (!creates && !withoutContract) {
-            withoutContract = { ID: row.ID, CompanyID: row.CompanyID, StageID: await firstStageOf(ctx, row.ID) };
+            withoutContract = await policyPipeline(ctx, row.ID);
         }
     }
 
@@ -304,8 +334,42 @@ async function resolvePipelinesByPolicy(
 
 interface PolicyPipeline {
     ID: string;
+    /** A company linked to the pipeline, by {@link linkedCompanyOf}. */
     CompanyID: string;
     StageID: string;
+}
+
+async function policyPipeline(ctx: IntegrationCheckContext, pipelineID: string): Promise<PolicyPipeline> {
+    return {
+        ID: pipelineID,
+        CompanyID: await linkedCompanyOf(ctx, pipelineID),
+        StageID: await firstStageOf(ctx, pipelineID),
+    };
+}
+
+/**
+ * The company the fixture uses for deals on `pipelineID`: one with an ACTIVE `PipelineCompany` link.
+ *
+ * A pipeline no longer has one company (`Pipeline.CompanyID` was replaced by the link table), and the
+ * server refuses a deal whose company is not actively linked to its pipeline. So any active link is a
+ * valid answer; which one is picked must still be deterministic, for the reason {@link one} gives.
+ *
+ * OLDEST LINK FIRST. The migration that introduced the table gave every existing pipeline one link, to
+ * the company it belonged to, and links added later (`LinkDefaultPipelineToCompanies`, an admin) come
+ * after it. Taking the oldest keeps the company these checks were written against — which matters
+ * because products are per-company, and TS5/TS6 need a company whose catalogue has a subscription
+ * product. `CompanyID` breaks a tie, since the backfilled links share one timestamp.
+ */
+async function linkedCompanyOf(ctx: IntegrationCheckContext, pipelineID: string): Promise<string> {
+    const link = await one<{ CompanyID: string }>(
+        ctx,
+        E_PIPELINE_COMPANY,
+        `PipelineID = '${pipelineID}' AND IsActive = 1`,
+        ['CompanyID'],
+        `company actively linked to pipeline ${pipelineID}`,
+        '__mj_CreatedAt ASC, CompanyID ASC',
+    );
+    return link.CompanyID;
 }
 
 /** A pipeline with no policy, or an unparseable one, routes nothing — so it counts as "no contract". */
@@ -436,7 +500,7 @@ export async function NewDeal(
     deal.DealTypeID = f.DealTypeID;
     deal.DealStatusTypeID = f.OpenStatusID;
     deal.AccountID = f.AccountID;
-    deal.CompanyID = f.PipelineCompanyID;
+    deal.CompanyID = f.CompanyID;
     deal.TermMonths = 12;
     shape?.(deal);
     return deal;

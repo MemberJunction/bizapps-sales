@@ -80,6 +80,7 @@ import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, EventEmitter, 
 import { CommonModule } from '@angular/common';
 import { A11yModule } from '@angular/cdk/a11y';
 import { Metadata } from '@memberjunction/core';
+import { UUIDsEqual } from '@memberjunction/global';
 import { FormsModule } from '@angular/forms';
 import {
     AsDateValue,
@@ -105,6 +106,7 @@ import {
     MJOLinePricePickerComponent,
     type MJOExistingHolding,
 } from '@mj-biz-apps/orders-ng';
+import { CountDraftMatches, RankDealProducts } from './deal-product-ranking';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountAmountToPercent,
@@ -123,6 +125,7 @@ import {
     RecordDiscountConcession,
     ShouldOfferTermStart,
     type DiscountReasonCategory,
+    type DraftProductLookup,
     type ProductLookup,
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
@@ -206,27 +209,73 @@ interface RemoteOperationRouter {
                 <div class="mjs-le__body"><p class="mjs-le__error">{{ Error || 'This line could not be opened.' }}</p></div>
             } @else {
                 <div class="mjs-le__body">
-                    <label class="mjs-le__field">
-                        <span class="mjs-le__label">Product</span>
-                        <!-- Filtered by ProductFilterFor to Active and to the availability window as of
-                             today IN THE BUSINESS TIME ZONE (#168), and NOT filtered by company: a deal
-                             may sell any company's product, and the LINE takes its company from whichever
-                             is chosen. Each option names its owner because two companies can both sell an
-                             "Onboarding Fee". -->
+                    <div class="mjs-le__field">
+                        <label class="mjs-le__label" for="mjs-le-product">Product</label>
+                        <!-- A type-ahead over the catalogue, ranked by orders' RankCatalogMatches: a name that
+                             starts with the text, then a SKU that does, then either containing it, with the
+                             DEAL's company first within each (golive#360). Filtered by ProductFilterFor to
+                             Active and to the availability window as of today IN THE BUSINESS TIME ZONE
+                             (#168), and NOT filtered by company: a deal may sell any company's product, and
+                             the LINE takes its company from whichever is chosen. Each row names its owner
+                             because two companies can both sell an "Onboarding Fee". -->
                         <!-- Locked while the price is off its default: a pick belongs to one product's
                              rules, and carrying it onto another product would pin a price nobody chose. -->
-                        <select data-testid="line-product" [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)"
-                                [disabled]="IsLocked || ProductLockedByPrice"
-                                [title]="ProductSelectTitle">
-                            <option [ngValue]="null">— choose a product —</option>
-                            @for (p of Products; track p.ID) {
-                                <option [ngValue]="p.ID">{{ ProductOptionLabel(p) }}</option>
-                            }
-                        </select>
+                        <input id="mjs-le-product" data-testid="line-product" type="text" autocomplete="off"
+                               role="combobox" aria-autocomplete="list" aria-controls="mjs-le-product-list"
+                               [attr.aria-expanded]="PickerOpen" [attr.data-product-id]="Working.ProductID || null"
+                               placeholder="Type a name or SKU…"
+                               [ngModel]="ProductQuery" (ngModelChange)="OnProductQuery($event)"
+                               (focus)="OnPickerFocus($event)" (click)="OpenPicker()" (blur)="ClosePicker()" (keydown)="OnPickerKey($event)"
+                               [disabled]="IsLocked || ProductLockedByPrice"
+                               [title]="ProductSelectTitle" />
+                        @if (PickerOpen) {
+                            <div class="mjs-le__picks" id="mjs-le-product-list" role="listbox"
+                                 data-testid="line-product-options" aria-label="Products">
+                                @for (p of PickerResults; track p.ID; let i = $index) {
+                                    <!-- mousedown, not click: click lands after the input's blur closed the list. -->
+                                    <button type="button" class="mjs-le__pick" role="option" tabindex="-1"
+                                            data-testid="line-product-option"
+                                            [class.is-cursor]="i === PickerCursor" [attr.aria-selected]="i === PickerCursor"
+                                            (mousedown)="ChooseProduct(p, $event)">
+                                        <span class="mjs-le__pick-name">{{ p.Name }}</span>
+                                        <span class="mjs-le__pick-meta">
+                                            @if (p.SKU) { <span>{{ p.SKU }}</span> }
+                                            @if (PriceLabel(p); as price) { <span>{{ price }}</span> }
+                                            @if (p.Company) {
+                                                <span class="mjs-le__pick-co" [class.is-foreign]="IsForeignProduct(p)">
+                                                    <i class="fa-solid fa-building" aria-hidden="true"></i> {{ p.Company }}
+                                                </span>
+                                            }
+                                        </span>
+                                    </button>
+                                } @empty {
+                                    <div class="mjs-le__pick-empty">
+                                        {{ Products.length ? 'No product matches that.' : 'No products to offer.' }}
+                                    </div>
+                                }
+                                @if (PickerHidden > 0) {
+                                    <div class="mjs-le__pick-empty" data-testid="line-product-more">
+                                        {{ PickerHidden }} more — keep typing to narrow the list.
+                                    </div>
+                                }
+                                <!-- golive#433: a new product starts as Draft and is not offered, so say when the
+                                     search matches some, whether or not any Active product matches too. -->
+                                @if (DraftMatchNote; as note) {
+                                    <div class="mjs-le__pick-empty" data-testid="line-product-drafts" role="status">
+                                        <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ note }}
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (ForeignCompanyWarning; as warning) {
+                            <span class="mjs-le__warn" data-testid="line-product-foreign" role="status">
+                                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ warning }}
+                            </span>
+                        }
                         @if (ProductLoadError) {
                             <span class="mjs-le__error" data-testid="line-product-error">{{ ProductLoadError }}</span>
                         }
-                    </label>
+                    </div>
 
                     <div class="mjs-le__row">
                         <label class="mjs-le__field">
@@ -551,6 +600,28 @@ interface RemoteOperationRouter {
         .mjs-le__muted { color: var(--mj-text-muted); font-size: var(--mj-text-sm); }
         .mjs-le__hint { color: var(--mj-text-muted); font-size: var(--mj-text-xs); }
         .mjs-le__error { color: var(--mj-status-error-text); font-size: var(--mj-text-sm); }
+        .mjs-le__warn {
+            display: flex; gap: 6px; align-items: baseline; padding: 6px 10px; font-size: var(--mj-text-sm);
+            color: var(--mj-status-warning-text); background: var(--mj-status-warning-bg);
+            border: 1px solid var(--mj-status-warning-border); border-radius: var(--mj-radius-md, 8px);
+        }
+        .mjs-le__picks {
+            display: flex; flex-direction: column; max-height: 280px; overflow-y: auto;
+            border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-md, 8px);
+            background: var(--mj-bg-surface-elevated); box-shadow: var(--mj-shadow-md);
+        }
+        .mjs-le__pick {
+            display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 8px 10px;
+            border: 0; border-bottom: 1px solid var(--mj-border-subtle); background: transparent;
+            color: var(--mj-text-primary); font: inherit; cursor: pointer;
+        }
+        .mjs-le__pick:hover, .mjs-le__pick.is-cursor { background: var(--mj-bg-surface-hover); }
+        .mjs-le__pick-name { font-weight: 600; }
+        .mjs-le__pick-meta {
+            display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--mj-text-muted); font-size: var(--mj-text-xs);
+        }
+        .mjs-le__pick-co.is-foreign { color: var(--mj-status-warning-text); font-weight: 600; }
+        .mjs-le__pick-empty { padding: 8px 10px; color: var(--mj-text-muted); font-size: var(--mj-text-sm); }
         .mjs-le__foot {
             display: flex; align-items: center; gap: var(--mj-space-3);
             padding: var(--mj-space-4) var(--mj-space-5); border-top: 1px solid var(--mj-border-subtle);
@@ -634,6 +705,22 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     public Products: ProductLookup[] = [];
     /** Set when orders' catalogue could not be read; shown under the product select. */
     public ProductLoadError: string | null = null;
+    /** What the product box shows: the chosen product's label, or what the rep is typing. */
+    public ProductQuery = '';
+    public PickerOpen = false;
+    /** The highlighted row, moved by the arrow keys and taken by Enter. */
+    public PickerCursor = 0;
+    public PickerResults: ProductLookup[] = [];
+    /** How many matches are past the list's cap — named so the rep knows to keep typing. */
+    public PickerHidden = 0;
+    /** How many Draft products match the search; the picker hides them, and the note says so (golive#433). */
+    public DraftMatches = 0;
+    /** Orders' Draft products, matched against the search for {@link DraftMatches}; never offered. */
+    private draftProducts: DraftProductLookup[] = [];
+    /** The text the list was last ranked by, so Draft rows that arrive later are counted against it. */
+    private rankedQuery = '';
+    /** Set on destroy, so a read that returns after the dialog closed does not touch its view. */
+    private destroyed = false;
     /** Each product's catalog price, for the picker label — read from orders, keyed by product id. */
     private readonly productPriceLabels = new Map<string, string>();
     /** The signed-in rep's price-override grant; `'none'` hides the price picker. */
@@ -663,6 +750,11 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     private coveredValue: number | null = null;
     private reasonCategories: DiscountReasonCategory[] | null = null;
     public DiscountCategory: DiscountReasonCategory | null = null;
+    /**
+     * Client-generated UUID for the current discount-concession recording attempt, kept across a retry
+     * so a resend after a timeout finds the concession the first attempt already wrote (#512).
+     */
+    private pendingConcessionID: string | null = null;
     public DiscountReason = '';
     /** What the rep must know after a save that recorded, or failed to record, a concession. */
     public Notice: string | null = null;
@@ -680,6 +772,8 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             const persisted = this.Deal?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
             this.IsLocked = (await ResolveDealLockState(persisted)).IsLocked;
 
+            // Not awaited: the note is a hint, and the catalogue must not wait on it.
+            void this.loadDraftProducts();
             await this.loadProducts();
             await this.loadProductPriceLabels();
             this.OverrideKind = this.resolveOverrideKind();
@@ -759,6 +853,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
                 this.Working.Quantity = 1;
             }
             this.savedDiscountPct = this.Working.DiscountPct ?? null;
+            this.ProductQuery = this.chosenProductLabel();
             if (this.IsNewLine) this.coveredValue = 0;
             else void this.refreshCoveredValue();
             void this.refreshHolding();
@@ -793,6 +888,23 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
                 `${reason.replace(/\.?\s*$/, '.')} Reload the page and try again; if it persists, an administrator needs to check ` +
                 `access to Orders' products.`;
         }
+    }
+
+    /**
+     * Orders' Draft products, for the note under the list. Re-counts on arrival, since the rep may
+     * already be typing. Anything that goes wrong only leaves the note off.
+     */
+    private async loadDraftProducts(): Promise<void> {
+        try {
+            this.draftProducts = await this.service.LoadDraftProducts();
+        } catch {
+            this.draftProducts = [];
+        }
+        // A closed list is re-counted when it next opens, and a dialog closed before the read returned
+        // has no view to update.
+        if (!this.PickerOpen || this.destroyed) return;
+        this.DraftMatches = CountDraftMatches(this.draftProducts, this.rankedQuery);
+        this.cdr.detectChanges();
     }
 
     /** Focus the dialog itself while it loads, so the trap and Escape work from the first frame. */
@@ -833,6 +945,114 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         const price = this.productPriceLabels.get(p.ID);
         const name = price ? `${p.Name}${sku} · ${price}` : `${p.Name}${sku}`;
         return p.Company ? `${name} — ${p.Company}` : name;
+    }
+
+    /* ── The product type-ahead (golive#360) ───────────────────────────────────── */
+
+    /** Rows the list shows at once. The catalogue runs to hundreds; past this the rep narrows by typing. */
+    private static readonly PickerLimit = 50;
+
+    /** The catalog price beside a product in the list, when orders has one. */
+    public PriceLabel(p: ProductLookup): string | null {
+        return this.productPriceLabels.get(p.ID) ?? null;
+    }
+
+    /** True when the product is owned by a company other than the deal's. */
+    public IsForeignProduct(p: ProductLookup): boolean {
+        const dealCompanyID = this.Deal?.CompanyID;
+        return !!p.CompanyID && !!dealCompanyID && !UUIDsEqual(p.CompanyID, dealCompanyID);
+    }
+
+    /**
+     * The warning under the box when the chosen product belongs to another company.
+     *
+     * Cross-company selling is allowed (#29), so this warns rather than refuses: the line's revenue books
+     * to the product's company, which is easy to miss when two companies sell similar names.
+     */
+    public get ForeignCompanyWarning(): string | null {
+        const product = this.SelectedProduct;
+        if (!product || !this.IsForeignProduct(product)) return null;
+        const owner = product.Company || 'another company';
+        const dealCompany = this.Deal?.Company ? ` (${this.Deal.Company})` : '';
+        return `Sold by ${owner}, not this deal's company${dealCompany}. This line's revenue books to ${owner}.`;
+    }
+
+    /** Opens the list on focus only when nothing is chosen yet; a chosen product opens it on click or typing. */
+    public OnPickerFocus(event: FocusEvent): void {
+        (event.target as HTMLInputElement | null)?.select();
+        if (!this.Working?.ProductID) this.OpenPicker();
+    }
+
+    public OpenPicker(): void {
+        if (this.PickerOpen) return;
+        this.PickerOpen = true;
+        this.rankPicker(this.Working?.ProductID ? '' : this.ProductQuery);
+    }
+
+    /** Closing without a choice puts the chosen product's label back, so the box never shows stray text. */
+    public ClosePicker(): void {
+        this.PickerOpen = false;
+        this.ProductQuery = this.chosenProductLabel();
+    }
+
+    public OnProductQuery(text: string): void {
+        this.ProductQuery = text;
+        this.PickerOpen = true;
+        this.rankPicker(text);
+    }
+
+    public OnPickerKey(event: KeyboardEvent): void {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            if (!this.PickerOpen) {
+                this.OpenPicker();
+                return;
+            }
+            const last = this.PickerResults.length - 1;
+            const step = event.key === 'ArrowDown' ? 1 : -1;
+            this.PickerCursor = Math.max(0, Math.min(last, this.PickerCursor + step));
+        } else if (event.key === 'Enter' && this.PickerOpen) {
+            event.preventDefault();
+            const product = this.PickerResults[this.PickerCursor];
+            if (product) this.ChooseProduct(product);
+        } else if (event.key === 'Escape' && this.PickerOpen) {
+            // The list closes first; a second Escape reaches the dialog and cancels it.
+            event.stopPropagation();
+            this.ClosePicker();
+        }
+    }
+
+    public ChooseProduct(product: ProductLookup, event?: Event): void {
+        event?.preventDefault();
+        this.PickerOpen = false;
+        if (!UUIDsEqual(product.ID, this.Working?.ProductID ?? '')) {
+            this.OnProductChange(product.ID);
+        }
+        this.ProductQuery = this.chosenProductLabel();
+        this.cdr.detectChanges();
+    }
+
+    private rankPicker(query: string): void {
+        const ranked = RankDealProducts(this.Products, query, this.Deal?.CompanyID ?? null);
+        this.PickerResults = ranked.slice(0, MJSDealLineEditorComponent.PickerLimit);
+        this.PickerHidden = ranked.length - this.PickerResults.length;
+        this.rankedQuery = query;
+        this.DraftMatches = CountDraftMatches(this.draftProducts, query);
+        this.PickerCursor = 0;
+    }
+
+    /** The note under the list when the search matches Draft products it does not offer, or null. */
+    public get DraftMatchNote(): string | null {
+        const n = this.DraftMatches;
+        if (n <= 0) return null;
+        const subject = n === 1 ? '1 Draft product matches' : `${n} Draft products match`;
+        const object = n === 1 ? 'it' : 'them';
+        return `${subject} but cannot be sold yet. Activate ${object} in Orders → Catalog to add ${object} here.`;
+    }
+
+    private chosenProductLabel(): string {
+        const product = this.SelectedProduct;
+        return product ? this.ProductOptionLabel(product) : '';
     }
 
     /**
@@ -897,6 +1117,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.EngineDefault = undefined;
         this.Applicable = [];
         this.Working.SubscriptionAction = null;
+        this.pendingConcessionID = null;
         void this.refreshApplicable();
         void this.refreshHolding();
         this.cdr.detectChanges();
@@ -1009,6 +1230,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         }
         this.DiscountRefusal = null;
         this.Working.DiscountPct = converted.Fraction;
+        this.pendingConcessionID = null;
     }
 
     /* ── A discount stated in dollars ─────────────────────────────────────────── */
@@ -1048,6 +1270,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.DiscountRefusal = null;
         if (converted.Fraction === (this.Working.DiscountPct ?? 0)) return;
         this.Working.DiscountPct = converted.Fraction;
+        this.pendingConcessionID = null;
         this.SchedulePrice();   // a priced input changed — ask Orders again
     }
 
@@ -1266,6 +1489,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      * or `Save` owns its own `finally`.
      */
     public ngOnDestroy(): void {
+        this.destroyed = true;
         if (this.priceTimer) {
             clearTimeout(this.priceTimer);
             this.priceTimer = null;
@@ -1616,13 +1840,18 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      */
     private async recordDiscountConcession(): Promise<string | null> {
         if (!this.Working || !this.NeedsDiscountReason || !this.DiscountCategory) return null;
+        this.pendingConcessionID ??= crypto.randomUUID();
         const outcome = await RecordDiscountConcession({
             OrderLineID: this.Working.ID,
             ReasonCategory: this.DiscountCategory,
             Reason: this.DiscountReason,
+            ConcessionID: this.pendingConcessionID,
         });
         this.savedDiscountPct = this.Working.DiscountPct ?? null;
-        if (outcome.Recorded) await this.refreshCoveredValue();
+        if (outcome.Recorded) {
+            this.pendingConcessionID = null;
+            await this.refreshCoveredValue();
+        }
         if (!outcome.Recorded) {
             return (
                 `The line is saved, but its discount could not be recorded for approval: ${outcome.Message} ` +
@@ -1671,6 +1900,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.DiscountCategory = null;
         this.DiscountReason = '';
         this.DiscountRefusal = null;
+        this.pendingConcessionID = null;
         this.Closed.emit();
     }
 }

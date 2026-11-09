@@ -96,7 +96,6 @@ const DLV = 'packages/CoreEntitiesServer/src/DealLockOrderLineVeto.ts';
 const DSE = 'packages/CoreEntitiesServer/src/DealStageEventEntityServer.ts';
 const DSO = 'packages/CoreEntitiesServer/src/deal-schedule-to-order.ts';
 const RDC = 'packages/CoreEntitiesServer/src/RecordDiscountConcessionOperation.ts';
-const CDP = 'packages/CoreEntitiesServer/src/pipelines/CopyDefaultPipeline.ts';
 const PSE = 'packages/CoreEntitiesServer/src/PipelineStageEntityServer.ts';
 const SUB = 'packages/CoreEntitiesServer/src/subscription-choice.ts';
 
@@ -188,9 +187,13 @@ const MUTATIONS = [
       from: "AND (AvailableTo IS NULL OR AvailableTo >= '${asOfDay}')",
       to: "AND (AvailableTo IS NULL OR AvailableTo >= '1900-01-01')" },
 
+    // RETARGETED when the pipeline stopped carrying a company: the server no longer stamps the deal's
+    // company from its pipeline, it refuses one the pipeline is not actively linked to. Accepting every
+    // company is the defect SD2 names.
     { id: 'M-SD2', file: DES, expect: ['SD2'],
-      from: '    private async stampCompanyFromPipeline(): Promise<void> {\n        if (!this.PipelineID) {',
-      to: '    private async stampCompanyFromPipeline(): Promise<void> {\n        if (true) { return; }\n        if (!this.PipelineID) {' },
+      from: "        if ((result.Results ?? []).length === 0) {\n            return 'the pipeline on this deal is not available to its company.",
+      to: "        if (false) {\n            return 'the pipeline on this deal is not available to its company.",
+      note: 'the link lookup still runs, but no answer refuses the save -- an unlinked company is stored' },
     { id: 'M-SD3', file: DES, expect: ['SD3'],
       from: '        this.OwnerEmployeeID = owner?.EmployeeID ?? null;',
       to: '        this.OwnerEmployeeID = null;' },
@@ -951,7 +954,7 @@ const MUTATIONS = [
       from: '            this._declaredTransition = null;\n            this._revertedStatusTarget = null;',
       to: '            this._revertedStatusTarget = null;',
       note: 'a refused save leaves a declared transition standing on the entity (#385)' },
-    { id: 'M-SD45', file: DES, expect: ['SD45'],
+    { id: 'M-SD48', file: DES, expect: ['SD48'],
       from: '        const owner = this.Team.Items.find(\n            (m) => m.IsActive !== false && UUIDsEqual(m.DealRoleID, ownerRoleID),\n        );',
       to: '        const owner = this.Team.Items.find(\n            (m) => UUIDsEqual(m.DealRoleID, ownerRoleID),\n        );',
       note: 'deactivating the Owner/AE team row leaves Deal.OwnerEmployeeID pointing at the inactive row (#409)' },
@@ -987,14 +990,6 @@ const MUTATIONS = [
       from: '            await this.withdrawSuperseded(input.OrderLineID, provider, user);',
       to: '            void this.withdrawSuperseded;',
       note: 'raising a discount leaves the earlier concession standing on the line (#340)' },
-    { id: 'M-PC1', file: CDP, expect: ['PC1'],
-      from: '    for (const id of companyIDs) {\n        (owners.has(lower(id)) ? plan.AlreadyHave : plan.CopyTo).push(id);\n    }',
-      to: '    for (const id of companyIDs) {\n        plan.AlreadyHave.push(id);\n    }',
-      note: 'every company is treated as already owning the default pipeline, so nothing is copied (#327)' },
-    { id: 'M-PC2', file: CDP, expect: ['PC2'],
-      from: '    const owners = new Set(existing.filter((p) => lower(p.Code) === code).map((p) => lower(p.CompanyID)));',
-      to: '    const owners = new Set<string>();',
-      note: 'existing company pipelines are ignored, so a second run attempts to copy again (#327)' },
     { id: 'M-CO6', file: SUB, expect: ['CO6'],
       from: '    const held = await FindUnansweredHeldLines(order, lines, provider, user);',
       to: '    const held: UnansweredHeldLine[] = []; void FindUnansweredHeldLines;',
@@ -1007,7 +1002,7 @@ const MUTATIONS = [
       from: '    if (existing.Results.length > 0) {\n        return { Success: true, ContractID: input.ContractID };\n    }',
       to: '    if (false && existing.Results.length > 0) {\n        return { Success: true, ContractID: input.ContractID };\n    }',
       note: 're-closing a won deal inserts a duplicate ContractOrder link instead of reusing the existing one' },
-    { id: 'M-AC24', file: AWS, expect: ['AC24'],
+    { id: 'M-AC25', file: AWS, expect: ['AC25'],
       from: '        const parties = await this.dealParties(input.DealID, provider, contextUser);\n        if (!parties.Found) {',
       to: '        const parties = await this.dealParties(input.DealID, provider, contextUser);\n        if (false && !parties.Found) {',
       note: 'LogActivity writes an activity for an unknown DealID instead of refusing (#381, #355)' }

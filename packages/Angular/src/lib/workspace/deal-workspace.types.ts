@@ -24,8 +24,9 @@ export interface DealLookup {
 }
 
 /**
- * A pipeline carries its company, because `Deal.CompanyID` is derived from it and never chosen. Code,
- * IsDefault and DisplayRank are what the pickers group and order by (#327, `company-pipelines.ts`).
+ * A pipeline as served by one linked company: a pipeline linked to several companies is one lookup per
+ * company, so a company filter narrows to that company's pipelines. Code, IsDefault and DisplayRank are
+ * what the pickers group and order by (#327, `company-pipelines.ts`).
  */
 export interface PipelineLookup extends DealLookup, CompanyPipeline {}
 
