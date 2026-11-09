@@ -142,3 +142,27 @@ describe("a board read that doesn't answer", () => {
         expect(boardPage(fixture).querySelector('mjs-deal-board')).not.toBeNull();
     });
 });
+
+describe("a quiet re-read that doesn't answer", () => {
+    it('keeps the board up past 30 seconds, and takes the reply when it finally arrives', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const later = { ...DEAL, ID: 'deal-2' } as DealRosterRow;
+        const roster = held<DealRosterRow[]>();
+        service.LoadRoster.mockResolvedValueOnce([DEAL]).mockReturnValueOnce(roster.promise);
+        const fixture = mount();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(fixture.componentInstance.Deals).toEqual([DEAL]);
+
+        void fixture.componentInstance.Refresh(true);
+        await vi.advanceTimersByTimeAsync(31_000);
+        expect(fixture.componentInstance.LoadError, 'a save-driven re-read does not blank the board').toBeNull();
+        const page = boardPage(fixture);
+        expect(page.querySelector('[data-testid="sales-load-failed"]')).toBeNull();
+        expect(page.querySelector('mjs-deal-board')).not.toBeNull();
+
+        roster.release([DEAL, later]);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(fixture.componentInstance.Deals, 'the late reply lands').toEqual([DEAL, later]);
+        expect(fixture.componentInstance.LoadError).toBeNull();
+    });
+});

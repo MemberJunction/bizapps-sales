@@ -32,14 +32,24 @@ import { BaseAction } from '@memberjunction/actions';
 import type { ActionParam, ActionResultSimple, RunActionParams } from '@memberjunction/actions-base';
 import { Metadata, RunView, type UserInfo } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
-import { ActivityWriterService } from '@mj-biz-apps/sales-core-entities-server';
-import { E_DEAL, type ActivityTypeCode } from '@mj-biz-apps/sales-entities';
+import { ActivityWriterService, type ResolvedParty } from '@mj-biz-apps/sales-core-entities-server';
+import { E_DEAL, E_ORGANIZATION, E_PERSON, type ActivityTypeCode } from '@mj-biz-apps/sales-entities';
 
 const P_DEAL_ID = 'DealID';
 const P_TYPE_CODE = 'TypeCode';
 const P_TITLE = 'Title';
 const P_NOTES = 'Notes';
 const P_STARTED_AT = 'StartedAt';
+const P_PARTIES = 'Parties';
+
+/** A bound on one call's fan-out: a person ticks a handful of people, never hundreds. */
+export const MAX_PARTIES = 50;
+
+/** One person or organization the browser asks to link. The role is not the browser's to choose. */
+export type ChosenParty = Pick<ResolvedParty, 'Kind' | 'RecordID'>;
+
+/** The parsed `Parties` param: absent (null), the chosen list, or a refusal naming the bad entry. */
+type PartiesRead = { Parties: ChosenParty[] | null; Refusal: null } | { Parties?: undefined; Refusal: string };
 
 /** The codes a person may log by hand. A meeting arrives from the calendar, not from this form. */
 const LOGGABLE: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 'Email'];
@@ -57,6 +67,45 @@ function readText(params: RunActionParams, name: string): string | null {
     }
     const s = String(raw).trim();
     return s ? s : null;
+}
+
+/**
+ * Reads `Parties`: a JSON array of `{ Kind: 'Person' | 'Organization', RecordID }`.
+ *
+ * ABSENT IS NOT EMPTY. Absent means "the service decides from the deal", which is every caller before
+ * #408. An empty array means the rep unticked everyone, so only the deal is linked.
+ */
+export function readParties(params: RunActionParams): PartiesRead {
+    const raw = readParam(params, P_PARTIES);
+    if (raw === null || raw === undefined || (typeof raw === 'string' && !raw.trim())) {
+        return { Parties: null, Refusal: null };
+    }
+    let list: unknown = raw;
+    if (typeof raw === 'string') {
+        try {
+            list = JSON.parse(raw);
+        } catch {
+            return { Refusal: 'Parties is not valid JSON.' };
+        }
+    }
+    if (!Array.isArray(list)) {
+        return { Refusal: 'Parties must be a list.' };
+    }
+    if (list.length > MAX_PARTIES) {
+        return { Refusal: `Parties lists ${list.length} entries; at most ${MAX_PARTIES} are accepted.` };
+    }
+    const parties: ChosenParty[] = [];
+    for (const [i, entry] of list.entries()) {
+        const e = (entry ?? {}) as { Kind?: unknown; RecordID?: unknown };
+        if (e.Kind !== 'Person' && e.Kind !== 'Organization') {
+            return { Refusal: `Parties entry ${i + 1}: '${String(e.Kind)}' is not Person or Organization.` };
+        }
+        if (typeof e.RecordID !== 'string' || !UUID.test(e.RecordID)) {
+            return { Refusal: `Parties entry ${i + 1}: '${String(e.RecordID)}' is not a record ID.` };
+        }
+        parties.push({ Kind: e.Kind, RecordID: e.RecordID });
+    }
+    return { Parties: parties, Refusal: null };
 }
 
 function setOutput(params: RunActionParams, name: string, value: unknown): void {
@@ -112,11 +161,30 @@ export class LogActivityAction extends BaseAction {
         }
 
         /**
+         * WHO GETS LINKED IS NOW THE BROWSER'S CHOICE (#408), so every ID it names is checked here, before
+         * anything is written: well-formed, a Person or an Organization, and readable by the caller. A bad
+         * entry refuses the whole call and is named; it is never dropped quietly.
+         */
+        const chosen = readParties(params);
+        if (chosen.Refusal !== null) {
+            return { Success: false, ResultCode: 'BAD_INPUT', Message: chosen.Refusal };
+        }
+
+        /**
          * THE CALLER MUST BE ABLE TO SEE THE DEAL. The writer links the activity to whatever deal ID it is
          * given, so without this a caller could attach activities to a deal hidden from them.
          */
         if (!(await this.callerCanReadDeal(dealID, params.ContextUser))) {
             return { Success: false, ResultCode: 'NOT_FOUND', Message: 'No deal you can see has that ID.' };
+        }
+
+        const unreadable = chosen.Parties ? await this.firstUnreadable(chosen.Parties, params.ContextUser) : null;
+        if (unreadable) {
+            return {
+                Success: false,
+                ResultCode: 'NOT_FOUND',
+                Message: `No ${unreadable.Kind.toLowerCase()} you can see has the ID '${unreadable.RecordID}'.`,
+            };
         }
 
         /**
@@ -167,11 +235,14 @@ export class LogActivityAction extends BaseAction {
                 Status: 'Logged',
                 Source: 'Manual',
                 /**
-                 * TRUE, which is the point of routing through the service. The deal's account and primary
-                 * contact become participants -- "where relevant to the account and contact" (S-US9) -- and
-                 * the pane's own version attached neither.
+                 * Without `Parties` (any caller before #408): TRUE, so the deal's account and primary contact
+                 * become participants -- "where relevant to the account and contact" (S-US9).
+                 *
+                 * With `Parties`: FALSE, and the list is exactly what gets linked. The compose form sends the
+                 * deal's own account and contact itself, ticked or not, so unticking one really drops it.
                  */
-                IncludeDealParties: true,
+                IncludeDealParties: chosen.Parties === null,
+                Parties: chosen.Parties?.map((p) => ({ ...p, Role: 'Participant' as const })),
             },
             Metadata.Provider,
             params.ContextUser,
@@ -194,6 +265,26 @@ export class LogActivityAction extends BaseAction {
             Message: `Logged ${code} with ${result.LinkCount} link(s).`
                 + (result.Issues.length ? ` Notes: ${result.Issues.join(' | ')}` : ''),
         };
+    }
+
+    /**
+     * The first chosen party the caller cannot read, or null when every one comes back for them.
+     * One `RunViews` round trip: people and organizations side by side.
+     */
+    private async firstUnreadable(parties: ChosenParty[], contextUser: UserInfo): Promise<ChosenParty | null> {
+        const inList = (kind: ChosenParty['Kind']): string =>
+            parties.filter((p) => p.Kind === kind).map((p) => `'${p.RecordID}'`).join(', ') || 'NULL';
+        const [people, orgs] = await new RunView().RunViews(
+            [
+                { EntityName: E_PERSON, ExtraFilter: `ID IN (${inList('Person')})`, ResultType: 'simple', Fields: ['ID'] },
+                { EntityName: E_ORGANIZATION, ExtraFilter: `ID IN (${inList('Organization')})`, ResultType: 'simple', Fields: ['ID'] },
+            ],
+            contextUser,
+        );
+        const ids = (r: typeof people, kind: ChosenParty['Kind']): string[] =>
+            r?.Success ? ((r.Results ?? []) as { ID: string }[]).map((row) => `${kind}:${String(row.ID).toLowerCase()}`) : [];
+        const visible = new Set([...ids(people, 'Person'), ...ids(orgs, 'Organization')]);
+        return parties.find((p) => !visible.has(`${p.Kind}:${p.RecordID.toLowerCase()}`)) ?? null;
     }
 
     /** True when the deal comes back for the caller, so their read permission and row-level filters apply. */

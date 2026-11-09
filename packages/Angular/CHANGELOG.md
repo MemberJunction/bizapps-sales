@@ -1,5 +1,56 @@
 # @mj-biz-apps/sales-ng
 
+## 6.25.0
+
+### Minor Changes
+
+- 30d6104: The Deal form's Account picker finds a sales account by its acronym as a starts-with match, and shows
+  the acronym next to the website domain under the name ("NAR · nar.realtor"). Migration
+  `V202611061900` refreshes `vwSalesAccounts` and the Sales Account procedures to carry the Acronym
+  inherited from Organization (Common 5.57+) and registers its field, so saving a Sales Account no
+  longer fails with "Cannot query field Acronym". On a host where MJ Setup already registered that
+  field, the migration replaces its row.
+
+### Patch Changes
+
+- fa524d7: The deal's Activity grid no longer lists every activity in the system when the deal opens. The grid now loads only once the deal's activity filter is known (bc-aidp-next-golive#432).
+- d260a50: The deal line product picker now says when a search matches Draft products it does not offer, and
+  that they can be activated in Orders → Catalog (bc-aidp-next-golive#433).
+- 2f631b7: The order header's From row shows a "No executed agreement" warning (bc-aidp-next-golive#443) on an
+  order a won deal names when the deal has no contract, or its contract has no executed agreement
+  linked. Reversals and voided orders get no warning. Sending to Bill.com is unchanged.
+- b4c3d2e: The order header's From row names the contract by number and status, opens its executed agreement,
+  or says "Awaiting signed agreement" when the contract needs one and none is linked
+  (bc-aidp-next-golive#445). When the deal holds no `ContractID`, the contract its close created is
+  found by `CreatingRecordID`.
+- ddb39c7: A background re-read of the Deals section (after a deal save or a board drag) that takes longer than 30 seconds no longer replaces the board with a Retry panel. The board stays up and takes the new data when the slow reply lands. An explicit refresh still shows the Retry.
+- Updated dependencies [73e4527]
+- Updated dependencies [c983e92]
+  - @mj-biz-apps/sales-entities@6.25.0
+
+## 6.24.1
+
+### Patch Changes
+
+- b4fca8a: Restore the Acronym field on Sales Accounts. Sales Accounts inherit it from Organization (Common 5.57+), and the 6.24.0 generated code dropped it, so every Sales Account form failed to load with "Cannot query field Acronym". Common is now required at 5.60.0 or later, the version AIDP Next runs, so CodeGen in this repo keeps the field.
+- Updated dependencies [b4fca8a]
+  - @mj-biz-apps/sales-entities@6.24.1
+
+## 6.24.0
+
+### Minor Changes
+
+- 1ceea58: Logging an activity from a deal now lets the rep choose who it is linked to: the deal's account and primary contact start ticked and can be unticked, the billing contact and buying team can be ticked, and any other person or organization can be searched for and added. The Activity panel shows who the selected activity is linked to. `Log Activity` gains an optional `Parties` input (metadata); without it the action behaves as before. (golive #408)
+- 4a3226a: Close and lock hardening: validate caller-supplied IDs and fail closed on loss-reason and deal-type lookup errors in `Sales.CloseDeal` and `Sales.ReopenDeal`; keep client-generated `ConcessionID` across discount-concession retries so a resend after a timeout is idempotent; return a specific refusal naming the deal and contract when a close or stale pre-close save hits an already-Won deal; and allow a closed deal whose persisted `AccountID` is blank to have its account set once without reopening.
+
+### Patch Changes
+
+- Updated dependencies [da41816]
+- Updated dependencies [4a3226a]
+- Updated dependencies [c4808fa]
+- Updated dependencies [c96a138]
+  - @mj-biz-apps/sales-entities@6.24.0
+
 ## 6.23.4
 
 ### Patch Changes
