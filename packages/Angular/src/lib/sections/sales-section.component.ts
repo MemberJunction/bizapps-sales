@@ -83,6 +83,7 @@ import {
     PrimaryActionFor,
     SecondaryActionFor,
     SubPagesFor,
+    type SalesNavAudience,
     type SalesNavBadges,
     type SalesPrimaryAction,
 } from '../nav/sales-nav.model';
@@ -146,6 +147,7 @@ import { PipelineCompanies, PipelineCompanyNames, PipelineLabel } from '../data/
 import { SalesSettings } from '../data/sales-settings';
 import { WatchDealSaves } from '../data/deal-saves';
 import { MJSSalesFilterBarComponent, type FilterKind, type SalesFilterBarState } from './sales-filter-bar.component';
+import { MJSSalesSettingsPageComponent } from './sales-settings-page.component';
 
 /**
  * The account entity, for opening a customer as its own Explorer tab.
@@ -222,6 +224,7 @@ interface AttentionRow {
         MJLeftNavContentComponent,
         MJButtonDirective,
         MJSSalesFilterBarComponent,
+        MJSSalesSettingsPageComponent,
         DealBoardComponent,
         EntityViewerModule,
     ],
@@ -492,7 +495,7 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private pageOrDefault(page: string | null): string {
-        return page && SubPagesFor(this.Section).some((p) => p.Id === page) ? page : DefaultPageFor(this.Section);
+        return page && SubPagesFor(this.Section, this.navAudience).some((p) => p.Id === page) ? page : DefaultPageFor(this.Section);
     }
 
     /** Applies a URL (back/forward, or a link opened into a mounted tab). Writes nothing back. */
@@ -548,7 +551,7 @@ export class MJSSalesSectionComponent implements OnInit {
     // ── Chrome ─────────────────────────────────────────────────────────────────
 
     public get NavSections(): MJLeftNavSection[] {
-        return BuildLeftNavSections(SubPagesFor(this.Section), this.Badges);
+        return BuildLeftNavSections(SubPagesFor(this.Section, this.navAudience), this.Badges);
     }
 
     public get PrimaryAction(): SalesPrimaryAction | null {
@@ -724,6 +727,18 @@ export class MJSSalesSectionComponent implements OnInit {
      * Takes the `HidePipelines` setting. Turning it on drops a Pipeline filter carried in from the URL,
      * which the bar would no longer show and so could not be cleared.
      */
+    /** Who the rail is for, read once: the Settings page is listed only for those who may change it. */
+    private get navAudience(): SalesNavAudience {
+        this.audience ??= { CanChangeSettings: SalesSettings.CanChange };
+        return this.audience;
+    }
+    private audience: SalesNavAudience | null = null;
+
+    /** The Settings page saved Hide pipelines: re-read everything with the new value. */
+    public async OnHidePipelinesChanged(): Promise<void> {
+        await this.Refresh(true);
+    }
+
     private applyHidePipelines(hide: boolean): void {
         this.HidePipelines = hide;
         if (hide && this.Filters.PipelineIDs.length) {
@@ -1621,7 +1636,8 @@ export class SalesDealsSectionResource extends BaseResourceComponent implements 
     }
 
     private parseUrl(params: Record<string, string>): SalesUrlState {
-        return ParseSalesUrlState(params, SubPagesFor('deals').map((p) => p.Id));
+        // Every page the URL may name; the section falls back to the dashboard for one the user cannot see.
+        return ParseSalesUrlState(params, SubPagesFor('deals', { CanChangeSettings: true }).map((p) => p.Id));
     }
 
     public override async GetResourceDisplayName(_d: ResourceData): Promise<string> {

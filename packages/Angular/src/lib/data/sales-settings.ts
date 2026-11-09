@@ -10,6 +10,7 @@ import { ApplicationSettingEngine } from '@memberjunction/core-entities';
  * default.
  */
 const SALES_APPLICATION_NAME = 'Sales';
+const APPLICATION_SETTINGS_ENTITY = 'MJ: Application Settings';
 
 export const SALES_SETTING = {
     /**
@@ -52,6 +53,36 @@ export class SalesSettings {
             console.error('Sales settings could not be loaded; pipelines stay shown.', error);
             return false;
         }
+    }
+
+    /**
+     * Whether the signed-in user may change the Sales settings: they can both create and update
+     * `MJ: Application Settings` records. That entity permission is the real gate, since the server
+     * refuses a save without it, so the Settings page is shown only to those who hold it.
+     */
+    public static get CanChange(): boolean {
+        try {
+            const metadata = new Metadata();
+            const entity = metadata.EntityByName(APPLICATION_SETTINGS_ENTITY);
+            const user = metadata.CurrentUser;
+            if (!entity || !user) {
+                return false;
+            }
+            const permissions = entity.GetUserPermisions(user);
+            return permissions.CanCreate && permissions.CanUpdate;
+        } catch {
+            // Metadata not loaded: no Settings page rather than a broken rail.
+            return false;
+        }
+    }
+
+    /**
+     * Turns {@link HidePipelines} on or off for every user of this instance. Saved through the engine,
+     * so MJAPI's cache sees the change at once; other users pick it up the next time Sales loads.
+     */
+    public static async SetHidePipelines(hide: boolean): Promise<boolean> {
+        await this.Load();
+        return ApplicationSettingEngine.Instance.SetSetting(SALES_SETTING.HidePipelines, hide ? 'true' : 'false', this.applicationID());
     }
 
     private static read(name: string): string | null {

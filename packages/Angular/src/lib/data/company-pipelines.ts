@@ -74,7 +74,18 @@ export function DefaultPipeline<T extends CompanyPipeline>(pipelines: readonly T
     return pipelines.find((p) => p.IsDefault) ?? null;
 }
 
-/** The first company the default pipeline serves: the company a new deal starts in. */
+/**
+ * The order `PipelineCompany` rows are read in: oldest link first. {@link DefaultCompanyID} takes the
+ * default pipeline's first row, so once that pipeline is linked to every company the company it was
+ * first linked to stays the one a new deal starts in, rather than whichever link the database returns
+ * first.
+ */
+export const PIPELINE_LINK_ORDER = '__mj_CreatedAt ASC, ID ASC';
+
+/**
+ * The first company the default pipeline serves: the company a new deal starts in. Relies on the links
+ * being read in {@link PIPELINE_LINK_ORDER}.
+ */
 export function DefaultCompanyID(pipelines: readonly CompanyPipeline[]): string | null {
     return DefaultPipeline(pipelines)?.CompanyID ?? OrderPipelinesByCompany(pipelines)[0]?.CompanyID ?? null;
 }

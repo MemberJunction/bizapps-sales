@@ -82,11 +82,29 @@ export const DEALS_SUB_PAGES: SalesSubPage[] = [
     { Id: 'contacts', Label: 'Contacts', Icon: 'fa-solid fa-address-book', Group: 'Customers' },
 ];
 
+/**
+ * Settings for the whole instance, such as hiding pipelines. Shown only to users who may change the
+ * Sales application settings; see `SalesSettings.CanChange`.
+ */
+export const SETTINGS_SUB_PAGE: SalesSubPage = {
+    Id: 'settings',
+    Label: 'Settings',
+    Icon: 'fa-solid fa-sliders',
+    Description: 'How Sales works for everyone',
+    Group: 'Admin',
+};
+
+/** Who is looking at the rail. */
+export interface SalesNavAudience {
+    /** The user may change the Sales settings, so the Settings page is listed. */
+    CanChangeSettings?: boolean;
+}
+
 /** The rail for a section id. An unknown id gives an empty rail rather than throwing. */
-export function SubPagesFor(sectionId: string): SalesSubPage[] {
+export function SubPagesFor(sectionId: string, audience: SalesNavAudience = {}): SalesSubPage[] {
     switch (sectionId) {
         case 'deals':
-            return DEALS_SUB_PAGES;
+            return audience.CanChangeSettings ? [...DEALS_SUB_PAGES, SETTINGS_SUB_PAGE] : DEALS_SUB_PAGES;
         default:
             return [];
     }
@@ -178,6 +196,7 @@ export function PrimaryActionFor(pageId: string): SalesPrimaryAction | null {
         case 'contacts':
             return { Label: 'New contact', Icon: 'fa-solid fa-plus', Creates: 'contact' };
         default:
+            // Settings creates nothing.
             return null;
     }
 }

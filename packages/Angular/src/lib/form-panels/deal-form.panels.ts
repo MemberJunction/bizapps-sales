@@ -51,6 +51,7 @@ import {
     PipelineLabel,
     PipelineServesCompany,
     PipelinesForCompany,
+    PIPELINE_LINK_ORDER,
     type CompanyPipeline,
     type PipelineCompany,
 } from '../data/company-pipelines';
@@ -177,6 +178,9 @@ async function LoadPipelines(): Promise<PipelineOption[]> {
             // Inactive links too, for the same reason as inactive pipelines: a deal on a retired link
             // still has to show its company.
             EntityName: MJS_ENTITIES.PipelineCompany,
+            // Oldest link first, so the default company stays the one the default pipeline was first
+            // linked to when it is later linked to every company (see `DefaultCompanyID`).
+            OrderBy: PIPELINE_LINK_ORDER,
             ResultType: 'simple',
             Fields: ['PipelineID', 'CompanyID', 'Company', 'IsActive'],
         },
