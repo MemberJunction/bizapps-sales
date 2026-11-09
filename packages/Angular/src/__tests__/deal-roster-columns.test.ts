@@ -47,6 +47,14 @@ describe('AssertRosterColumns', () => {
         expect(() => AssertRosterColumns([olderDefinitionRow()])).toThrow(/PipelineIncludeInForecast/);
     });
 
+    it('refuses a roster without IncludeInPipeline rather than reading every open deal as Omitted', () => {
+        // bool(undefined) is false, and the forecast stack, weighted open and the inspect slices all
+        // gate on IncludeInPipeline (#287). A definition from before #287 must fail loudly, not read $0.
+        const row = fullRow();
+        delete row['IncludeInPipeline'];
+        expect(() => AssertRosterColumns([row])).toThrow(/IncludeInPipeline/);
+    });
+
     it('does not check an empty roster, which has nothing to mis-compute', () => {
         expect(() => AssertRosterColumns([])).not.toThrow();
     });

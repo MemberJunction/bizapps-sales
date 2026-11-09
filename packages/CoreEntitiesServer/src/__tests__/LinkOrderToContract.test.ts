@@ -61,12 +61,13 @@ describe('LinkOrderToContract', () => {
         expect(saved).toEqual([]);
     });
 
-    it('reports an older contracts release that has no order links', async () => {
+    it('reports an older contracts release that has no order links as pending, not refused', async () => {
         entityNames.splice(1);
         const { provider, saved } = makeProvider();
         const result = await LinkOrderToContract(INPUT, provider, USER);
         expect(result.Success).toBe(false);
-        expect(result.Message).toMatch(/no order links/);
+        expect(result.Pending).toBe(true);
+        expect(result.Message).toMatch(/pending/i);
         expect(saved).toEqual([]);
         expect(runView).not.toHaveBeenCalled();
     });
@@ -76,6 +77,7 @@ describe('LinkOrderToContract', () => {
         const { provider } = makeProvider(false);
         const result = await LinkOrderToContract(INPUT, provider, USER);
         expect(result.Success).toBe(false);
+        expect(result.Pending).toBeUndefined();
         expect(result.Message).toContain('duplicate link');
     });
 

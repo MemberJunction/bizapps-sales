@@ -138,3 +138,31 @@ describe('the cache key moves exactly when the answer does', () => {
         expect(DealRelatedLinksKey('deal-1', wonWithEverything)).toBe(DealRelatedLinksKey('deal-1', wonWithEverything));
     });
 });
+
+describe('bizapps-orders#740 — a won deal reaches the reversals of its order', () => {
+    it('offers one Reversal chip per reversal, right after the order', () => {
+        const links = DealRelatedLinks({ ...wonWithEverything, ReversalOrderIDs: ['rev-1', 'rev-2'] });
+        expect(keysOf(links)).toEqual(['order', 'reversal:rev-1', 'reversal:rev-2', 'contract', 'renews']);
+        expect(links.find((l) => l.Key === 'reversal:rev-1')).toMatchObject({ EntityName: ORDER, RecordID: 'rev-1', Label: 'Reversal' });
+    });
+
+    it('offers no reversal chip before the win, with the order chip', () => {
+        const links = DealRelatedLinks({ IsWon: false, OrderID: 'order-1', ReversalOrderIDs: ['rev-1'] });
+        expect(keysOf(links)).toEqual([]);
+    });
+
+    it('offers no reversal chip without the order it reverses', () => {
+        expect(keysOf(DealRelatedLinks({ IsWon: true, OrderID: null, ReversalOrderIDs: ['rev-1'] }))).toEqual([]);
+    });
+
+    it('skips a blank reversal id', () => {
+        expect(keysOf(DealRelatedLinks({ IsWon: true, OrderID: 'order-1', ReversalOrderIDs: ['  ', 'rev-1'] }))).toEqual(['order', 'reversal:rev-1']);
+    });
+
+    it('moves the cache key when a reversal appears', () => {
+        const before = DealRelatedLinksKey('deal-1', wonWithEverything);
+        const after = DealRelatedLinksKey('deal-1', { ...wonWithEverything, ReversalOrderIDs: ['rev-1'] });
+        expect(after).not.toBe(before);
+        expect(DealRelatedLinksKey('deal-1', { ...wonWithEverything, ReversalOrderIDs: ['rev-1'] })).toBe(after);
+    });
+});

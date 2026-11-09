@@ -20,6 +20,12 @@ export * from './generated/remote_operations';
 export * from './deal-entity';
 
 /**
+ * The shared `DealTeamMember` subclass: a team member is an employee or a person, never both. Runs in
+ * the browser and on the server; `DealTeamMemberEntityServer` extends it.
+ */
+export * from './deal-team-member-entity';
+
+/**
  * The typed seams the close flow calls downstream, plus the stub that stands in while neither sibling
  * is reachable. Read the file header before wiring anything: the blockers are recorded there, and the
  * `IsLive` flag is what tells a caller whether a routing result means "created" or only "planned".
@@ -32,6 +38,7 @@ export * from './downstream-seams';
  * all apply the same one.
  */
 export * from './product-filter';
+export * from './inherited-subscription-type';
 export * from './term-start';
 
 /**
@@ -46,6 +53,12 @@ export * from './close-lock';
  * stored figures, never a computation. See the file header for why it is no longer a timestamp test.
  */
 export * from './amount-freshness';
+
+/**
+ * The refusal a stage event edit or delete gets, shared by `DealStageEventEntityServer` and the Explorer
+ * form so both say the same thing (#348).
+ */
+export * from './stage-event-append-only';
 
 /**
  * Forces the generated entity subclasses to be loaded. Without an explicit

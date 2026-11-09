@@ -18,22 +18,36 @@
 import { ChangeDetectorRef, Component, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Metadata, RunView, type IMetadataProvider } from '@memberjunction/core';
-import { RegisterClassEx } from '@memberjunction/global';
+import { EscapeSQLString, RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel } from '@memberjunction/ng-base-forms';
-import { RelatedChipsComponent, type BizAppsRelatedLink } from '@mj-biz-apps/common-ng';
+import {
+    RelatedChipNavigation,
+    RelatedChipsComponent,
+    type BizAppsRelatedLink,
+    type ResolvedRelatedChip,
+} from '@mj-biz-apps/common-ng';
 import type { mjBizAppsOrdersOrderHeaderEntity } from '@mj-biz-apps/orders-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
-import { OrderRelatedLinks, OrderRelatedLinksKey, type OrderRelatedLinkState } from './order-related-links';
+import {
+    ContractFileLinksFilter,
+    ContractLookupFilter,
+    DealLookupOrderID,
+    ExecutedAgreementFileFilter,
+    OrderContractChips,
+    OrderRelatedLinks,
+    OrderRelatedLinksKey,
+    ShouldReadAgreement,
+    type OrderAgreementFile,
+    type OrderContractRow,
+    type OrderContractView,
+    type OrderRelatedLinkState,
+} from './order-related-links';
 
-/** The one row this panel reads: the deal that names this order, and the contract it points at. */
+/** The one row this panel reads: the deal that names this order, its contract id and its status type. */
 interface DealProvenanceRow {
     ID: string;
     ContractID: string | null;
-}
-
-/** Single-quote escaping for a value going into an `ExtraFilter`, as every other filter here does. */
-function quote(value: string): string {
-    return value.replace(/'/g, "''");
+    DealStatusTypeID: string | null;
 }
 
 @RegisterClassEx(BaseFormPanel, {
@@ -59,6 +73,36 @@ function quote(value: string): string {
                     [Links]="Links"
                     [Provider]="Provider"
                     (Navigate)="FormComponent.OnFormNavigate($event)" />
+                <!-- The contract and its executed agreement (golive#445). Drawn here, in the shared
+                     chip's own classes, because the contract chip shows number AND status. -->
+                @for (chip of ContractView.Chips; track chip.Key) {
+                    <button
+                        type="button"
+                        class="bizapps-related__chip"
+                        [attr.data-testid]="'order-related-' + chip.Key"
+                        [attr.aria-label]="chip.AriaLabel"
+                        (click)="OpenChip(chip, $event)">
+                        @if (chip.Icon) {
+                            <i [class]="chip.Icon" aria-hidden="true"></i>
+                        }
+                        <span class="bizapps-related__label">{{ chip.Label }}</span>
+                        <span class="bizapps-related__name">{{ chip.Name }}</span>
+                    </button>
+                }
+                @if (ContractView.Warning; as warning) {
+                    <span class="mjs-order-related__warning" role="status" data-testid="order-related-no-agreement"
+                          [attr.title]="warning.Detail">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                        {{ warning.Label }}
+                        <span class="mjs-order-related__sr">{{ warning.Detail }}</span>
+                    </span>
+                }
+                @if (ContractView.AwaitingNote) {
+                    <span class="mjs-order-related__note" data-testid="order-related-awaiting">
+                        <i class="fa-solid fa-hourglass-half" aria-hidden="true"></i>
+                        {{ ContractView.AwaitingNote }}
+                    </span>
+                }
             </div>
         }
     `,
@@ -82,6 +126,33 @@ function quote(value: string): string {
                 text-transform: uppercase;
                 color: var(--mj-text-muted);
             }
+            .mjs-order-related__warning {
+                display: inline-flex;
+                align-items: center;
+                gap: var(--mj-space-1-5);
+                padding: var(--mj-space-1) var(--mj-space-3);
+                font-size: var(--mj-text-xs);
+                font-weight: var(--mj-font-semibold);
+                color: var(--mj-status-warning-text);
+                background: var(--mj-status-warning-bg);
+                border: 1px solid var(--mj-status-warning-border);
+                border-radius: var(--mj-radius-full);
+            }
+            .mjs-order-related__sr {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                overflow: hidden;
+                clip: rect(0 0 0 0);
+                white-space: nowrap;
+            }
+            .mjs-order-related__note {
+                display: inline-flex;
+                align-items: center;
+                gap: var(--mj-space-1-5);
+                font-size: var(--mj-text-xs);
+                color: var(--mj-text-secondary);
+            }
         `,
     ],
 })
@@ -98,6 +169,9 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
      * visible change.
      */
     public Links: BizAppsRelatedLink[] = [];
+
+    /** The contract chip, the agreement chip and the awaiting note. Rebuilt with {@link Links}. */
+    public ContractView: OrderContractView = { Chips: [], AwaitingNote: null, Warning: null };
 
     /** The key the published links were built from. `null` until the first read completes. */
     private linksFor: string | null = null;
@@ -125,19 +199,21 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
         void this.load();
     }
 
+    /** A contract or agreement chip click: the same navigation event the shared chip row emits. */
+    public OpenChip(chip: ResolvedRelatedChip, event: MouseEvent): void {
+        this.FormComponent?.OnFormNavigate(RelatedChipNavigation(chip, event));
+    }
+
     /**
-     * Resolve the deal behind this order, and through it the contract.
+     * Resolve the deal behind this order, then its contract and executed agreement.
      *
-     * ONE READ, NOT TWO. The chip row can find a record from a filter as happily as from an id — the
-     * reverse link is why `BizAppsRelatedLink.Filter` exists — so the deal chip alone would need no
-     * read here at all. The CONTRACT is what forces one: its id lives on the deal row, a second hop
-     * the chip row cannot take on the caller's behalf, and the only alternative would be a filter
-     * carrying a subquery across into the sales schema. So the deal is read once, for the two ids,
-     * and both chips are then ordinary forward links.
+     * Up to four reads, each needing the one before it: the deal (for its ids), the contract (number,
+     * status, `IsAwaitingDocument`), the contract's file links, and the linked file in the Executed
+     * Agreement category. The last two are skipped when the view already says the paper is missing.
      *
-     * A THROWN READ PUBLISHES NOTHING, which is the same answer the shared component gives a reverse
-     * link that threw, and for the same reason: the throw cost us the ids, so there is nothing left
-     * to open. An order whose deal simply does not exist takes the same path, one line earlier.
+     * A THROWN DEAL READ PUBLISHES NOTHING: the throw cost us the ids, so there is nothing left to
+     * open. A throw after the deal was read keeps the deal and the plain contract link, which is what
+     * the row showed before golive#445.
      */
     private async load(): Promise<void> {
         const generation = ++this.generation;
@@ -147,28 +223,112 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
             return;
         }
 
+        // A reversal is looked up by the order it reverses: see `DealLookupOrderID`.
+        const dealOrderID = DealLookupOrderID(this.Record) ?? orderID;
         let state: OrderRelatedLinkState = {};
         try {
-            const result = await RunView.FromMetadataProvider(this.Provider).RunView<DealProvenanceRow>({
-                EntityName: MJS_ENTITIES.Deal,
-                Fields: ['ID', 'ContractID'],
-                ExtraFilter: `OrderID = '${quote(String(orderID))}'`,
-                // `Deal.OrderID` is documented as a 1:1 peer, but this is a REVERSE read and nothing in
-                // the schema enforces the one. Ordering makes the row that wins the same row on every
-                // render rather than whichever the server happened to return first.
-                OrderBy: '__mj_CreatedAt ASC',
-                MaxRows: 1,
-                ResultType: 'simple',
-            });
-            const row = result?.Success ? result.Results?.[0] : undefined;
-            if (row) {
-                state = { DealID: row.ID, ContractID: row.ContractID };
+            const deal = await this.readDeal(String(dealOrderID));
+            state = deal.State;
+            if (state.DealID) {
+                state = { ...state, ...(await this.readContractAndStatus(state, deal.StatusTypeID)) };
+                state.Agreement = ShouldReadAgreement(state.Contract) ? await this.readAgreement(state.Contract.ID) : null;
             }
         } catch {
-            state = {};
+            // The deal's ids, once read, stay published: a failed contract read leaves the plain
+            // contract link to `bizapps-related-chips`, which applies its own refusal rules, and no
+            // warning, since nothing was learned about the contract.
+            state = { DealID: state.DealID, ContractID: state.ContractID };
         }
+        state.ViaReversedOrder = String(dealOrderID) !== String(orderID);
+        state.OrderVoided = this.Record.Status === 'Voided'; // vocabulary-grep-allow: orders' fixed lifecycle, no flag table behind it
 
         this.publish(generation, orderID, state);
+    }
+
+    private get runView(): RunView {
+        return RunView.FromMetadataProvider(this.Provider);
+    }
+
+    /** The deal whose `OrderID` names this order. Empty state when there is none. */
+    private async readDeal(dealOrderID: string): Promise<{ State: OrderRelatedLinkState; StatusTypeID: string | null }> {
+        const result = await this.runView.RunView<DealProvenanceRow>({
+            EntityName: MJS_ENTITIES.Deal,
+            Fields: ['ID', 'ContractID', 'DealStatusTypeID'],
+            ExtraFilter: `OrderID = '${EscapeSQLString(dealOrderID)}'`,
+            // `Deal.OrderID` is documented as a 1:1 peer, but this is a REVERSE read and nothing in
+            // the schema enforces the one. Ordering makes the row that wins the same row on every
+            // render rather than whichever the server happened to return first.
+            OrderBy: '__mj_CreatedAt ASC',
+            MaxRows: 1,
+            ResultType: 'simple',
+        });
+        const row = result?.Success ? result.Results?.[0] : undefined;
+        return {
+            State: row ? { DealID: row.ID, ContractID: row.ContractID } : {},
+            StatusTypeID: row?.DealStatusTypeID ?? null,
+        };
+    }
+
+    /**
+     * The contract behind the deal and whether the deal is won, in one batch: they are independent.
+     *
+     * The contract comes by `Deal.ContractID` or by the close's provenance pair
+     * (`ContractLookupFilter`), newest first, so a deal whose close was re-run shows its latest.
+     * `ContractRead` is set only when that read answered, so the warning never rests on a refusal.
+     * Won is `DealStatusType.IsWon`, never a status name.
+     */
+    private async readContractAndStatus(state: OrderRelatedLinkState, statusID: string | null): Promise<Partial<OrderRelatedLinkState>> {
+        const filter = ContractLookupFilter(state);
+        if (!filter) return {};
+        const [contracts, statuses] = await this.runView.RunViews([
+            {
+                EntityName: MJS_FOREIGN_ENTITIES.Contract,
+                Fields: ['ID', 'ContractNumber', 'State', 'IsAwaitingDocument'],
+                ExtraFilter: filter,
+                OrderBy: '__mj_CreatedAt DESC',
+                MaxRows: 1,
+                ResultType: 'simple',
+            },
+            {
+                EntityName: MJS_ENTITIES.DealStatusType,
+                Fields: ['ID', 'IsWon'],
+                ExtraFilter: statusID ? `ID = '${EscapeSQLString(statusID)}'` : '1 = 0',
+                MaxRows: 1,
+                ResultType: 'simple',
+            },
+        ]);
+        const contract = (contracts?.Success ? (contracts.Results?.[0] as OrderContractRow | undefined) : undefined) ?? null;
+        const status = statuses?.Success ? (statuses.Results?.[0] as { IsWon?: boolean } | undefined) : undefined;
+        return {
+            Contract: contract,
+            ContractRead: contracts?.Success === true,
+            DealIsWon: status ? status.IsWon === true : null,
+        };
+    }
+
+    /**
+     * The contract's executed agreement: its linked files, then the one in the Executed Agreement
+     * category, the same test `vwContracts.IsAwaitingDocument` applies. `null` when none is linked or
+     * the reader may not read files.
+     */
+    private async readAgreement(contractID: string): Promise<OrderAgreementFile | null> {
+        const links = await this.runView.RunView<{ FileID: string }>({
+            EntityName: MJS_FOREIGN_ENTITIES.FileEntityRecordLink,
+            Fields: ['FileID'],
+            ExtraFilter: ContractFileLinksFilter(contractID),
+            ResultType: 'simple',
+        });
+        const filter = ExecutedAgreementFileFilter(links?.Success ? links.Results.map((l) => l.FileID) : []);
+        if (!filter) return null;
+        const files = await this.runView.RunView<OrderAgreementFile>({
+            EntityName: MJS_FOREIGN_ENTITIES.File,
+            Fields: ['ID', 'Name'],
+            ExtraFilter: filter,
+            OrderBy: '__mj_CreatedAt DESC',
+            MaxRows: 1,
+            ResultType: 'simple',
+        });
+        return (files?.Success ? files.Results?.[0] : undefined) ?? null;
     }
 
     /** Publish only when this read is still the current one AND the links would actually differ. */
@@ -182,6 +342,7 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
         }
         this.linksFor = key;
         this.Links = OrderRelatedLinks(state);
+        this.ContractView = OrderContractChips(state);
         this.cdr.detectChanges();
     }
 }

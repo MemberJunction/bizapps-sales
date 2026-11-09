@@ -20,6 +20,8 @@
  *                        is what names the order's status, so CO3 proves the order follows a stage that
  *                        names one and ignores a stage that does not, and CO5 proves a REFUSED status
  *                        never blocks the stage change (S-US5/S-US7/S-US8)
+ *   close-won-schedule   The deal's payment schedule reaches its order at Close Won, and a won deal's later
+ *                        edits follow it; an invoiced instalment refuses the edit (golive #290)
  *   close-won-contract   ONE tripwire (CT0), not a route. CT1-CT4 were retired on 2026-08-20: they named
  *                        ContractTerm and ContractLine, deleted in contracts' clean-sheet rebuild, and a
  *                        Contract.Status column that no longer exists -- while being SKIPPED on every
@@ -28,7 +30,21 @@
  *   board-move           A stage move appends EXACTLY ONE DealStageEvent, stamped with the values the
  *                        deal held on the way OUT — the provenance a board drag owes (D-BD2). Its writer
  *                        shares one transaction with the stage-order writer and the deal counter; see
- *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters
+ *                        `DealEntityServer.saveWithinScope` for why the ordering between them matters.
+ *                        BD7 proves the event it appends then refuses an edit and a delete (#348)
+ *   pipeline-link        Every company ends linked to the default pipeline through PipelineCompany, no
+ *                        pipeline is created, and a second run links nothing (#327). Needs no sibling
+ *                        app: it saves no deal
+ *   party-lookup         The Deal form's Account and Contact picker queries: prefix only, subtype rows
+ *                        only, % and _ literal (bc-aidp-next-golive#372). Saves no deal
+ *   discount-concession  A deal line's raised discount is recorded through Sales.RecordDiscountConcession,
+ *                        where orders' subclass fills, values and decides it; a refusal carries orders'
+ *                        reason, and a second raise withdraws the line's earlier concession (golive#340)
+ *   sales-isa            MemberJunction's IS-A contract through SalesContact IsA Person and SalesAccount
+ *                        IsA Organization, against a real database (MJ itself proves it only with mocks).
+ *                        Needs bizapps-common only, not orders. IS7 runs OUTSIDE a rolled-back
+ *                        transaction on purpose, and IS9 skips with a warning where nothing else extends
+ *                        People — see the file header for both
  *
  * ⚠️ EVERY BUNDLE REQUIRES bizapps-orders EXCEPT `close-won-contract`, whose single check needs nothing
  * at all — it is asserting an absence. save-deal and close-deal require it too. A deal cannot be
@@ -76,21 +92,31 @@ import './checks/save-deal.checks.js';
 import './checks/close-deal.checks.js';
 import './checks/product-picker.checks.js';
 import './checks/close-won-order.checks.js';
+import './checks/close-won-schedule.checks.js';
 import './checks/close-won-contract.checks.js';
 import './checks/board-move.checks.js';
 import './checks/close-won-tasks.checks.js';
 import './checks/activities.checks.js';
 import './checks/forecast.checks.js';
 import './checks/term-start.checks.js';
+import './checks/pipeline-link.checks.js';
+import './checks/party-lookup.checks.js';
+import './checks/discount-concession.checks.js';
+import './checks/sales-isa.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
 export { ProductPickerChecks } from './checks/product-picker.checks.js';
 export { TermStartChecks } from './checks/term-start.checks.js';
+export { PipelineLinkChecks } from './checks/pipeline-link.checks.js';
+export { PartyLookupChecks } from './checks/party-lookup.checks.js';
+export { DiscountConcessionChecks } from './checks/discount-concession.checks.js';
 export { CloseWonOrderChecks } from './checks/close-won-order.checks.js';
+export { CloseWonScheduleChecks } from './checks/close-won-schedule.checks.js';
 export { CloseWonContractChecks } from './checks/close-won-contract.checks.js';
 export { BoardMoveChecks } from './checks/board-move.checks.js';
 export { CloseWonTasksChecks } from './checks/close-won-tasks.checks.js';
 export { ActivitiesChecks } from './checks/activities.checks.js';
 export { ForecastChecks } from './checks/forecast.checks.js';
+export { SalesIsaChecks } from './checks/sales-isa.checks.js';
 export * from './fixture.js';

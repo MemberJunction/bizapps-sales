@@ -1,0 +1,40 @@
+[
+  {
+    "_comments": [
+      "DAILY CONTRACT ORDER RELINK (contracts#77). Runs the Action in",
+      "`.sales-contract-order-relink-actions.json`. Own file, as with the forecast job.",
+      "",
+      "01:00 UTC, ahead of contracts' renewal-terms sweep, so a link added here has its terms copied the",
+      "same night.",
+      "",
+      "  · ConcurrencyMode `Skip` — two concurrent runs would race to create the same link.",
+      "  · MissedRunPolicy `RunOnce` — each run re-reads every won deal, so one catch-up run covers any",
+      "    number of missed nights.",
+      "  · RunImmediatelyIfNeverRun `true` — deals closed before a contracts upgrade are linked on the",
+      "    first start after it, not a night later.",
+      "",
+      "SEEDED Active: it touches only won deals that already name a contract and an order, needs no setup,",
+      "and does nothing until contracts has order links."
+    ],
+    "fields": {
+      "Name": "Sales — Relink Won Deal Orders To Contracts (daily)",
+      "Description": "Links each won deal's order to its contract where the link is missing. Skips while the installed bizapps-contracts has no order links.",
+      "JobTypeID": "3B94DD43-E961-4D85-B7F4-B6783D748766",
+      "CronExpression": "0 0 1 * * *",
+      "Timezone": "UTC",
+      "Status": "Active",
+      "ConcurrencyMode": "Skip",
+      "MissedRunPolicy": "RunOnce",
+      "RunImmediatelyIfNeverRun": true,
+      "MaxRuntimeMinutes": 15,
+      "NotifyOnSuccess": false,
+      "NotifyOnFailure": false,
+      "NotifyViaEmail": false,
+      "NotifyViaInApp": false,
+      "Configuration": "{\"ActionID\":\"DD7CEF7B-C75B-42F8-8D7A-45B9503A6D19\",\"Params\":[]}"
+    },
+    "primaryKey": {
+      "ID": "B1E51D67-B681-40F7-A2AD-FF84D2C2A6EC"
+    }
+  }
+]

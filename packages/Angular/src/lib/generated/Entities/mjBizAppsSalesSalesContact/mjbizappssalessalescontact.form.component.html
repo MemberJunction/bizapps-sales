@@ -56,14 +56,6 @@
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
-            FieldName="Seniority"
-            Type="textbox"
-            [EditMode]="EditMode"
-            [FormContext]="formContext"
-        ></mj-form-field>
-        <mj-form-field 
-            [Record]="record"
-            [ShowLabel]="true"
             FieldName="OptedOutOfOutreach"
             Type="checkbox"
             [EditMode]="EditMode"
@@ -289,10 +281,10 @@
         }
     </mj-collapsible-panel>
 
-    <!-- Deal Contact Roles Section -->
+    <!-- Buying roles Section -->
     <mj-collapsible-panel
         SectionKey="mJBizAppsSalesDealContactRoles"
-        SectionName="Deal Contact Roles"
+        SectionName="Buying roles"
         Icon="fa fa-table"
         Variant="related-entity"
         [Form]="this"
@@ -308,6 +300,56 @@
                 [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealContactRoles', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Accounts (default primary contact) Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsSalesSalesAccountsDefaultPrimaryContactID"
+        SectionName="Accounts (default primary contact)"
+        Icon="fa fa-table"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesSalesAccountsDefaultPrimaryContactID')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Sales Accounts','DefaultPrimaryContactID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Sales Accounts','DefaultPrimaryContactID')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesSalesAccountsDefaultPrimaryContactID')"
+                [ShowToolbar]="true"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesSalesAccountsDefaultPrimaryContactID', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Accounts (default billing contact) Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsSalesSalesAccountsDefaultBillingContactID"
+        SectionName="Accounts (default billing contact)"
+        Icon="fa fa-table"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesSalesAccountsDefaultBillingContactID')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Sales Accounts','DefaultBillingContactID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Sales Accounts','DefaultBillingContactID')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesSalesAccountsDefaultBillingContactID')"
+                [ShowToolbar]="true"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesSalesAccountsDefaultBillingContactID', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>

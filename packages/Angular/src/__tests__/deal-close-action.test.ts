@@ -248,7 +248,12 @@ describe('the template wires the actions it claims to', () => {
         // These used to sit inside @if (CanClose), and ConfirmClose ends by reloading the record —
         // which closes the deal, flips CanClose false, and unmounted the confirmation and every
         // warning the close had just produced.
-        expect(source).toContain('@if (Message || Issues.length) {');
+        expect(source).toContain('@if (Message || Issues.length || InfoNotes.length) {');
+    });
+
+    it('shows info notes apart from issues, so a pending step does not read as a problem', () => {
+        expect(source).toContain('@for (n of InfoNotes; track $index)');
+        expect(source).toContain('mjs-close-action__note');
     });
 
     it('tracks issues by index, since two tasks can fail identically', () => {
