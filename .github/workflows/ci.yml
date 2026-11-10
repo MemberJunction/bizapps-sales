@@ -171,6 +171,11 @@ jobs:
       - name: Sibling resolver (one copy of each BizApps package)
         run: npm run test:one-copy-harness
 
+      # The Playwright teardown runs sqlcmd with QUOTED_IDENTIFIER on; off, SQL Server refuses deletes
+      # from tables with filtered indexes and test rows pile up across runs (sales#433). No database.
+      - name: Playwright teardown (sqlcmd runs with QUOTED_IDENTIFIER on)
+        run: npm run test:cleanup-harness
+
       # Unit tests run in the shared build.yml (`pnpm run test`, the root vitest suite).
 
       # Advisory, matching the sibling repo's judgement. migrations/_README.md requires a changeset on

@@ -8,7 +8,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 
-import { DealEntityServer } from '../DealEntityServer.js';
+// A booking first asks whether any line extends a held subscription (#426); none here.
+vi.mock('../subscription-choice.js', () => ({
+    FindUnansweredSubscriptionLines: async () => [],
+}));
+
+const { DealEntityServer } = await import('../DealEntityServer.js');
 
 const TODAY = '2026-10-16';
 const CREATED = new Date('2026-07-01T00:00:00Z');
@@ -29,7 +34,7 @@ type Deal = {
 function deal(opts: { order: Order | null; onDisk?: { Status: string; OrderDate: Date }; loaded?: Order }): Deal {
     const d = Object.create(DealEntityServer.prototype) as Deal;
     const define = (name: string, value: unknown) => Object.defineProperty(d, name, { value, writable: true });
-    define('OrderID', 'order-1');
+    define('OrderID', 'aaaaaaaa-0000-4000-8000-000000000001');
     define('CompanyID', 'company-1');
     define('ActualCloseDate', CLOSED);
     define('_orderJustProvisioned', false);

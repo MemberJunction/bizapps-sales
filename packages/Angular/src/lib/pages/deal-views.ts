@@ -139,6 +139,22 @@ export async function DealPipelineViewWith(
     return copy;
 }
 
+/**
+ * A copy of `template` with the Pipeline column hidden, for the `HidePipelines` setting. The saved view
+ * is left as it is, so turning the setting off brings the column back.
+ */
+export async function WithoutPipelineColumn(template: MJUserViewEntityExtended): Promise<MJUserViewEntityExtended> {
+    const copy = await DealPipelineViewWith(template);
+    const grid = JSON.parse(copy.GridState || '{}') as { columnSettings?: GridCol[] };
+    grid.columnSettings = (grid.columnSettings ?? []).map((c) => (c.Name === 'Pipeline' ? { ...c, hidden: true } : c));
+    copy.GridState = JSON.stringify(grid);
+    if (!(copy instanceof BaseEntity)) {
+        // The fallback view is a plain object, and the grid reads the parsed state off it directly.
+        Object.assign(copy, { GridStateObject: grid });
+    }
+    return copy;
+}
+
 async function copyEntity(template: MJUserViewEntityExtended): Promise<MJUserViewEntityExtended> {
     const copy = await new Metadata().GetEntityObject<MJUserViewEntityExtended>('MJ: User Views');
     await copy.LoadFromData(template.GetAll());
@@ -209,10 +225,19 @@ export interface InspectScope {
 export type CriteriaInspectKey = Exclude<InspectKey, 'idle'>;
 
 /**
+ * The filter bar's lists as a filter on the Deals view, for All Deals (bc-aidp-next-golive#453): the
+ * same criteria the Inspect lists apply, with no period. Empty when no list is set, so the grid lists
+ * every deal.
+ */
+export function DealFiltersWhere(filters: DashboardFilters, orderLineTable: SqlTable | null): string {
+    return filterParts(filters, orderLineTable).join(' AND ');
+}
+
+/**
  * The filter bar's lists as criteria on the Deals view, the same rule each dashboard query applies.
  * Product company keeps a deal when one line of its order belongs to a selected company.
  */
-function filterParts(filters: DashboardFilters, tables: InspectTables): string[] {
+function filterParts(filters: DashboardFilters, orderLineTable: SqlTable | null | undefined): string[] {
     const parts: string[] = [];
     if (filters.CompanyIDs.length) parts.push(`CompanyID IN ${sqlList(filters.CompanyIDs)}`);
     if (filters.OwnerEmployeeIDs.length) parts.push(`OwnerEmployeeID IN ${sqlList(filters.OwnerEmployeeIDs)}`);
@@ -220,8 +245,8 @@ function filterParts(filters: DashboardFilters, tables: InspectTables): string[]
     if (filters.ProductCompanyIDs.length) {
         // Without the order-line table no deal can be shown to match, so the list says so by matching
         // none rather than ignoring the filter and listing deals the figure did not count.
-        parts.push(tables.OrderLine
-            ? `OrderID IN (SELECT OrderHeaderID FROM ${tableRef(tables.OrderLine)} WHERE CompanyID IN ${sqlList(filters.ProductCompanyIDs)})`
+        parts.push(orderLineTable
+            ? `OrderID IN (SELECT OrderHeaderID FROM ${tableRef(orderLineTable)} WHERE CompanyID IN ${sqlList(filters.ProductCompanyIDs)})`
             : '1 = 0');
     }
     return parts;
@@ -260,14 +285,14 @@ export function InspectCriteriaWhere(
     const bounded = PERIOD_BOUND_KEYS.includes(key) ? scope.Window : undefined;
     const status = (flag: string): string => `DealStatusTypeID IN (SELECT ID FROM ${tableRef(tables.Status)} WHERE ${flag} = 1)`;
     if (key === 'won' || key === 'closed') {
-        return [status(key === 'won' ? 'IsWon' : 'IsClosed'), ...windowParts('ActualCloseDate', bounded), ...filterParts(filters, tables)].join(' AND ');
+        return [status(key === 'won' ? 'IsWon' : 'IsClosed'), ...windowParts('ActualCloseDate', bounded), ...filterParts(filters, tables.OrderLine)].join(' AND ');
     }
     const open = [
         status('IsOpen'),
         // Naming pipelines in the filter includes them, as the summary query's PipelineIDs does.
         ...(filters.PipelineIDs.length ? [] : [`PipelineID IN (SELECT ID FROM ${tableRef(tables.Pipeline)} WHERE IncludeInForecast = 1)`]),
     ];
-    return [...open, ...sliceParts(key, tables, today, scope.Arg ?? null), ...windowParts('ExpectedCloseDate', bounded), ...filterParts(filters, tables)]
+    return [...open, ...sliceParts(key, tables, today, scope.Arg ?? null), ...windowParts('ExpectedCloseDate', bounded), ...filterParts(filters, tables.OrderLine)]
         .join(' AND ');
 }
 

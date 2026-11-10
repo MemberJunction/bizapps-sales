@@ -65,8 +65,11 @@
  * ── A DISCOUNT IS RECORDED AS A CONCESSION (golive#305) ─────────────────────────────────────────
  *
  * Discount % writes `OrderLine.DiscountPct`, and orders' confirm gate holds the order until an
- * Approved Price concession covers it. So a discount that goes UP asks for a reason here, and once
- * the order has saved the line, the reason is recorded as that concession. Orders values it and
+ * Approved Price concession covers it. So a discount worth more than the line's Pending or Approved
+ * concessions cover asks for a reason here, and once the order has saved the line, the reason is
+ * recorded as that concession. "Worth more" compares orders' priced discount with orders' stored
+ * concession values (golive#340): a percent compared with the saved percent asked nothing when a
+ * refused concession left the line uncovered, or when the quantity or price rose at the same percent. Orders values it and
  * decides it: inside the rep's Sales Authority it is Approved on save, outside it the rep is told the
  * order waits for approval. A failure to record it does not undo the saved line; the rep is told the
  * confirm will be held until one is recorded.
@@ -77,6 +80,7 @@ import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, EventEmitter, 
 import { CommonModule } from '@angular/common';
 import { A11yModule } from '@angular/cdk/a11y';
 import { Metadata } from '@memberjunction/core';
+import { UUIDsEqual } from '@memberjunction/global';
 import { FormsModule } from '@angular/forms';
 import {
     AsDateValue,
@@ -102,21 +106,26 @@ import {
     MJOLinePricePickerComponent,
     type MJOExistingHolding,
 } from '@mj-biz-apps/orders-ng';
+import { CountDraftMatches, RankDealProducts } from './deal-product-ranking';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountAmountToPercent,
     DiscountFractionToPercent,
-    DiscountNeedsConcession,
     DiscountPercentToFraction,
     DiscountReasonCategories,
     EffectiveTermStart,
     HasExplicitTermStart as StoresOwnTermStart,
+    LargestStandingConcessionValue,
+    LineDiscountNeedsConcession,
+    LoadLineConcessionRows,
     PricedLineListAmount,
+    IsSubscriptionProduct,
     ResolveDealLockState,
     RoundDiscountPercent,
     RecordDiscountConcession,
     ShouldOfferTermStart,
     type DiscountReasonCategory,
+    type DraftProductLookup,
     type ProductLookup,
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
@@ -200,24 +209,73 @@ interface RemoteOperationRouter {
                 <div class="mjs-le__body"><p class="mjs-le__error">{{ Error || 'This line could not be opened.' }}</p></div>
             } @else {
                 <div class="mjs-le__body">
-                    <label class="mjs-le__field">
-                        <span class="mjs-le__label">Product</span>
-                        <!-- Filtered by ProductFilterFor to Active and to the availability window as of
-                             today IN THE BUSINESS TIME ZONE (#168), and NOT filtered by company: a deal
-                             may sell any company's product, and the LINE takes its company from whichever
-                             is chosen. Each option names its owner because two companies can both sell an
-                             "Onboarding Fee". -->
+                    <div class="mjs-le__field">
+                        <label class="mjs-le__label" for="mjs-le-product">Product</label>
+                        <!-- A type-ahead over the catalogue, ranked by orders' RankCatalogMatches: a name that
+                             starts with the text, then a SKU that does, then either containing it, with the
+                             DEAL's company first within each (golive#360). Filtered by ProductFilterFor to
+                             Active and to the availability window as of today IN THE BUSINESS TIME ZONE
+                             (#168), and NOT filtered by company: a deal may sell any company's product, and
+                             the LINE takes its company from whichever is chosen. Each row names its owner
+                             because two companies can both sell an "Onboarding Fee". -->
                         <!-- Locked while the price is off its default: a pick belongs to one product's
                              rules, and carrying it onto another product would pin a price nobody chose. -->
-                        <select data-testid="line-product" [ngModel]="Working.ProductID" (ngModelChange)="OnProductChange($event)"
-                                [disabled]="IsLocked || ProductLockedByPrice"
-                                [title]="ProductLockedByPrice ? 'Put the price back on Default before changing the product.' : BlockedReason">
-                            <option [ngValue]="null">— choose a product —</option>
-                            @for (p of Products; track p.ID) {
-                                <option [ngValue]="p.ID">{{ ProductOptionLabel(p) }}</option>
-                            }
-                        </select>
-                    </label>
+                        <input id="mjs-le-product" data-testid="line-product" type="text" autocomplete="off"
+                               role="combobox" aria-autocomplete="list" aria-controls="mjs-le-product-list"
+                               [attr.aria-expanded]="PickerOpen" [attr.data-product-id]="Working.ProductID || null"
+                               placeholder="Type a name or SKU…"
+                               [ngModel]="ProductQuery" (ngModelChange)="OnProductQuery($event)"
+                               (focus)="OnPickerFocus($event)" (click)="OpenPicker()" (blur)="ClosePicker()" (keydown)="OnPickerKey($event)"
+                               [disabled]="IsLocked || ProductLockedByPrice"
+                               [title]="ProductSelectTitle" />
+                        @if (PickerOpen) {
+                            <div class="mjs-le__picks" id="mjs-le-product-list" role="listbox"
+                                 data-testid="line-product-options" aria-label="Products">
+                                @for (p of PickerResults; track p.ID; let i = $index) {
+                                    <!-- mousedown, not click: click lands after the input's blur closed the list. -->
+                                    <button type="button" class="mjs-le__pick" role="option" tabindex="-1"
+                                            data-testid="line-product-option"
+                                            [class.is-cursor]="i === PickerCursor" [attr.aria-selected]="i === PickerCursor"
+                                            (mousedown)="ChooseProduct(p, $event)">
+                                        <span class="mjs-le__pick-name">{{ p.Name }}</span>
+                                        <span class="mjs-le__pick-meta">
+                                            @if (p.SKU) { <span>{{ p.SKU }}</span> }
+                                            @if (PriceLabel(p); as price) { <span>{{ price }}</span> }
+                                            @if (p.Company) {
+                                                <span class="mjs-le__pick-co" [class.is-foreign]="IsForeignProduct(p)">
+                                                    <i class="fa-solid fa-building" aria-hidden="true"></i> {{ p.Company }}
+                                                </span>
+                                            }
+                                        </span>
+                                    </button>
+                                } @empty {
+                                    <div class="mjs-le__pick-empty">
+                                        {{ Products.length ? 'No product matches that.' : 'No products to offer.' }}
+                                    </div>
+                                }
+                                @if (PickerHidden > 0) {
+                                    <div class="mjs-le__pick-empty" data-testid="line-product-more">
+                                        {{ PickerHidden }} more — keep typing to narrow the list.
+                                    </div>
+                                }
+                                <!-- golive#433: a new product starts as Draft and is not offered, so say when the
+                                     search matches some, whether or not any Active product matches too. -->
+                                @if (DraftMatchNote; as note) {
+                                    <div class="mjs-le__pick-empty" data-testid="line-product-drafts" role="status">
+                                        <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ note }}
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (ForeignCompanyWarning; as warning) {
+                            <span class="mjs-le__warn" data-testid="line-product-foreign" role="status">
+                                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ warning }}
+                            </span>
+                        }
+                        @if (ProductLoadError) {
+                            <span class="mjs-le__error" data-testid="line-product-error">{{ ProductLoadError }}</span>
+                        }
+                    </div>
 
                     <div class="mjs-le__row">
                         <label class="mjs-le__field">
@@ -542,6 +600,28 @@ interface RemoteOperationRouter {
         .mjs-le__muted { color: var(--mj-text-muted); font-size: var(--mj-text-sm); }
         .mjs-le__hint { color: var(--mj-text-muted); font-size: var(--mj-text-xs); }
         .mjs-le__error { color: var(--mj-status-error-text); font-size: var(--mj-text-sm); }
+        .mjs-le__warn {
+            display: flex; gap: 6px; align-items: baseline; padding: 6px 10px; font-size: var(--mj-text-sm);
+            color: var(--mj-status-warning-text); background: var(--mj-status-warning-bg);
+            border: 1px solid var(--mj-status-warning-border); border-radius: var(--mj-radius-md, 8px);
+        }
+        .mjs-le__picks {
+            display: flex; flex-direction: column; max-height: 280px; overflow-y: auto;
+            border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-md, 8px);
+            background: var(--mj-bg-surface-elevated); box-shadow: var(--mj-shadow-md);
+        }
+        .mjs-le__pick {
+            display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 8px 10px;
+            border: 0; border-bottom: 1px solid var(--mj-border-subtle); background: transparent;
+            color: var(--mj-text-primary); font: inherit; cursor: pointer;
+        }
+        .mjs-le__pick:hover, .mjs-le__pick.is-cursor { background: var(--mj-bg-surface-hover); }
+        .mjs-le__pick-name { font-weight: 600; }
+        .mjs-le__pick-meta {
+            display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--mj-text-muted); font-size: var(--mj-text-xs);
+        }
+        .mjs-le__pick-co.is-foreign { color: var(--mj-status-warning-text); font-weight: 600; }
+        .mjs-le__pick-empty { padding: 8px 10px; color: var(--mj-text-muted); font-size: var(--mj-text-sm); }
         .mjs-le__foot {
             display: flex; align-items: center; gap: var(--mj-space-3);
             padding: var(--mj-space-4) var(--mj-space-5); border-top: 1px solid var(--mj-border-subtle);
@@ -623,6 +703,24 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     public Products: ProductLookup[] = [];
+    /** Set when orders' catalogue could not be read; shown under the product select. */
+    public ProductLoadError: string | null = null;
+    /** What the product box shows: the chosen product's label, or what the rep is typing. */
+    public ProductQuery = '';
+    public PickerOpen = false;
+    /** The highlighted row, moved by the arrow keys and taken by Enter. */
+    public PickerCursor = 0;
+    public PickerResults: ProductLookup[] = [];
+    /** How many matches are past the list's cap — named so the rep knows to keep typing. */
+    public PickerHidden = 0;
+    /** How many Draft products match the search; the picker hides them, and the note says so (golive#433). */
+    public DraftMatches = 0;
+    /** Orders' Draft products, matched against the search for {@link DraftMatches}; never offered. */
+    private draftProducts: DraftProductLookup[] = [];
+    /** The text the list was last ranked by, so Draft rows that arrive later are counted against it. */
+    private rankedQuery = '';
+    /** Set on destroy, so a read that returns after the dialog closed does not touch its view. */
+    private destroyed = false;
     /** Each product's catalog price, for the picker label — read from orders, keyed by product id. */
     private readonly productPriceLabels = new Map<string, string>();
     /** The signed-in rep's price-override grant; `'none'` hides the price picker. */
@@ -642,10 +740,21 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     /** Whether this dialog created the line, so cancelling must take it back off the collection. */
     private IsNewLine = false;
 
-    /** The `DiscountPct` the line carried when it was last saved — what a raise is measured from. */
+    /** The `DiscountPct` the line carried when it was last saved — the fallback a raise is measured from. */
     private savedDiscountPct: number | null = null;
+    /**
+     * The largest value orders stored on this line's Pending or Approved concession: what the discount's
+     * dollar value is measured against (golive#340). 0 for a new line; null until read, or when the read
+     * failed, which falls back to the percent rule.
+     */
+    private coveredValue: number | null = null;
     private reasonCategories: DiscountReasonCategory[] | null = null;
     public DiscountCategory: DiscountReasonCategory | null = null;
+    /**
+     * Client-generated UUID for the current discount-concession recording attempt, kept across a retry
+     * so a resend after a timeout finds the concession the first attempt already wrote (#512).
+     */
+    private pendingConcessionID: string | null = null;
     public DiscountReason = '';
     /** What the rep must know after a save that recorded, or failed to record, a concession. */
     public Notice: string | null = null;
@@ -663,7 +772,9 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             const persisted = this.Deal?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
             this.IsLocked = (await ResolveDealLockState(persisted)).IsLocked;
 
-            this.Products = await this.service.LoadProducts();
+            // Not awaited: the note is a hint, and the catalogue must not wait on it.
+            void this.loadDraftProducts();
+            await this.loadProducts();
             await this.loadProductPriceLabels();
             this.OverrideKind = this.resolveOverrideKind();
 
@@ -742,13 +853,16 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
                 this.Working.Quantity = 1;
             }
             this.savedDiscountPct = this.Working.DiscountPct ?? null;
+            this.ProductQuery = this.chosenProductLabel();
+            if (this.IsNewLine) this.coveredValue = 0;
+            else void this.refreshCoveredValue();
             void this.refreshHolding();
-            if (this.ShowPricePicker) {
-                // The picker's Default row needs orders' answer before anything is changed, and its list
-                // needs the applicable prices; a saved line otherwise opens with Default disabled.
-                void this.refreshApplicable();
-                this.SchedulePrice();
-            }
+            // The picker's list needs the applicable prices; a saved line otherwise opens with Default disabled.
+            if (this.ShowPricePicker) void this.refreshApplicable();
+            // Orders' answer is asked for before anything is changed: the picker's Default row needs it,
+            // and so does the discount's reason, which compares orders' priced discount with what the
+            // line's concessions already cover and needs to know whether orders values the line at all.
+            if (this.Working.ProductID) this.SchedulePrice();
         } catch (err) {
             this.Error = `This line could not be opened: ${err instanceof Error ? err.message : String(err)}`;
         } finally {
@@ -756,6 +870,41 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             this.cdr.detectChanges();
             this.focusFirstField();
         }
+    }
+
+    /**
+     * Orders' catalogue, or a message saying it could not be read. A failed read leaves the picker
+     * empty but says why, so a rep can tell "nothing to sell" from "the load failed" (#380); the rest of
+     * the dialog still opens, since a saved line can be edited without choosing a new product.
+     */
+    private async loadProducts(): Promise<void> {
+        this.ProductLoadError = null;
+        try {
+            this.Products = await this.service.LoadProducts();
+        } catch (err) {
+            this.Products = [];
+            const reason = err instanceof Error ? err.message : String(err);
+            this.ProductLoadError =
+                `${reason.replace(/\.?\s*$/, '.')} Reload the page and try again; if it persists, an administrator needs to check ` +
+                `access to Orders' products.`;
+        }
+    }
+
+    /**
+     * Orders' Draft products, for the note under the list. Re-counts on arrival, since the rep may
+     * already be typing. Anything that goes wrong only leaves the note off.
+     */
+    private async loadDraftProducts(): Promise<void> {
+        try {
+            this.draftProducts = await this.service.LoadDraftProducts();
+        } catch {
+            this.draftProducts = [];
+        }
+        // A closed list is re-counted when it next opens, and a dialog closed before the read returned
+        // has no view to update.
+        if (!this.PickerOpen || this.destroyed) return;
+        this.DraftMatches = CountDraftMatches(this.draftProducts, this.rankedQuery);
+        this.cdr.detectChanges();
     }
 
     /** Focus the dialog itself while it loads, so the trap and Escape work from the first frame. */
@@ -796,6 +945,114 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         const price = this.productPriceLabels.get(p.ID);
         const name = price ? `${p.Name}${sku} · ${price}` : `${p.Name}${sku}`;
         return p.Company ? `${name} — ${p.Company}` : name;
+    }
+
+    /* ── The product type-ahead (golive#360) ───────────────────────────────────── */
+
+    /** Rows the list shows at once. The catalogue runs to hundreds; past this the rep narrows by typing. */
+    private static readonly PickerLimit = 50;
+
+    /** The catalog price beside a product in the list, when orders has one. */
+    public PriceLabel(p: ProductLookup): string | null {
+        return this.productPriceLabels.get(p.ID) ?? null;
+    }
+
+    /** True when the product is owned by a company other than the deal's. */
+    public IsForeignProduct(p: ProductLookup): boolean {
+        const dealCompanyID = this.Deal?.CompanyID;
+        return !!p.CompanyID && !!dealCompanyID && !UUIDsEqual(p.CompanyID, dealCompanyID);
+    }
+
+    /**
+     * The warning under the box when the chosen product belongs to another company.
+     *
+     * Cross-company selling is allowed (#29), so this warns rather than refuses: the line's revenue books
+     * to the product's company, which is easy to miss when two companies sell similar names.
+     */
+    public get ForeignCompanyWarning(): string | null {
+        const product = this.SelectedProduct;
+        if (!product || !this.IsForeignProduct(product)) return null;
+        const owner = product.Company || 'another company';
+        const dealCompany = this.Deal?.Company ? ` (${this.Deal.Company})` : '';
+        return `Sold by ${owner}, not this deal's company${dealCompany}. This line's revenue books to ${owner}.`;
+    }
+
+    /** Opens the list on focus only when nothing is chosen yet; a chosen product opens it on click or typing. */
+    public OnPickerFocus(event: FocusEvent): void {
+        (event.target as HTMLInputElement | null)?.select();
+        if (!this.Working?.ProductID) this.OpenPicker();
+    }
+
+    public OpenPicker(): void {
+        if (this.PickerOpen) return;
+        this.PickerOpen = true;
+        this.rankPicker(this.Working?.ProductID ? '' : this.ProductQuery);
+    }
+
+    /** Closing without a choice puts the chosen product's label back, so the box never shows stray text. */
+    public ClosePicker(): void {
+        this.PickerOpen = false;
+        this.ProductQuery = this.chosenProductLabel();
+    }
+
+    public OnProductQuery(text: string): void {
+        this.ProductQuery = text;
+        this.PickerOpen = true;
+        this.rankPicker(text);
+    }
+
+    public OnPickerKey(event: KeyboardEvent): void {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            if (!this.PickerOpen) {
+                this.OpenPicker();
+                return;
+            }
+            const last = this.PickerResults.length - 1;
+            const step = event.key === 'ArrowDown' ? 1 : -1;
+            this.PickerCursor = Math.max(0, Math.min(last, this.PickerCursor + step));
+        } else if (event.key === 'Enter' && this.PickerOpen) {
+            event.preventDefault();
+            const product = this.PickerResults[this.PickerCursor];
+            if (product) this.ChooseProduct(product);
+        } else if (event.key === 'Escape' && this.PickerOpen) {
+            // The list closes first; a second Escape reaches the dialog and cancels it.
+            event.stopPropagation();
+            this.ClosePicker();
+        }
+    }
+
+    public ChooseProduct(product: ProductLookup, event?: Event): void {
+        event?.preventDefault();
+        this.PickerOpen = false;
+        if (!UUIDsEqual(product.ID, this.Working?.ProductID ?? '')) {
+            this.OnProductChange(product.ID);
+        }
+        this.ProductQuery = this.chosenProductLabel();
+        this.cdr.detectChanges();
+    }
+
+    private rankPicker(query: string): void {
+        const ranked = RankDealProducts(this.Products, query, this.Deal?.CompanyID ?? null);
+        this.PickerResults = ranked.slice(0, MJSDealLineEditorComponent.PickerLimit);
+        this.PickerHidden = ranked.length - this.PickerResults.length;
+        this.rankedQuery = query;
+        this.DraftMatches = CountDraftMatches(this.draftProducts, query);
+        this.PickerCursor = 0;
+    }
+
+    /** The note under the list when the search matches Draft products it does not offer, or null. */
+    public get DraftMatchNote(): string | null {
+        const n = this.DraftMatches;
+        if (n <= 0) return null;
+        const subject = n === 1 ? '1 Draft product matches' : `${n} Draft products match`;
+        const object = n === 1 ? 'it' : 'them';
+        return `${subject} but cannot be sold yet. Activate ${object} in Orders → Catalog to add ${object} here.`;
+    }
+
+    private chosenProductLabel(): string {
+        const product = this.SelectedProduct;
+        return product ? this.ProductOptionLabel(product) : '';
     }
 
     /**
@@ -850,7 +1107,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     public OnProductChange(productID: string | null): void {
         this.SchedulePrice();   // a priced input changed — ask Orders again
         if (!this.Working) return;
-        this.clearServicePeriodLeavingLineSource(productID);
+        this.clearServicePeriodForProductChange(productID);
         this.Working.ProductID = productID ?? '';
         const product = this.Products.find((p) => p.ID === productID) ?? null;
         if (product) {
@@ -860,6 +1117,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.EngineDefault = undefined;
         this.Applicable = [];
         this.Working.SubscriptionAction = null;
+        this.pendingConcessionID = null;
         void this.refreshApplicable();
         void this.refreshHolding();
         this.cdr.detectChanges();
@@ -874,7 +1132,20 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
 
     /** True while the line's price is off its default — see the product select. */
     public get ProductLockedByPrice(): boolean {
-        return !!this.Working && IsLinePriceOverridden(this.Working, this.EngineDefault);
+        return !!this.Working && IsLinePriceOverridden(this.Working, this.EngineDefault, this.Applicable);
+    }
+
+    /**
+     * Why the product select is disabled. A line off its default price names the remedy only to a rep
+     * who has the price picker; a rep without an override grant has no Default to put it back on, so
+     * they are told the line carries a special price and who can change it (#408). The lock outranks
+     * both, as it does in `BlockedReason`.
+     */
+    public get ProductSelectTitle(): string {
+        if (this.IsLocked || !this.ProductLockedByPrice) return this.BlockedReason;
+        if (this.ShowPricePicker) return 'Put the price back on Default before changing the product.';
+        return 'This line has a special price set on the order. Someone who can override prices has to put it ' +
+            'back on Default before the product can be changed.';
     }
 
     /** The default unit price: orders' answer when it has given one, else the unpinned priced figure. */
@@ -959,6 +1230,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         }
         this.DiscountRefusal = null;
         this.Working.DiscountPct = converted.Fraction;
+        this.pendingConcessionID = null;
     }
 
     /* ── A discount stated in dollars ─────────────────────────────────────────── */
@@ -998,6 +1270,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.DiscountRefusal = null;
         if (converted.Fraction === (this.Working.DiscountPct ?? 0)) return;
         this.Working.DiscountPct = converted.Fraction;
+        this.pendingConcessionID = null;
         this.SchedulePrice();   // a priced input changed — ask Orders again
     }
 
@@ -1083,14 +1356,29 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     }
 
     /**
-     * A window typed for a product that needed one says nothing about the product replacing it. Left
-     * on an event line it stops orders stamping the event's dates (`applyEventServicePeriod` skips a
-     * line that already has either date), and left on a subscription line it reads as a term start.
+     * Dates stated for the product being left say nothing about the one replacing it, so both columns
+     * are cleared unless the new product can use them. Left on an event line they stop orders stamping
+     * the event's dates (`applyEventServicePeriod` skips a line that already has either date), and the
+     * confirm then fails for want of a service period.
+     *
+     * Two cases clear:
+     * · Leaving a product the rep dates (`Line` source) for one that is not: the window would read as
+     *   a term start on a subscription, or block an event's dates.
+     * · Moving to a product in the catalogue that is not a subscription (#374): a term start cannot
+     *   carry over. Leaving a subscription reports `Subscription`, not `Line`, so the first case never
+     *   caught it. Both dates go, because orders' guard is `Start || End`.
+     *
+     * A window moving between two dated products is kept, and nothing is cleared for a product the
+     * catalogue does not list, since whether it is a subscription is unknown.
      */
-    private clearServicePeriodLeavingLineSource(nextProductID: string | null): void {
+    private clearServicePeriodForProductChange(nextProductID: string | null): void {
         if (!this.Working) return;
-        const was = this.ServicePeriodSourceFor(this.Working.ProductID);
-        if (was !== 'Line' || this.ServicePeriodSourceFor(nextProductID) === 'Line') return;
+        const leavingDated = this.ServicePeriodSourceFor(this.Working.ProductID) === 'Line';
+        const enteringDated = this.ServicePeriodSourceFor(nextProductID) === 'Line';
+        if (leavingDated && enteringDated) return;
+        const next = this.Products.find((p) => p.ID === nextProductID) ?? null;
+        const enteringNonSubscription = !!next && !IsSubscriptionProduct(next);
+        if (!leavingDated && !enteringNonSubscription) return;
         this.Working.ServicePeriodStart = null;
         this.Working.ServicePeriodEnd = null;
     }
@@ -1201,6 +1489,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      * or `Save` owns its own `finally`.
      */
     public ngOnDestroy(): void {
+        this.destroyed = true;
         if (this.priceTimer) {
             clearTimeout(this.priceTimer);
             this.priceTimer = null;
@@ -1356,15 +1645,54 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             !this.QuantityInvalid &&
             !this.DiscountRefusal &&
             !!this.Deal?.OrderID_Object &&
-            !LineNeedsOverrideReason(this.Working, this.EngineDefault) &&
+            !LineNeedsOverrideReason(this.Working, this.EngineDefault, this.Applicable) &&
             !this.MissingDiscountReason &&
             !this.ServicePeriodBackwards
         );
     }
 
-    /** Whether the discount went up since the line was saved, so it needs a concession behind it. */
+    /**
+     * Whether the discount is worth more than the line's concessions cover, so it needs a reason and a
+     * new concession (golive#340). Every figure compared is orders' own; see `LineDiscountNeedsConcession`.
+     */
     public get NeedsDiscountReason(): boolean {
-        return !!this.Working && DiscountNeedsConcession(this.savedDiscountPct, this.Working.DiscountPct);
+        if (!this.Working) return false;
+        const priced = !this.pricePending && !this.Pricing;
+        return LineDiscountNeedsConcession({
+            SavedPct: this.savedDiscountPct,
+            CurrentPct: this.Working.DiscountPct,
+            DiscountValue: priced ? (this.pricedDiscount ?? null) : null,
+            CoveredValue: this.coveredValue ?? null,
+            OrdersValuesLine: this.OrdersValuesDiscount,
+            PriceOverridden: IsLinePriceOverridden(this.Working, this.EngineDefault, this.Applicable),
+        });
+    }
+
+    /**
+     * Whether orders records a price concession for a discount on this line. Not for a renewal line, and
+     * not for a product no rule prices (orders' `Default` comes back null): orders refuses to record one
+     * for either, saying there is no price concession on the line, and its confirm gate asks for none.
+     * Null until orders has answered.
+     */
+    private get OrdersValuesDiscount(): boolean | null {
+        if (this.Working?.RenewsSubscriptionID) return false;
+        if (this.EngineDefault === undefined) return null;
+        return this.EngineDefault !== null;
+    }
+
+    /** Reads what orders' concessions on this line already cover. A failed read leaves the percent rule. */
+    private async refreshCoveredValue(): Promise<void> {
+        const orderID = this.Deal?.OrderID_Object?.ID;
+        const lineID = this.Working?.ID;
+        if (!orderID || !lineID) return;
+        try {
+            const rows = await LoadLineConcessionRows(orderID);
+            this.coveredValue = LargestStandingConcessionValue(rows.filter((r) => r.OrderLineID === lineID));
+        } catch {
+            this.coveredValue = null;
+        } finally {
+            this.cdr.detectChanges();
+        }
     }
 
     /** Orders' concession reason categories, read from its entity metadata when first shown. */
@@ -1394,7 +1722,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         if (!this.Deal?.OrderID_Object) return 'Save the deal first — a product line needs its order.';
         if (!this.Working?.ProductID) return 'Choose a product.';
         if (this.QuantityInvalid) return this.QuantityInvalidMessage;
-        if (LineNeedsOverrideReason(this.Working, this.EngineDefault)) return 'Enter a reason for the price override.';
+        if (LineNeedsOverrideReason(this.Working, this.EngineDefault, this.Applicable)) return 'Enter a reason for the price override.';
         if (this.MissingDiscountReason) return 'Choose a category and enter a reason for the discount.';
         if (this.ServicePeriodBackwards) return 'Set a service end on or after the service start.';
         return this.DiscountRefusal ?? '';
@@ -1512,12 +1840,18 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      */
     private async recordDiscountConcession(): Promise<string | null> {
         if (!this.Working || !this.NeedsDiscountReason || !this.DiscountCategory) return null;
+        this.pendingConcessionID ??= crypto.randomUUID();
         const outcome = await RecordDiscountConcession({
             OrderLineID: this.Working.ID,
             ReasonCategory: this.DiscountCategory,
             Reason: this.DiscountReason,
+            ConcessionID: this.pendingConcessionID,
         });
         this.savedDiscountPct = this.Working.DiscountPct ?? null;
+        if (outcome.Recorded) {
+            this.pendingConcessionID = null;
+            await this.refreshCoveredValue();
+        }
         if (!outcome.Recorded) {
             return (
                 `The line is saved, but its discount could not be recorded for approval: ${outcome.Message} ` +
@@ -1566,6 +1900,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.DiscountCategory = null;
         this.DiscountReason = '';
         this.DiscountRefusal = null;
+        this.pendingConcessionID = null;
         this.Closed.emit();
     }
 }

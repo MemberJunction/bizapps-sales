@@ -267,7 +267,7 @@ PW_HEADLESS=1 pnpm run test:explorer   # unattended
   and view-vs-edit-mode traps that cost real time to find.
 
 ### CI (`.github/workflows/ci.yml`)
-**THIRTEEN gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
+**FOURTEEN gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
 listed the first and third; five more have been added since and went unrecorded. That understatement is
 not harmless — a reviewer who believes CI only greps and builds will reason that a template change, a
 copy change or a query comment cannot be caught by it, and will hand-check things CI already covers
@@ -288,6 +288,7 @@ while trusting things it does not:
 11. **`npm run test:mutate-harness`** — an interrupted mutation run leaves no mutant in the tree or `dist/`.
 12. **`npm run test:one-copy-harness`** — on sibling-checkout hosts, each `@mj-biz-apps/*` import gets the copy its range or sales' override calls for.
 13. **`pnpm run test:token-gate`** — every `var(--mj-…)` in `packages/Angular` is a token MJ defines (`scripts/mj-tokens.json`). An unknown name drops its rule silently.
+14. **`npm run test:cleanup-harness`** — the Playwright teardown's sqlcmd call turns QUOTED_IDENTIFIER on (`-I`), so its deletes are not refused.
 
 Plus a non-blocking changeset presence check.
 
@@ -422,8 +423,9 @@ Built on MJ's Angular Generic components — `kanban`, `timeline`, `filter-build
 Recorded in full in `docs/DECISIONS.md`; listed here so nobody "fixes" them:
 - **Quota / attainment** — v2. No `Quota` table (D2).
 - **Territory** — a label on `SalesAccount`, not a routing engine (D3).
-- **`Pipeline.CompanyID` stays NOT NULL**; each line takes its company from its product, so a deal can
-  still span companies (D5, ratified 2026-08-26).
+- **A pipeline links to its companies through `PipelineCompany`**, not a column; the rep picks the deal's
+  company and the server checks it is linked to the pipeline. Each line still takes its company from its
+  product, so a deal can span companies (D5, superseded 2026-11-05).
 - **`ForecastSnapshot` columns are `*Amount`-suffixed**, diverging from master plan §9.5's bare
   `Commit`/`BestCase`/`Pipeline`/`Closed`. **The shipped names are authoritative** — `COMMIT` is reserved
   in T-SQL and Postgres, and prod is Postgres (D6).

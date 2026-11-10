@@ -72,7 +72,8 @@ describe('deal form: the Company field points at the control that changes it', (
     it('names the Pipeline panel\'s Company control', () => {
         const hint = source.match(/data-testid="deal-company-hint">([^<]+)</)?.[1];
         expect(hint, 'a Company hint').toBeDefined();
-        expect(hint).toMatch(/Set by the pipeline/);
+        // The pipeline no longer sets it: a pipeline can serve several companies.
+        expect(hint).not.toMatch(/Set by the pipeline/);
         expect(hint).toMatch(/Company on the Pipeline panel/);
     });
 });

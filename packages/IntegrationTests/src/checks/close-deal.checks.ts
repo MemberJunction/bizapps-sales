@@ -65,6 +65,7 @@ import {
 } from '@mj-biz-apps/sales-core-entities-server';
 
 import {
+    CompanyForPipeline,
     E_DEAL,
     E_EMPLOYEE,
     E_SCHEDULE,
@@ -123,7 +124,8 @@ async function openDeal(
     deal.DealTypeID = f.DealTypeID;
     deal.DealStatusTypeID = f.OpenStatusID;
     deal.AccountID = f.AccountID;
-    deal.CompanyID = f.PipelineCompanyID;
+    // The named pipeline's own company: the server refuses one not linked to the pipeline.
+    deal.CompanyID = CompanyForPipeline(f, pipelineID);
     deal.TermMonths = 12;
 
     for (const seed of instalments) {
@@ -718,6 +720,31 @@ export const CloseDealChecks: NamedCheck[] = [
                 Assert(
                     !(await locked.Save()),
                     'a field outside the shared set must still be refused — otherwise the lock is advisory',
+                );
+
+                /**
+                 * AND `CreationDate` BY NAME (#532), which the `Name` probe above does not cover.
+                 *
+                 * `Name` proves the lock holds SOMETHING. This proves it holds the one field most
+                 * likely to be carved out later, because the column exists IN ORDER to be editable —
+                 * it is the business creation date a rep corrects when an import got it wrong — and on
+                 * a closed deal only the lock stops that. Adding it to the editable set would leave
+                 * every assertion above still passing while the deal's aging basis became rewritable
+                 * after close, which is the kind of green nobody investigates.
+                 *
+                 * A FRESH ENTITY, because `locked` is still dirty from the refused rename: reusing it
+                 * would let the rename produce the refusal and this probe would prove nothing.
+                 */
+                const lockedDate = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await lockedDate.Load(lockedID), 'the locked deal reloads for the CreationDate probe');
+                Assert(
+                    !DealFieldsEditableWhileLocked(true).has('CreationDate'),
+                    'CreationDate must NOT be carved out of the lock: a closed deal keeps the creation date it closed with (#532)',
+                );
+                lockedDate.CreationDate = new Date('2020-01-01T00:00:00.000Z');
+                Assert(
+                    !(await lockedDate.Save()),
+                    'CreationDate must be refused on a locked deal (#532)',
                 );
             }),
     },
@@ -2894,8 +2921,8 @@ export const CloseDealChecks: NamedCheck[] = [
                  *
                  * ── AND IT MUST BE THE REASON THIS CLOSE USED ──────────────────────────────────────
                  *
-                 * `validateClose` accepts `input.LossReasonID ?? deal.LossReasonID`, so the id being
-                 * closed with is not always the id on the header -- and `LossReasonID` is an ordinary
+                 * `validateClose` closes with the CALLER's reason (#400), so the id being closed with
+                 * is not always the id on the header -- and `LossReasonID` is an ordinary
                  * editable field on an OPEN deal, so the two genuinely diverge in the product. A note
                  * built from the denormalized `deal.LossReason` would name the reason the deal happened
                  * to be carrying, which is the wrong one, and would be wrong in the direction nobody
@@ -3244,6 +3271,19 @@ export const CloseDealChecks: NamedCheck[] = [
                     CompanyID: f.OrderOnlyPolicyCompanyID,
                     LineCount: 1,
                 });
+
+                // Stamp a pre-close ServicePeriodEnd so the post-close edit changes an already-set date
+                // rather than filling a blank (which Orders golive#322 exempts before confirm).
+                const preLineRow = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 ID FROM ${ORDERS_SCHEMA}.OrderLine WHERE OrderHeaderID = '${seeded.OrderID}'`,
+                );
+                const preLine = await ProviderOf(ctx).GetEntityObject<mjBizAppsOrdersOrderLineEntity>(
+                    E_ORDER_LINE, ctx.User,
+                );
+                Assert(await preLine.Load(String(preLineRow.ID)), 'setup: the open deal\'s order line loads');
+                preLine.ServicePeriodEnd = LOCKED_LINE_END;
+                Assert(await preLine.Save(), `setup: the open deal's order line saves — ${preLine.LatestResult?.CompleteMessage ?? ''}`);
 
                 const out = await close(ctx, { DealID: seeded.DealID, DealStatusTypeID: seeded.WonStatusID });
                 Assert(out.Success, `the won close failed: ${JSON.stringify(out.Issues)}`);

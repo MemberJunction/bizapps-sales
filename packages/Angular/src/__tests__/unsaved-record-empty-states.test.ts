@@ -32,6 +32,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEAL = readFileSync(join(HERE, '..', 'lib', 'form-panels', 'deal-form.panels.ts'), 'utf8');
 const PARTY = readFileSync(join(HERE, '..', 'lib', 'form-panels', 'party-deals.panels.ts'), 'utf8');
 const ACCOUNT = readFileSync(join(HERE, '..', 'lib', 'form-panels', 'account-contacts.panel.ts'), 'utf8');
+const CONTACT = readFileSync(join(HERE, '..', 'lib', 'form-panels', 'contact-accounts.panel.ts'), 'utf8');
 
 type Panel = { label: string; source: string; anchor: string; message: string };
 
@@ -90,6 +91,12 @@ const PANELS: Panel[] = [
         source: ACCOUNT,
         anchor: "selector: 'mjs-account-contacts-panel'",
         message: 'Save the account first. People are linked to it once it exists.',
+    },
+    {
+        label: 'Accounts, on a contact',
+        source: CONTACT,
+        anchor: "selector: 'mjs-contact-accounts-panel'",
+        message: 'Save the contact first. Accounts are linked to them once they exist.',
     },
 ];
 

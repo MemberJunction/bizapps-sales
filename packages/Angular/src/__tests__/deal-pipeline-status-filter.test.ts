@@ -135,6 +135,41 @@ describe('editability fails CLOSED when the status cannot be resolved', () => {
     });
 });
 
+/**
+ * A DEAL WHOSE STATUS ROW IS GONE CAN BE REPAIRED FROM HERE (#402).
+ *
+ * The lock notice tells the user to set the status to an open one, and the server allows exactly that
+ * write. The control used to be disabled for it, leaving the notice's instruction impossible to follow.
+ */
+describe('a deal whose status row no longer exists', () => {
+    function missing() {
+        const p = panelWith('ghost-1');
+        Object.defineProperty(p, 'FormComponent', { value: { IsLocked: true, IsStatusMissing: true }, configurable: true });
+        return p;
+    }
+
+    it('leaves the status control editable', () => {
+        expect(missing().StatusIsEditable).toBe(true);
+    });
+
+    it('offers only the open statuses: the server refuses a close from a status it cannot read', () => {
+        expect(missing().SelectableStatuses.map((s) => s.Name)).toEqual(['Open', 'On Hold']);
+    });
+
+    it('writes the open status the user picks, which is the repair', () => {
+        const p = missing();
+        p.SetStatus('open-1');
+        expect(p.Record?.DealStatusTypeID).toBe('open-1');
+        expect(p.PendingReopenStatusID, 'there is no close to undo').toBeNull();
+    });
+
+    it('still fails closed for a status that exists but is not in the list', () => {
+        // A DEACTIVATED row still exists and says whether it locks; it is not the missing case.
+        expect(panelWith('ghost-1').StatusIsMissing).toBe(false);
+        expect(panelWith('ghost-1').StatusIsEditable).toBe(false);
+    });
+});
+
 describe('the blank option cannot clear a saved deal', () => {
     it('writes a chosen status', () => {
         const p = panelWith('open-1');
@@ -501,8 +536,14 @@ describe('the status hints point at this control, not away from it', () => {
     })();
     const hints = [...statusField.matchAll(/class="mjs-field__hint">([^<]+)</g)].map((m) => m[1].trim());
 
-    it('has one hint for each side of the lock, and one for an unsaved deal', () => {
-        expect(hints.length, 'an unsaved-deal hint, a closed-deal hint and an open-deal hint').toBe(3);
+    it('has one hint for each side of the lock, one for an unsaved deal, and one for a status that no longer exists', () => {
+        expect(hints.length, 'an unsaved-deal hint, a missing-status hint, a closed-deal hint and an open-deal hint').toBe(4);
+    });
+
+    it('tells a deal whose status is gone how to repair it from here (#402)', () => {
+        const missing = hints.find((h) => h.startsWith('Missing.'));
+        expect(missing, 'a missing-status hint').toBeDefined();
+        expect(missing).toMatch(/Pick an open status and save/);
     });
 
     it('does not call an UNSAVED deal open or offer a Close it cannot have yet', () => {

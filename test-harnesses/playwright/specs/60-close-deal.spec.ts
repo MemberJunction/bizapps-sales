@@ -47,8 +47,8 @@ const RUN_TAG = `CL-${Date.now().toString(36).toUpperCase()}`;
  * A LINE IS NOT OPTIONAL here: a header-only deal would close successfully with nothing to route, and
  * the stamps asserted below would be taken from a deal that never carried anything.
  *
- * The B2B pipeline is asked for by search text, as before: it decides the selling company, and the
- * company decides the product catalogue. `ComposeDeal` also picks a customer — `Sales.CloseDeal`
+ * The B2B pipeline is asked for by name, as before. `ComposeDeal` picks the company it is linked to
+ * first (the Company control comes before Pipeline), and the company decides the product catalogue. `ComposeDeal` also picks a customer — `Sales.CloseDeal`
  * refuses a won deal with no account, because an order needs a payer.
  */
 async function createDealWithLine(page: Page, suffix: string): Promise<string> {

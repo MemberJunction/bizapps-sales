@@ -282,7 +282,8 @@ describe('creating a deal, on the section it opens on', () => {
         // Pipeline and Pipeline Stage are dedicated controls since golive#291 and render outside this
         // list; `the pipeline and stage controls` below is what keeps them from simply disappearing.
         expect(names(pipeline(false))).toEqual([
-            'DealTypeID', 'ExpectedCloseDate', 'AccountID', 'PrimaryContactID', 'BillingContactID',
+            'DealTypeID', 'ExpectedCloseDate', 'LeadSourceTypeID', 'LeadSourceDetail',
+            'AccountID', 'PrimaryContactID', 'BillingContactID',
         ]);
     });
 
@@ -296,6 +297,20 @@ describe('creating a deal, on the section it opens on', () => {
         for (const derived of ['ForecastCategoryTypeID', 'Probability']) {
             expect(shown).not.toContain(derived);
         }
+    });
+
+    /**
+     * CreationDate is NOT offered while unsaved, and that is a decision rather than an omission (#532).
+     * The column defaults to the row's creation instant, which is already right for a deal created
+     * here, so putting it on the create form only invites a typo on every new deal. It becomes
+     * editable once the deal is saved, which is when a wrong imported date needs correcting.
+     *
+     * Asked by name rather than by list length: the saved-list assertion below would also fail if the
+     * field went missing, but it would not say which field or why.
+     */
+    it('does not offer the creation date on a new deal', () => {
+        expect(names(pipeline(false))).not.toContain('CreationDate');
+        expect(names(pipeline(true))).toContain('CreationDate');
     });
 
     it('drops the borrowed fields from the party panel while unsaved', () => {
@@ -316,7 +331,8 @@ describe('creating a deal, on the section it opens on', () => {
 
     it('puts everything back once the deal is saved', () => {
         expect(names(pipeline(true))).toEqual([
-            'DealTypeID', 'ForecastCategoryTypeID', 'Probability', 'ExpectedCloseDate',
+            'DealTypeID', 'ForecastCategoryTypeID', 'Probability', 'CreationDate', 'ExpectedCloseDate',
+            'LeadSourceTypeID', 'LeadSourceDetail',
         ]);
         expect(names(party(true))).toEqual([
             'AccountID', 'CompanyID', 'OwnerEmployeeID', 'PrimaryContactID', 'BillingContactID',

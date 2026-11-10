@@ -30,10 +30,10 @@ covers only what a tester needs afterwards.
 
 | App | Range | What sales needs it for |
 |---|---|---|
-| bizapps-common | `>=5.49.0 <6.0.0` | Accounts and contacts are IS-A children of common's Organization and Person; activities live in common's tables |
-| bizapps-tasks | `>=1.2.0 <2.0.0` | A won close raises the order-review and contract-processing tasks |
+| bizapps-common | `>=5.51.0 <6.0.0` | Accounts and contacts are IS-A children of common's Organization and Person; activities live in common's tables |
+| bizapps-tasks | `>=1.7.0 <2.0.0` | A won close raises the order-review and contract-processing tasks |
 | bizapps-accounting | `>=0.2.0 <1.0.0` | Orders books orders through accounting's engine |
-| bizapps-orders | `>=5.26.0 <6.0.0` | **A deal cannot be saved without it.** The save provisions the deal's embedded `OrderHeader`, and the deal's lines live on that order |
+| bizapps-orders | `>=5.30.0 <6.0.0` | **A deal cannot be saved without it.** The save provisions the deal's embedded `OrderHeader`, and the deal's lines live on that order |
 | bizapps-contracts | `>=0.1.1 <1.0.0` | A won close on a pipeline whose policy creates a contract (B2B) creates one. Without contracts the close still succeeds and records why no contract was made |
 
 ### The workspace CLI rule

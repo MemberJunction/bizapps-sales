@@ -29,7 +29,6 @@ type Input = import('../CloseWonTaskService.js').CloseWonTaskInput;
 const USER = { ID: 'user-1' } as never;
 const DEAL = 'dddddddd-0000-4000-8000-000000000001';
 const ORDER = 'oooooooo-0000-4000-8000-000000000001';
-const PIPELINE = 'pppppppp-0000-4000-8000-000000000001';
 
 afterEach(() => runView.mockReset());
 
@@ -62,7 +61,7 @@ describe('reading the switch from a policy', () => {
 });
 
 /** A service whose tasks app and database answer, and which records what it was asked to create. */
-function harness(opts: { createContract: boolean; taskTypeReadFails?: boolean }) {
+function harness(opts: { taskTypeReadFails?: boolean } = {}) {
     const created: { Name: string; TypeID: string }[] = [];
     const instance = Object.create(CloseWonTaskService.prototype) as InstanceType<typeof CloseWonTaskService>;
     Object.defineProperty(instance, 'orchestration', {
@@ -76,9 +75,6 @@ function harness(opts: { createContract: boolean; taskTypeReadFails?: boolean })
     Object.defineProperty(instance, 'assignments', { value: { assignToTask: vi.fn() } });
 
     runView.mockImplementation(async (args: { EntityName: string; ExtraFilter: string }) => {
-        if (args.EntityName === 'MJ_BizApps_Sales: Pipelines') {
-            return { Success: true, Results: [{ CloseWonPolicy: JSON.stringify({ CreateContract: opts.createContract }) }] };
-        }
         if (args.EntityName === 'MJ_BizApps_Tasks: Task Types') {
             if (opts.taskTypeReadFails) return { Success: false, ErrorMessage: 'task types are down' };
             const code = /'([^']+)'/.exec(args.ExtraFilter)?.[1];
@@ -104,7 +100,7 @@ function harness(opts: { createContract: boolean; taskTypeReadFails?: boolean })
 }
 
 function input(overrides: Partial<Input> = {}): Input {
-    return { DealID: DEAL, DealName: 'Acme renewal', OrderID: ORDER, PipelineID: PIPELINE, ...overrides };
+    return { DealID: DEAL, DealName: 'Acme renewal', OrderID: ORDER, CreateContract: false, ...overrides };
 }
 
 function taskTypeReads(): string[] {
@@ -116,7 +112,7 @@ function taskTypeReads(): string[] {
 
 describe('closing a won deal with the order-review task switched off', () => {
     it('raises no order-review task, and does not look its type up', async () => {
-        const h = harness({ createContract: false });
+        const h = harness();
         const result = await h.instance.CreateCloseWonTasks(input({ RaiseOrderReviewTask: false }), h.provider, USER);
         expect(result.Tasks.map((t) => t.Kind)).toEqual([]);
         expect(h.created).toEqual([]);
@@ -124,14 +120,14 @@ describe('closing a won deal with the order-review task switched off', () => {
     });
 
     it('reports nothing, since nothing was due', async () => {
-        const h = harness({ createContract: false });
+        const h = harness();
         const result = await h.instance.CreateCloseWonTasks(input({ RaiseOrderReviewTask: false }), h.provider, USER);
         expect(result.Success).toBe(true);
         expect(result.Issues).toEqual([]);
     });
 
     it('does not report a missing order as a task it could not raise', async () => {
-        const h = harness({ createContract: false });
+        const h = harness();
         const result = await h.instance.CreateCloseWonTasks(
             input({ OrderID: '', RaiseOrderReviewTask: false }),
             h.provider,
@@ -141,9 +137,9 @@ describe('closing a won deal with the order-review task switched off', () => {
         expect(result.Success).toBe(true);
     });
 
-    it('still raises the contract-processing task when the pipeline creates a contract', async () => {
-        const h = harness({ createContract: true });
-        const result = await h.instance.CreateCloseWonTasks(input({ RaiseOrderReviewTask: false }), h.provider, USER);
+    it('still raises the contract-processing task when the close creates a contract', async () => {
+        const h = harness();
+        const result = await h.instance.CreateCloseWonTasks(input({ CreateContract: true, RaiseOrderReviewTask: false }), h.provider, USER);
         expect(result.Tasks.map((t) => t.Kind)).toEqual(['ContractProcessing']);
         expect(h.created.map((t) => t.TypeID)).toEqual(['type-CONTRACT_PROCESSING']);
     });
@@ -151,27 +147,27 @@ describe('closing a won deal with the order-review task switched off', () => {
 
 describe('closing a won deal with the switch left alone', () => {
     it('raises the order-review task, as every install always has', async () => {
-        const h = harness({ createContract: false });
+        const h = harness();
         const result = await h.instance.CreateCloseWonTasks(input(), h.provider, USER);
         expect(result.Tasks.map((t) => t.Kind)).toEqual(['OrderReview']);
         expect(h.created.map((t) => t.TypeID)).toEqual(['type-ORDER_REVIEW']);
     });
 
     it('raises it when the switch is explicitly on', async () => {
-        const h = harness({ createContract: true });
-        const result = await h.instance.CreateCloseWonTasks(input({ RaiseOrderReviewTask: true }), h.provider, USER);
+        const h = harness();
+        const result = await h.instance.CreateCloseWonTasks(input({ CreateContract: true, RaiseOrderReviewTask: true }), h.provider, USER);
         expect(result.Tasks.map((t) => t.Kind)).toEqual(['OrderReview', 'ContractProcessing']);
     });
 
     it('still reports a missing order, because a task was due and could not be raised', async () => {
-        const h = harness({ createContract: false });
+        const h = harness();
         const result = await h.instance.CreateCloseWonTasks(input({ OrderID: '' }), h.provider, USER);
         expect(result.Success).toBe(false);
         expect(result.Issues.join(' ')).toContain('no order-review task was created');
     });
 
     it('still reports a task-type read that fails', async () => {
-        const h = harness({ createContract: false, taskTypeReadFails: true });
+        const h = harness({ taskTypeReadFails: true });
         const result = await h.instance.CreateCloseWonTasks(input(), h.provider, USER);
         expect(result.Success).toBe(false);
         expect(result.Issues.join(' ')).toContain('task types are down');
