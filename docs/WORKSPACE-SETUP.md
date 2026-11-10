@@ -492,7 +492,8 @@ is wrong.
 > product picker (measured 2026-08-25).
 >
 > This matters because the push is also the remedy for other things -- a missing action, a stale remote
-> operation -- so there is a real reason to run it later in a host's life. When you do, re-seed after.
+> operation -- so there is a real reason to run it later in a host's life. The company links the seed
+> set survive it, so a re-seed after the push is no longer needed for them.
 
 
 > ### ⚠️ NONE OF THE COMMANDS BELOW NAME A DATABASE. They hit whatever `.env` says.

@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/sales-integration-tests",
   "type": "module",
-  "version": "6.23.4",
+  "version": "6.27.0",
   "private": true,
   "description": "Integration check bundles for BizApps Sales, dispatched by `mj test` via MJ's testing framework.",
   "main": "dist/index.js",
@@ -21,7 +21,7 @@
     "@mj-biz-apps/accounting-engine-base": ">=0.22.0 <1.0.0",
     "@mj-biz-apps/accounting-entities": ">=0.22.0 <1.0.0",
     "@mj-biz-apps/accounting-server": "0.22.0",
-    "@mj-biz-apps/common-server": "5.56.0",
+    "@mj-biz-apps/common-server": "5.60.0",
     "@mj-biz-apps/contracts-core-entities-server": ">=0.7.3 <1.0.0",
     "@mj-biz-apps/contracts-entities": ">=0.7.3 <1.0.0",
     "@mj-biz-apps/orders-core-entities-server": "^5.40.0",
@@ -32,16 +32,16 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@mj-biz-apps/common-entities": "^5.51.0",
+    "@mj-biz-apps/common-entities": "^5.60.0",
     "@mj-biz-apps/orders-entities": "^5.40.0",
-    "@mj-biz-apps/sales-core-entities-server": "^6.23.4",
-    "@mj-biz-apps/sales-entities": "^6.23.4",
-    "@mj-biz-apps/sales-server": "^6.23.4"
+    "@mj-biz-apps/sales-core-entities-server": "^6.27.0",
+    "@mj-biz-apps/sales-entities": "^6.27.0",
+    "@mj-biz-apps/sales-server": "^6.27.0"
   },
   "peerDependencies": {
-    "@memberjunction/core": "^6.1.6",
-    "@memberjunction/global": "^6.1.6",
-    "@memberjunction/testing-integration": "^6.1.6"
+    "@memberjunction/core": "^6.2.1",
+    "@memberjunction/global": "^6.2.1",
+    "@memberjunction/testing-integration": "^6.2.1"
   },
   "repository": {
     "type": "git",

@@ -1,5 +1,58 @@
 # @mj-biz-apps/sales-entities
 
+## 6.27.0
+
+### Minor Changes
+
+- edf5a94: Release seed for the deal-delete permission model: `V…__v6.27.x__Metadata_Sync` creates the `MJ.BizApps.Sales.Deal.Delete` and `.DeleteOwn` authorizations, the Sales User and Sales Admin roles, their read and delete permissions on Deals, and the grants (Sales User → DeleteOwn; Sales Admin and Developer → Delete). Every record is create-only, guarded on its ID or natural key, so a host's existing roles and later changes are kept. Assigning users to the roles is left to each host.
+
+## 6.26.0
+
+### Minor Changes
+
+- ede0517: Move to MemberJunction's 6.2 LTS line: every `@memberjunction/*` range and the core/global overrides are `^6.2.1` (exact `6.2.1` devDependency anchors), and `mjVersionRange` is `>=6.2.1 <7.0.0`. Hosts must run MJ 6.2.1 or later to install this release.
+- 24c0b46: The 6.26 Metadata_Sync ships the HidePipelines Sales application setting ("false"), so a host that upgrades by migration gets it as one that ran `mj sync push` does. It is create-only: a host that already has the setting keeps its value. It has a Postgres counterpart.
+
+## 6.25.0
+
+### Minor Changes
+
+- 73e4527: A pipeline can serve several selling companies. The new `Pipeline Companies` entity links a pipeline
+  to each company that sells through it, with `IsActive` to retire a link without touching existing
+  deals; `Pipeline.CompanyID` is removed. Every existing pipeline is linked to the company it had.
+
+  A deal's company is now the rep's choice: the company is picked first and the pipelines offered are
+  the ones actively linked to it. The server refuses a deal whose company is not linked to its pipeline,
+  instead of copying the company from the pipeline. Pipeline lookups by company resolve through the
+  link table.
+
+- c983e92: The 6.25 Metadata_Sync ships the Link Default Pipeline To Companies action and the Party Lookup Accounts query change, so a host that upgrades by migration gets the same metadata as one that ran `mj sync push`. It has a Postgres counterpart.
+
+## 6.24.1
+
+### Patch Changes
+
+- b4fca8a: Restore the Acronym field on Sales Accounts. Sales Accounts inherit it from Organization (Common 5.57+), and the 6.24.0 generated code dropped it, so every Sales Account form failed to load with "Cannot query field Acronym". Common is now required at 5.60.0 or later, the version AIDP Next runs, so CodeGen in this repo keeps the field.
+
+## 6.24.0
+
+### Minor Changes
+
+- da41816: Deals carry a `CreationDate` — the business creation date the deal ages from, defaulted to the
+  record's creation instant and editable afterwards (#532).
+
+  `__mj_CreatedAt` could not do this job: it records when the ROW was written, so an imported deal
+  carries import day rather than deal day, and it is not editable. Existing deals are backfilled from
+  the earliest evidence the deal existed — their row stamp, or their first stage transition when that
+  is earlier — the same rule `Sales: Deal Cycle Time` already infers at query time.
+
+  The field is on the deal form's Pipeline tab, beside the forecast fields. It is not offered while a
+  deal is unsaved, since the default is correct for a deal created here.
+
+- 4a3226a: Close and lock hardening: validate caller-supplied IDs and fail closed on loss-reason and deal-type lookup errors in `Sales.CloseDeal` and `Sales.ReopenDeal`; keep client-generated `ConcessionID` across discount-concession retries so a resend after a timeout is idempotent; return a specific refusal naming the deal and contract when a close or stale pre-close save hits an already-Won deal; and allow a closed deal whose persisted `AccountID` is blank to have its account set once without reopening.
+- c4808fa: Release seed for 6.24, second part: `V202611061600__v6.24.x__Metadata_Sync.sql` and its PostgreSQL counterpart create the optional `Parties` input on the "Log Deal Activity" action, so installed hosts can pass the people and organizations to link.
+- c96a138: Release seed for 6.24: `V202611061330__v6.24.x__Metadata_Sync.sql` and its PostgreSQL counterpart carry this release's metadata to hosts, which install by migration and never read `metadata/`: the `Sales.RecordDiscountConcession` remote operation's input type gains the optional `ConcessionID`, so a resend after a timeout finds the concession the first attempt wrote.
+
 ## 6.23.4
 
 ## 6.23.3

@@ -16,7 +16,7 @@ import { Injectable } from '@angular/core';
 import { EntitySaveOptions, LogError, LogStatus, Metadata, RunQuery, RunView, RunViewParams, type RunViewResult } from '@memberjunction/core';
 import { DealEntity } from '@mj-biz-apps/sales-entities';
 
-import { ExpandPipelinesByCompany, OrderPipelinesByCompany, type PipelineCompanyLink } from '../data/company-pipelines';
+import { ExpandPipelinesByCompany, OrderPipelinesByCompany, PIPELINE_LINK_ORDER, type PipelineCompanyLink } from '../data/company-pipelines';
 import { AssertRosterColumns } from './deal-roster.columns';
 
 import {
@@ -35,10 +35,13 @@ import {
 } from './deal-workspace.validation';
 import { BusinessTimeZoneEngine, CalendarDayIn, type CalendarDay } from '@mj-biz-apps/common-entities';
 import {
+    DRAFT_PRODUCT_FIELDS,
+    DraftProductFilterFor,
     E_ORDERS_PRODUCT,
     PRODUCT_LOOKUP_FIELDS,
     ProductFilterFor,
     WithInheritedSubscriptionType,
+    type DraftProductLookup,
     type ProductLookup,
 } from '@mj-biz-apps/sales-entities';
 import {
@@ -417,7 +420,8 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
     // read too, for the same reason retired pipelines are: their deals still have to be filterable.
     Pipelines: joinedLookupRead<PipelineRow, PipelineCompanyLink>(
         { EntityName: E_PIPELINE, ExtraFilter: PIPELINE_LIST_FILTER, OrderBy: 'DisplayRank ASC, Name ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'IsDefault', 'DisplayRank'] },
-        { EntityName: E_PIPELINE_COMPANY, ResultType: 'simple', Fields: ['PipelineID', 'CompanyID', 'Company'] },
+        // Oldest link first: the default pipeline's first-linked company is the default company.
+        { EntityName: E_PIPELINE_COMPANY, OrderBy: PIPELINE_LINK_ORDER, ResultType: 'simple', Fields: ['PipelineID', 'CompanyID', 'Company'] },
         (rows, links, into) => {
             const pipelines = rows.map((p) => ({
                 ID: p.ID,
@@ -551,6 +555,28 @@ const DEAL_COLLECTIONS = ['PaymentSchedule', 'Team'] as const;
  */
 function sellableNewFilter(productFields: readonly string[]): string {
     return productFields.includes('IsSellableNew') ? ' AND IsSellableNew = 1' : '';
+}
+
+/** What both product reads need: the business day, and the not-sold-new clause when the host has it. */
+interface ProductReadScope {
+    Day: CalendarDay;
+    SellableNew: string;
+}
+
+/**
+ * The scope of a read of orders' products, or null when orders is not installed — a supported state,
+ * checked in metadata first for the reason {@link DealWorkspaceService.LoadProducts} gives.
+ */
+async function productReadScope(asOfDay: CalendarDay | undefined): Promise<ProductReadScope | null> {
+    const productEntity = new Metadata().Entities.find((e) => e.Name === E_ORDERS_PRODUCT);
+    if (!productEntity) {
+        return null;
+    }
+    await BusinessTimeZoneEngine.Instance.Config(false);
+    return {
+        Day: asOfDay ?? BusinessTimeZoneEngine.Instance.Today(),
+        SellableNew: sellableNewFilter(productEntity.Fields.map((f) => f.Name)),
+    };
 }
 
 @Injectable({ providedIn: 'root' })
@@ -839,19 +865,15 @@ export class DealWorkspaceService {
          *
          * So the entity is checked in metadata FIRST, and its absence simply means no picker.
          */
-        const md = new Metadata();
-        const productEntity = md.Entities.find((e) => e.Name === E_ORDERS_PRODUCT);
-        if (!productEntity) {
+        const scope = await productReadScope(asOfDay);
+        if (!scope) {
             return [];
         }
-
-        await BusinessTimeZoneEngine.Instance.Config(false);
-        const day = asOfDay ?? BusinessTimeZoneEngine.Instance.Today();
 
         const rv = new RunView();
         const result = await rv.RunView<ProductLookup>({
             EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: ProductFilterFor(day) + sellableNewFilter(productEntity.Fields.map((f) => f.Name)),
+            ExtraFilter: ProductFilterFor(scope.Day) + scope.SellableNew,
             OrderBy: 'Name ASC',
             ResultType: 'simple',
             // Shared with the check that guards it, so the two cannot drift — see PRODUCT_LOOKUP_FIELDS.
@@ -864,6 +886,33 @@ export class DealWorkspaceService {
         }
         // A product naming no subscription type inherits its product type's, as confirm does (golive #339).
         return WithInheritedSubscriptionType(result.Results ?? []);
+    }
+
+    /**
+     * The Draft products the picker would offer once activated, so it can say when a search matches
+     * products it is hiding (bc-aidp-next-golive#433). Same window and not-sold-new rule as
+     * {@link LoadProducts}; only the status differs.
+     *
+     * Read ONCE per dialog, beside the catalogue rather than per keystroke: the search runs in the
+     * browser, so the Draft rows are matched there with the same ranking. A failed read logs and
+     * returns no rows, because the note is a hint and must never cost the rep the picker.
+     */
+    public async LoadDraftProducts(asOfDay?: CalendarDay): Promise<DraftProductLookup[]> {
+        const scope = await productReadScope(asOfDay);
+        if (!scope) {
+            return [];
+        }
+        const result = await new RunView().RunView<DraftProductLookup>({
+            EntityName: E_ORDERS_PRODUCT,
+            ExtraFilter: DraftProductFilterFor(scope.Day) + scope.SellableNew,
+            ResultType: 'simple',
+            Fields: [...DRAFT_PRODUCT_FIELDS],
+        });
+        if (!result?.Success) {
+            LogError(`Draft products could not be read for the picker note - ${result?.ErrorMessage || 'no reason was given'}`);
+            return [];
+        }
+        return result.Results ?? [];
     }
 
     /**

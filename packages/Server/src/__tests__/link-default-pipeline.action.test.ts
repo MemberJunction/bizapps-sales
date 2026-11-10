@@ -62,6 +62,12 @@ describe('the Action result', () => {
         expect(result).toMatchObject({ Success: false, ResultCode: 'NO_DEFAULT', Message: 'No active pipeline is marked IsDefault' });
     });
 
+    it('fails with the reason alone when a read fails, without zero tallies', async () => {
+        link.mockResolvedValue(outcome({ Success: false, Outcome: 'READ_FAILED', Companies: 0, Linked: 0, AlreadyLinked: 0, Issues: ['Could not read pipelines, companies or links: timeout'] }));
+        const result = await new Harness().Run(params());
+        expect(result).toMatchObject({ Success: false, ResultCode: 'READ_FAILED', Message: 'Could not read pipelines, companies or links: timeout' });
+    });
+
     it('fails, without throwing, when the job throws', async () => {
         link.mockRejectedValue(new Error('provider gone'));
         const result = await new Harness().Run(params());

@@ -1,5 +1,54 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.27.0
+
+### Patch Changes
+
+- Updated dependencies [edf5a94]
+  - @mj-biz-apps/sales-entities@6.27.0
+
+## 6.26.0
+
+### Minor Changes
+
+- a7aff3d: Deleting a deal works, under rules. A deal can be deleted only while it is open and has never been closed, and only when its order is not Confirmed. Holders of `MJ.BizApps.Sales.Deal.Delete` (new Sales Admin role, and Developer) can delete any such deal; holders of `MJ.BizApps.Sales.Deal.DeleteOwn` (new Sales User role) only deals they own. The deal's team, contacts, payment schedule and stage history are removed with it, and its order is deleted through orders as the system user, all in one transaction. A refused delete now says why instead of failing on a foreign key, and the Deal form shows that reason instead of "Error deleting record". New metadata: the two roles, the two authorizations, their grants, and read and delete permissions for both roles on Deals only. Neither role holds delete on any order entity, so neither can delete order rows directly.
+
+### Patch Changes
+
+- Updated dependencies [ede0517]
+- Updated dependencies [24c0b46]
+  - @mj-biz-apps/sales-entities@6.26.0
+
+## 6.25.0
+
+### Patch Changes
+
+- dde07ee: Close Won no longer stalls 30 seconds and returns a GraphQL 504. The check for an existing contract-processing task now reads on the close's own transaction instead of a separate connection that waited on the order-review task the close had just written.
+- Updated dependencies [73e4527]
+- Updated dependencies [c983e92]
+  - @mj-biz-apps/sales-entities@6.25.0
+
+## 6.24.1
+
+### Patch Changes
+
+- Updated dependencies [b4fca8a]
+  - @mj-biz-apps/sales-entities@6.24.1
+
+## 6.24.0
+
+### Minor Changes
+
+- 4a3226a: Close and lock hardening: validate caller-supplied IDs and fail closed on loss-reason and deal-type lookup errors in `Sales.CloseDeal` and `Sales.ReopenDeal`; keep client-generated `ConcessionID` across discount-concession retries so a resend after a timeout is idempotent; return a specific refusal naming the deal and contract when a close or stale pre-close save hits an already-Won deal; and allow a closed deal whose persisted `AccountID` is blank to have its account set once without reopening.
+
+### Patch Changes
+
+- Updated dependencies [da41816]
+- Updated dependencies [4a3226a]
+- Updated dependencies [c4808fa]
+- Updated dependencies [c96a138]
+  - @mj-biz-apps/sales-entities@6.24.0
+
 ## 6.23.4
 
 ### Patch Changes

@@ -84,6 +84,7 @@ import {
     PrimaryActionFor,
     SecondaryActionFor,
     SubPagesFor,
+    type SalesNavAudience,
     type SalesNavBadges,
     type SalesPrimaryAction,
 } from '../nav/sales-nav.model';
@@ -147,6 +148,7 @@ import { PipelineCompanies, PipelineCompanyNames, PipelineLabel } from '../data/
 import { SalesSettings } from '../data/sales-settings';
 import { WatchDealSaves } from '../data/deal-saves';
 import { MJSSalesFilterBarComponent, type FilterKind, type SalesFilterBarState } from './sales-filter-bar.component';
+import { MJSSalesSettingsPageComponent } from './sales-settings-page.component';
 
 /**
  * The account entity, for opening a customer as its own Explorer tab.
@@ -223,6 +225,7 @@ interface AttentionRow {
         MJLeftNavContentComponent,
         MJButtonDirective,
         MJSSalesFilterBarComponent,
+        MJSSalesSettingsPageComponent,
         DealBoardComponent,
         EntityViewerModule,
     ],
@@ -495,7 +498,7 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private pageOrDefault(page: string | null): string {
-        return page && SubPagesFor(this.Section).some((p) => p.Id === page) ? page : DefaultPageFor(this.Section);
+        return page && SubPagesFor(this.Section, this.navAudience).some((p) => p.Id === page) ? page : DefaultPageFor(this.Section);
     }
 
     /** Applies a URL (back/forward, or a link opened into a mounted tab). Writes nothing back. */
@@ -554,7 +557,7 @@ export class MJSSalesSectionComponent implements OnInit {
     // ── Chrome ─────────────────────────────────────────────────────────────────
 
     public get NavSections(): MJLeftNavSection[] {
-        return BuildLeftNavSections(SubPagesFor(this.Section), this.Badges);
+        return BuildLeftNavSections(SubPagesFor(this.Section, this.navAudience), this.Badges);
     }
 
     public get PrimaryAction(): SalesPrimaryAction | null {
@@ -610,7 +613,9 @@ export class MJSSalesSectionComponent implements OnInit {
      * `LoadError` and Retry show, and the replies still out are ignored when they arrive.
      *
      * `quiet` re-reads without the spinners, so the pages stay mounted and show their current data
-     * until the new data lands. The board uses it after a drag.
+     * until the new data lands. The board uses it after a drag, and every deal save uses it through
+     * {@link RefreshAfterSave}. A quiet re-read that runs out of time keeps the board up instead of
+     * replacing it with a Retry.
      */
     public async Refresh(quiet = false): Promise<void> {
         const token = ++this.refreshToken;
@@ -625,7 +630,7 @@ export class MJSSalesSectionComponent implements OnInit {
             const rest = await WithinTimeLimit(this.load(token), BOARD_TIME_LIMIT_MS, BOARD_TOO_SLOW);
             await rest.Detail;
         } catch (e) {
-            this.failRefresh(token, e);
+            this.failRefresh(token, e, quiet);
         } finally {
             if (token === this.refreshToken) {
                 this.Loading = false;
@@ -639,9 +644,16 @@ export class MJSSalesSectionComponent implements OnInit {
     /**
      * Shows why the newest `Refresh()` stopped. One that ran out of time is abandoned: its reads are still
      * out, and a reply landing under the error would show deals beside a message saying they did not load.
+     *
+     * A `quiet` one that ran out of time is only logged. The board on screen is still good, and leaving
+     * the token current lets the late reply land, so the board catches up without a Retry.
      */
-    private failRefresh(token: number, e: unknown): void {
+    private failRefresh(token: number, e: unknown, quiet: boolean): void {
         if (token !== this.refreshToken) {
+            return;
+        }
+        if (quiet && e instanceof TimeLimitExceeded) {
+            LogError(`Sales: a background refresh is slow and will apply when it lands - ${reasonOf(e)}`);
             return;
         }
         if (e instanceof TimeLimitExceeded) {
@@ -721,6 +733,18 @@ export class MJSSalesSectionComponent implements OnInit {
      * Takes the `HidePipelines` setting. Turning it on drops a Pipeline filter carried in from the URL,
      * which the bar would no longer show and so could not be cleared.
      */
+    /** Who the rail is for, read once: the Settings page is listed only for those who may change it. */
+    private get navAudience(): SalesNavAudience {
+        this.audience ??= { CanChangeSettings: SalesSettings.CanChange };
+        return this.audience;
+    }
+    private audience: SalesNavAudience | null = null;
+
+    /** The Settings page saved Hide pipelines: re-read everything with the new value. */
+    public async OnHidePipelinesChanged(): Promise<void> {
+        await this.Refresh(true);
+    }
+
     private applyHidePipelines(hide: boolean): void {
         this.HidePipelines = hide;
         if (hide && this.Filters.PipelineIDs.length) {
@@ -1635,7 +1659,8 @@ export class SalesDealsSectionResource extends BaseResourceComponent implements 
     }
 
     private parseUrl(params: Record<string, string>): SalesUrlState {
-        return ParseSalesUrlState(params, SubPagesFor('deals').map((p) => p.Id));
+        // Every page the URL may name; the section falls back to the dashboard for one the user cannot see.
+        return ParseSalesUrlState(params, SubPagesFor('deals', { CanChangeSettings: true }).map((p) => p.Id));
     }
 
     public override async GetResourceDisplayName(_d: ResourceData): Promise<string> {

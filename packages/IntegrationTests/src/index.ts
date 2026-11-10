@@ -35,11 +35,18 @@
  *   pipeline-link        Every company ends linked to the default pipeline through PipelineCompany, no
  *                        pipeline is created, and a second run links nothing (#327). Needs no sibling
  *                        app: it saves no deal
+ *   deal-delete          Who may delete a deal (Sales User own, Sales Admin any), never a closed,
+ *                        reopened or booked one, and the child rows and order go with it (golive#429)
  *   party-lookup         The Deal form's Account and Contact picker queries: prefix only, subtype rows
  *                        only, % and _ literal (bc-aidp-next-golive#372). Saves no deal
  *   discount-concession  A deal line's raised discount is recorded through Sales.RecordDiscountConcession,
  *                        where orders' subclass fills, values and decides it; a refusal carries orders'
  *                        reason, and a second raise withdraws the line's earlier concession (golive#340)
+ *   sales-isa            MemberJunction's IS-A contract through SalesContact IsA Person and SalesAccount
+ *                        IsA Organization, against a real database (MJ itself proves it only with mocks).
+ *                        Needs bizapps-common only, not orders. IS7 runs OUTSIDE a rolled-back
+ *                        transaction on purpose, and IS9 skips with a warning where nothing else extends
+ *                        People — see the file header for both
  *
  * ⚠️ EVERY BUNDLE REQUIRES bizapps-orders EXCEPT `close-won-contract`, whose single check needs nothing
  * at all — it is asserting an absence. save-deal and close-deal require it too. A deal cannot be
@@ -97,6 +104,8 @@ import './checks/term-start.checks.js';
 import './checks/pipeline-link.checks.js';
 import './checks/party-lookup.checks.js';
 import './checks/discount-concession.checks.js';
+import './checks/sales-isa.checks.js';
+import './checks/deal-delete.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
@@ -105,6 +114,7 @@ export { TermStartChecks } from './checks/term-start.checks.js';
 export { PipelineLinkChecks } from './checks/pipeline-link.checks.js';
 export { PartyLookupChecks } from './checks/party-lookup.checks.js';
 export { DiscountConcessionChecks } from './checks/discount-concession.checks.js';
+export { DealDeleteChecks } from './checks/deal-delete.checks.js';
 export { CloseWonOrderChecks } from './checks/close-won-order.checks.js';
 export { CloseWonScheduleChecks } from './checks/close-won-schedule.checks.js';
 export { CloseWonContractChecks } from './checks/close-won-contract.checks.js';
@@ -112,4 +122,5 @@ export { BoardMoveChecks } from './checks/board-move.checks.js';
 export { CloseWonTasksChecks } from './checks/close-won-tasks.checks.js';
 export { ActivitiesChecks } from './checks/activities.checks.js';
 export { ForecastChecks } from './checks/forecast.checks.js';
+export { SalesIsaChecks } from './checks/sales-isa.checks.js';
 export * from './fixture.js';

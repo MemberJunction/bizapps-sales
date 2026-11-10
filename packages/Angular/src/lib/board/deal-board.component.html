@@ -14,7 +14,11 @@
   -->
   <div class="db-bar">
     @let tabs = TabPipelines;
-    <span class="db-bar__label">{{ HidePipelines ? 'Company' : 'Pipeline' }}</span>
+    <!-- With pipelines hidden and one pipeline in play, its tab would only list every company: show nothing. -->
+    @let quiet = HidePipelines && tabs.length < 2;
+    @if (!quiet) {
+      <span class="db-bar__label">{{ HidePipelines ? 'Company' : 'Pipeline' }}</span>
+    }
     @if (tabs.length > 1) {
       <div class="db-bar__pipes" role="tablist" [attr.aria-label]="HidePipelines ? 'Company' : 'Pipeline'" data-testid="db-pipeline-tabs">
         @for (pipeline of tabs; track pipeline.ID) {
@@ -29,7 +33,7 @@
           </button>
         }
       </div>
-    } @else if (tabs.length === 1) {
+    } @else if (tabs.length === 1 && !quiet) {
       <span class="db-bar__one" data-testid="db-pipeline-one">{{ HidePipelines ? TabLabel(tabs[0]) : tabs[0].Name }}</span>
     }
     @if (Moving) {

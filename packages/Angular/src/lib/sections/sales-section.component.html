@@ -339,6 +339,20 @@
           </div>
         }
 
+        <!-- ═════════════════════════ SETTINGS ═════════════════════════ -->
+        <!-- Listed only for users who may change Application Settings; see SalesSettings.CanChange. -->
+        @if (Page === 'settings') {
+          <div class="wrap wrap--list">
+            <div class="sechead">
+              <h2>Settings</h2>
+              <span class="r">Applies to everyone using Sales on this site</span>
+            </div>
+            <mjs-sales-settings-page
+              [HidePipelines]="HidePipelines"
+              (HidePipelinesChange)="OnHidePipelinesChanged()"></mjs-sales-settings-page>
+          </div>
+        }
+
         <!-- ═════════════════════════ BOARD ═════════════════════════ -->
         <!-- Rendered with @if rather than [hidden]: the board holds no unsaved state, so there is
              nothing to lose by tearing it down, and a hidden board with a horizontal scroller is a

@@ -5,9 +5,11 @@
  *   Overview (exec briefing) · Pipeline · What's being sold · Payment schedule · Account · Commercial
  *   Close · Buying team · Internal team · Motion · Activity · Stage history
  *
- * `replacesSectionKey: 'details'` hides the generated field list. `contributionKey` equals each
- * panel's `SectionKey` so left-nav rail items attach. Overview is the only `inclusion: 'Primary'`
- * so it leads; the rest sort into the related band by `sortKey` (descending).
+ * The hero's `replacesSectionKey: 'details'` hides the generated field list. `contributionKey` equals
+ * each panel's `SectionKey` so left-nav rail items attach. Every panel declares `inclusion: 'Primary'`:
+ * MJ 6.2 files a panel at a field slot inside the Details rail item unless it declares an
+ * inclusion, and Primary panels lead the rail in `sortKey` order (descending), so the rail reads
+ * Overview, Pipeline, What's being sold, ... in the order it had before 6.2.
  *
  * @module @mj-biz-apps/sales-ng
  */
@@ -23,6 +25,7 @@ import {
     EntityViewerModule,
     type AfterDataLoadEventArgs,
     type RecordOpenedEvent,
+    type RecordSelectedEvent,
     type ViewRelatedRecordNavigation,
 } from '@memberjunction/ng-entity-viewer';
 import {
@@ -38,6 +41,7 @@ import {
     type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
+import { LinkedParties, type ActivityLinkFields, type LinkedParty } from '../activities/deal-activity-parties';
 import { RelatedRecordTarget, SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import {
@@ -49,6 +53,7 @@ import {
     PipelineLabel,
     PipelineServesCompany,
     PipelinesForCompany,
+    PIPELINE_LINK_ORDER,
     type CompanyPipeline,
     type PipelineCompany,
 } from '../data/company-pipelines';
@@ -175,6 +180,9 @@ async function LoadPipelines(): Promise<PipelineOption[]> {
             // Inactive links too, for the same reason as inactive pipelines: a deal on a retired link
             // still has to show its company.
             EntityName: MJS_ENTITIES.PipelineCompany,
+            // Oldest link first, so the default company stays the one the default pipeline was first
+            // linked to when it is later linked to every company (see `DefaultCompanyID`).
+            OrderBy: PIPELINE_LINK_ORDER,
             ResultType: 'simple',
             Fields: ['PipelineID', 'CompanyID', 'Company', 'IsActive'],
         },
@@ -1118,7 +1126,6 @@ const FIELD_STYLES = `
         sortKey: 200,
         contributionKey: 'overview',
         inclusion: 'Primary',
-        replacesSectionKey: 'details',
     },
 })
 @Component({
@@ -1666,7 +1673,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     // Overview is an exec briefing and stays the lead for a SAVED deal, which is what it is for;
     // on a record with no data it is a page of blanks the user has to look past to find where
     // typing starts. This is the first panel that asks for anything.
-    metadata: { entity: E, slot: 'after-fields', sortKey: 90, contributionKey: 'pipeline', leadsWhenUnsaved: true },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 90, contributionKey: 'pipeline', leadsWhenUnsaved: true, inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-pipeline-panel',
@@ -2633,7 +2640,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-party',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 80, contributionKey: 'party' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 80, contributionKey: 'party', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-party-panel',
@@ -2799,7 +2806,7 @@ const COMMERCIAL_FIELDS: DealFieldSpec[] = [
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-commercial',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 70, contributionKey: 'commercial' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 70, contributionKey: 'commercial', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-commercial-panel',
@@ -2841,7 +2848,7 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-lines',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-related', sortKey: 89, contributionKey: 'lines' },
+    metadata: { entity: E, slot: 'after-related', sortKey: 89, contributionKey: 'lines', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-lines-panel',
@@ -3063,7 +3070,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-motion',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 48, contributionKey: 'motion' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 48, contributionKey: 'motion', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-motion-panel',
@@ -3132,7 +3139,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-close',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 60, contributionKey: 'close' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 60, contributionKey: 'close', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-close-panel',
@@ -3686,7 +3693,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
     key: 'sales:deal-related-internal-team',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 50, contributionKey: 'internal-team',
+        entity: E, slot: 'after-related', sortKey: 50, contributionKey: 'internal-team', inclusion: 'Primary',
         relatedEntity: MJS_ENTITIES.DealTeamMember, relatedJoinField: 'DealID',
     },
 })
@@ -3779,7 +3786,7 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-buying-team',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 52, contributionKey: 'buying-team',
+        entity: E, slot: 'after-related', sortKey: 52, contributionKey: 'buying-team', inclusion: 'Primary',
         relatedEntity: MJS_ENTITIES.DealContactRole, relatedJoinField: 'DealID',
     },
 })
@@ -3818,7 +3825,7 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-activity',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 46, contributionKey: 'activity',
+        entity: E, slot: 'after-related', sortKey: 46, contributionKey: 'activity', inclusion: 'Primary',
         relatedEntity: MJS_FOREIGN_ENTITIES.ActivityLink, relatedJoinField: 'RecordID',
     },
 })
@@ -3834,17 +3841,39 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
                 <div class="mjs-deal-activity">
                     <mjs-deal-activity-timeline #compose [DealID]="Record.ID" [ComposeOnly]="true"
                         (Logged)="OnLogged()"></mjs-deal-activity-timeline>
-                    @if (ActivityEntity) {
+                    <!-- Mounted only once the deal's view exists: with no view the viewer loads every
+                         activity, and a view bound during that load is dropped (golive#432). -->
+                    @if (ActivityEntity && ActivityView) {
                         <div class="mjs-deal-activity__viewer">
                             <!-- New goes to the compose form above: it is the only path that links the new
                                  activity to this deal. -->
                             <mj-entity-viewer
                                 [Entity]="ActivityEntity"
                                 [ViewEntity]="ActivityView"
+                                (RecordSelected)="OnActivitySelected($event)"
                                 (RecordOpened)="OnActivityOpened($event)"
                                 (OpenRelatedRecordRequested)="OnActivityRelatedRecord($event)"
                                 (CreateRecordRequested)="compose.FocusCompose()">
                             </mj-entity-viewer>
+                        </div>
+                        <!-- Who the selected activity is linked to (#408): the grid has no column for it. -->
+                        <div class="mjs-deal-activity__links">
+                            @if (!Linked) {
+                                <span class="mjs-deal-activity__hint">Select an activity to see who it is linked to.</span>
+                            } @else {
+                                <span class="mjs-deal-activity__hint">Linked to:</span>
+                                @for (party of Linked; track $index) {
+                                    <span class="mjs-deal-activity__party" [title]="party.Role">
+                                        <i class="fa-solid" aria-hidden="true"
+                                            [class.fa-user]="party.Icon === 'person'"
+                                            [class.fa-building]="party.Icon === 'organization'"
+                                            [class.fa-at]="party.Icon === 'other'"></i>
+                                        {{ party.Name }}
+                                    </span>
+                                } @empty {
+                                    <span>this deal only</span>
+                                }
+                            }
                         </div>
                     }
                 </div>
@@ -3859,6 +3888,12 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
             min-height: 420px; height: 480px;
             display: flex; flex-direction: column;
             border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-md); overflow: hidden;
+        }
+        .mjs-deal-activity__links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mj-space-2); font-size: 0.8125rem; color: var(--mj-text-primary); }
+        .mjs-deal-activity__hint { color: var(--mj-text-muted); }
+        .mjs-deal-activity__party {
+            display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+            border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-sm);
         }
         .mjs-deal-activity__viewer mj-entity-viewer {
             display: flex; flex-direction: column; flex: 1 1 auto; height: 100%; width: 100%;
@@ -3880,8 +3915,58 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
         void this.refreshView();
     }
 
+    /** The selected activity's links, or null when none is selected. */
+    public Linked: LinkedParty[] | null = null;
+    private selectedActivityID: string | null = null;
+
     public OnLogged(): void {
+        this.selectedActivityID = null;
+        this.Linked = null;
         void this.refreshView();
+    }
+
+    public async OnActivitySelected(event: RecordSelectedEvent): Promise<void> {
+        const id = String(event.compositeKey?.GetValueByFieldName('ID') ?? event.record?.['ID'] ?? '');
+        if (!id) return;
+        this.selectedActivityID = id;
+        const linked = await this.readLinkedParties(id);
+        if (this.selectedActivityID !== id) return; // a later click won
+        this.Linked = linked;
+        this.cdr.detectChanges();
+    }
+
+    /** One read of the activity's links, then one `RunViews` for the people's and organizations' names. */
+    private async readLinkedParties(activityID: string): Promise<LinkedParty[] | null> {
+        const md = new Metadata();
+        const idOf = (name: string): string => md.Entities.find((e) => e.Name === name)?.ID ?? '';
+        const ids = { Deal: idOf(MJS_ENTITIES.Deal), Person: idOf(MJS_FOREIGN_ENTITIES.Person), Organization: idOf(MJS_FOREIGN_ENTITIES.Organization) };
+        const rv = new RunView();
+        const links = await rv.RunView<ActivityLinkFields>({
+            EntityName: MJS_FOREIGN_ENTITIES.ActivityLink,
+            ExtraFilter: `ActivityID = '${activityID.replace(/'/g, "''")}'`,
+            Fields: ['Role', 'EntityID', 'RecordID', 'IdentityValue', 'Entity'],
+            OrderBy: 'Sequence',
+            ResultType: 'simple',
+        });
+        if (!links.Success) {
+            console.error('Deal activity: could not read the activity links', links.ErrorMessage);
+            return null;
+        }
+        const rows = links.Results ?? [];
+        const inList = (entityID: string): string =>
+            rows.filter((l) => l.EntityID?.toLowerCase() === entityID.toLowerCase() && l.RecordID)
+                .map((l) => `'${String(l.RecordID).replace(/'/g, "''")}'`).join(', ') || 'NULL';
+        const [people, orgs] = await rv.RunViews([
+            { EntityName: MJS_FOREIGN_ENTITIES.Person, ExtraFilter: `ID IN (${inList(ids.Person)})`, Fields: ['ID', 'DisplayName'], ResultType: 'simple' },
+            { EntityName: MJS_FOREIGN_ENTITIES.Organization, ExtraFilter: `ID IN (${inList(ids.Organization)})`, Fields: ['ID', 'Name'], ResultType: 'simple' },
+        ]);
+        for (const r of [people, orgs].filter((x) => !x?.Success)) {
+            console.error('Deal activity: could not read linked names; showing IDs', r?.ErrorMessage);
+        }
+        const names = new Map<string, string>();
+        for (const r of (people?.Results ?? []) as { ID: string; DisplayName: string }[]) names.set(r.ID.toLowerCase(), r.DisplayName);
+        for (const r of (orgs?.Results ?? []) as { ID: string; Name: string }[]) names.set(r.ID.toLowerCase(), r.Name);
+        return LinkedParties(rows, ids, String(this.Record.ID), names);
     }
 
     public OnActivityOpened(event: RecordOpenedEvent): void {
@@ -3936,7 +4021,7 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-stage-history',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 44, contributionKey: 'stage-history',
+        entity: E, slot: 'after-related', sortKey: 44, contributionKey: 'stage-history', inclusion: 'Primary',
         relatedEntity: MJS_ENTITIES.DealStageEvent, relatedJoinField: 'DealID',
     },
 })
@@ -3990,7 +4075,7 @@ export const SCHEDULE_DATE_ORDER = 'CASE WHEN PaymentDate IS NULL THEN 0 ELSE 1 
     key: 'sales:deal-related-payment-schedule',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 88, contributionKey: 'payment-schedule',
+        entity: E, slot: 'after-related', sortKey: 88, contributionKey: 'payment-schedule', inclusion: 'Primary',
         relatedEntity: MJS_ENTITIES.DealPaymentSchedule, relatedJoinField: 'DealID',
     },
 })
