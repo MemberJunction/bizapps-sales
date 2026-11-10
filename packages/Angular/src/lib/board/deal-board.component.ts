@@ -56,7 +56,7 @@ import { FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import { DealWorkspaceService, DEFAULT_DISPLAY_CURRENCY, type DealRosterRow } from '../workspace/deal-workspace.service';
 import { BusinessToday, DayLabel, UtcDatePart } from '../pages/dashboard-dates';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
-import { DistinctPipelines, OrderPipelinesByCompany, PipelineLabel, type CompanyPipeline } from '../data/company-pipelines';
+import { DistinctPipelines, OrderPipelinesByCompany, PipelineCompanyNames, PipelineLabel, type CompanyPipeline } from '../data/company-pipelines';
 import { HasID } from '../pages/dashboard-filters';
 
 /**
@@ -278,6 +278,12 @@ export class DealBoardComponent {
      */
     @Input() public SelectedPipelineID: string | null = null;
     @Output() public readonly SelectedPipelineIDChange = new EventEmitter<string | null>();
+
+    /**
+     * The `HidePipelines` setting, read by the section. The tabs stay one per pipeline, since a pipeline
+     * still decides the columns, but each is named by the companies it serves.
+     */
+    @Input() public HidePipelines = false;
     /** Shown verbatim. A refused or failed move must say why rather than silently snapping back. */
     public Message: string | null = null;
     public Moving = false;
@@ -310,6 +316,9 @@ export class DealBoardComponent {
      * pipeline serves several companies, where naming one of them would be wrong.
      */
     public TabLabel(pipeline: Pick<PipelineLookup, 'ID' | 'Name' | 'CompanyName'>): string {
+        if (this.HidePipelines) {
+            return PipelineCompanyNames(this.Pipelines, pipeline);
+        }
         // Counted over every row of the tabs' pipelines, not the one row a tab shows: a shared pipeline's
         // tab carries only its first company, which would hide that the tabs span several.
         const tabIDs = this.TabPipelines.map((p) => p.ID);

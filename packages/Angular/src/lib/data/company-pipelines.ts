@@ -74,7 +74,18 @@ export function DefaultPipeline<T extends CompanyPipeline>(pipelines: readonly T
     return pipelines.find((p) => p.IsDefault) ?? null;
 }
 
-/** The first company the default pipeline serves: the company a new deal starts in. */
+/**
+ * The order `PipelineCompany` rows are read in: oldest link first. {@link DefaultCompanyID} takes the
+ * default pipeline's first row, so once that pipeline is linked to every company the company it was
+ * first linked to stays the one a new deal starts in, rather than whichever link the database returns
+ * first.
+ */
+export const PIPELINE_LINK_ORDER = '__mj_CreatedAt ASC, ID ASC';
+
+/**
+ * The first company the default pipeline serves: the company a new deal starts in. Relies on the links
+ * being read in {@link PIPELINE_LINK_ORDER}.
+ */
 export function DefaultCompanyID(pipelines: readonly CompanyPipeline[]): string | null {
     return DefaultPipeline(pipelines)?.CompanyID ?? OrderPipelinesByCompany(pipelines)[0]?.CompanyID ?? null;
 }
@@ -119,6 +130,25 @@ export function PipelineCompanies(pipelines: readonly CompanyPipeline[]): Pipeli
 export function PipelinesForCompany<T extends CompanyPipeline>(pipelines: readonly T[], companyID: string | null): T[] {
     const ordered = OrderPipelinesByCompany(pipelines);
     return companyID ? ordered.filter((p) => sameID(p.CompanyID, companyID)) : DistinctPipelines(ordered);
+}
+
+/**
+ * The company's default pipeline: the first of its pipelines in picker order, so the `IsDefault`
+ * pipeline when it is linked to the company, else the lowest `DisplayRank`. Null when none is linked.
+ */
+export function CompanyDefaultPipeline<T extends CompanyPipeline>(pipelines: readonly T[], companyID: string | null): T | null {
+    return companyID ? (PipelinesForCompany(pipelines, companyID)[0] ?? null) : null;
+}
+
+/**
+ * The names of the companies a pipeline is linked to, joined: what names a pipeline where pipelines are
+ * hidden. Falls back to the pipeline's own name when it has no named company.
+ */
+export function PipelineCompanyNames(pipelines: readonly CompanyPipeline[], pipeline: Pick<CompanyPipeline, 'ID' | 'Name'>): string {
+    const names = OrderPipelinesByCompany(pipelines.filter((p) => sameID(p.ID, pipeline.ID)))
+        .map((p) => p.CompanyName)
+        .filter((name): name is string => !!name);
+    return names.length ? [...new Set(names)].join(', ') : pipeline.Name;
 }
 
 /** Whether `pipelineID` is linked to `companyID`. */

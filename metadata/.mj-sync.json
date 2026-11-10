@@ -91,6 +91,7 @@
     "authorizations",
     "roles",
     "applications",
+    "application-settings",
     "entity-fields",
     "user-views",
     "entity-relationships",
