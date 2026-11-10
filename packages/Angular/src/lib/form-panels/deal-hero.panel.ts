@@ -82,6 +82,11 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
         slot: 'before-fields',
         sortKey: 100,
         contributionKey: 'header',
+        // Hides the generated field list: the Deal panels draw every field. The claim sits on the
+        // hero, not on Overview, because MJ 6.2 files a panel that replaces the Details tab inside
+        // Details, so an Overview holding it became a "Details" item at the end of the rail. The
+        // hero is not a rail item, so claiming here empties Details and Overview leads.
+        replacesSectionKey: 'details',
     },
 })
 @Component({
