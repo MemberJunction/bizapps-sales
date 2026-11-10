@@ -25,6 +25,9 @@
 --     has RenewsSubscriptionID. Orders spawns these with no deal. This is the same test as orders'
 --     OrderReviewExemption (order-review.ts). An order that renews one subscription and sells
 --     something new stays on the report.
+--   * Migrated orders (Andrew, PR #497 review): Origin = 'Migration', loaded by data conversion
+--     with no deal, so every one would fail HasDeal and bury the live orders. Origin is NOT NULL
+--     (default 'Direct'), so the <> needs no NULL handling.
 --
 -- PAYMENT LINK is not named. It is the contract type with RequiresExecutedDocument = 0 (the
 -- customer accepts terms at payment). An order whose contract has that flag off is checked for a
@@ -78,6 +81,7 @@ WITH checked AS (
            ON ct.ID = c.ContractTypeID
     WHERE o.Status = N'Confirmed'
       AND o.SourceCheckoutWidgetID IS NULL
+      AND o.Origin <> N'Migration'
       AND o.ReversesOrderHeaderID IS NULL
       AND o.OrderType NOT IN (N'Return', N'Cancellation')
       AND NOT (

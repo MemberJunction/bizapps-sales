@@ -75,8 +75,9 @@ const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
     'party-lookup-contacts.sql': { tables: ['Person', 'SalesContact'], columns: 3 },
     'party-lookup-accounts.sql': { tables: ['Organization', 'SalesAccount'], columns: 3 },
     // golive #388: a `SELECT *` here registered 156 query fields, every column of every joined view.
+    // The `checked` CTE is left out, as MJ 6.2's parser does for every CTE name (see above).
     'confirmed-orders-missing-agreement.sql': {
-        tables: ['vwOrderHeaders', 'vwDeals', 'DealStatusType', 'vwContracts', 'ContractType', 'OrderLine', 'checked'],
+        tables: ['vwOrderHeaders', 'vwDeals', 'DealStatusType', 'vwContracts', 'ContractType', 'OrderLine'],
         columns: 24,
     },
 };
