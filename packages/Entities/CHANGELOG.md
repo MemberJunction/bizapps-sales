@@ -1,5 +1,18 @@
 # @mj-biz-apps/sales-entities
 
+## 6.27.0
+
+### Minor Changes
+
+- edf5a94: Release seed for the deal-delete permission model: `V…__v6.27.x__Metadata_Sync` creates the `MJ.BizApps.Sales.Deal.Delete` and `.DeleteOwn` authorizations, the Sales User and Sales Admin roles, their read and delete permissions on Deals, and the grants (Sales User → DeleteOwn; Sales Admin and Developer → Delete). Every record is create-only, guarded on its ID or natural key, so a host's existing roles and later changes are kept. Assigning users to the roles is left to each host.
+
+## 6.26.0
+
+### Minor Changes
+
+- ede0517: Move to MemberJunction's 6.2 LTS line: every `@memberjunction/*` range and the core/global overrides are `^6.2.1` (exact `6.2.1` devDependency anchors), and `mjVersionRange` is `>=6.2.1 <7.0.0`. Hosts must run MJ 6.2.1 or later to install this release.
+- 24c0b46: The 6.26 Metadata_Sync ships the HidePipelines Sales application setting ("false"), so a host that upgrades by migration gets it as one that ran `mj sync push` does. It is create-only: a host that already has the setting keeps its value. It has a Postgres counterpart.
+
 ## 6.25.0
 
 ### Minor Changes
