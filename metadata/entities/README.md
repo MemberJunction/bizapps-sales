@@ -6,7 +6,14 @@ rows:
 - `.form-chrome.json` — `Entity.Configuration`, the JSON that decides how a generated form is laid out.
   The rest of this README is about it.
 - `.entities.json` — which entities and fields the user search API covers (`AllowUserSearchAPI`,
-  `IncludeInUserSearchAPI`), with the `AutoUpdate*` flags off so CodeGen leaves them as set. On `Deals`
+  `IncludeInUserSearchAPI`) and HOW each searchable field matches (`UserSearchPredicateAPI`:
+  `Contains`, `BeginsWith`, `EndsWith` or `Exact`), with the `AutoUpdate*` flags off so CodeGen
+  leaves them as set. The predicate is the difference between finding a record by a word in the
+  middle of its name and only from the start, so it is worth setting deliberately: `Contains` for
+  a name a person types a fragment of, and a narrower one for a code, a slug or a number, where a
+  shared prefix would otherwise match every row (golive#359). Pinning
+  `AutoUpdateUserSearchPredicate: false` matters as much as the value — without it CodeGen rewrites
+  the predicate whenever the column's type, length, precision, scale or nullability changes. On `Deals`
   it also sets `BaseViewGenerated: false` and `GeneratedBaseViewName: vwDealsGenerated`, the layered
   base view `V202609202353__v6.4.0__Predictive_Deal_Win_Fields.sql` creates. On `Deal Stage Events` it
   sets `AllowUpdateAPI` and `AllowDeleteAPI` to false: stage events are append-only (`docs/DECISIONS.md`

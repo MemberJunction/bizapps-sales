@@ -23,7 +23,11 @@ import { MJSDealPipelinePanel } from '../lib/form-panels/deal-form.panels';
  */
 
 const original = RunView.prototype.RunView;
-afterEach(() => { RunView.prototype.RunView = original; });
+const originalViews = RunView.prototype.RunViews;
+afterEach(() => {
+    RunView.prototype.RunView = original;
+    RunView.prototype.RunViews = originalViews;
+});
 
 /** Every RunView the panel issues while initialising, by entity name. */
 async function ordersRequestedOnInit(): Promise<Map<string, string | undefined>> {
@@ -32,11 +36,17 @@ async function ordersRequestedOnInit(): Promise<Map<string, string | undefined>>
         seen.set(params.EntityName, params.OrderBy);
         return { Success: true, Results: [] };
     }) as unknown as typeof RunView.prototype.RunView;
+    // Pipelines are read in one batch with their company links (`PipelineCompany`).
+    RunView.prototype.RunViews = (async (params: { EntityName: string; OrderBy?: string }[]) =>
+        params.map((p) => {
+            seen.set(p.EntityName, p.OrderBy);
+            return { Success: true, Results: [] };
+        })) as unknown as typeof RunView.prototype.RunViews;
 
     const panel = Object.create(MJSDealPipelinePanel.prototype) as { ngOnInit(): Promise<void> };
     // The signals ngOnInit writes into. `Object.create` runs no field initialisers, so each is stubbed
     // with the only thing that is called on it.
-    for (const sig of ['statuses', 'LossReasons', 'pipelines', 'stages']) {
+    for (const sig of ['statuses', 'LossReasons', 'pipelines', 'stages', 'HidePipelines']) {
         Object.defineProperty(panel, sig, { value: { set: () => undefined }, writable: true });
     }
     for (const [k, v] of Object.entries({

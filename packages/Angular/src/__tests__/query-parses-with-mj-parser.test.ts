@@ -52,16 +52,16 @@ beforeAll(async () => {
 });
 
 const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
-    'deal-cycle-time.sql': { tables: ['vwDeals', 'DealStatusType', 'DealStageEvent', 'closed', 'ranked'], columns: 10 },
-    'won-deals-order-not-confirmed.sql': { tables: ['vwDeals', 'DealStatusType', 'won', 'vwOrderHeaders'], columns: 18 },
-    // `scoped` is the summary's own CTE. The order-line EXISTS sits inside a CASE in that CTE, where the
-    // parser does not look; the roster's sits in its select list, where it does.
-    'dashboard-summary.sql': { tables: ['Deal', 'DealStatusType', 'Pipeline', 'ForecastCategoryType', 'scoped'], columns: 19 },
+    'deal-cycle-time.sql': { tables: ['vwDeals', 'DealStatusType', 'DealStageEvent'], columns: 10 },
+    'won-deals-order-not-confirmed.sql': { tables: ['vwDeals', 'DealStatusType', 'vwOrderHeaders'], columns: 18 },
+    // MJ 6.2's parser leaves CTE names (closed, ranked, won, scoped, slips, moves) out of the table refs,
+    // and reads the order-line EXISTS inside the summary CTE's CASE, so OrderLine is listed here.
+    'dashboard-summary.sql': { tables: ['Deal', 'DealStatusType', 'Pipeline', 'ForecastCategoryType', 'OrderLine'], columns: 19 },
     'deal-roster.sql': {
         tables: ['vwDeals', 'DealStatusType', 'Pipeline', 'PipelineStage', 'ForecastCategoryType', 'OrderLine', 'Company'],
         columns: 42,
     },
-    'slippage.sql': { tables: ['RecordChange', 'Entity', 'slips', 'moves', 'vwDeals', 'DealStatusType'], columns: 17 },
+    'slippage.sql': { tables: ['RecordChange', 'Entity', 'vwDeals', 'DealStatusType'], columns: 17 },
     'stage-conversion-and-dwell.sql': { tables: ['DealStageEvent', 'Deal', 'Pipeline', 'PipelineStage'], columns: 16 },
     'forecast-history.sql': { tables: ['ForecastSnapshot', 'Company', 'Pipeline', 'Employee'], columns: 15 },
     'win-rate.sql': { tables: ['vwDeals', 'DealStatusType', 'OrderLine'], columns: 13 },
@@ -70,7 +70,7 @@ const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
         tables: ['vwDealTeamMembers', 'DealRole', 'vwDeals', 'DealStatusType', 'vwPeople', 'Employee'],
         columns: 16,
     },
-    'bookings-by-period.sql': { tables: ['vwDeals', 'DealStatusType', 'closed'], columns: 11 },
+    'bookings-by-period.sql': { tables: ['vwDeals', 'DealStatusType'], columns: 11 },
     // The Deal form's party pickers (bc-aidp-next-golive#372): base tables only, never a view.
     'party-lookup-contacts.sql': { tables: ['Person', 'SalesContact'], columns: 3 },
     'party-lookup-accounts.sql': { tables: ['Organization', 'SalesAccount'], columns: 3 },

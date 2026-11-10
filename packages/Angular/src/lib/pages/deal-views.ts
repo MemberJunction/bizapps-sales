@@ -139,6 +139,22 @@ export async function DealPipelineViewWith(
     return copy;
 }
 
+/**
+ * A copy of `template` with the Pipeline column hidden, for the `HidePipelines` setting. The saved view
+ * is left as it is, so turning the setting off brings the column back.
+ */
+export async function WithoutPipelineColumn(template: MJUserViewEntityExtended): Promise<MJUserViewEntityExtended> {
+    const copy = await DealPipelineViewWith(template);
+    const grid = JSON.parse(copy.GridState || '{}') as { columnSettings?: GridCol[] };
+    grid.columnSettings = (grid.columnSettings ?? []).map((c) => (c.Name === 'Pipeline' ? { ...c, hidden: true } : c));
+    copy.GridState = JSON.stringify(grid);
+    if (!(copy instanceof BaseEntity)) {
+        // The fallback view is a plain object, and the grid reads the parsed state off it directly.
+        Object.assign(copy, { GridStateObject: grid });
+    }
+    return copy;
+}
+
 async function copyEntity(template: MJUserViewEntityExtended): Promise<MJUserViewEntityExtended> {
     const copy = await new Metadata().GetEntityObject<MJUserViewEntityExtended>('MJ: User Views');
     await copy.LoadFromData(template.GetAll());

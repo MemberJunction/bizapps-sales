@@ -28,6 +28,7 @@ import { DealCloseDay } from './deal-close-day';
 import { IsFieldReadable } from './field-readable';
 import { WeightedAmount } from './deal-weighted-amount';
 import { FormatDealMoney, RefreshDealCurrencyCodes } from './deal-money';
+import { SalesSettings } from '../data/sales-settings';
 
 
 /**
@@ -81,6 +82,11 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
         slot: 'before-fields',
         sortKey: 100,
         contributionKey: 'header',
+        // Hides the generated field list: the Deal panels draw every field. The claim sits on the
+        // hero, not on Overview, because MJ 6.2 files a panel that replaces the Details tab inside
+        // Details, so an Overview holding it became a "Details" item at the end of the rail. The
+        // hero is not a rail item, so claiming here empties Details and Overview leads.
+        replacesSectionKey: 'details',
     },
 })
 @Component({
@@ -233,10 +239,19 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
                         <span class="mjs-deal-hero__stat-label">{{ CloseStatLabel }}</span>
                         <span class="mjs-deal-hero__stat-val">{{ CloseStatValue }}</span>
                     </div>
-                    <div class="mjs-deal-hero__stat">
-                        <span class="mjs-deal-hero__stat-label">Pipeline</span>
-                        <span class="mjs-deal-hero__stat-val">{{ PipelineName || '—' }}</span>
-                    </div>
+                    <!-- With pipelines hidden (the HidePipelines setting) the company stands in for the
+                         pipeline: choosing it is what chose the pipeline. -->
+                    @if (HidePipelines) {
+                        <div class="mjs-deal-hero__stat">
+                            <span class="mjs-deal-hero__stat-label">Company</span>
+                            <span class="mjs-deal-hero__stat-val">{{ CompanyName || '—' }}</span>
+                        </div>
+                    } @else {
+                        <div class="mjs-deal-hero__stat">
+                            <span class="mjs-deal-hero__stat-label">Pipeline</span>
+                            <span class="mjs-deal-hero__stat-val">{{ PipelineName || '—' }}</span>
+                        </div>
+                    }
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Type</span>
                         <span class="mjs-deal-hero__stat-val">{{ TypeName || '—' }}</span>
@@ -463,6 +478,8 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     }
     public LockNotice: string | null = null;
     public StaleAmountNotice: string | null = null;
+    /** The `HidePipelines` setting, read in `ngOnInit`. */
+    public HidePipelines = false;
 
     public async ngOnInit(): Promise<void> {
         const raw = UserInfoEngine.Instance.GetSetting(COLLAPSE_SETTING);
@@ -482,7 +499,11 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
          * `sales-ng` is lazily loaded, so the boot sequence is not relied on — the Overview panel does
          * the same. Marked for check because nothing else repaints the stat when it lands.
          */
-        await BusinessTimeZoneEngine.Instance.Config(false);
+        const [, hidePipelines] = await Promise.all([
+            BusinessTimeZoneEngine.Instance.Config(false),
+            SalesSettings.LoadHidePipelines(),
+        ]);
+        this.HidePipelines = hidePipelines;
         this.cdr?.markForCheck();
     }
 
@@ -643,6 +664,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     public get OwnerName(): string { return String(this.Record?.OwnerEmployee ?? this.Record?.Get?.('OwnerEmployee') ?? ''); }
     public get StageName(): string { return String(this.Record?.PipelineStage ?? this.Record?.Get?.('PipelineStage') ?? ''); }
     public get PipelineName(): string { return String(this.Record?.Pipeline ?? this.Record?.Get?.('Pipeline') ?? ''); }
+    public get CompanyName(): string { return String(this.Record?.Company ?? this.Record?.Get?.('Company') ?? ''); }
     public get TypeName(): string { return String(this.Record?.DealType ?? this.Record?.Get?.('DealType') ?? ''); }
 
     /**
@@ -758,7 +780,9 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
 
     private async resolveLock(): Promise<void> {
         const persisted = this.Record?.GetFieldByName?.('DealStatusTypeID')?.OldValue as string | null | undefined;
-        const lock = await ResolveDealLockState(persisted ?? this.Record?.DealStatusTypeID);
+        const accountOld = this.Record?.GetFieldByName?.('AccountID')?.OldValue as string | null | undefined;
+        const accountBlank = this.Record !== undefined && (!accountOld || String(accountOld).trim() === '');
+        const lock = await ResolveDealLockState(persisted ?? this.Record?.DealStatusTypeID, undefined, accountBlank);
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
         this.IsWon = lock.IsWon;

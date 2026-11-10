@@ -1,11 +1,14 @@
 /**
  * Pipelines grouped, ordered and labelled by their selling company (#327).
  *
- * A pipeline names the company a deal sells as (`DealEntityServer.stampCompanyFromPipeline`), so a
- * rep choosing a pipeline is choosing a company. Every company can carry its own copy of the default
- * pipeline (`Sales.CopyDefaultPipelineToCompanies`), which makes a flat list of names unreadable: five
- * options all called "B2B". The deal form, the deal workspace and the board all pick from the same
- * list, so the ordering and the label live here once rather than three times.
+ * A pipeline serves every company it is actively linked to through `PipelineCompany`. The rep picks
+ * the deal's company first and is offered that company's pipelines; `DealEntityServer` refuses a deal
+ * whose company is not linked to its pipeline. The deal form, the deal workspace and the board all pick
+ * from the same list, so the ordering and the label live here once rather than three times.
+ *
+ * A `CompanyPipeline` is one pipeline AS SERVED BY one company: a pipeline linked to three companies
+ * appears three times, once per company ({@link ExpandPipelinesByCompany}). Lists that are not scoped
+ * to a company take one row per pipeline ({@link DistinctPipelines}).
  *
  * ORDER: the default pipeline's company first, then the other companies by name. Within a company, the
  * pipeline sharing the default pipeline's Code first (its copy of the current stages), then
@@ -23,7 +26,17 @@ export interface CompanyPipeline {
     DisplayRank: number;
 }
 
-/** One selling company that owns at least one pipeline. */
+/** A pipeline row as loaded, before it is paired with its companies. */
+export type PipelineRecord = Omit<CompanyPipeline, 'CompanyID' | 'CompanyName'>;
+
+/** One active `PipelineCompany` link, with the company's name from the link view. */
+export interface PipelineCompanyLink {
+    PipelineID: string;
+    CompanyID: string;
+    Company: string | null;
+}
+
+/** One selling company with at least one pipeline linked to it. */
 export interface PipelineCompany {
     CompanyID: string;
     CompanyName: string | null;
@@ -34,12 +47,45 @@ function sameID(a: string | null | undefined, b: string | null | undefined): boo
     return String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
 }
 
+/**
+ * One row per (pipeline, linked company). A pipeline with no active link has no company to sell as,
+ * so it is left out: no deal could be saved on it.
+ */
+export function ExpandPipelinesByCompany<T extends PipelineRecord>(
+    pipelines: readonly T[],
+    links: readonly PipelineCompanyLink[],
+): (T & Pick<CompanyPipeline, 'CompanyID' | 'CompanyName'>)[] {
+    const rows: (T & Pick<CompanyPipeline, 'CompanyID' | 'CompanyName'>)[] = [];
+    for (const pipeline of pipelines) {
+        for (const link of links.filter((l) => sameID(l.PipelineID, pipeline.ID))) {
+            rows.push({ ...pipeline, CompanyID: link.CompanyID, CompanyName: link.Company });
+        }
+    }
+    return rows;
+}
+
+/** The first row for each pipeline, in the order given: for a list not scoped to one company. */
+export function DistinctPipelines<T extends CompanyPipeline>(pipelines: readonly T[]): T[] {
+    return pipelines.filter((p, i) => pipelines.findIndex((q) => sameID(q.ID, p.ID)) === i);
+}
+
 /** The pipeline marked `IsDefault`, or null when none is. */
 export function DefaultPipeline<T extends CompanyPipeline>(pipelines: readonly T[]): T | null {
     return pipelines.find((p) => p.IsDefault) ?? null;
 }
 
-/** The company of the default pipeline: the company a new deal starts in. */
+/**
+ * The order `PipelineCompany` rows are read in: oldest link first. {@link DefaultCompanyID} takes the
+ * default pipeline's first row, so once that pipeline is linked to every company the company it was
+ * first linked to stays the one a new deal starts in, rather than whichever link the database returns
+ * first.
+ */
+export const PIPELINE_LINK_ORDER = '__mj_CreatedAt ASC, ID ASC';
+
+/**
+ * The first company the default pipeline serves: the company a new deal starts in. Relies on the links
+ * being read in {@link PIPELINE_LINK_ORDER}.
+ */
 export function DefaultCompanyID(pipelines: readonly CompanyPipeline[]): string | null {
     return DefaultPipeline(pipelines)?.CompanyID ?? OrderPipelinesByCompany(pipelines)[0]?.CompanyID ?? null;
 }
@@ -69,7 +115,7 @@ export function OrderPipelinesByCompany<T extends CompanyPipeline>(pipelines: re
         || compareNames(a.Name, b.Name));
 }
 
-/** The companies that own a pipeline, default company first. */
+/** The companies with a pipeline linked to them, default company first. */
 export function PipelineCompanies(pipelines: readonly CompanyPipeline[]): PipelineCompany[] {
     const companies: PipelineCompany[] = [];
     for (const p of OrderPipelinesByCompany(pipelines)) {
@@ -80,24 +126,46 @@ export function PipelineCompanies(pipelines: readonly CompanyPipeline[]): Pipeli
     return companies;
 }
 
-/** One company's pipelines in picker order; every pipeline when `companyID` is null. */
+/** One company's pipelines in picker order; every pipeline, once each, when `companyID` is null. */
 export function PipelinesForCompany<T extends CompanyPipeline>(pipelines: readonly T[], companyID: string | null): T[] {
     const ordered = OrderPipelinesByCompany(pipelines);
-    return companyID ? ordered.filter((p) => sameID(p.CompanyID, companyID)) : ordered;
-}
-
-/** The company that owns `pipelineID`, or null when the pipeline is not in the list. */
-export function CompanyOfPipeline(pipelines: readonly CompanyPipeline[], pipelineID: string | null): string | null {
-    if (!pipelineID) return null;
-    return pipelines.find((p) => sameID(p.ID, pipelineID))?.CompanyID ?? null;
+    return companyID ? ordered.filter((p) => sameID(p.CompanyID, companyID)) : DistinctPipelines(ordered);
 }
 
 /**
- * The company to show in a company filter: the current pipeline's when it has one, else the default
- * company. A saved deal therefore opens on its own company rather than on one it is not in.
+ * The company's default pipeline: the first of its pipelines in picker order, so the `IsDefault`
+ * pipeline when it is linked to the company, else the lowest `DisplayRank`. Null when none is linked.
  */
-export function InitialCompanyID(pipelines: readonly CompanyPipeline[], pipelineID: string | null): string | null {
-    return CompanyOfPipeline(pipelines, pipelineID) ?? DefaultCompanyID(pipelines);
+export function CompanyDefaultPipeline<T extends CompanyPipeline>(pipelines: readonly T[], companyID: string | null): T | null {
+    return companyID ? (PipelinesForCompany(pipelines, companyID)[0] ?? null) : null;
+}
+
+/**
+ * The names of the companies a pipeline is linked to, joined: what names a pipeline where pipelines are
+ * hidden. Falls back to the pipeline's own name when it has no named company.
+ */
+export function PipelineCompanyNames(pipelines: readonly CompanyPipeline[], pipeline: Pick<CompanyPipeline, 'ID' | 'Name'>): string {
+    const names = OrderPipelinesByCompany(pipelines.filter((p) => sameID(p.ID, pipeline.ID)))
+        .map((p) => p.CompanyName)
+        .filter((name): name is string => !!name);
+    return names.length ? [...new Set(names)].join(', ') : pipeline.Name;
+}
+
+/** Whether `pipelineID` is linked to `companyID`. */
+export function PipelineServesCompany(
+    pipelines: readonly CompanyPipeline[],
+    pipelineID: string | null,
+    companyID: string | null,
+): boolean {
+    return !!pipelineID && !!companyID && pipelines.some((p) => sameID(p.ID, pipelineID) && sameID(p.CompanyID, companyID));
+}
+
+/**
+ * The company a deal's company picker starts on: the deal's own company when it has one, else the
+ * default company. A pipeline serves several companies, so it cannot answer this on its own.
+ */
+export function InitialCompanyID(pipelines: readonly CompanyPipeline[], dealCompanyID: string | null): string | null {
+    return dealCompanyID || DefaultCompanyID(pipelines);
 }
 
 /** "B2B (Acme)": the pipeline with its company, so the choice says who is selling. */

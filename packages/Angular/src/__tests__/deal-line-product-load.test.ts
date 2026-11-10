@@ -36,9 +36,9 @@ describe('the product picker when the catalogue cannot be read', () => {
         expect(e.ProductLoadError).toBeNull();
     });
 
-    it('renders the message under the product select', () => {
+    it('renders the message under the product box', () => {
         const at = EDITOR.indexOf('data-testid="line-product"');
-        const label = EDITOR.slice(at, EDITOR.indexOf('</label>', at));
+        const label = EDITOR.slice(at, EDITOR.indexOf('<div class="mjs-le__row">', at));
         expect(label).toMatch(/@if \(ProductLoadError\)[\s\S]*data-testid="line-product-error"[\s\S]*\{\{ ProductLoadError \}\}/);
     });
 });

@@ -1,5 +1,199 @@
 # @mj-biz-apps/sales-ng
 
+## 6.27.0
+
+### Patch Changes
+
+- 5880d0c: The Deal form's side rail shows the same items, in the same order, as before MJ 6.2: Overview, Pipeline, What's being sold, Payment schedule, Account & people, Commercial, Close, Buying team, Internal team, Motion, Activity, Stage history. MJ 6.2 folded Overview, Pipeline, Account & people, Commercial, Close and Motion into one Details item. Every Deal panel now declares `inclusion: 'Primary'`, and the claim that hides the generated field list moved from Overview to the hero.
+- Updated dependencies [edf5a94]
+  - @mj-biz-apps/sales-entities@6.27.0
+
+## 6.26.0
+
+### Minor Changes
+
+- a7aff3d: Deleting a deal works, under rules. A deal can be deleted only while it is open and has never been closed, and only when its order is not Confirmed. Holders of `MJ.BizApps.Sales.Deal.Delete` (new Sales Admin role, and Developer) can delete any such deal; holders of `MJ.BizApps.Sales.Deal.DeleteOwn` (new Sales User role) only deals they own. The deal's team, contacts, payment schedule and stage history are removed with it, and its order is deleted through orders as the system user, all in one transaction. A refused delete now says why instead of failing on a foreign key, and the Deal form shows that reason instead of "Error deleting record". New metadata: the two roles, the two authorizations, their grants, and read and delete permissions for both roles on Deals only. Neither role holds delete on any order entity, so neither can delete order rows directly.
+- 46bbe54: A new deal starts on its company's default pipeline, and a `HidePipelines` Sales application setting
+  hides pipelines across the app.
+
+  A new deal opened with the default company in the Company picker and no pipeline, so the rep had to
+  pick one. It now takes the company's default pipeline: the `IsDefault` pipeline when it is linked to
+  the company, otherwise its lowest `DisplayRank`.
+
+  `HidePipelines` ships as "false". An administrator turns it on from the new Settings page in Sales
+  (listed for users who can edit MJ's Application Settings), or in Application Settings itself. With it on, choosing a deal's company
+  always puts the deal on that company's default pipeline, and the Pipeline control, the Pipeline filter,
+  the Pipeline grid column and the Pipeline stats are gone. The board and the Open deals by stage card
+  name each tab by the companies its pipeline serves. With one pipeline, the board names no pipeline or company at all.
+
+  A company's default pipeline links are read oldest first, so when the default pipeline is linked to
+  every company, a new deal still starts in the company it was first linked to.
+
+  `scripts/consolidate-pipelines.sql` moves every deal onto one pipeline, links that pipeline to every
+  company and retires the others, for a site turning this on. It is a dry run unless run with `Apply=1`.
+
+### Patch Changes
+
+- Updated dependencies [ede0517]
+- Updated dependencies [24c0b46]
+  - @mj-biz-apps/sales-entities@6.26.0
+
+## 6.25.0
+
+### Minor Changes
+
+- 30d6104: The Deal form's Account picker finds a sales account by its acronym as a starts-with match, and shows
+  the acronym next to the website domain under the name ("NAR · nar.realtor"). Migration
+  `V202611061900` refreshes `vwSalesAccounts` and the Sales Account procedures to carry the Acronym
+  inherited from Organization (Common 5.57+) and registers its field, so saving a Sales Account no
+  longer fails with "Cannot query field Acronym". On a host where MJ Setup already registered that
+  field, the migration replaces its row.
+
+### Patch Changes
+
+- fa524d7: The deal's Activity grid no longer lists every activity in the system when the deal opens. The grid now loads only once the deal's activity filter is known (bc-aidp-next-golive#432).
+- d260a50: The deal line product picker now says when a search matches Draft products it does not offer, and
+  that they can be activated in Orders → Catalog (bc-aidp-next-golive#433).
+- 2f631b7: The order header's From row shows a "No executed agreement" warning (bc-aidp-next-golive#443) on an
+  order a won deal names when the deal has no contract, or its contract has no executed agreement
+  linked. Reversals and voided orders get no warning. Sending to Bill.com is unchanged.
+- b4c3d2e: The order header's From row names the contract by number and status, opens its executed agreement,
+  or says "Awaiting signed agreement" when the contract needs one and none is linked
+  (bc-aidp-next-golive#445). When the deal holds no `ContractID`, the contract its close created is
+  found by `CreatingRecordID`.
+- ddb39c7: A background re-read of the Deals section (after a deal save or a board drag) that takes longer than 30 seconds no longer replaces the board with a Retry panel. The board stays up and takes the new data when the slow reply lands. An explicit refresh still shows the Retry.
+- Updated dependencies [73e4527]
+- Updated dependencies [c983e92]
+  - @mj-biz-apps/sales-entities@6.25.0
+
+## 6.24.1
+
+### Patch Changes
+
+- b4fca8a: Restore the Acronym field on Sales Accounts. Sales Accounts inherit it from Organization (Common 5.57+), and the 6.24.0 generated code dropped it, so every Sales Account form failed to load with "Cannot query field Acronym". Common is now required at 5.60.0 or later, the version AIDP Next runs, so CodeGen in this repo keeps the field.
+- Updated dependencies [b4fca8a]
+  - @mj-biz-apps/sales-entities@6.24.1
+
+## 6.24.0
+
+### Minor Changes
+
+- 1ceea58: Logging an activity from a deal now lets the rep choose who it is linked to: the deal's account and primary contact start ticked and can be unticked, the billing contact and buying team can be ticked, and any other person or organization can be searched for and added. The Activity panel shows who the selected activity is linked to. `Log Activity` gains an optional `Parties` input (metadata); without it the action behaves as before. (golive #408)
+- 4a3226a: Close and lock hardening: validate caller-supplied IDs and fail closed on loss-reason and deal-type lookup errors in `Sales.CloseDeal` and `Sales.ReopenDeal`; keep client-generated `ConcessionID` across discount-concession retries so a resend after a timeout is idempotent; return a specific refusal naming the deal and contract when a close or stale pre-close save hits an already-Won deal; and allow a closed deal whose persisted `AccountID` is blank to have its account set once without reopening.
+
+### Patch Changes
+
+- Updated dependencies [da41816]
+- Updated dependencies [4a3226a]
+- Updated dependencies [c4808fa]
+- Updated dependencies [c96a138]
+  - @mj-biz-apps/sales-entities@6.24.0
+
+## 6.23.4
+
+### Patch Changes
+
+- ddb752d: The Sales board shows as soon as its deals, pipelines and stages load, without waiting for the win rate, the stage history or the grids; idle badges fill in when the stage history arrives. If the board's own reads take longer than 30 seconds, it shows the reason and a Retry instead of loading until a browser refresh.
+- 77bcd74: A saved owner or stage now shows everywhere without a browser refresh. The Sales board and dashboard re-read after any deal save in the browser, and an open deal tab reloads when another copy of its deal is saved, unless it is in edit mode or has unsaved changes.
+  - @mj-biz-apps/sales-entities@6.23.4
+
+## 6.23.3
+
+### Patch Changes
+
+- 6de2a0d: A deactivated pipeline stays on the Sales dashboard and board while it is kept in the forecast
+  (bc-aidp-next-golive#423).
+
+  `Pipeline.IsActive` now decides only whether a deal can be put in a pipeline. The Sales section's
+  pipeline list (dashboard Company and Pipeline filters, stage card, board) reads pipelines that are
+  active or have `IncludeInForecast = 1`, so a retired pipeline holding won and lost deals can be
+  deactivated without dropping out of the dashboard. The deal form still offers only active pipelines,
+  but a deal already in an inactive one keeps showing it, with its company, instead of "—".
+
+  - @mj-biz-apps/sales-entities@6.23.3
+
+## 6.23.2
+
+### Patch Changes
+
+- c1c73b9: A deal line's product is chosen from a type-ahead (name or SKU) instead of a plain list of every product. It ranks with orders' own add-product rule, lists the deal's company first, and warns before Save when the product belongs to another company, since that company books the line's revenue. Products orders marks as not sold new (`IsSellableNew` off) are no longer offered, on hosts whose orders has that column (golive#360).
+- dc2e50a: Sales app: Accounts and Contacts pages in the rail, under Customers, each listing its records with a New account / New contact button. The dashboard offers New account beside New deal.
+  - @mj-biz-apps/sales-entities@6.23.2
+
+## 6.23.1
+
+### Patch Changes
+
+- a73d09a: New Deal form: Lead Source and Lead Source Detail are offered while the deal is being created, on the Pipeline section, so a rep no longer has to save the deal and edit it again to record its source.
+  - @mj-biz-apps/sales-entities@6.23.1
+
+## 6.23.0
+
+### Minor Changes
+
+- 62e89d6: Deal: new Lead Source Detail field, the specific event, campaign or person behind the deal's lead source, as free text. The Deal form now shows Lead Source and Lead Source Detail on the Pipeline section instead of Motion. Adds a migration (Deal.LeadSourceDetail).
+
+### Patch Changes
+
+- Updated dependencies [62e89d6]
+  - @mj-biz-apps/sales-entities@6.23.0
+
+## 6.22.1
+
+### Patch Changes
+
+- 9e6d67e: Deal line: picking a revenue band for a buyer whose revenue is unknown no longer demands a price override reason. Orders 5.40.0 treats that pick as the rules' price and hides its reason box, but the deal line still asked for a reason, so the line could not be saved. Requires Orders 5.40.0.
+- Updated dependencies [9e6d67e]
+  - @mj-biz-apps/sales-entities@6.22.1
+
+## 6.22.0
+
+### Minor Changes
+
+- a279840: A discounted deal line now says where its concession stands: awaiting approval, rejected, or not recorded, with Record again on the last two, which opens the line editor to record a new one. The editor asks for a discount reason when orders' priced discount for the line is worth more than the largest Pending or Approved concession on it, instead of when the percent rose over the saved percent, so it asks again after a refused concession and when the quantity or price rises at the same percent. It asks nothing, and shows no "cannot be confirmed" notice, for a line orders records no price concession on (a product no rule prices, a renewal line). New exports from `sales-entities`: `LineDiscountNeedsConcession`, `LargestStandingConcessionValue`, `ResolveLineConcessionState`, `LoadLineConcessionRows`, `ConcessionIsPending`, `ConcessionWasRejected`. `DealLineCardRow` gains `OrderHeaderID`, `ProductPriceID` and `RenewsSubscriptionID`.
+- df7d0bb: A pipeline names the person its close-won tasks go to, and an upgrade keeps it.
+
+  The Order Review and Contract Processing tasks raised when a deal closes Won were routed to `CloseWonTasks.AssigneeRecordID` inside the pipeline's Close Won Policy. The default pipelines ship that policy in metadata with the assignee empty, and installing the app writes the shipped policy back over the database, so an assignee a deployment set there was lost on the next upgrade.
+
+  Pipelines now have a `CloseWonAssigneePersonID` column, a foreign key to People, shown on the pipeline form. The app's metadata never sets it, so an upgrade leaves it alone, and the database refuses a person who does not exist. A won close uses it ahead of the policy's assignee; when it is empty the policy value is used as before, and when both are empty the tasks are created and reported as not routed.
+
+  The demo seed sets its partner rep on the new column instead of in the policy JSON.
+
+### Patch Changes
+
+- f5dbce2: The deal form's Payment schedule panel shows the scheduled total and the remainder against the deal amount whenever the deal has instalments, and one sentence explaining a gap: an amount not yet scheduled, an amount over the deal, or an instalment with no date or no amount above zero. Amounts are compared in whole cents, so a schedule one cent off shows as off. Display only; orders' own check still decides whether the schedule reaches the order.
+- 7761d34: A deal line for a product that names no subscription type of its own, but inherits one from its product type, is now treated as a subscription, as orders' confirm treats it. The line editor shows Term start and asks whether the line is the next term of a subscription the customer already holds, and the line cards show its term start. `sales-entities` adds `WithInheritedSubscriptionType` and `E_ORDERS_PRODUCT_TYPE`, and `ProductLookup` gains `ProductTypeID` (also in `PRODUCT_LOOKUP_FIELDS`).
+- Updated dependencies [a279840]
+- Updated dependencies [7761d34]
+- Updated dependencies [df7d0bb]
+  - @mj-biz-apps/sales-entities@6.22.0
+
+## 6.21.0
+
+### Minor Changes
+
+- f5aacda: Sales bug fixes:
+
+  - Close lock: a permitted edit on a closed deal no longer rewrites its Amount (#351); order lines lock when the deal's status row is missing, as the header does (#401); a save that reopens a deal and changes a frozen field says to save the status change first (#390); a Lost close takes its loss reason and notes from the caller, not from values left on the deal (#400).
+  - Close routing: the Contract Processing task follows the close's effective policy, overrides included. `CloseWonTaskInput.PipelineID` is replaced by `CreateContract` (#354).
+  - Order vetoes read Deals as the system user, so a role that may confirm orders but not read Deals is no longer refused; its refusals do not name the deal (#423).
+  - A stage that confirms the order holds it back with a warning while a line for a product the customer already holds has no next-term answer (#426).
+  - Deal form: no duplicate order-total read (#386); saving clears the stale-amount notice when only the order changed (#399); Amount, MRR, ARR and Weighted honour field-level read security (#403); an empty Pipeline shows the required underline (#416); a deal whose status row is gone can be set to an open status (#402); the closed-deal notice names Status and Forecast Category as the form labels them (#387).
+  - Deal lines: a term start is cleared when the product changes to a non-subscription (#374); a failed product catalogue load is shown, not an empty picker (#380); the product select explains an overridden price to reps without the price grant (#408).
+  - Team and contacts: picking an Employee clears the old Person's name on the row (#437); the Sales Contact form lists the accounts the contact works at (#442); the default contact fields are labelled without "ID" (#435); a new query lists owner-role rows held by a Person (#438).
+  - Queries: Deal Type Mix leaves out open deals of pipelines flagged out of the forecast (#404); Bookings by Period parses with MJ's SQL parser (#417); Slipped Deals takes the first and last move by when each was made (#353); the No owner queue says no employee holds the owner role (#438).
+
+### Patch Changes
+
+- f2ed582: Sales now requires bizapps-common 5.51.0 or later, in `mj-app.json` and in every package's common peer range. Deal Cycle Time and Won Deals With Unconfirmed Orders call common's `fnBusinessDayOf`, which 5.51.0 added, so an install on common 5.49 or 5.50 passed the check and then failed both reports (#406).
+- 8d14db8: Deal form: picking an account warns when the selling company invoices through Bill.com and the account has no Bill.com customer ID in Orders' External Customers, since its first Bill.com invoice would create a new (possibly duplicate) customer.
+- Updated dependencies [f2ed582]
+- Updated dependencies [a3400af]
+- Updated dependencies [9daffcf]
+- Updated dependencies [f5aacda]
+- Updated dependencies [d716be7]
+  - @mj-biz-apps/sales-entities@6.21.0
+
 ## 6.20.0
 
 ### Minor Changes
