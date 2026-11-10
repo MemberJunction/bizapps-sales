@@ -118,6 +118,30 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     private stopWatchingSaves: (() => void) | null = null;
 
     /**
+     * Shows WHY a delete was refused (golive#429). The server refuses a deal delete with a reason (who
+     * may delete it, closed, confirmed order) and the reason reaches this record's latest result, but
+     * the base form's handler shows only "Error deleting record". Successes and thrown errors keep the
+     * base behaviour.
+     */
+    public override async OnDeleteRequested(): Promise<void> {
+        const record = this.record;
+        if (!record || !record.IsSaved) return;
+        let errorMsg: string;
+        try {
+            if (await record.Delete()) {
+                this.Notification.emit({ Message: 'Record deleted successfully', Type: 'success', Duration: 2500 });
+                this.RecordDeleted.emit({ EntityName: record.EntityInfo.Name, RecordId: record.PrimaryKey.ToString() });
+                return;
+            }
+            errorMsg = record.LatestResult?.Message || 'Error deleting record';
+        } catch (e) {
+            errorMsg = 'Error deleting record: ' + e;
+        }
+        this.Notification.emit({ Message: errorMsg, Type: 'error', Duration: 8000 });
+        this.RecordDeleteFailed.emit({ EntityName: record.EntityInfo.Name, ErrorMessage: errorMsg });
+    }
+
+    /**
      * Reloads this deal when another copy of it was saved (bc-aidp-next-golive#419).
      *
      * Explorer re-focuses a deal's open tab instead of loading it again, and the board's stage move

@@ -1,0 +1,26 @@
+[
+  {
+    "fields": {
+      "Name": "MJ.BizApps.Sales.Deal.Delete",
+      "ParentID": null,
+      "IsActive": true,
+      "UseAuditLog": true,
+      "Description": "Delete any open deal that was never closed, with its unconfirmed order. Parent of MJ.BizApps.Sales.Deal.DeleteOwn, so it implies it."
+    },
+    "primaryKey": {
+      "ID": "9BDAB69E-6549-4584-9FD6-045180D42E8B"
+    }
+  },
+  {
+    "fields": {
+      "Name": "MJ.BizApps.Sales.Deal.DeleteOwn",
+      "ParentID": "@lookup:MJ: Authorizations.Name=MJ.BizApps.Sales.Deal.Delete",
+      "IsActive": true,
+      "UseAuditLog": true,
+      "Description": "Delete an open, never-closed deal the user owns (Deal.OwnerEmployeeID is the user's Employee), with its unconfirmed order."
+    },
+    "primaryKey": {
+      "ID": "1449CB31-3384-4FC8-8066-F89C9FB70A40"
+    }
+  }
+]
