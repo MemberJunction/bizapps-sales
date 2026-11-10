@@ -43,6 +43,7 @@ import { LinkedParties, type ActivityLinkFields, type LinkedParty } from '../act
 import { RelatedRecordTarget, SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import {
+    CompanyDefaultPipeline,
     CompanyLabel,
     InitialCompanyID,
     OrderPipelinesByCompany,
@@ -50,6 +51,7 @@ import {
     PipelineLabel,
     PipelineServesCompany,
     PipelinesForCompany,
+    PIPELINE_LINK_ORDER,
     type CompanyPipeline,
     type PipelineCompany,
 } from '../data/company-pipelines';
@@ -63,6 +65,7 @@ import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './de
 import { IsFieldReadable } from './field-readable';
 import { SelectableStages } from '../data/selectable-stages';
 import { BillComCustomerWarning, CheckBillComCustomer } from '../data/billcom-customer';
+import { SalesSettings } from '../data/sales-settings';
 
 const E = MJS_ENTITIES.Deal;
 
@@ -175,6 +178,9 @@ async function LoadPipelines(): Promise<PipelineOption[]> {
             // Inactive links too, for the same reason as inactive pipelines: a deal on a retired link
             // still has to show its company.
             EntityName: MJS_ENTITIES.PipelineCompany,
+            // Oldest link first, so the default company stays the one the default pipeline was first
+            // linked to when it is later linked to every company (see `DefaultCompanyID`).
+            OrderBy: PIPELINE_LINK_ORDER,
             ResultType: 'simple',
             Fields: ['PipelineID', 'CompanyID', 'Company', 'IsActive'],
         },
@@ -1206,7 +1212,9 @@ const FIELD_STYLES = `
                                 </div>
                             </div>
                             <div><div class="l">Stage</div><div class="v">{{ G('PipelineStage') || '—' }}</div></div>
-                            <div><div class="l">Pipeline</div><div class="v">{{ G('Pipeline') || '—' }}</div></div>
+                            @if (ShowPipelineRow) {
+                                <div><div class="l">Pipeline</div><div class="v">{{ G('Pipeline') || '—' }}</div></div>
+                            }
                             <div><div class="l">Type</div><div class="v">{{ G('DealType') || '—' }}</div></div>
                             <div><div class="l">Selling as</div><div class="v">{{ G('Company') || '—' }}</div></div>
                             <!-- WHY A DEAL WAS LOST is the single most useful thing on a lost deal, and
@@ -1354,6 +1362,14 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
      */
     private readonly businessZoneLoaded = signal(false);
 
+    /** The `HidePipelines` setting. */
+    public readonly HidePipelines = signal(SalesSettings.HidePipelinesIfLoaded);
+
+    /** Whether the overview names the pipeline. `?.()` for the `Object.create` reason given above. */
+    public get ShowPipelineRow(): boolean {
+        return !this.HidePipelines?.();
+    }
+
     /**
      * THE ZONE IS LOADED BEFORE THIS PANEL IS ASKED WHAT DAY IT IS (bc-aidp-next-golive#168).
      *
@@ -1372,8 +1388,12 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
      * BaseFormPanel declares no lifecycle hook, so there is nothing to chain to.
      */
     public async ngOnInit(): Promise<void> {
-        await BusinessTimeZoneEngine.Instance.Config(false);
+        const [, hidePipelines] = await Promise.all([
+            BusinessTimeZoneEngine.Instance.Config(false),
+            SalesSettings.LoadHidePipelines(),
+        ]);
         this.businessZoneLoaded.set(true);
+        this.HidePipelines.set(hidePipelines);
     }
 
     /**
@@ -1661,7 +1681,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent],
     styles: [FIELD_STYLES],
     template: `
-        <mj-collapsible-panel SectionKey="pipeline" SectionName="Pipeline" Icon="fa-solid fa-diagram-project"
+        <mj-collapsible-panel SectionKey="pipeline" [SectionName]="HidePipelines() ? 'Stage' : 'Pipeline'" Icon="fa-solid fa-diagram-project"
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
                 @for (f of Fields; track FieldTrackKey(f)) {
@@ -1704,7 +1724,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 <!-- COMPANY FIRST, then its pipelines (#327). Writes Deal.CompanyID and narrows the
                      Pipeline list to the pipelines linked to that company; a current pipeline the
                      company does not use moves to its first one. Hidden when one company has every
-                     pipeline, where it would offer no choice and SetPipeline fills the company. -->
+                     pipeline, where it would offer no choice and SetPipeline fills the company.
+                     With pipelines hidden (the HidePipelines setting) this is the only choice: the
+                     company's default pipeline follows it, and the Pipeline control below is gone. -->
                 @if (EditMode && FieldEditable('PipelineID') && CompanyOptions.length > 1) {
                     <div class="mjs-field" data-field="PipelineCompany">
                         <div class="mj-forms-field mj-forms-field--editing">
@@ -1720,6 +1742,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                     </div>
                 }
 
+                @if (!HidePipelines()) {
                 <div class="mjs-field" data-field="PipelineID">
                     <!-- The editing modifier class is MJ's own marker for a field it is currently
                          letting you edit, and FieldIsEditable in the Explorer harness reads exactly
@@ -1749,6 +1772,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                         }
                     </div>
                 </div>
+                }
 
                 <div class="mjs-field" data-field="PipelineStageID">
                     <!-- The editing modifier class is MJ's own marker for a field it is currently
@@ -1772,7 +1796,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                 <!-- Says which of the two it is. An empty disabled control otherwise
                                      reads as "broken" whether the pipeline is unset or has no stages. -->
                                 <div class="mjs-hint" data-testid="stage-hint">
-                                    {{ Record.PipelineID ? 'This pipeline has no active stages.' : 'Choose a pipeline first.' }}
+                                    {{ Record.PipelineID ? (HidePipelines() ? 'This company has no active stages.' : 'This pipeline has no active stages.') : (HidePipelines() ? 'Choose a company first.' : 'Choose a pipeline first.') }}
                                 </div>
                             }
                         } @else {
@@ -1946,6 +1970,13 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     private readonly pipelines = signal<PipelineOption[]>([]);
     private readonly stages = signal<PipelineStageOption[]>([]);
 
+    /**
+     * The `HidePipelines` setting. A signal for the reason `statuses` is one. Starts from the engine when
+     * it is already loaded: the form's rail takes this panel's name when it is first built, so a name
+     * that changed only after `ngOnInit` read the setting stayed "Pipeline" there.
+     */
+    public readonly HidePipelines = signal(SalesSettings.HidePipelinesIfLoaded);
+
     public async ngOnInit(): Promise<void> {
         // BaseFormPanel declares no lifecycle hook, so there is nothing to chain to. Angular calls this
         // on the component regardless of whether the base class has one.
@@ -1954,6 +1985,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
             LoadLossReasons(),
             LoadPipelines(),
             LoadPipelineStages(),
+            SalesSettings.LoadHidePipelines(),
         ]);
         const valueOf = <T>(r: PromiseSettledResult<T>): T | null =>
             r.status === 'fulfilled' ? r.value : null; // vocabulary-grep-allow: PromiseSettledResult discriminant, not a domain status
@@ -1974,6 +2006,8 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         if (loadedStages) {
             this.stages.set(loadedStages);
         }
+        this.HidePipelines.set(valueOf(settled[4] as PromiseSettledResult<boolean>) ?? false);
+        this.FillDefaultPipeline();
 
         if (!loadedStatuses || !loadedReasons || !loadedPipelines || !loadedStages) {
             this.ActionFailed = true;
@@ -2014,15 +2048,30 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     }
 
     /**
-     * Sets the deal's company, and moves the deal to the company's first pipeline when its current one
-     * does not serve that company (which clears a stage the old pipeline owned).
+     * Puts a deal with no pipeline on the selected company's default pipeline, writing that company too.
+     *
+     * A new deal opened with the default company showing in the Company picker and an empty Pipeline, so
+     * the rep had to choose a pipeline the company already implied. Keyed on the absent pipeline rather
+     * than on newness, as `company-from-pipeline.ts` explains for the company.
+     */
+    public FillDefaultPipeline(): void {
+        if (!this.Record || this.Record.PipelineID || !this.EditMode || !this.FieldEditable('PipelineID')) return;
+        const company = this.SelectedCompanyID;
+        if (company) this.SetCompany(company);
+    }
+
+    /**
+     * Sets the deal's company, and moves the deal to the company's default pipeline when its current one
+     * does not serve that company (which clears a stage the old pipeline owned). With pipelines hidden the
+     * deal always moves to the default, since the rep has no other way to choose a pipeline.
      */
     public SetCompany(companyID: string | null): void {
         if (!this.Record || !companyID) return;
         this.Record.CompanyID = companyID;
-        if (!PipelineServesCompany(this.offeredPipelines, this.Record.PipelineID ?? null, companyID)) {
-            const first = PipelinesForCompany(this.offeredPipelines, companyID)[0];
-            if (first) this.SetPipeline(first.ID);
+        const fallback = CompanyDefaultPipeline(this.offeredPipelines, companyID);
+        const keep = !this.HidePipelines() && PipelineServesCompany(this.offeredPipelines, this.Record.PipelineID ?? null, companyID);
+        if (fallback && !keep && fallback.ID.toLowerCase() !== String(this.Record.PipelineID ?? '').toLowerCase()) {
+            this.SetPipeline(fallback.ID);
         }
         // The Bill.com customer is per company.
         if (this.Record.AccountID) void this.CheckBillComCustomer();
