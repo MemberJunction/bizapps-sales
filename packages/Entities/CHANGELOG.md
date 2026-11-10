@@ -1,5 +1,12 @@
 # @mj-biz-apps/sales-entities
 
+## 6.26.0
+
+### Minor Changes
+
+- ede0517: Move to MemberJunction's 6.2 LTS line: every `@memberjunction/*` range and the core/global overrides are `^6.2.1` (exact `6.2.1` devDependency anchors), and `mjVersionRange` is `>=6.2.1 <7.0.0`. Hosts must run MJ 6.2.1 or later to install this release.
+- 24c0b46: The 6.26 Metadata_Sync ships the HidePipelines Sales application setting ("false"), so a host that upgrades by migration gets it as one that ran `mj sync push` does. It is create-only: a host that already has the setting keeps its value. It has a Postgres counterpart.
+
 ## 6.25.0
 
 ### Minor Changes
