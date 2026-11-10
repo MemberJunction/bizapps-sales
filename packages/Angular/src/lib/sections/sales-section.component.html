@@ -289,6 +289,10 @@
             <h2>All deals</h2>
             <span class="r">Every deal, with the same columns as the dashboard's deal list — grid, cards, or timeline</span>
           </div>
+          <!-- The section's filter lists without the period: All Deals lists every deal (bc-aidp-next-golive#453). -->
+          @if (Page === 'list') {
+            <ng-container *ngTemplateOutlet="filterBar"></ng-container>
+          }
 
           @if (Loading || DetailLoading) {
             <mj-loading></mj-loading>
