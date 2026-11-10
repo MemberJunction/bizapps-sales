@@ -5,9 +5,11 @@
  *   Overview (exec briefing) · Pipeline · What's being sold · Payment schedule · Account · Commercial
  *   Close · Buying team · Internal team · Motion · Activity · Stage history
  *
- * `replacesSectionKey: 'details'` hides the generated field list. `contributionKey` equals each
- * panel's `SectionKey` so left-nav rail items attach. Overview is the only `inclusion: 'Primary'`
- * so it leads; the rest sort into the related band by `sortKey` (descending).
+ * The hero's `replacesSectionKey: 'details'` hides the generated field list. `contributionKey` equals
+ * each panel's `SectionKey` so left-nav rail items attach. Every panel declares `inclusion: 'Primary'`:
+ * MJ 6.2 files a panel at a field slot inside the Details rail item unless it declares an
+ * inclusion, and Primary panels lead the rail in `sortKey` order (descending), so the rail reads
+ * Overview, Pipeline, What's being sold, ... in the order it had before 6.2.
  *
  * @module @mj-biz-apps/sales-ng
  */
@@ -1124,7 +1126,6 @@ const FIELD_STYLES = `
         sortKey: 200,
         contributionKey: 'overview',
         inclusion: 'Primary',
-        replacesSectionKey: 'details',
     },
 })
 @Component({
@@ -1672,7 +1673,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     // Overview is an exec briefing and stays the lead for a SAVED deal, which is what it is for;
     // on a record with no data it is a page of blanks the user has to look past to find where
     // typing starts. This is the first panel that asks for anything.
-    metadata: { entity: E, slot: 'after-fields', sortKey: 90, contributionKey: 'pipeline', leadsWhenUnsaved: true },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 90, contributionKey: 'pipeline', leadsWhenUnsaved: true, inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-pipeline-panel',
@@ -2639,7 +2640,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-party',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 80, contributionKey: 'party' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 80, contributionKey: 'party', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-party-panel',
@@ -2805,7 +2806,7 @@ const COMMERCIAL_FIELDS: DealFieldSpec[] = [
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-commercial',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 70, contributionKey: 'commercial' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 70, contributionKey: 'commercial', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-commercial-panel',
@@ -2847,7 +2848,7 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-lines',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-related', sortKey: 89, contributionKey: 'lines' },
+    metadata: { entity: E, slot: 'after-related', sortKey: 89, contributionKey: 'lines', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-lines-panel',
@@ -3069,7 +3070,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-motion',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 48, contributionKey: 'motion' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 48, contributionKey: 'motion', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-motion-panel',
@@ -3138,7 +3139,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-close',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 60, contributionKey: 'close' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 60, contributionKey: 'close', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-close-panel',
@@ -3692,7 +3693,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
     key: 'sales:deal-related-internal-team',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 50, contributionKey: 'internal-team',
+        entity: E, slot: 'after-related', sortKey: 50, contributionKey: 'internal-team', inclusion: 'Primary',
         relatedEntity: MJS_ENTITIES.DealTeamMember, relatedJoinField: 'DealID',
     },
 })
@@ -3785,7 +3786,7 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-buying-team',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 52, contributionKey: 'buying-team',
+        entity: E, slot: 'after-related', sortKey: 52, contributionKey: 'buying-team', inclusion: 'Primary',
         relatedEntity: MJS_ENTITIES.DealContactRole, relatedJoinField: 'DealID',
     },
 })
@@ -3824,7 +3825,7 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-activity',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 46, contributionKey: 'activity',
+        entity: E, slot: 'after-related', sortKey: 46, contributionKey: 'activity', inclusion: 'Primary',
         relatedEntity: MJS_FOREIGN_ENTITIES.ActivityLink, relatedJoinField: 'RecordID',
     },
 })
@@ -4020,7 +4021,7 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-stage-history',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 44, contributionKey: 'stage-history',
+        entity: E, slot: 'after-related', sortKey: 44, contributionKey: 'stage-history', inclusion: 'Primary',
         relatedEntity: MJS_ENTITIES.DealStageEvent, relatedJoinField: 'DealID',
     },
 })
@@ -4074,7 +4075,7 @@ export const SCHEDULE_DATE_ORDER = 'CASE WHEN PaymentDate IS NULL THEN 0 ELSE 1 
     key: 'sales:deal-related-payment-schedule',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 88, contributionKey: 'payment-schedule',
+        entity: E, slot: 'after-related', sortKey: 88, contributionKey: 'payment-schedule', inclusion: 'Primary',
         relatedEntity: MJS_ENTITIES.DealPaymentSchedule, relatedJoinField: 'DealID',
     },
 })
