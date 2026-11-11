@@ -273,9 +273,22 @@ const DEBOUNCE_MS = 250;
                 cursor: pointer;
                 color: var(--mj-text-muted);
             }
+            /*
+             * ONE HEIGHT FOR EVERY STATE. The body held whatever was in it, so the dialog grew and
+             * shrank as results arrived, emptied, or gave way to the create block -- and it did it
+             * at the exact moment the pointer was travelling toward a row. A fixed body turns that
+             * into whitespace: the list scrolls inside it, the create block sits in the same space,
+             * and the footer never moves under the cursor.
+             *
+             * min() rather than a flat height so a short viewport shrinks it instead of pushing the
+             * footer off screen; the shell's own max-height then has nothing left to clamp.
+             */
             .mjs-pp__body {
+                flex: 0 0 auto;
+                height: min(340px, 50vh);
+                box-sizing: border-box;
                 padding: var(--mj-space-4) var(--mj-space-5);
-                overflow: auto;
+                overflow-y: auto;
             }
             .mjs-pp__search {
                 width: 100%;

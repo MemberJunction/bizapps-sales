@@ -1,5 +1,8 @@
 import '@angular/compiler';
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
     MJSPromotePartyDialog,
     PROMOTE_KINDS,
@@ -336,5 +339,34 @@ describe('creating one that does not exist at all', () => {
         expect(h.promoted).toEqual([]);
         expect(h.closed).toBe(0);
         expect(h.d.Error()).toBe('Name is already taken');
+    });
+});
+
+describe('the dialog keeps one height', () => {
+    const source = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), '../lib/form-panels/promote-party-dialog.component.ts'),
+        'utf8',
+    );
+
+    /**
+     * The body used to size to its contents, so the dialog jumped as results arrived, emptied, or
+     * gave way to the create block -- while the pointer was already moving toward a row. Pinning the
+     * body is what turns that into whitespace, so it is pinned here too: a later edit that makes the
+     * height elastic again fails this rather than being noticed by whoever clicks the wrong row.
+     */
+    it('pins the body height and scrolls inside it', () => {
+        const body = source.match(/\.mjs-pp__body \{[^}]*\}/)?.[0] ?? '';
+        expect(body).toMatch(/height:\s*min\(/);
+        expect(body).toMatch(/overflow-y:\s*auto/);
+        expect(body).not.toMatch(/max-height:\s*none/);
+    });
+
+    it('keeps the footer out of the scrolling area', () => {
+        // The confirm button must not move with the results; it lives outside the body.
+        const bodyIdx = source.indexOf('class="mjs-pp__body"');
+        const footIdx = source.indexOf('class="mjs-pp__foot"');
+        expect(bodyIdx).toBeGreaterThan(-1);
+        expect(footIdx).toBeGreaterThan(bodyIdx);
+        expect(source.slice(bodyIdx, footIdx)).toContain('</div>');
     });
 });
