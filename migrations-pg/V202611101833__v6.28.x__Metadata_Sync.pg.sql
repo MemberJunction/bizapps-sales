@@ -50,14 +50,9 @@ DECLARE
 BEGIN
   p_ID_aa249e805c8d := '41FF0F8F-D263-407B-9164-2C5BDE21D8B7';
   p_Name_aa249e805c8d := 'Sales: Confirmed Orders Missing Agreement';
-  p_CategoryID_aa249e805c8d := (
-    SELECT
-      "ID"
-    FROM
-      "${mjSchema}"."QueryCategory"
-    WHERE
-      LOWER("Name") = LOWER('Sales')
-  );
+  -- The Sales query category this app ships, found by name with its own ID first: a database can
+  -- hold more than one category named Sales.
+  p_CategoryID_aa249e805c8d := COALESCE((SELECT "ID" FROM "${mjSchema}"."QueryCategory" WHERE "Name" = 'Sales' ORDER BY CASE WHEN "ID" = '5A1E5000-0000-4000-A000-000000000001' THEN 0 ELSE 1 END LIMIT 1), '5A1E5000-0000-4000-A000-000000000001');
   p_UserQuestion_aa249e805c8d := 'Which confirmed orders have no deal, no contract, or no executed contract, so should not be invoiced yet?';
   p_Description_aa249e805c8d := 'Confirmed orders that have no deal, no contract, no signed date on the contract, or no file in the Executed Agreement category. Web orders, returns, subscription auto-renewals and migrated orders are left out, and Payment Link orders are checked for a deal only.';
   p_SQL_aa249e805c8d := '-- Confirmed orders with no deal, no contract, or no executed contract. golive #388.
