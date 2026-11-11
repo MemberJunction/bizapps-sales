@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BaseEntity } from '@memberjunction/core';
 import {
+    CreateParty,
     PROMOTIONS,
     PromoteParty,
     ProspectAccountTypeID,
@@ -200,5 +201,64 @@ describe('ProspectAccountTypeID', () => {
         ];
         expect(ProspectAccountTypeID(rows)).toBe('a-first');
         expect(ProspectAccountTypeID([...rows].reverse())).toBe('a-first');
+    });
+});
+
+describe('CreateParty', () => {
+    it('builds the child, sets non-blank fields, and saves parent + child without AttachToParent', async () => {
+        const child = fakeChild();
+        const outcome = await CreateParty(
+            PROMOTIONS.Account.Child,
+            { Name: 'Zephyr Logistics', AccountTypeID: 'at-prospect' },
+            { OpenChild: async () => child.entity },
+        );
+
+        expect(outcome).toEqual({ Kind: 'Promoted', ID: 'org-1' });
+        expect(child.attachedTo).toEqual([]);
+        expect(child.calls).toEqual(['NewRecord', 'Set:Name', 'Set:AccountTypeID', 'Save']);
+        expect(child.sets).toEqual({ Name: 'Zephyr Logistics', AccountTypeID: 'at-prospect' });
+    });
+
+    it('skips null, undefined and whitespace-only values', async () => {
+        const child = fakeChild();
+        await CreateParty(
+            PROMOTIONS.Contact.Child,
+            { FirstName: 'Grace', LastName: 'Hopper', AccountTypeID: null, Territory: undefined, Notes: '   ' },
+            { OpenChild: async () => child.entity },
+        );
+
+        expect(child.sets).toEqual({ FirstName: 'Grace', LastName: 'Hopper' });
+        expect(child.calls).toEqual(['NewRecord', 'Set:FirstName', 'Set:LastName', 'Save']);
+    });
+
+    it("passes a refused save's own message through", async () => {
+        const child = fakeChild({ save: false, refusal: 'LastName cannot be null' });
+        const outcome = await CreateParty(
+            PROMOTIONS.Contact.Child,
+            { FirstName: 'Grace' },
+            { OpenChild: async () => child.entity },
+        );
+
+        expect(outcome).toEqual({ Kind: 'Failed', Message: 'LastName cannot be null' });
+    });
+
+    it('reports a missing entity or a thrown save as Failed', async () => {
+        const missing = await CreateParty(
+            PROMOTIONS.Account.Child,
+            { Name: 'Zephyr' },
+            { OpenChild: async () => null },
+        );
+        expect(missing).toEqual({ Kind: 'Failed', Message: 'Could not open MJ_BizApps_Sales: Sales Accounts.' });
+
+        const throwing = await CreateParty(
+            PROMOTIONS.Account.Child,
+            { Name: 'Zephyr' },
+            {
+                OpenChild: async () => {
+                    throw new Error('provider offline');
+                },
+            },
+        );
+        expect(throwing).toEqual({ Kind: 'Failed', Message: 'provider offline' });
     });
 });

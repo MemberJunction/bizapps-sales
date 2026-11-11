@@ -390,6 +390,7 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
         RunPromotableLookup;
     public Promote: typeof PromoteParty = PromoteParty;
     public Create: typeof CreateParty = CreateParty;
+    public Prefill: PromotePrefillReader = () => this.Config.Prefill();
 
     private timer: ReturnType<typeof setTimeout> | null = null;
     private opener: HTMLElement | null = null;
@@ -486,7 +487,7 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
         this.Busy.set(true);
         this.Error.set(null);
         try {
-            this.Apply(await this.Promote(this.Config.ChildEntity, row.ID, await this.Config.Prefill()), row);
+            this.Apply(await this.Promote(this.Config.ChildEntity, row.ID, await this.Prefill()), row);
         } finally {
             this.Busy.set(false);
         }
@@ -494,9 +495,9 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
 
     // ── Creating one that does not exist at all ───────────────────────────────
 
-    /** Offered only once a search has run and found nothing — never as a first resort. */
+    /** Offered only once a search has run and found nothing — never as a first resort, and never when the search failed. */
     public CanOfferCreate(): boolean {
-        return !!this.Params() && !this.Searching() && this.Rows().length === 0;
+        return !!this.Params() && !this.Searching() && !this.Error() && this.Rows().length === 0;
     }
 
     /**
@@ -540,7 +541,7 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
                     : { Name: this.Term().trim() };
             const outcome = await this.Create(this.Config.ChildEntity, {
                 ...fields,
-                ...(await this.Config.Prefill()),
+                ...(await this.Prefill()),
             });
             if (outcome.Kind === 'Promoted') {
                 this.PartyChosen.emit(outcome.ID);
@@ -596,6 +597,10 @@ export async function RunPromotableLookup(
         CategoryPath: 'Sales',
         Parameters: domain ? { Term: term, Domain: domain } : { Term: term },
     });
-    if (!result?.Success) return [];
+    if (!result?.Success) {
+        // RunQuery reports failures as `{ Success: false }` rather than throwing. Returning `[]`
+        // here would tell the dialog there were no matches and offer to create a duplicate.
+        throw new Error(result?.ErrorMessage || `Query '${queryName}' failed.`);
+    }
     return (result.Results ?? []) as PromotableRow[];
 }

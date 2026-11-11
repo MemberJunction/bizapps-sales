@@ -35,7 +35,7 @@ function harness(
     kind: 'Account' | 'Contact' = 'Account',
     rows: readonly PromotableRow[] = [ROW],
     outcome: PromoteOutcome = { Kind: 'Promoted', ID: 'org-9' },
-    prefill: Record<string, unknown> = { AccountTypeID: 'at-prospect' },
+    prefill: Record<string, unknown> = kind === 'Account' ? { AccountTypeID: 'at-prospect' } : {},
 ): Harness {
     const d = new MJSPromotePartyDialog();
     d.PromoteKind = kind;
@@ -52,8 +52,7 @@ function harness(
         promotions.push([childEntity, parentID, (fields ?? {}) as Record<string, unknown>]);
         return outcome;
     };
-    // The prefill lives on the kind config; override it for the duration of the test.
-    PROMOTE_KINDS[kind].Prefill = async () => prefill;
+    d.Prefill = async () => prefill;
     d.PartyChosen.subscribe((id) => promoted.push(id));
     d.Closed.subscribe(() => (closed += 1));
 
@@ -143,6 +142,9 @@ describe('the promote dialog search', () => {
 
         expect(h.d.Rows()).toEqual([]);
         expect(h.d.Error()).toBe('The search failed. Try again.');
+        // A failed search must NOT offer Create — that would invite the duplicate this dialog prevents.
+        expect(h.d.CanOfferCreate()).toBe(false);
+        expect(h.d.CanCreate()).toBe(false);
     });
 });
 
@@ -160,6 +162,19 @@ describe('the promote dialog promotion', () => {
 
         expect(h.promotions).toEqual([['MJ_BizApps_Sales: Sales Accounts', 'org-9', { AccountTypeID: 'at-prospect' }]]);
         expect(h.promoted).toEqual(['org-9']);
+        expect(h.closed).toBe(1);
+    });
+
+    it('promotes a Contact with no prefill fields', async () => {
+        const contactRow: PromotableRow = { ID: 'person-9', Name: 'Grace Hopper', Detail: 'grace@navy.example', IsSalesParty: false };
+        const h = harness('Contact', [contactRow], { Kind: 'Promoted', ID: 'person-9' });
+        h.d.OnTermChange('grace');
+        await h.d.RunSearch();
+        h.d.Choose(contactRow);
+        await h.d.Confirm();
+
+        expect(h.promotions).toEqual([['MJ_BizApps_Sales: Sales Contacts', 'person-9', {}]]);
+        expect(h.promoted).toEqual(['person-9']);
         expect(h.closed).toBe(1);
     });
 
@@ -319,9 +334,8 @@ describe('creating one that does not exist at all', () => {
         await h.d.RunSearch();
         await h.d.CreateNew();
 
-        expect(created[0]).toMatchObject({ FirstName: 'Juan', LastName: 'Carlos de la Cruz' });
-        // Never written: it is a persisted computed column on Person.
-        expect(Object.keys(created[0])).not.toContain('DisplayName');
+        // Exact match: no DisplayName (persisted computed column on Person) and no AccountTypeID prefill.
+        expect(created[0]).toEqual({ FirstName: 'Juan', LastName: 'Carlos de la Cruz' });
     });
 
     it('refuses a one-word person rather than inventing a last name', async () => {
