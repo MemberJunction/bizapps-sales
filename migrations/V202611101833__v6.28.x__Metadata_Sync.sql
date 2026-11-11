@@ -18,7 +18,10 @@
 -- build database had no AI credentials for the field-description pass. The created row keeps
 -- ExtractionStatus OK; descriptions are empty, as the push left them.
 --
--- TRANSFORMS: `[${mjSchema}].` -> `[${mjSchema}].` on the SP calls and lookups. The query SQL names this
+-- CATEGORY: the query's category resolves to this app's Sales category, its ID first and then by
+-- name, not by name alone: a database can hold more than one category named Sales.
+--
+-- TRANSFORMS: `[__mj].` -> `[${mjSchema}].` on the SP calls and lookups. The query SQL names this
 -- app's and sibling apps' schemas literally, as earlier query seeds do. Idempotent.
 -- =============================================================================================
 
@@ -61,14 +64,10 @@ SET
 SET
   @Name_aa249e805c8d = N'Sales: Confirmed Orders Missing Agreement'
 SET
-  @CategoryID_aa249e805c8d = (
-    SELECT
-      [ID]
-    FROM
-      [${mjSchema}].[QueryCategory]
-    WHERE
-      LOWER([Name]) = LOWER(N'Sales')
-  )
+  @CategoryID_aa249e805c8d = '5A1E5000-0000-4000-A000-000000000001'
+-- The Sales query category this app ships (metadata/query-categories), found by name with its own
+-- ID first: a database can hold more than one category named Sales.
+SELECT TOP 1 @CategoryID_aa249e805c8d = [ID] FROM [${mjSchema}].[QueryCategory] WHERE [Name] = N'Sales' ORDER BY CASE WHEN [ID] = @CategoryID_aa249e805c8d THEN 0 ELSE 1 END
 SET
   @UserQuestion_aa249e805c8d = N'Which confirmed orders have no deal, no contract, or no executed contract, so should not be invoiced yet?'
 SET
