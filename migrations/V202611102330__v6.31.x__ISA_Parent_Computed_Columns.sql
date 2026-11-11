@@ -22,20 +22,31 @@
 --
 -- ONE PASS, AND WHY THAT IS WORTH SAYING. A first capture of this same drift took three passes to
 -- settle (2626 lines, then 2067, then 884). That churn was not the one-pass lag in KNOWN-ISSUES
--- (KI-7) -- it was a name-field flip rewriting the same views twice. CodeGen's reconciler runs
--- `UPDATE EntityField SET IsNameField = 1 WHERE ID = <its own pick> AND AutoUpdateIsNameField = 1`,
--- which SETS but never CLEARS, so its pick is ADDED alongside a pinned one. Sales Contacts ended up
--- with two fields flagged IsNameField, and the view generator takes the lower Sequence: FirstName at
--- 12 beat the pinned DisplayNameAndEmail at 34. Every denormalized contact-name column in the schema
--- was then regenerated to join FirstName -- SalesContact on Deal Contact Roles, PrimaryContact and
--- BillingContact on Deals, DefaultPrimaryContact and DefaultBillingContact on Sales Accounts --
--- turning nvarchar(753) into nvarchar(100) and showing a bare first name on every deal and account
--- surface. It also inverted golive#259 exactly, since that fix is built by SUBTRACTING the name field
--- from the picker's column plan. `metadata/entity-fields/.sales-contact-name-field.json` clears both
--- flags on FirstName so the pin holds on every host; this file was captured with that pin in place,
--- and the reconciler emits no IsNameField write at all. Nothing in the suite asserts on a contact's
--- rendered name, so the broken version regenerated green -- it was caught by reading a
--- @MaxLength(753) -> @MaxLength(100) change in the generated GraphQL schema.
+-- (KI-7) -- it was a name-field flip rewriting the same views twice, and the mechanism is worth
+-- recording because it is not the obvious one.
+--
+-- CodeGen picks ONE name field per entity and clears every other flagged field. It clears only
+-- fields with AutoUpdateIsNameField = 1, because a PINNED field is deliberately never touched in
+-- either direction (MJ CodeGenLib `manage-metadata.ts`, applyNameFieldUpdates). Sales Contacts'
+-- pinned DisplayNameAndEmail is also INELIGIBLE TO WIN: isFieldEligibleForNameField rejects any
+-- IsVirtual field that is not an inherited IS-A column, and DisplayNameAndEmail is a sales-only
+-- concat defined in vwSalesContactsGenerated -- it is not a column on Person, so it is virtual
+-- WITHOUT being inherited. The eligible-flagged set was therefore empty, the reconciler fell through
+-- to its AI-ranked candidates and picked FirstName (an inherited Person column, hence eligible), set
+-- IsNameField on it, and could not clear the pinned one. TWO fields ended up flagged, against that
+-- method's own documented "single winner, always", and the view generator takes the lower Sequence:
+-- FirstName at 12 beat DisplayNameAndEmail at 34.
+--
+-- WHAT THAT COST, measured: every denormalized contact-name column in the schema was regenerated to
+-- join FirstName -- SalesContact on Deal Contact Roles, PrimaryContact and BillingContact on Deals,
+-- DefaultPrimaryContact and DefaultBillingContact on Sales Accounts -- turning nvarchar(753) into
+-- nvarchar(100) and showing a bare first name on every deal and account surface. It also inverted
+-- golive#259 exactly, since that picker fix is built by SUBTRACTING the name field from the column
+-- plan. `metadata/entity-fields/.sales-contact-name-field.json` clears both flags on FirstName so it
+-- can no longer be auto-picked, leaving the pinned field as the only one flagged; this file was
+-- captured with that pin in place. Nothing in the suite asserts on a contact's rendered name, so the
+-- broken version regenerated green -- it was caught by reading a @MaxLength(753) -> @MaxLength(100)
+-- change in the generated GraphQL schema.
 --
 -- VERIFIED END STATE on the generating database: vwSalesAccounts.WebsiteDomain,
 -- vwSalesContactsGenerated.DisplayName + .EmailDomain, and -- because CodeGen emits

@@ -14,11 +14,16 @@ single CodeGen pass against MJ core v6.2.1; a second pass emitted nothing, and a
 to a clean pre-drift database and regenerating emitted no SQL at all.
 
 `metadata/entity-fields/.sales-contact-name-field.json` clears `IsNameField` and
-`AutoUpdateIsNameField` on `Sales Contacts.FirstName`. CodeGen's reconciler sets `IsNameField = 1` on
-its own pick but never clears the previous one, so on the pass that added the two inherited Person
-columns it flagged `FirstName` *alongside* the pinned `DisplayNameAndEmail`, and the view generator
-takes the lower Sequence. Every denormalized contact-name column in the schema was then regenerated to
-join `FirstName` — `SalesContact` on Deal Contact Roles, `PrimaryContact`/`BillingContact` on Deals,
+`AutoUpdateIsNameField` on `Sales Contacts.FirstName`, so the pinned `DisplayNameAndEmail` stays the
+only flagged name field. CodeGen picks one name field per entity and clears the others, but only those
+with `AutoUpdateIsNameField = 1` — a pinned field is never touched in either direction. The pinned
+field here is also ineligible to win, because `isFieldEligibleForNameField` rejects any `IsVirtual`
+field that is not an inherited IS-A column and `DisplayNameAndEmail` is a sales-only concat in
+`vwSalesContactsGenerated` rather than a column on `Person`. So on the pass that added the two
+inherited Person columns, the reconciler fell through to its AI-ranked candidates, picked `FirstName`,
+and could not clear the pinned one — leaving two fields flagged, with the view generator taking the
+lower `Sequence`. Every denormalized contact-name column in the schema was then regenerated to join
+`FirstName` — `SalesContact` on Deal Contact Roles, `PrimaryContact`/`BillingContact` on Deals,
 `DefaultPrimaryContact`/`DefaultBillingContact` on Sales Accounts — narrowing `nvarchar(753)` to
 `nvarchar(100)` and showing a bare first name on every deal and account surface. It also inverted
 golive#259, whose picker fix is built by subtracting the name field from the column plan.
