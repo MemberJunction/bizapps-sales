@@ -791,11 +791,12 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
     }
 
     public PromoteLinkFor(f: DealFieldSpec): string {
-        // Names what the rep is LOOKING FOR and where to look instead. The picker searches Sales
-        // Accounts; the thing that is missing is a Sales Account; the place it exists is Organizations.
+        // Names the FIELD the rep is looking at, then where to look and what they can add. The
+        // field's own label is Account, not Sales Account, so the link matching it reads as part of
+        // the field rather than as a sentence about the data model.
         return this.PromotableFieldKind(f) === 'account'
-            ? "Can't find the Sales Account? Search Organizations / Add Account."
-            : "Can't find the Sales Contact? Search People / Add Contact.";
+            ? "Can't find the Account? Search Organizations / Add Account."
+            : "Can't find the Contact? Search People / Add Contact.";
     }
 
     public OpenPromote(f: DealFieldSpec): void {
