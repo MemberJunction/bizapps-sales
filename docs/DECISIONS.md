@@ -1036,6 +1036,13 @@ has returned nothing, so it is the last resort rather than the first.
 > the exact complement of one another — the partition `PL7`/`PL8` assert. The test is what lets the
 > union be taken on trust.
 
-> A new Sales Contact needs `FirstName` **and** `LastName`; `Person.DisplayName` is a persisted
-> computed column and must never be written. That is why the create form is two fields for a contact
-> and one for an account, rather than one box split on a space.
+> **The search box is the name.** A second field asking for what the rep has already typed is
+> friction at the moment they just want to get on with the deal, so Create takes the term.
+>
+> A Person is the awkward case: `FirstName` and `LastName` are both NOT NULL and `Person.DisplayName`
+> is a persisted computed column that must never be written, so one string has to become two. It
+> splits on the FIRST run of whitespace — `Grace Hopper` gives Grace / Hopper, and
+> `Juan Carlos de la Cruz` gives Juan / `Carlos de la Cruz`, which keeps a compound surname whole.
+> A single word cannot produce a last name, so Create stays disabled and says so rather than
+> inventing one. Splitting is a guess, and this is the one place the app makes it; a rep who needs a
+> different split edits the contact, where the fields are separate.

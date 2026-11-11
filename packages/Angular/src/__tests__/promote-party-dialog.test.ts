@@ -290,16 +290,15 @@ describe('creating one that does not exist at all', () => {
         expect(h.d.CanOfferCreate()).toBe(true);
     });
 
-    it('creates an account from a name and reports it like any other choice', async () => {
+    it('creates an account named from the SEARCH TERM — no second field to fill', async () => {
         const h = harness('Account', []);
         const created: [string, Record<string, unknown>][] = [];
         h.d.Create = async (entity, fields) => {
             created.push([entity, fields as Record<string, unknown>]);
             return { Kind: 'Promoted', ID: 'new-1' };
         };
-        h.d.OnTermChange('zzz');
+        h.d.OnTermChange('  Zephyr Logistics  ');
         await h.d.RunSearch();
-        h.d.NewName.set('  Zephyr Logistics  ');
         expect(h.d.CanCreate()).toBe(true);
         await h.d.CreateNew();
 
@@ -309,24 +308,43 @@ describe('creating one that does not exist at all', () => {
         expect(h.closed).toBe(1);
     });
 
-    it('needs BOTH names for a person, because DisplayName is computed from them', async () => {
+    it('splits a person on the FIRST space, keeping a compound surname whole', async () => {
         const h = harness('Contact', []);
-        h.d.OnTermChange('zzz');
-        await h.d.RunSearch();
-        h.d.NewFirst.set('Grace');
-        expect(h.d.CanCreate()).toBe(false);
-        h.d.NewLast.set('Hopper');
-        expect(h.d.CanCreate()).toBe(true);
-
         const created: Record<string, unknown>[] = [];
         h.d.Create = async (_e, fields) => {
             created.push(fields as Record<string, unknown>);
             return { Kind: 'Promoted', ID: 'p-1' };
         };
+        h.d.OnTermChange('Juan Carlos de la Cruz');
+        await h.d.RunSearch();
         await h.d.CreateNew();
-        expect(created[0]).toMatchObject({ FirstName: 'Grace', LastName: 'Hopper' });
-        // Never set: it is a persisted computed column on Person.
+
+        expect(created[0]).toMatchObject({ FirstName: 'Juan', LastName: 'Carlos de la Cruz' });
+        // Never written: it is a persisted computed column on Person.
         expect(Object.keys(created[0])).not.toContain('DisplayName');
+    });
+
+    it('refuses a one-word person rather than inventing a last name', async () => {
+        const h = harness('Contact', []);
+        h.d.OnTermChange('Grace');
+        await h.d.RunSearch();
+        expect(h.d.NewPersonName()).toBeNull();
+        expect(h.d.CanCreate()).toBe(false);
+        expect(h.d.CreateBlockedReason()).toMatch(/first and last name/i);
+
+        h.d.OnTermChange('Grace Hopper');
+        await h.d.RunSearch();
+        expect(h.d.NewPersonName()).toEqual({ First: 'Grace', Last: 'Hopper' });
+        expect(h.d.CanCreate()).toBe(true);
+        expect(h.d.CreateBlockedReason()).toBeNull();
+    });
+
+    it('does not offer an account create while results are on screen', async () => {
+        const h = harness('Account', [ROW]);
+        h.d.OnTermChange('harbor');
+        await h.d.RunSearch();
+        expect(h.d.CanOfferCreate()).toBe(false);
+        expect(h.d.CanCreate()).toBe(false);
     });
 
     it('keeps the dialog open and shows why when the create is refused', async () => {
@@ -334,7 +352,6 @@ describe('creating one that does not exist at all', () => {
         h.d.Create = async () => ({ Kind: 'Failed', Message: 'Name is already taken' });
         h.d.OnTermChange('zzz');
         await h.d.RunSearch();
-        h.d.NewName.set('Dupe');
         await h.d.CreateNew();
         expect(h.promoted).toEqual([]);
         expect(h.closed).toBe(0);
@@ -356,7 +373,7 @@ describe('the dialog keeps one height', () => {
      */
     it('pins the body height and scrolls inside it', () => {
         const body = source.match(/\.mjs-pp__body \{[^}]*\}/)?.[0] ?? '';
-        expect(body).toMatch(/height:\s*min\(/);
+        expect(body).toMatch(/height:\s*min\(260px/);
         expect(body).toMatch(/overflow-y:\s*auto/);
         expect(body).not.toMatch(/max-height:\s*none/);
     });

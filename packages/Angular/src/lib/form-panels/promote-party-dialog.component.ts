@@ -152,28 +152,19 @@ const DEBOUNCE_MS = 250;
                     <p class="mjs-pp__note" data-testid="promote-too-short">Keep typing — two characters at least.</p>
                 } @else if (CanOfferCreate()) {
                     <!-- Offered only AFTER a search found nothing, so creating is the last resort
-                         rather than the first one -- which is the duplicate this feature removes. -->
+                         rather than the first one -- which is the duplicate this feature removes.
+                         The term already in the search box is the name; asking for it twice would be
+                         friction at exactly the wrong moment. -->
                     <div class="mjs-pp__create" data-testid="promote-create">
-                        <p class="mjs-pp__note">{{ Config.Empty }} Create a new {{ Config.CreateLabel }}?</p>
-                        @if (Config.CreateFields === 'person') {
-                            <div class="mjs-pp__create-row">
-                                <input type="text" class="mjs-pp__search" placeholder="First name"
-                                       data-testid="promote-create-first"
-                                       [ngModel]="NewFirst()" (ngModelChange)="NewFirst.set($event)" />
-                                <input type="text" class="mjs-pp__search" placeholder="Last name"
-                                       data-testid="promote-create-last"
-                                       [ngModel]="NewLast()" (ngModelChange)="NewLast.set($event)" />
-                            </div>
-                        } @else {
-                            <input type="text" class="mjs-pp__search" placeholder="Name"
-                                   data-testid="promote-create-name"
-                                   [ngModel]="NewName()" (ngModelChange)="NewName.set($event)" />
-                        }
+                        <p class="mjs-pp__note">{{ Config.Empty }}</p>
                         <button type="button" mjButton Variant="outline" class="mjs-pp__create-btn"
                                 data-testid="promote-create-confirm"
                                 [disabled]="!CanCreate() || Busy()" (click)="CreateNew()">
-                            {{ Busy() ? 'Creating…' : 'Create ' + Config.CreateLabel }}
+                            {{ Busy() ? 'Creating…' : 'Create ' + Config.CreateLabel + ' “' + Term().trim() + '”' }}
                         </button>
+                        @if (CreateBlockedReason(); as why) {
+                            <p class="mjs-pp__note" data-testid="promote-create-blocked">{{ why }}</p>
+                        }
                     </div>
                 }
 
@@ -280,12 +271,14 @@ const DEBOUNCE_MS = 250;
              * into whitespace: the list scrolls inside it, the create block sits in the same space,
              * and the footer never moves under the cursor.
              *
-             * min() rather than a flat height so a short viewport shrinks it instead of pushing the
-             * footer off screen; the shell's own max-height then has nothing left to clamp.
+             * Sized to the SHORTEST useful state rather than the tallest, so the empty and create
+             * states are not mostly padding; a longer result set scrolls. min() rather than a flat
+             * height so a short viewport shrinks it instead of pushing the footer off screen; the
+             * shell's own max-height then has nothing left to clamp.
              */
             .mjs-pp__body {
                 flex: 0 0 auto;
-                height: min(340px, 50vh);
+                height: min(260px, 45vh);
                 box-sizing: border-box;
                 padding: var(--mj-space-4) var(--mj-space-5);
                 overflow-y: auto;
@@ -339,10 +332,6 @@ const DEBOUNCE_MS = 250;
                 margin-top: var(--mj-space-3);
                 padding-top: var(--mj-space-3);
                 border-top: 1px solid var(--mj-border-subtle);
-            }
-            .mjs-pp__create-row {
-                display: flex;
-                gap: var(--mj-space-2);
             }
             .mjs-pp__create-btn {
                 margin-top: var(--mj-space-2);
@@ -497,19 +486,38 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
 
     // ── Creating one that does not exist at all ───────────────────────────────
 
-    public readonly NewName = signal('');
-    public readonly NewFirst = signal('');
-    public readonly NewLast = signal('');
-
     /** Offered only once a search has run and found nothing — never as a first resort. */
     public CanOfferCreate(): boolean {
         return !!this.Params() && !this.Searching() && this.Rows().length === 0;
     }
 
+    /**
+     * THE SEARCH BOX IS THE NAME. A second field asking for what the rep has already typed is one
+     * more thing to fill in at the moment they just want to get on with the deal.
+     *
+     * A Person is the awkward case: `FirstName` and `LastName` are both NOT NULL and `DisplayName` is
+     * a persisted computed column, so one string has to become two. It splits on the FIRST run of
+     * whitespace — "Grace Hopper" gives Grace / Hopper, and "Juan Carlos de la Cruz" gives Juan /
+     * "Carlos de la Cruz", which keeps a compound surname whole. A single word cannot produce a last
+     * name, so Create stays disabled and says why rather than inventing one.
+     */
+    public NewPersonName(): { First: string; Last: string } | null {
+        const parts = this.Term().trim().split(/\s+/);
+        if (parts.length < 2) return null;
+        return { First: parts[0], Last: parts.slice(1).join(' ') };
+    }
+
     public CanCreate(): boolean {
-        return this.Config.CreateFields === 'person'
-            ? !!this.NewFirst().trim() && !!this.NewLast().trim()
-            : !!this.NewName().trim();
+        if (!this.CanOfferCreate()) return false;
+        return this.Config.CreateFields === 'person' ? !!this.NewPersonName() : !!this.Term().trim();
+    }
+
+    /** Why Create is unavailable, or null when it is. */
+    public CreateBlockedReason(): string | null {
+        if (this.Config.CreateFields === 'person' && this.CanOfferCreate() && !this.NewPersonName()) {
+            return 'Type a first and last name to create one.';
+        }
+        return null;
     }
 
     public async CreateNew(): Promise<void> {
@@ -517,10 +525,11 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
         this.Busy.set(true);
         this.Error.set(null);
         try {
+            const person = this.NewPersonName();
             const fields =
                 this.Config.CreateFields === 'person'
-                    ? { FirstName: this.NewFirst().trim(), LastName: this.NewLast().trim() }
-                    : { Name: this.NewName().trim() };
+                    ? { FirstName: person!.First, LastName: person!.Last }
+                    : { Name: this.Term().trim() };
             const outcome = await this.Create(this.Config.ChildEntity, {
                 ...fields,
                 ...(await this.Config.Prefill()),
