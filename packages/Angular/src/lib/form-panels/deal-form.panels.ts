@@ -45,9 +45,12 @@ import { LinkedParties, type ActivityLinkFields, type LinkedParty } from '../act
 import { RelatedRecordTarget, SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import {
+    CHOOSE_PIPELINE_MESSAGE,
     CompanyDefaultPipeline,
+    CompanyHasPipeline,
     CompanyLabel,
     InitialCompanyID,
+    NoPipelineMessage,
     OrderPipelinesByCompany,
     PipelineCompanies,
     PipelineLabel,
@@ -1728,18 +1731,28 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                      pipeline, where it would offer no choice and SetPipeline fills the company.
                      With pipelines hidden (the HidePipelines setting) this is the only choice: the
                      company's default pipeline follows it, and the Pipeline control below is gone. -->
-                @if (EditMode && FieldEditable('PipelineID') && CompanyOptions.length > 1) {
+                @if (EditMode && FieldEditable('PipelineID') && ShowCompanyPicker) {
                     <div class="mjs-field" data-field="PipelineCompany">
                         <div class="mj-forms-field mj-forms-field--editing">
                             <label class="mj-forms-field-label" [attr.for]="FieldIdPrefix + '-company'">Company</label>
                             <select [id]="FieldIdPrefix + '-company'" [ngModel]="SelectedCompanyID" data-testid="deal-pipeline-company"
                                     (ngModelChange)="SetCompany($event)"
                                     [compareWith]="CompareID">
+                                @if (!CompanyIsListed) {
+                                    <option [ngValue]="Record.CompanyID" disabled>{{ DealCompanyName ?? 'Current company' }} (no pipeline)</option>
+                                }
                                 @for (c of CompanyOptions; track c.CompanyID) {
                                     <option [ngValue]="c.CompanyID">{{ CompanyText(c) }}</option>
                                 }
                             </select>
                         </div>
+                    </div>
+                }
+                <!-- Says why the deal has no pipeline and what to do, before a save refuses it. The
+                     save's own refusal says the same, through DealFormComponentExtended. -->
+                @if (NoPipelineHint; as hint) {
+                    <div class="mjs-hint mjs-hint--warning" role="status" data-testid="deal-no-pipeline-hint">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ hint }}
                     </div>
                 }
 
@@ -1793,7 +1806,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                     <option [ngValue]="st.ID">{{ st.Name }}</option>
                                 }
                             </select>
-                            @if (!StageIsEditable) {
+                            @if (!StageIsEditable && !NoPipelineHint) {
                                 <!-- Says which of the two it is. An empty disabled control otherwise
                                      reads as "broken" whether the pipeline is unset or has no stages. -->
                                 <div class="mjs-hint" data-testid="stage-hint">
@@ -1971,6 +1984,9 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     private readonly pipelines = signal<PipelineOption[]>([]);
     private readonly stages = signal<PipelineStageOption[]>([]);
 
+    /** Whether the pipelines have loaded, so an empty list is not read as "no company has a pipeline". `?.` for the `Object.create` suites. */
+    private readonly pipelinesLoaded = signal(false);
+
     /**
      * The `HidePipelines` setting. A signal for the reason `statuses` is one. Starts from the engine when
      * it is already loaded: the form's rail takes this panel's name when it is first built, so a name
@@ -2003,6 +2019,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         const loadedStages = valueOf(settled[3] as PromiseSettledResult<PipelineStageOption[]>);
         if (loadedPipelines) {
             this.pipelines.set(loadedPipelines);
+            this.pipelinesLoaded?.set(true);
         }
         if (loadedStages) {
             this.stages.set(loadedStages);
@@ -2026,6 +2043,46 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     /** Every company with a pipeline linked to it, default company first. */
     public get CompanyOptions(): PipelineCompany[] {
         return PipelineCompanies(this.offeredPipelines);
+    }
+
+    /** Whether the deal's company is in the Company list, which holds only companies with a pipeline. */
+    public get CompanyIsListed(): boolean {
+        const id = this.Record?.CompanyID;
+        return !id || CompanyHasPipeline(this.offeredPipelines, id);
+    }
+
+    /**
+     * The Company picker shows when there is a choice to make: several companies, or a deal whose company
+     * has no pipeline while another company has one. Without the second, a deal on a company with no
+     * pipeline could not be moved off it when only one other company has a pipeline.
+     */
+    public get ShowCompanyPicker(): boolean {
+        return this.CompanyOptions.length > 1 || (!this.CompanyIsListed && this.CompanyOptions.length > 0);
+    }
+
+    /** The deal's company name, from the deal or the pipeline links; null when neither has it. */
+    public get DealCompanyName(): string | null {
+        const id = this.Record?.CompanyID ?? null;
+        const listed = this.CompanyOptions.find((c) => c.CompanyID.toLowerCase() === String(id ?? '').toLowerCase());
+        return this.Record?.Company || listed?.CompanyName || null;
+    }
+
+    /**
+     * Why the deal has no pipeline, when that is something other than an unmade choice in a visible
+     * Pipeline field: its company has none, no company has one, or pipelines are hidden. Null while the
+     * deal has a pipeline, outside edit mode, and until the pipelines load.
+     */
+    public get NoPipelineHint(): string | null {
+        if (!this.Record || this.Record.PipelineID || !this.EditMode || !this.pipelinesLoaded?.()) return null;
+        const companyID = this.Record.CompanyID || null;
+        const message = NoPipelineMessage({
+            HidePipelines: this.HidePipelines(),
+            CompanyID: companyID,
+            CompanyName: companyID ? this.DealCompanyName : null,
+            CompanyHasPipeline: CompanyHasPipeline(this.offeredPipelines, companyID),
+            OtherCompanyHasPipeline: this.CompanyOptions.some((c) => c.CompanyID.toLowerCase() !== String(companyID ?? '').toLowerCase()),
+        });
+        return message === CHOOSE_PIPELINE_MESSAGE ? null : message;
     }
 
     /**
