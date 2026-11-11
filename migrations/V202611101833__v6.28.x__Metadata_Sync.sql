@@ -18,6 +18,10 @@
 -- build database had no AI credentials for the field-description pass. The created row keeps
 -- ExtractionStatus OK; descriptions are empty, as the push left them.
 --
+-- SOURCE FIELDS: each query field's SourceEntityFieldID is resolved on the target database from its
+-- SourceEntityID and SourceFieldName (the shipped ID first), because entity field IDs can differ
+-- between databases; it is NULL when no such field exists.
+--
 -- CATEGORY: the query's category resolves to this app's Sales category, its ID first and then by
 -- name, not by name alone: a database can hold more than one category named Sales.
 --
@@ -317,6 +321,11 @@ SET
   @SourceEntityFieldID_4650558f75c6 = '142D7CE2-5C12-4A68-B7CC-797CBDA164C1'
 SET
   @IsNullable_4650558f75c6 = 0
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_4650558f75c6 = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_4650558f75c6 AND [Name] = @SourceFieldName_4650558f75c6
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_4650558f75c6 THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_4650558f75c6
                   OR ([QueryID] = @QueryID_4650558f75c6 AND [Name] = @Name_4650558f75c6))
@@ -395,6 +404,11 @@ SET
   @SourceEntityFieldID_b36b46aff51c = '37ED0567-5213-4E33-9123-C88CF3E9A851'
 SET
   @IsNullable_b36b46aff51c = 0
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_b36b46aff51c = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_b36b46aff51c AND [Name] = @SourceFieldName_b36b46aff51c
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_b36b46aff51c THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_b36b46aff51c
                   OR ([QueryID] = @QueryID_b36b46aff51c AND [Name] = @Name_b36b46aff51c))
@@ -472,6 +486,11 @@ SET
   @SourceEntityFieldID_456b8611c764 = 'C7C1BD22-6968-499B-9FFA-1931BEB97C0C'
 SET
   @IsNullable_456b8611c764 = 0
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_456b8611c764 = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_456b8611c764 AND [Name] = @SourceFieldName_456b8611c764
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_456b8611c764 THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_456b8611c764
                   OR ([QueryID] = @QueryID_456b8611c764 AND [Name] = @Name_456b8611c764))
@@ -549,6 +568,11 @@ SET
   @SourceEntityFieldID_b3eda0508a03 = '41E3A5E2-F717-4220-AC33-8ABC132F8DD0'
 SET
   @IsNullable_b3eda0508a03 = 0
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_b3eda0508a03 = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_b3eda0508a03 AND [Name] = @SourceFieldName_b3eda0508a03
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_b3eda0508a03 THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_b3eda0508a03
                   OR ([QueryID] = @QueryID_b3eda0508a03 AND [Name] = @Name_b3eda0508a03))
@@ -626,6 +650,11 @@ SET
   @SourceEntityFieldID_8e66273a4ad7 = '565015DD-BE0A-4024-BF1F-6CB2A147A5C9'
 SET
   @IsNullable_8e66273a4ad7 = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_8e66273a4ad7 = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_8e66273a4ad7 AND [Name] = @SourceFieldName_8e66273a4ad7
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_8e66273a4ad7 THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_8e66273a4ad7
                   OR ([QueryID] = @QueryID_8e66273a4ad7 AND [Name] = @Name_8e66273a4ad7))
@@ -703,6 +732,11 @@ SET
   @SourceEntityFieldID_efaff430ccdc = '197A4A78-E556-465F-9B0E-FE0F68653B48'
 SET
   @IsNullable_efaff430ccdc = 0
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_efaff430ccdc = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_efaff430ccdc AND [Name] = @SourceFieldName_efaff430ccdc
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_efaff430ccdc THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_efaff430ccdc
                   OR ([QueryID] = @QueryID_efaff430ccdc AND [Name] = @Name_efaff430ccdc))
@@ -778,6 +812,11 @@ SET
   @SourceEntityFieldID_ec38d97c1167 = '54079149-DE80-4CEE-B857-AE5ADFFD41A6'
 SET
   @IsNullable_ec38d97c1167 = 0
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_ec38d97c1167 = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_ec38d97c1167 AND [Name] = @SourceFieldName_ec38d97c1167
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_ec38d97c1167 THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_ec38d97c1167
                   OR ([QueryID] = @QueryID_ec38d97c1167 AND [Name] = @Name_ec38d97c1167))
@@ -929,6 +968,11 @@ SET
   @SourceEntityFieldID_6dd2ec82dde8 = '7AEB02A2-1574-4FC4-ADF1-299328154295'
 SET
   @IsNullable_6dd2ec82dde8 = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_6dd2ec82dde8 = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_6dd2ec82dde8 AND [Name] = @SourceFieldName_6dd2ec82dde8
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_6dd2ec82dde8 THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_6dd2ec82dde8
                   OR ([QueryID] = @QueryID_6dd2ec82dde8 AND [Name] = @Name_6dd2ec82dde8))
@@ -1006,6 +1050,11 @@ SET
   @SourceEntityFieldID_db2f27c049ed = 'B66538B2-A77C-4B69-9B58-30D0D2016CC4'
 SET
   @IsNullable_db2f27c049ed = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_db2f27c049ed = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_db2f27c049ed AND [Name] = @SourceFieldName_db2f27c049ed
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_db2f27c049ed THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_db2f27c049ed
                   OR ([QueryID] = @QueryID_db2f27c049ed AND [Name] = @Name_db2f27c049ed))
@@ -1081,6 +1130,11 @@ SET
   @SourceEntityFieldID_302d8d081857 = 'B0F46D44-A139-4CBB-8737-8265D5052238'
 SET
   @IsNullable_302d8d081857 = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_302d8d081857 = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_302d8d081857 AND [Name] = @SourceFieldName_302d8d081857
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_302d8d081857 THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_302d8d081857
                   OR ([QueryID] = @QueryID_302d8d081857 AND [Name] = @Name_302d8d081857))
@@ -1157,6 +1211,11 @@ SET
   @SourceEntityFieldID_68a1a3b41e59 = '3D52AFFE-C851-46F7-8C49-5263BECB0C9B'
 SET
   @IsNullable_68a1a3b41e59 = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_68a1a3b41e59 = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_68a1a3b41e59 AND [Name] = @SourceFieldName_68a1a3b41e59
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_68a1a3b41e59 THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_68a1a3b41e59
                   OR ([QueryID] = @QueryID_68a1a3b41e59 AND [Name] = @Name_68a1a3b41e59))
@@ -1233,6 +1292,11 @@ SET
   @SourceEntityFieldID_20c3912f5006 = '939FFD49-39DA-4200-BE2E-906F14FE50E1'
 SET
   @IsNullable_20c3912f5006 = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_20c3912f5006 = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_20c3912f5006 AND [Name] = @SourceFieldName_20c3912f5006
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_20c3912f5006 THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_20c3912f5006
                   OR ([QueryID] = @QueryID_20c3912f5006 AND [Name] = @Name_20c3912f5006))
@@ -1309,6 +1373,11 @@ SET
   @SourceEntityFieldID_c67b1782eb9a = '379450E4-178C-4CDD-90B3-9081E903B51D'
 SET
   @IsNullable_c67b1782eb9a = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_c67b1782eb9a = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_c67b1782eb9a AND [Name] = @SourceFieldName_c67b1782eb9a
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_c67b1782eb9a THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_c67b1782eb9a
                   OR ([QueryID] = @QueryID_c67b1782eb9a AND [Name] = @Name_c67b1782eb9a))
@@ -1385,6 +1454,11 @@ SET
   @SourceEntityFieldID_49941ac810d6 = '3442E4F5-F87C-4993-9AB3-38D7FBBECF88'
 SET
   @IsNullable_49941ac810d6 = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_49941ac810d6 = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_49941ac810d6 AND [Name] = @SourceFieldName_49941ac810d6
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_49941ac810d6 THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_49941ac810d6
                   OR ([QueryID] = @QueryID_49941ac810d6 AND [Name] = @Name_49941ac810d6))
@@ -1461,6 +1535,11 @@ SET
   @SourceEntityFieldID_285578b72efc = '04E8AA9D-C2DC-489D-B081-75C4E6DDFA6B'
 SET
   @IsNullable_285578b72efc = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_285578b72efc = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_285578b72efc AND [Name] = @SourceFieldName_285578b72efc
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_285578b72efc THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_285578b72efc
                   OR ([QueryID] = @QueryID_285578b72efc AND [Name] = @Name_285578b72efc))
@@ -1539,6 +1618,11 @@ SET
   @SourceEntityFieldID_b1d24f35a8e9 = '8677055B-2482-4250-98C1-AFC3DAE57393'
 SET
   @IsNullable_b1d24f35a8e9 = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_b1d24f35a8e9 = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_b1d24f35a8e9 AND [Name] = @SourceFieldName_b1d24f35a8e9
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_b1d24f35a8e9 THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_b1d24f35a8e9
                   OR ([QueryID] = @QueryID_b1d24f35a8e9 AND [Name] = @Name_b1d24f35a8e9))
@@ -1614,6 +1698,11 @@ SET
   @SourceEntityFieldID_32f423237cd3 = '14BDA941-CE85-4A14-8FDC-3681B8C52418'
 SET
   @IsNullable_32f423237cd3 = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_32f423237cd3 = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_32f423237cd3 AND [Name] = @SourceFieldName_32f423237cd3
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_32f423237cd3 THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_32f423237cd3
                   OR ([QueryID] = @QueryID_32f423237cd3 AND [Name] = @Name_32f423237cd3))
@@ -1690,6 +1779,11 @@ SET
   @SourceEntityFieldID_0868a158aa4a = '0E1B433E-F36B-1410-8489-00031FE78EB9'
 SET
   @IsNullable_0868a158aa4a = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_0868a158aa4a = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_0868a158aa4a AND [Name] = @SourceFieldName_0868a158aa4a
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_0868a158aa4a THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_0868a158aa4a
                   OR ([QueryID] = @QueryID_0868a158aa4a AND [Name] = @Name_0868a158aa4a))
@@ -1768,6 +1862,11 @@ SET
   @SourceEntityFieldID_7169530cd3da = '9ED4A8CC-E0B8-4880-945A-4BD6DD6368C6'
 SET
   @IsNullable_7169530cd3da = 1
+-- The source entity field is found on this database by entity and field name (the shipped ID first):
+-- entity field IDs can differ between databases. NULL when the field is not there.
+SELECT @SourceEntityFieldID_7169530cd3da = (SELECT TOP 1 [ID] FROM [${mjSchema}].[EntityField]
+    WHERE [EntityID] = @SourceEntityID_7169530cd3da AND [Name] = @SourceFieldName_7169530cd3da
+    ORDER BY CASE WHEN [ID] = @SourceEntityFieldID_7169530cd3da THEN 0 ELSE 1 END)
 IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[QueryField]
                WHERE [ID] = @ID_7169530cd3da
                   OR ([QueryID] = @QueryID_7169530cd3da AND [Name] = @Name_7169530cd3da))
