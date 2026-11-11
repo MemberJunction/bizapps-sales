@@ -126,6 +126,7 @@ export {
 } from './lib/form-panels/promote-party.panels';
 export {
     PROMOTIONS,
+    CreateParty,
     PromoteParty,
     ProspectAccountTypeID,
     ReadProspectAccountTypeID,

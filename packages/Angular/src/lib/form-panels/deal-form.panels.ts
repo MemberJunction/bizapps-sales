@@ -794,8 +794,8 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         // Names what the rep is LOOKING FOR and where to look instead. The picker searches Sales
         // Accounts; the thing that is missing is a Sales Account; the place it exists is Organizations.
         return this.PromotableFieldKind(f) === 'account'
-            ? "Can't find the Sales Account? Search Organizations."
-            : "Can't find the Sales Contact? Search People.";
+            ? "Can't find the Sales Account? Search Organizations / Add Account."
+            : "Can't find the Sales Contact? Search People / Add Contact.";
     }
 
     public OpenPromote(f: DealFieldSpec): void {
@@ -1783,6 +1783,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                         @if (f.party) {
                             <bizapps-party-field [Record]="Record" [FieldName]="f.name" [Kind]="f.party.Kind" [QueryName]="f.party.QueryName"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext"
+                                [AllowCreate]="false"
                                 (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></bizapps-party-field>
                             @if (EditMode && FieldEditable(f.name) && PromotableFieldKind(f)) {
                                 <!-- The picker only offers organizations and people that ALREADY have a
@@ -2057,7 +2058,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         @if (PromoteOpen) {
             <mjs-promote-party-dialog
                 [PromoteKind]="PromoteKind"
-                (Promoted)="OnPromoted($event)"
+                (PartyChosen)="OnPromoted($event)"
                 (Closed)="ClosePromote()"></mjs-promote-party-dialog>
         }
     `,
@@ -2785,6 +2786,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                         } @else if (f.party) {
                             <bizapps-party-field [Record]="Record" [FieldName]="f.name" [Kind]="f.party.Kind" [QueryName]="f.party.QueryName"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext"
+                                [AllowCreate]="false"
                                 (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></bizapps-party-field>
                             @if (EditMode && FieldEditable(f.name) && PromotableFieldKind(f)) {
                                 <!-- The picker only offers organizations and people that ALREADY have a
@@ -2818,7 +2820,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
         @if (PromoteOpen) {
             <mjs-promote-party-dialog
                 [PromoteKind]="PromoteKind"
-                (Promoted)="OnPromoted($event)"
+                (PartyChosen)="OnPromoted($event)"
                 (Closed)="ClosePromote()"></mjs-promote-party-dialog>
         }
     `,

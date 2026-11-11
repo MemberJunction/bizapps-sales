@@ -168,3 +168,36 @@ export async function ReadProspectAccountTypeID(): Promise<string | null> {
     if (!result?.Success) return null;
     return ProspectAccountTypeID(result.Results ?? []);
 }
+
+/**
+ * Creates a BRAND NEW sales party — the parent row and the subtype row together.
+ *
+ * This is the same IS-A chain save `IS1` pins ("a Sales Contact built through the child writes
+ * Person + SalesContact under ONE key"): build the CHILD, set the parent's own columns on it, and the
+ * one `Save()` writes both. It is NOT a promotion — there is no existing parent to attach to — so it
+ * deliberately shares nothing with `PromoteParty` beyond the prefill.
+ *
+ * `fields` must carry whatever the parent needs: `Name` for an Organization, `FirstName` + `LastName`
+ * for a Person (whose `DisplayName` is a persisted computed column and must never be set here).
+ * Everything else is left blank, for the reasons in D-PR1.
+ */
+export async function CreateParty(
+    childEntity: string,
+    fields: Readonly<Record<string, unknown>>,
+    deps: Pick<PromoteDeps, 'OpenChild'> = DEFAULT_DEPS,
+): Promise<PromoteOutcome> {
+    try {
+        const child = await deps.OpenChild(childEntity);
+        if (!child) return { Kind: 'Failed', Message: `Could not open ${childEntity}.` };
+        child.NewRecord();
+        for (const [name, value] of Object.entries(fields)) {
+            if (value !== null && value !== undefined && String(value).trim()) child.Set(name, value);
+        }
+        if (!(await child.Save())) {
+            return { Kind: 'Failed', Message: child.LatestResult?.CompleteMessage || 'The save was refused.' };
+        }
+        return { Kind: 'Promoted', ID: String(child.Get('ID') ?? '') };
+    } catch (error) {
+        return { Kind: 'Failed', Message: messageOf(error) };
+    }
+}

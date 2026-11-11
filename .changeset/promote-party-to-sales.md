@@ -36,3 +36,10 @@ stay green; verified by mutating that filter and watching both `PL3` and `PL7` g
 The Deals panel on those forms now re-reads its own gate on a record refresh. A promotion does not
 change the record's ID, so without that it kept saying "Not a sales customer" beside a record that had
 just become one.
+
+The dialog lists both halves of the directory: parties that already have their sales row are badged
+and selected outright (writing nothing), while the rest promote on selection. When a search matches
+nothing it offers to create a new one — an account from a name, a contact from first and last name,
+since `Person.DisplayName` is a persisted computed column. The deal form's pickers now pass
+`[AllowCreate]="false"`, so creation is reachable only after a search has come up empty rather than
+competing with the matches still on screen (D-PR5).

@@ -441,6 +441,6 @@
 @if (PromoteOpen) {
   <mjs-promote-party-dialog
       [PromoteKind]="PromoteKind"
-      (Promoted)="OnPromoted($event)"
+      (PartyChosen)="OnPromoted($event)"
       (Closed)="ClosePromote()"></mjs-promote-party-dialog>
 }

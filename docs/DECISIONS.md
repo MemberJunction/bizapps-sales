@@ -1011,3 +1011,31 @@ at all, so it would gate nothing while adding a surface to maintain.
 > **Undo is not symmetric, so do not add one casually.** `IS8` records that deleting a Sales Contact
 > which is its Person's only subtype deletes the Person too. An "undo promotion" built from a child
 > delete can therefore destroy a record this app does not own.
+
+### D-PR5 — One dialog finds, promotes or creates; the picker's own Create is removed
+
+**Decision:** the promote dialog lists **both** halves — parties that already have their sales row,
+badged and selectable outright, and those that do not, which promote on selection. When a search
+matches nothing it offers to create a new one. The deal form's pickers pass `[AllowCreate]="false"`,
+so creating a party is reachable only through this dialog.
+
+**Why:** D-PR2 kept the picker honest by withholding rows it cannot store, but that left the rep with
+a control that says "no matches" and a separate route whose name presumes the answer — they had to
+know *why* the company was missing before choosing where to look. Showing both states answers that
+instead of asking it: "is this company already an account?" is the thing they came to find out.
+
+Selecting an existing account writes **nothing**. Promotion is for the other half only, which is also
+what keeps `PromoteParty`'s second-promotion refusal from ever being needed here.
+
+Creation moved off the picker for the same reason it exists at all. The picker's built-in Create row
+is offered *while matches are still on screen*, so it competes with the record the rep is looking
+for — which is how golive#259's duplicate was made. In the dialog it appears only **after** a search
+has returned nothing, so it is the last resort rather than the first.
+
+> The merged list needs no de-duplication and cannot be missing a row, because the two queries are
+> the exact complement of one another — the partition `PL7`/`PL8` assert. The test is what lets the
+> union be taken on trust.
+
+> A new Sales Contact needs `FirstName` **and** `LastName`; `Person.DisplayName` is a persisted
+> computed column and must never be written. That is why the create form is two fields for a contact
+> and one for an account, rather than one box split on a space.

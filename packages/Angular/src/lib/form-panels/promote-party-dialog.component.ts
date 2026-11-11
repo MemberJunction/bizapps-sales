@@ -40,7 +40,7 @@ import {
     ContactPromotePrefill,
     type PromotePrefillReader,
 } from './promote-party.panels';
-import { PromoteParty, type PromoteOutcome } from '../data/promote-party';
+import { CreateParty, PromoteParty, type PromoteOutcome } from '../data/promote-party';
 
 /** Which promotion this dialog is doing. */
 export type PromoteKind = 'Account' | 'Contact';
@@ -50,6 +50,12 @@ export interface PromotableRow {
     ID: string;
     Name: string | null;
     Detail: string | null;
+    /**
+     * True when the sales row ALREADY exists, so the row is chosen outright and nothing is written.
+     * The dialog shows both states in one list because "is this company already an account?" is not
+     * a question the rep should have to answer before searching -- it is what they came to find out.
+     */
+    IsSalesParty: boolean;
 }
 
 interface PromoteKindConfig {
@@ -57,8 +63,14 @@ interface PromoteKindConfig {
     QueryName: string;
     ChildEntity: string;
     Title: string;
-    /** The confirm button. Names the ACT and its result, so the button reads the same as the rule. */
+    /** The confirm button when the chosen row must be PROMOTED. */
     Confirm: string;
+    /** The query returning rows that already have their sales row. */
+    ExistingQueryName: string;
+    /** What a brand-new record is called, and the fields it needs. */
+    CreateLabel: string;
+    /** Person needs FirstName + LastName; Organization needs only Name. */
+    CreateFields: 'name' | 'person';
     Placeholder: string;
     Empty: string;
     Prefill: PromotePrefillReader;
@@ -69,21 +81,27 @@ export const PROMOTE_KINDS: Record<PromoteKind, PromoteKindConfig> = {
     Account: {
         Kind: 'Organization',
         QueryName: 'Sales: Party Lookup Promotable Accounts',
+        ExistingQueryName: 'Sales: Party Lookup Accounts',
         ChildEntity: MJS_ENTITIES.SalesAccount,
-        Title: 'Promote an Organization to a Sales Account',
+        Title: 'Find or add a Sales Account',
         Confirm: 'Promote to Sales Account',
+        CreateLabel: 'Sales Account',
+        CreateFields: 'name',
         Placeholder: 'Search Organizations by name, acronym or website',
-        Empty: 'No Organization matches, or every match is already a Sales Account.',
+        Empty: 'No Organization matches.',
         Prefill: AccountPromotePrefill,
     },
     Contact: {
         Kind: 'Person',
         QueryName: 'Sales: Party Lookup Promotable Contacts',
+        ExistingQueryName: 'Sales: Party Lookup Contacts',
         ChildEntity: MJS_ENTITIES.SalesContact,
-        Title: 'Promote a Person to a Sales Contact',
+        Title: 'Find or add a Sales Contact',
         Confirm: 'Promote to Sales Contact',
+        CreateLabel: 'Sales Contact',
+        CreateFields: 'person',
         Placeholder: 'Search People by name or email',
-        Empty: 'No Person matches, or every match is already a Sales Contact.',
+        Empty: 'No Person matches.',
         Prefill: ContactPromotePrefill,
     },
 };
@@ -132,8 +150,31 @@ const DEBOUNCE_MS = 250;
                     <p class="mjs-pp__note">Searching…</p>
                 } @else if (Term().length > 0 && !Params()) {
                     <p class="mjs-pp__note" data-testid="promote-too-short">Keep typing — two characters at least.</p>
-                } @else if (Params() && Rows().length === 0) {
-                    <p class="mjs-pp__note" data-testid="promote-empty">{{ Config.Empty }}</p>
+                } @else if (CanOfferCreate()) {
+                    <!-- Offered only AFTER a search found nothing, so creating is the last resort
+                         rather than the first one -- which is the duplicate this feature removes. -->
+                    <div class="mjs-pp__create" data-testid="promote-create">
+                        <p class="mjs-pp__note">{{ Config.Empty }} Create a new {{ Config.CreateLabel }}?</p>
+                        @if (Config.CreateFields === 'person') {
+                            <div class="mjs-pp__create-row">
+                                <input type="text" class="mjs-pp__search" placeholder="First name"
+                                       data-testid="promote-create-first"
+                                       [ngModel]="NewFirst()" (ngModelChange)="NewFirst.set($event)" />
+                                <input type="text" class="mjs-pp__search" placeholder="Last name"
+                                       data-testid="promote-create-last"
+                                       [ngModel]="NewLast()" (ngModelChange)="NewLast.set($event)" />
+                            </div>
+                        } @else {
+                            <input type="text" class="mjs-pp__search" placeholder="Name"
+                                   data-testid="promote-create-name"
+                                   [ngModel]="NewName()" (ngModelChange)="NewName.set($event)" />
+                        }
+                        <button type="button" mjButton Variant="outline" class="mjs-pp__create-btn"
+                                data-testid="promote-create-confirm"
+                                [disabled]="!CanCreate() || Busy()" (click)="CreateNew()">
+                            {{ Busy() ? 'Creating…' : 'Create ' + Config.CreateLabel }}
+                        </button>
+                    </div>
                 }
 
                 <ul id="mjs-pp-results" class="mjs-pp__rows" role="listbox" [attr.aria-label]="Config.Title">
@@ -148,7 +189,14 @@ const DEBOUNCE_MS = 250;
                                 [disabled]="Busy()"
                                 data-testid="promote-row"
                                 (click)="Choose(row)">
-                                <span class="mjs-pp__row-name">{{ row.Name }}</span>
+                                <span class="mjs-pp__row-name">
+                                    {{ row.Name }}
+                                    @if (row.IsSalesParty) {
+                                        <span class="mjs-pp__badge" data-testid="promote-row-existing">{{ Config.CreateLabel }}</span>
+                                    } @else {
+                                        <span class="mjs-pp__badge mjs-pp__badge--new" data-testid="promote-row-promotable">Not yet</span>
+                                    }
+                                </span>
                                 @if (row.Detail) {
                                     <span class="mjs-pp__row-detail">{{ row.Detail }}</span>
                                 }
@@ -171,7 +219,7 @@ const DEBOUNCE_MS = 250;
                     data-testid="promote-dialog-confirm"
                     [disabled]="!Selected() || Busy()"
                     (click)="Confirm()">
-                    {{ Busy() ? 'Promoting…' : Config.Confirm }}
+                    {{ ConfirmLabel() }}
                 </button>
                 <button type="button" mjButton Variant="outline" [disabled]="Busy()" data-testid="promote-dialog-cancel" (click)="Cancel()">
                     Cancel
@@ -262,6 +310,30 @@ const DEBOUNCE_MS = 250;
                 border-color: var(--mj-brand-primary);
                 background: var(--mj-bg-surface-hover);
             }
+            .mjs-pp__badge {
+                margin-left: var(--mj-space-2);
+                padding: 1px var(--mj-space-2);
+                border-radius: var(--mj-radius-md, 8px);
+                font-size: var(--mj-text-xs);
+                background: var(--mj-bg-surface-sunken);
+                color: var(--mj-text-secondary);
+            }
+            .mjs-pp__badge--new {
+                background: var(--mj-status-warning-bg);
+                color: var(--mj-status-warning-text);
+            }
+            .mjs-pp__create {
+                margin-top: var(--mj-space-3);
+                padding-top: var(--mj-space-3);
+                border-top: 1px solid var(--mj-border-subtle);
+            }
+            .mjs-pp__create-row {
+                display: flex;
+                gap: var(--mj-space-2);
+            }
+            .mjs-pp__create-btn {
+                margin-top: var(--mj-space-2);
+            }
             .mjs-pp__row-detail {
                 font-size: var(--mj-text-sm);
                 color: var(--mj-text-secondary);
@@ -288,8 +360,12 @@ const DEBOUNCE_MS = 250;
 })
 export class MJSPromotePartyDialog implements OnInit, OnDestroy {
     @Input() public PromoteKind: PromoteKind = 'Account';
-    /** Emits the promoted record's ID, which IS the parent's ID (IS-A). */
-    @Output() public readonly Promoted = new EventEmitter<string>();
+    /**
+     * The sales party the rep ended on, whether it was selected, promoted or created. Its ID IS the
+     * parent's ID (IS-A). Named for the outcome rather than the route, because the caller stores the
+     * same thing either way.
+     */
+    @Output() public readonly PartyChosen = new EventEmitter<string>();
     @Output() public readonly Closed = new EventEmitter<void>();
 
     public readonly Term = signal('');
@@ -303,6 +379,7 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
     public Search: (queryName: string, term: string, domain: string | null) => Promise<readonly PromotableRow[]> =
         RunPromotableLookup;
     public Promote: typeof PromoteParty = PromoteParty;
+    public Create: typeof CreateParty = CreateParty;
 
     private timer: ReturnType<typeof setTimeout> | null = null;
     private opener: HTMLElement | null = null;
@@ -341,14 +418,28 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
         this.timer = setTimeout(() => void this.RunSearch(), DEBOUNCE_MS);
     }
 
-    /** Only the newest search may write results; an earlier one that lands late is discarded. */
+    /**
+     * Runs BOTH halves and merges them. The two queries are the exact complement of one another
+     * (`PL7`/`PL8` assert they partition the set), so the union is every matching party exactly once
+     * -- no de-duplication needed, and nothing can be missing from it. Each row carries which half it
+     * came from, which is the only difference the rep sees.
+     *
+     * Only the newest search may write results; an earlier one that lands late is discarded.
+     */
     public async RunSearch(): Promise<void> {
         const params = this.Params();
         if (!params) return;
         const mine = ++this.sequence;
         try {
-            const rows = await this.Search(this.Config.QueryName, params.Term, params.Domain);
+            const [existing, promotable] = await Promise.all([
+                this.Search(this.Config.ExistingQueryName, params.Term, params.Domain),
+                this.Search(this.Config.QueryName, params.Term, params.Domain),
+            ]);
             if (mine !== this.sequence) return;
+            const rows = [
+                ...existing.map((r) => ({ ...r, IsSalesParty: true })),
+                ...promotable.map((r) => ({ ...r, IsSalesParty: false })),
+            ].sort((a, b) => String(a.Name ?? '').localeCompare(String(b.Name ?? '')));
             this.Rows.set(rows);
         } catch {
             if (mine === this.sequence) {
@@ -366,13 +457,67 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
         this.Error.set(null);
     }
 
+    /** The confirm button's label: a row that is already a sales party is CHOSEN, not promoted. */
+    public ConfirmLabel(): string {
+        if (this.Busy()) return this.Selected()?.IsSalesParty ? 'Selecting…' : 'Promoting…';
+        return this.Selected()?.IsSalesParty ? 'Select' : this.Config.Confirm;
+    }
+
     public async Confirm(): Promise<void> {
         const row = this.Selected();
         if (!row || this.Busy()) return;
+        // Already a sales party: nothing to write. Choosing it is the whole action, and promoting it
+        // would be the second promotion `PromoteParty` exists to refuse.
+        if (row.IsSalesParty) {
+            this.PartyChosen.emit(row.ID);
+            this.Closed.emit();
+            return;
+        }
         this.Busy.set(true);
         this.Error.set(null);
         try {
             this.Apply(await this.Promote(this.Config.ChildEntity, row.ID, await this.Config.Prefill()), row);
+        } finally {
+            this.Busy.set(false);
+        }
+    }
+
+    // ── Creating one that does not exist at all ───────────────────────────────
+
+    public readonly NewName = signal('');
+    public readonly NewFirst = signal('');
+    public readonly NewLast = signal('');
+
+    /** Offered only once a search has run and found nothing — never as a first resort. */
+    public CanOfferCreate(): boolean {
+        return !!this.Params() && !this.Searching() && this.Rows().length === 0;
+    }
+
+    public CanCreate(): boolean {
+        return this.Config.CreateFields === 'person'
+            ? !!this.NewFirst().trim() && !!this.NewLast().trim()
+            : !!this.NewName().trim();
+    }
+
+    public async CreateNew(): Promise<void> {
+        if (!this.CanCreate() || this.Busy()) return;
+        this.Busy.set(true);
+        this.Error.set(null);
+        try {
+            const fields =
+                this.Config.CreateFields === 'person'
+                    ? { FirstName: this.NewFirst().trim(), LastName: this.NewLast().trim() }
+                    : { Name: this.NewName().trim() };
+            const outcome = await this.Create(this.Config.ChildEntity, {
+                ...fields,
+                ...(await this.Config.Prefill()),
+            });
+            if (outcome.Kind === 'Promoted') {
+                this.PartyChosen.emit(outcome.ID);
+                this.Closed.emit();
+                return;
+            }
+            this.Error.set(outcome.Kind === 'Failed' ? outcome.Message : 'It could not be created.');
         } finally {
             this.Busy.set(false);
         }
@@ -383,7 +528,7 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
         switch (outcome.Kind) {
             case 'Promoted':
             case 'AlreadyPromoted':
-                this.Promoted.emit(outcome.Kind === 'Promoted' ? outcome.ID : row.ID);
+                this.PartyChosen.emit(outcome.Kind === 'Promoted' ? outcome.ID : row.ID);
                 this.Closed.emit();
                 return;
             case 'NoParent':

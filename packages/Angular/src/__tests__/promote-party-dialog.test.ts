@@ -25,7 +25,8 @@ interface Harness {
     closed: number;
 }
 
-const ROW: PromotableRow = { ID: 'org-9', Name: 'Harbor Yacht Club', Detail: 'HYC · harbor.example' };
+const ROW: PromotableRow = { ID: 'org-9', Name: 'Harbor Yacht Club', Detail: 'HYC · harbor.example', IsSalesParty: false };
+const EXISTING: PromotableRow = { ID: 'org-1', Name: 'Cascade Manufacturing', Detail: null, IsSalesParty: true };
 
 function harness(
     kind: 'Account' | 'Contact' = 'Account',
@@ -42,7 +43,7 @@ function harness(
 
     d.Search = async (queryName, term, domain) => {
         searches.push([queryName, term, domain]);
-        return rows;
+        return queryName.includes('Promotable') ? rows : [];
     };
     d.Promote = async (childEntity, parentID, fields) => {
         promotions.push([childEntity, parentID, (fields ?? {}) as Record<string, unknown>]);
@@ -50,7 +51,7 @@ function harness(
     };
     // The prefill lives on the kind config; override it for the duration of the test.
     PROMOTE_KINDS[kind].Prefill = async () => prefill;
-    d.Promoted.subscribe((id) => promoted.push(id));
+    d.PartyChosen.subscribe((id) => promoted.push(id));
     d.Closed.subscribe(() => (closed += 1));
 
     return {
@@ -78,7 +79,10 @@ describe('the promote dialog search', () => {
         h.d.OnTermChange('harbor');
         await h.d.RunSearch();
 
-        expect(h.searches).toEqual([['Sales: Party Lookup Promotable Accounts', 'harbor', null]]);
+        expect(h.searches.map((x) => x[0]).sort()).toEqual([
+            'Sales: Party Lookup Accounts',
+            'Sales: Party Lookup Promotable Accounts',
+        ]);
         expect(h.d.Rows()).toEqual([ROW]);
     });
 
@@ -87,15 +91,15 @@ describe('the promote dialog search', () => {
         h.d.OnTermChange('https://www.harbor.example/about');
         await h.d.RunSearch();
 
-        const [, , domain] = h.searches[0];
-        expect(domain).toBe('harbor.example');
+        for (const [, , domain] of h.searches) expect(domain).toBe('harbor.example');
     });
 
     it('searches people through the contacts complement', async () => {
         const h = harness('Contact');
         h.d.OnTermChange('grace');
         await h.d.RunSearch();
-        expect(h.searches[0][0]).toBe('Sales: Party Lookup Promotable Contacts');
+        expect(h.searches.map((x) => x[0])).toContain('Sales: Party Lookup Promotable Contacts');
+        expect(h.searches.map((x) => x[0])).toContain('Sales: Party Lookup Contacts');
     });
 
     it('does not search on the keystroke itself — it debounces', () => {
@@ -108,10 +112,11 @@ describe('the promote dialog search', () => {
     it('discards a search that lands after a newer one', async () => {
         const h = harness();
         let release: (() => void) | null = null;
-        h.d.Search = async (_q, term) => {
+        h.d.Search = async (q, term) => {
+            if (!q.includes('Promotable')) return [];
             if (term === 'slow') {
                 await new Promise<void>((r) => (release = r));
-                return [{ ID: 'stale', Name: 'Stale', Detail: null }];
+                return [{ ID: 'stale', Name: 'Stale', Detail: null, IsSalesParty: false }];
             }
             return [ROW];
         };
@@ -219,5 +224,117 @@ describe('the promote dialog promotion', () => {
         expect(h.d.Selected()).toEqual(ROW);
         h.d.OnTermChange('different');
         expect(h.d.Selected()).toBeNull();
+    });
+});
+
+describe('the dialog shows both halves in one list', () => {
+    function withBoth(): Harness {
+        const h = harness();
+        h.d.Search = async (q, term, domain) => {
+            h.searches.push([q, term, domain]);
+            return q.includes('Promotable') ? [ROW] : [EXISTING];
+        };
+        return h;
+    }
+
+    it('merges existing and promotable rows, flagged and sorted by name', async () => {
+        const h = withBoth();
+        h.d.OnTermChange('a');
+        h.d.OnTermChange('harbor');
+        await h.d.RunSearch();
+
+        // PL7/PL8 assert the two queries partition the set, so the union needs no de-duplication.
+        expect(h.d.Rows().map((r) => [r.Name, r.IsSalesParty])).toEqual([
+            ['Cascade Manufacturing', true],
+            ['Harbor Yacht Club', false],
+        ]);
+    });
+
+    it('SELECTS an existing sales account outright, writing nothing', async () => {
+        const h = withBoth();
+        h.d.OnTermChange('harbor');
+        await h.d.RunSearch();
+        h.d.Choose(h.d.Rows().find((r) => r.IsSalesParty)!);
+
+        expect(h.d.ConfirmLabel()).toBe('Select');
+        await h.d.Confirm();
+        // No promotion: a second promotion is exactly what PromoteParty refuses.
+        expect(h.promotions).toEqual([]);
+        expect(h.promoted).toEqual(['org-1']);
+        expect(h.closed).toBe(1);
+    });
+
+    it('still promotes a row that has no sales account', async () => {
+        const h = withBoth();
+        h.d.OnTermChange('harbor');
+        await h.d.RunSearch();
+        h.d.Choose(h.d.Rows().find((r) => !r.IsSalesParty)!);
+
+        expect(h.d.ConfirmLabel()).toBe('Promote to Sales Account');
+        await h.d.Confirm();
+        expect(h.promotions).toHaveLength(1);
+        expect(h.promoted).toEqual(['org-9']);
+    });
+});
+
+describe('creating one that does not exist at all', () => {
+    it('is offered only after a search has found nothing', async () => {
+        const h = harness('Account', []);
+        expect(h.d.CanOfferCreate()).toBe(false);      // nothing typed
+        h.d.OnTermChange('zzz');
+        expect(h.d.CanOfferCreate()).toBe(false);      // still searching
+        await h.d.RunSearch();
+        expect(h.d.CanOfferCreate()).toBe(true);
+    });
+
+    it('creates an account from a name and reports it like any other choice', async () => {
+        const h = harness('Account', []);
+        const created: [string, Record<string, unknown>][] = [];
+        h.d.Create = async (entity, fields) => {
+            created.push([entity, fields as Record<string, unknown>]);
+            return { Kind: 'Promoted', ID: 'new-1' };
+        };
+        h.d.OnTermChange('zzz');
+        await h.d.RunSearch();
+        h.d.NewName.set('  Zephyr Logistics  ');
+        expect(h.d.CanCreate()).toBe(true);
+        await h.d.CreateNew();
+
+        expect(created[0][0]).toBe('MJ_BizApps_Sales: Sales Accounts');
+        expect(created[0][1]).toMatchObject({ Name: 'Zephyr Logistics', AccountTypeID: 'at-prospect' });
+        expect(h.promoted).toEqual(['new-1']);
+        expect(h.closed).toBe(1);
+    });
+
+    it('needs BOTH names for a person, because DisplayName is computed from them', async () => {
+        const h = harness('Contact', []);
+        h.d.OnTermChange('zzz');
+        await h.d.RunSearch();
+        h.d.NewFirst.set('Grace');
+        expect(h.d.CanCreate()).toBe(false);
+        h.d.NewLast.set('Hopper');
+        expect(h.d.CanCreate()).toBe(true);
+
+        const created: Record<string, unknown>[] = [];
+        h.d.Create = async (_e, fields) => {
+            created.push(fields as Record<string, unknown>);
+            return { Kind: 'Promoted', ID: 'p-1' };
+        };
+        await h.d.CreateNew();
+        expect(created[0]).toMatchObject({ FirstName: 'Grace', LastName: 'Hopper' });
+        // Never set: it is a persisted computed column on Person.
+        expect(Object.keys(created[0])).not.toContain('DisplayName');
+    });
+
+    it('keeps the dialog open and shows why when the create is refused', async () => {
+        const h = harness('Account', []);
+        h.d.Create = async () => ({ Kind: 'Failed', Message: 'Name is already taken' });
+        h.d.OnTermChange('zzz');
+        await h.d.RunSearch();
+        h.d.NewName.set('Dupe');
+        await h.d.CreateNew();
+        expect(h.promoted).toEqual([]);
+        expect(h.closed).toBe(0);
+        expect(h.d.Error()).toBe('Name is already taken');
     });
 });
