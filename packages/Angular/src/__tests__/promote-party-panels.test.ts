@@ -220,3 +220,41 @@ describe('the promote card markup', () => {
         }
     });
 });
+
+describe('the deal form offers the promote route wherever it draws a party field', () => {
+    const source = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), '../lib/form-panels/deal-form.panels.ts'),
+        'utf8',
+    );
+
+    /**
+     * THE DEAL FORM DRAWS PARTY FIELDS FROM TWO PANELS, and the one that leads on a NEW deal is not
+     * the one named "party": `MJSDealPipelinePanel` carries `leadsWhenUnsaved: true`, while
+     * `MJSDealPartyPanel` deliberately drops the creation party fields while the deal is unsaved.
+     * The first version of this feature put the promote link only on the latter, so it was invisible
+     * in the exact place a rep hits the problem — creating a deal for a company that is not an
+     * account yet.
+     *
+     * Pairing the counts rather than asserting "two" states the requirement instead of today's
+     * layout: a third render site added later fails this until it carries the affordance too.
+     */
+    it('pairs every party-field render site with a promote link', () => {
+        const pickers = (source.match(/<bizapps-party-field/g) ?? []).length;
+        const links = (source.match(/class="mjs-promote-link"/g) ?? []).length;
+        expect(pickers).toBeGreaterThan(1);
+        expect(links).toBe(pickers);
+    });
+
+    it('mounts the dialog in every panel that imports the party field', () => {
+        const importsParty = (source.match(/PartyFieldComponent\]/g) ?? []).length
+            + (source.match(/PartyFieldComponent, MJSPromotePartyDialog\]/g) ?? []).length;
+        const mounts = (source.match(/<mjs-promote-party-dialog/g) ?? []).length;
+        expect(mounts).toBe(importsParty);
+    });
+
+    it('keys the promote affordance on the field\'s party Kind, never on its name', () => {
+        // A fourth party field added to the spec list must get the affordance without this changing.
+        expect(source).toContain("f.party.Kind === 'Organization' ? 'account' : 'contact'");
+        expect(source).not.toMatch(/PromotableFieldKind[\s\S]{0,200}f\.name === 'AccountID'/);
+    });
+});

@@ -772,6 +772,65 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
     /** `protected`: the party panel bumps it when a promotion adds the row the picker could not offer. */
     protected readonly accountRenderKey = signal(0);
 
+    // ── Reaching a record the picker cannot offer (D-PR2 / D-PR3) ──────────────
+
+    /** Which promotion the dialog is doing; meaningless while `PromoteOpen` is false. */
+    public PromoteKind: PromoteKind = 'Account';
+    public PromoteOpen = false;
+    /** The field the dialog was opened from, so the promoted record lands in the right one. */
+    private promoteField: string | null = null;
+
+    /**
+     * `'account'` for the account field, `'contact'` for either contact field, null for anything
+     * else. Derived from the field's party Kind rather than its name, so a fourth party field added
+     * to the spec list gets the affordance without this method being touched.
+     */
+    public PromotableFieldKind(f: DealFieldSpec): 'account' | 'contact' | null {
+        if (!f.party) return null;
+        return f.party.Kind === 'Organization' ? 'account' : 'contact';
+    }
+
+    public PromoteLinkFor(f: DealFieldSpec): string {
+        return this.PromotableFieldKind(f) === 'account'
+            ? 'Not finding the organization? Add an existing one.'
+            : 'Not finding the person? Add an existing one.';
+    }
+
+    public OpenPromote(f: DealFieldSpec): void {
+        const kind = this.PromotableFieldKind(f);
+        if (!kind) return;
+        this.PromoteKind = kind === 'account' ? 'Account' : 'Contact';
+        this.promoteField = f.name;
+        this.PromoteOpen = true;
+    }
+
+    public ClosePromote(): void {
+        this.PromoteOpen = false;
+        this.promoteField = null;
+    }
+
+    /**
+     * The promoted record's ID IS its Organization's or Person's ID (IsA), so it can be stored
+     * straight into the field the rep opened the dialog from.
+     *
+     * It then runs the SAME field-change path a normal pick runs, rather than re-deriving what
+     * choosing an account means: filling the deal's empty contacts and the Bill.com check both live
+     * there (#254). The account field is re-keyed because the row it would now show did not exist
+     * when it last rendered.
+     */
+    public async OnPromoted(id: string): Promise<void> {
+        const field = this.promoteField;
+        this.PromoteOpen = false;
+        this.promoteField = null;
+        if (!field || !this.Record) return;
+        this.Record.Set(field, id);
+        if (field === 'AccountID') {
+            this.accountRenderKey.update((k) => k + 1);
+        }
+        await this.OnFieldValueChange({ FieldName: field });
+    }
+
+
     public DrawsOwnMoney(f: DealFieldSpec): boolean {
         return f.currency === true && !(this.EditMode && this.FieldEditable(f.name));
     }
@@ -1711,8 +1770,8 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     selector: 'mjs-deal-pipeline-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent],
-    styles: [FIELD_STYLES],
+    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent, MJSPromotePartyDialog],
+    styles: [FIELD_STYLES, PROMOTE_LINK_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="pipeline" [SectionName]="HidePipelines() ? 'Stage' : 'Pipeline'" Icon="fa-solid fa-diagram-project"
             [Form]="FormComponent" [FormContext]="FormContext">
@@ -1723,6 +1782,15 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                             <bizapps-party-field [Record]="Record" [FieldName]="f.name" [Kind]="f.party.Kind" [QueryName]="f.party.QueryName"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext"
                                 (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></bizapps-party-field>
+                            @if (EditMode && FieldEditable(f.name) && PromotableFieldKind(f)) {
+                                <!-- The picker only offers organizations and people that ALREADY have a
+                                     sales row, because it cannot mark a row unselectable (PL1/PL3). This
+                                     is the way to the ones it leaves out, so the rep reaches the existing
+                                     record instead of creating a second one (golive#259). -->
+                                <button type="button" class="mjs-promote-link"
+                                        [attr.data-testid]="'deal-promote-' + PromotableFieldKind(f)"
+                                        (click)="OpenPromote(f)">{{ PromoteLinkFor(f) }}</button>
+                            }
                         } @else {
                             <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
@@ -1984,6 +2052,12 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 </div>
             </div>
         </mj-collapsible-panel>
+        @if (PromoteOpen) {
+            <mjs-promote-party-dialog
+                [PromoteKind]="PromoteKind"
+                (Promoted)="OnPromoted($event)"
+                (Closed)="ClosePromote()"></mjs-promote-party-dialog>
+        }
     `,
 })
 export class MJSDealPipelinePanel extends MJSDealFieldPanel {
@@ -2748,63 +2822,6 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
     `,
 })
 export class MJSDealPartyPanel extends MJSDealFieldPanel {
-    // ── Reaching a record the picker cannot offer (D-PR2 / D-PR3) ──────────────
-
-    /** Which promotion the dialog is doing; meaningless while `PromoteOpen` is false. */
-    public PromoteKind: PromoteKind = 'Account';
-    public PromoteOpen = false;
-    /** The field the dialog was opened from, so the promoted record lands in the right one. */
-    private promoteField: string | null = null;
-
-    /**
-     * `'account'` for the account field, `'contact'` for either contact field, null for anything
-     * else. Derived from the field's party Kind rather than its name, so a fourth party field added
-     * to the spec list gets the affordance without this method being touched.
-     */
-    public PromotableFieldKind(f: DealFieldSpec): 'account' | 'contact' | null {
-        if (!f.party) return null;
-        return f.party.Kind === 'Organization' ? 'account' : 'contact';
-    }
-
-    public PromoteLinkFor(f: DealFieldSpec): string {
-        return this.PromotableFieldKind(f) === 'account'
-            ? 'Not finding the organization? Add an existing one.'
-            : 'Not finding the person? Add an existing one.';
-    }
-
-    public OpenPromote(f: DealFieldSpec): void {
-        const kind = this.PromotableFieldKind(f);
-        if (!kind) return;
-        this.PromoteKind = kind === 'account' ? 'Account' : 'Contact';
-        this.promoteField = f.name;
-        this.PromoteOpen = true;
-    }
-
-    public ClosePromote(): void {
-        this.PromoteOpen = false;
-        this.promoteField = null;
-    }
-
-    /**
-     * The promoted record's ID IS its Organization's or Person's ID (IsA), so it can be stored
-     * straight into the field the rep opened the dialog from.
-     *
-     * It then runs the SAME field-change path a normal pick runs, rather than re-deriving what
-     * choosing an account means: filling the deal's empty contacts and the Bill.com check both live
-     * there (#254). The account field is re-keyed because the row it would now show did not exist
-     * when it last rendered.
-     */
-    public async OnPromoted(id: string): Promise<void> {
-        const field = this.promoteField;
-        this.PromoteOpen = false;
-        this.promoteField = null;
-        if (!field || !this.Record) return;
-        this.Record.Set(field, id);
-        if (field === 'AccountID') {
-            this.accountRenderKey.update((k) => k + 1);
-        }
-        await this.OnFieldValueChange({ FieldName: field });
-    }
     /**
      * Record links on these fields emit `Navigate` from `mj-form-field`. That output must be
      * forwarded to `FormComponent.OnFormNavigate`, which Explorer maps onto
