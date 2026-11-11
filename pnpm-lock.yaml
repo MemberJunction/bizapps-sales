@@ -149,7 +149,7 @@ importers:
   packages/Actions:
     dependencies:
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: ^6.28.0
+        specifier: ^6.29.0
         version: link:../CoreEntitiesServer
       zod:
         specifier: ^3.25.76
@@ -198,7 +198,7 @@ importers:
         specifier: 21.1.3
         version: 21.1.3(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(@angular/platform-browser@21.1.3(@angular/animations@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)(zone.js@0.16.2)))(rxjs@7.8.2)
       '@mj-biz-apps/sales-entities':
-        specifier: ^6.28.0
+        specifier: ^6.29.0
         version: link:../Entities
     devDependencies:
       '@angular/compiler':
@@ -262,7 +262,7 @@ importers:
   packages/CoreEntitiesServer:
     dependencies:
       '@mj-biz-apps/sales-entities':
-        specifier: ^6.28.0
+        specifier: ^6.29.0
         version: link:../Entities
     devDependencies:
       '@memberjunction/core':
@@ -348,13 +348,13 @@ importers:
         specifier: ^5.40.0
         version: 5.40.0(@memberjunction/core@6.2.1)(@memberjunction/global@6.2.1)(@mj-biz-apps/common-entities@5.60.0(@memberjunction/core@6.2.1)(@memberjunction/global@6.2.1))
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: ^6.28.0
+        specifier: ^6.29.0
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/sales-entities':
-        specifier: ^6.28.0
+        specifier: ^6.29.0
         version: link:../Entities
       '@mj-biz-apps/sales-server':
-        specifier: ^6.28.0
+        specifier: ^6.29.0
         version: link:../Server
     devDependencies:
       '@mj-biz-apps/accounting-core-entities-server':
@@ -400,13 +400,13 @@ importers:
   packages/Server:
     dependencies:
       '@mj-biz-apps/sales-actions':
-        specifier: ^6.28.0
+        specifier: ^6.29.0
         version: link:../Actions
       '@mj-biz-apps/sales-core-entities-server':
-        specifier: ^6.28.0
+        specifier: ^6.29.0
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/sales-entities':
-        specifier: ^6.28.0
+        specifier: ^6.29.0
         version: link:../Entities
       class-validator:
         specifier: ^0.14.3
@@ -11072,7 +11072,7 @@ snapshots:
       - canvas
     optional: true
 
-  '@hyperframes/engine@0.8.134(@types/node@22.20.1)':
+  '@hyperframes/engine@0.8.134':
     dependencies:
       '@hono/node-server': 2.1.0(hono@4.13.1)
       '@hyperframes/core': 0.8.134(@types/node@22.20.1)
@@ -11082,7 +11082,6 @@ snapshots:
       puppeteer: 25.16.0
       puppeteer-core: 25.16.0
     transitivePeerDependencies:
-      - '@types/node'
       - bufferutil
       - canvas
       - proxy-agent
@@ -11119,7 +11118,7 @@ snapshots:
     dependencies:
       '@hono/node-server': 2.1.0(hono@4.13.1)
       '@hyperframes/core': 0.8.134(@types/node@22.20.1)
-      '@hyperframes/engine': 0.8.134(@types/node@22.20.1)
+      '@hyperframes/engine': 0.8.134
       '@hyperframes/lint': 0.8.134
       '@hyperframes/parsers': 0.8.134
       '@hyperframes/studio-server': 0.8.134(@types/node@22.20.1)
@@ -20486,7 +20485,7 @@ snapshots:
   '@memberjunction/video-studio-render-worker@6.2.1(@types/node@22.20.1)':
     dependencies:
       '@hyperframes/core': 0.8.134(@types/node@22.20.1)
-      '@hyperframes/engine': 0.8.134(@types/node@22.20.1)
+      '@hyperframes/engine': 0.8.134
       '@hyperframes/lint': 0.8.134
       '@hyperframes/parsers': 0.8.134
       '@hyperframes/producer': 0.8.134(@types/node@22.20.1)

@@ -1,5 +1,12 @@
 # @mj-biz-apps/sales-ng
 
+## 6.29.0
+
+### Patch Changes
+
+- Updated dependencies [00c22d3]
+  - @mj-biz-apps/sales-entities@6.29.0
+
 ## 6.28.0
 
 ### Minor Changes
