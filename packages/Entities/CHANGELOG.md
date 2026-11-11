@@ -1,5 +1,12 @@
 # @mj-biz-apps/sales-entities
 
+## 6.28.0
+
+### Minor Changes
+
+- 8be0442: Add the `Sales: Confirmed Orders Missing Agreement` query: confirmed orders with no deal, no contract, no signed date, or no file in the Executed Agreement category, one row per order with a flag for each check. Web orders, returns, subscription auto-renewals and migrated orders are left out; Payment Link orders are checked for a deal only (golive #388).
+- acb1c0a: Release seed for the confirmed-orders check: `V…__v6.28.x__Metadata_Sync` creates the `Sales: Confirmed Orders Missing Agreement` query with its fields, parameters and query entities, and sets its approved fingerprint while it has none. Every record is create-only, guarded on its ID or key, so a host that already has the query keeps its copy. It has a Postgres counterpart.
+
 ## 6.27.0
 
 ### Minor Changes
