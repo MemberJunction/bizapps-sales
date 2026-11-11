@@ -64,6 +64,11 @@ import {
     MJSPersonDealTeamPanel,
     MJSPersonDealsPanel,
 } from './lib/form-panels/party-deals.panels';
+import {
+    MJSOrganizationPromotePanel,
+    MJSPersonPromotePanel,
+} from './lib/form-panels/promote-party.panels';
+import { MJSPromotePartyDialog } from './lib/form-panels/promote-party-dialog.component';
 import { MJSOrderRelatedPanel } from './lib/form-panels/order-related.panel';
 import { MJSAccountContactsPanel } from './lib/form-panels/account-contacts.panel';
 import { MJSContactAccountsPanel } from './lib/form-panels/contact-accounts.panel';
@@ -112,6 +117,31 @@ export {
     MJSPersonDealsPanel,
     MJSPersonDealTeamPanel,
 } from './lib/form-panels/party-deals.panels';
+export {
+    AccountPromotePrefill,
+    ContactPromotePrefill,
+    MJSOrganizationPromotePanel,
+    MJSPersonPromotePanel,
+    type PromotePrefillReader,
+} from './lib/form-panels/promote-party.panels';
+export {
+    PROMOTIONS,
+    PromoteParty,
+    ProspectAccountTypeID,
+    ReadProspectAccountTypeID,
+    SalesPartyRowExists,
+    type AccountTypeFlagRow,
+    type PartyRowReader,
+    type PromoteDeps,
+    type PromoteOutcome,
+} from './lib/data/promote-party';
+export {
+    MJSPromotePartyDialog,
+    PROMOTE_KINDS,
+    RunPromotableLookup,
+    type PromotableRow,
+    type PromoteKind,
+} from './lib/form-panels/promote-party-dialog.component';
 export { MJSOrderRelatedPanel } from './lib/form-panels/order-related.panel';
 export { MJSAccountContactsPanel } from './lib/form-panels/account-contacts.panel';
 export { MJSContactAccountsPanel } from './lib/form-panels/contact-accounts.panel';
@@ -174,6 +204,9 @@ export function LoadBizAppsSalesClient(): void {
     void MJSDealSchedulePanel;
     void MJSOrganizationDealsPanel;
     void MJSPersonDealsPanel;
+    void MJSOrganizationPromotePanel;
+    void MJSPersonPromotePanel;
+    void MJSPromotePartyDialog;
     void MJSPersonDealTeamPanel;
     void MJSAccountContactsPanel;
     void MJSContactAccountsPanel;

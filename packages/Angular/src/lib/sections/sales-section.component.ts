@@ -43,6 +43,10 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey, LogError, Metadata, type EntityInfo } from '@memberjunction/core';
+import {
+    MJSPromotePartyDialog,
+    type PromoteKind,
+} from '../form-panels/promote-party-dialog.component';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseResourceComponent, NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
@@ -161,7 +165,8 @@ const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 /** The entity each header action creates. */
-const CREATES: Record<SalesPrimaryAction['Creates'], string> = { deal: E_DEAL, account: E_ACCOUNT, contact: E_CONTACT };
+/** Only the CREATING actions map to an entity; the promote kinds open a dialog instead. */
+const CREATES: Record<'deal' | 'account' | 'contact', string> = { deal: E_DEAL, account: E_ACCOUNT, contact: E_CONTACT };
 const E_DEAL_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_FORECAST_CATEGORY_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
@@ -224,6 +229,7 @@ interface AttentionRow {
         MJLeftNavComponent,
         MJLeftNavContentComponent,
         MJButtonDirective,
+        MJSPromotePartyDialog,
         MJSSalesFilterBarComponent,
         MJSSalesSettingsPageComponent,
         DealBoardComponent,
@@ -588,9 +594,38 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Start(this.PrimaryAction ?? { Label: '', Icon: '', Creates: 'deal' });
     }
 
-    /** Opens a new record of what the action creates, as an Explorer tab. */
+    /**
+     * Opens a new record of what the action creates, as an Explorer tab — or, for the promote kinds,
+     * the promote dialog, because that record already exists and only its sales half is missing.
+     */
     public Start(action: SalesPrimaryAction): void {
+        if (action.Creates === 'promote-account' || action.Creates === 'promote-contact') {
+            this.PromoteKind = action.Creates === 'promote-account' ? 'Account' : 'Contact';
+            this.PromoteOpen = true;
+            return;
+        }
         this.nav.OpenNewEntityRecord(CREATES[action.Creates]);
+    }
+
+    // ── Promoting an existing Organization or Person (D-PR3) ───────────────────
+
+    /** Which promotion the dialog is doing. Meaningless while `PromoteOpen` is false. */
+    public PromoteKind: PromoteKind = 'Account';
+    public PromoteOpen = false;
+
+    public ClosePromote(): void {
+        this.PromoteOpen = false;
+    }
+
+    /**
+     * The promoted record's ID IS its Organization's or Person's ID (IsA), so this opens the record
+     * the rep just created rather than hunting for it. D-PR1 leaves everything but the account type
+     * blank, so landing on the form is where the work continues.
+     */
+    public OnPromoted(id: string): void {
+        const entity = this.PromoteKind === 'Account' ? E_ACCOUNT : E_CONTACT;
+        this.PromoteOpen = false;
+        this.nav.OpenEntityRecord(entity, CompositeKey.FromID(id));
     }
 
     /** A row on the Accounts or Contacts page: opens that record as an Explorer tab. */
