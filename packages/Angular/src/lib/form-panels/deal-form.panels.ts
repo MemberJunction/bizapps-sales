@@ -1791,8 +1791,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                      sales row, because it cannot mark a row unselectable (PL1/PL3). This
                                      is the way to the ones it leaves out, so the rep reaches the existing
                                      record instead of creating a second one (golive#259). -->
+                                <!-- A STATIC testid, scoped by the enclosing data-field. Built as
+                                     'deal-promote-' + kind it was greppable by nobody and invisible to
+                                     assert-harness-selectors, which collects literal data-testid only. -->
                                 <button type="button" class="mjs-promote-link"
-                                        [attr.data-testid]="'deal-promote-' + PromotableFieldKind(f)"
+                                        data-testid="deal-promote-party"
                                         (click)="OpenPromote(f)">{{ PromoteLinkFor(f) }}</button>
                             }
                         } @else {
@@ -2794,8 +2797,11 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                                      sales row, because it cannot mark a row unselectable (PL1/PL3). This
                                      is the way to the ones it leaves out, so the rep reaches the existing
                                      record instead of creating a second one (golive#259). -->
+                                <!-- A STATIC testid, scoped by the enclosing data-field. Built as
+                                     'deal-promote-' + kind it was greppable by nobody and invisible to
+                                     assert-harness-selectors, which collects literal data-testid only. -->
                                 <button type="button" class="mjs-promote-link"
-                                        [attr.data-testid]="'deal-promote-' + PromotableFieldKind(f)"
+                                        data-testid="deal-promote-party"
                                         (click)="OpenPromote(f)">{{ PromoteLinkFor(f) }}</button>
                             }
                         } @else {
