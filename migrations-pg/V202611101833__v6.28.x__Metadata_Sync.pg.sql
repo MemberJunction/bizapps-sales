@@ -271,6 +271,11 @@ BEGIN
   p_DetectionMethod_4650558f75c6 := 'Database';
   p_SourceEntityFieldID_4650558f75c6 := '142D7CE2-5C12-4A68-B7CC-797CBDA164C1';
   p_IsNullable_4650558f75c6 := FALSE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_4650558f75c6 := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_4650558f75c6 AND "Name" = p_SourceFieldName_4650558f75c6
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_4650558f75c6 THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_4650558f75c6
                     OR ("QueryID" = p_QueryID_4650558f75c6 AND "Name" = p_Name_4650558f75c6)) THEN
@@ -341,6 +346,11 @@ BEGIN
   p_DetectionMethod_b36b46aff51c := 'Database';
   p_SourceEntityFieldID_b36b46aff51c := '37ED0567-5213-4E33-9123-C88CF3E9A851';
   p_IsNullable_b36b46aff51c := FALSE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_b36b46aff51c := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_b36b46aff51c AND "Name" = p_SourceFieldName_b36b46aff51c
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_b36b46aff51c THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_b36b46aff51c
                     OR ("QueryID" = p_QueryID_b36b46aff51c AND "Name" = p_Name_b36b46aff51c)) THEN
@@ -411,6 +421,11 @@ BEGIN
   p_DetectionMethod_456b8611c764 := 'Database';
   p_SourceEntityFieldID_456b8611c764 := 'C7C1BD22-6968-499B-9FFA-1931BEB97C0C';
   p_IsNullable_456b8611c764 := FALSE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_456b8611c764 := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_456b8611c764 AND "Name" = p_SourceFieldName_456b8611c764
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_456b8611c764 THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_456b8611c764
                     OR ("QueryID" = p_QueryID_456b8611c764 AND "Name" = p_Name_456b8611c764)) THEN
@@ -481,6 +496,11 @@ BEGIN
   p_DetectionMethod_b3eda0508a03 := 'Database';
   p_SourceEntityFieldID_b3eda0508a03 := '41E3A5E2-F717-4220-AC33-8ABC132F8DD0';
   p_IsNullable_b3eda0508a03 := FALSE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_b3eda0508a03 := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_b3eda0508a03 AND "Name" = p_SourceFieldName_b3eda0508a03
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_b3eda0508a03 THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_b3eda0508a03
                     OR ("QueryID" = p_QueryID_b3eda0508a03 AND "Name" = p_Name_b3eda0508a03)) THEN
@@ -551,6 +571,11 @@ BEGIN
   p_DetectionMethod_8e66273a4ad7 := 'Database';
   p_SourceEntityFieldID_8e66273a4ad7 := '565015DD-BE0A-4024-BF1F-6CB2A147A5C9';
   p_IsNullable_8e66273a4ad7 := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_8e66273a4ad7 := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_8e66273a4ad7 AND "Name" = p_SourceFieldName_8e66273a4ad7
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_8e66273a4ad7 THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_8e66273a4ad7
                     OR ("QueryID" = p_QueryID_8e66273a4ad7 AND "Name" = p_Name_8e66273a4ad7)) THEN
@@ -621,6 +646,11 @@ BEGIN
   p_DetectionMethod_efaff430ccdc := 'Database';
   p_SourceEntityFieldID_efaff430ccdc := '197A4A78-E556-465F-9B0E-FE0F68653B48';
   p_IsNullable_efaff430ccdc := FALSE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_efaff430ccdc := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_efaff430ccdc AND "Name" = p_SourceFieldName_efaff430ccdc
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_efaff430ccdc THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_efaff430ccdc
                     OR ("QueryID" = p_QueryID_efaff430ccdc AND "Name" = p_Name_efaff430ccdc)) THEN
@@ -690,6 +720,11 @@ BEGIN
   p_DetectionMethod_ec38d97c1167 := 'Database';
   p_SourceEntityFieldID_ec38d97c1167 := '54079149-DE80-4CEE-B857-AE5ADFFD41A6';
   p_IsNullable_ec38d97c1167 := FALSE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_ec38d97c1167 := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_ec38d97c1167 AND "Name" = p_SourceFieldName_ec38d97c1167
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_ec38d97c1167 THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_ec38d97c1167
                     OR ("QueryID" = p_QueryID_ec38d97c1167 AND "Name" = p_Name_ec38d97c1167)) THEN
@@ -826,6 +861,11 @@ BEGIN
   p_DetectionMethod_6dd2ec82dde8 := 'Database';
   p_SourceEntityFieldID_6dd2ec82dde8 := '7AEB02A2-1574-4FC4-ADF1-299328154295';
   p_IsNullable_6dd2ec82dde8 := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_6dd2ec82dde8 := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_6dd2ec82dde8 AND "Name" = p_SourceFieldName_6dd2ec82dde8
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_6dd2ec82dde8 THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_6dd2ec82dde8
                     OR ("QueryID" = p_QueryID_6dd2ec82dde8 AND "Name" = p_Name_6dd2ec82dde8)) THEN
@@ -896,6 +936,11 @@ BEGIN
   p_DetectionMethod_db2f27c049ed := 'Database';
   p_SourceEntityFieldID_db2f27c049ed := 'B66538B2-A77C-4B69-9B58-30D0D2016CC4';
   p_IsNullable_db2f27c049ed := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_db2f27c049ed := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_db2f27c049ed AND "Name" = p_SourceFieldName_db2f27c049ed
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_db2f27c049ed THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_db2f27c049ed
                     OR ("QueryID" = p_QueryID_db2f27c049ed AND "Name" = p_Name_db2f27c049ed)) THEN
@@ -965,6 +1010,11 @@ BEGIN
   p_DetectionMethod_302d8d081857 := 'Database';
   p_SourceEntityFieldID_302d8d081857 := 'B0F46D44-A139-4CBB-8737-8265D5052238';
   p_IsNullable_302d8d081857 := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_302d8d081857 := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_302d8d081857 AND "Name" = p_SourceFieldName_302d8d081857
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_302d8d081857 THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_302d8d081857
                     OR ("QueryID" = p_QueryID_302d8d081857 AND "Name" = p_Name_302d8d081857)) THEN
@@ -1034,6 +1084,11 @@ BEGIN
   p_DetectionMethod_68a1a3b41e59 := 'Database';
   p_SourceEntityFieldID_68a1a3b41e59 := '3D52AFFE-C851-46F7-8C49-5263BECB0C9B';
   p_IsNullable_68a1a3b41e59 := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_68a1a3b41e59 := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_68a1a3b41e59 AND "Name" = p_SourceFieldName_68a1a3b41e59
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_68a1a3b41e59 THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_68a1a3b41e59
                     OR ("QueryID" = p_QueryID_68a1a3b41e59 AND "Name" = p_Name_68a1a3b41e59)) THEN
@@ -1103,6 +1158,11 @@ BEGIN
   p_DetectionMethod_20c3912f5006 := 'Database';
   p_SourceEntityFieldID_20c3912f5006 := '939FFD49-39DA-4200-BE2E-906F14FE50E1';
   p_IsNullable_20c3912f5006 := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_20c3912f5006 := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_20c3912f5006 AND "Name" = p_SourceFieldName_20c3912f5006
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_20c3912f5006 THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_20c3912f5006
                     OR ("QueryID" = p_QueryID_20c3912f5006 AND "Name" = p_Name_20c3912f5006)) THEN
@@ -1172,6 +1232,11 @@ BEGIN
   p_DetectionMethod_c67b1782eb9a := 'Database';
   p_SourceEntityFieldID_c67b1782eb9a := '379450E4-178C-4CDD-90B3-9081E903B51D';
   p_IsNullable_c67b1782eb9a := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_c67b1782eb9a := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_c67b1782eb9a AND "Name" = p_SourceFieldName_c67b1782eb9a
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_c67b1782eb9a THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_c67b1782eb9a
                     OR ("QueryID" = p_QueryID_c67b1782eb9a AND "Name" = p_Name_c67b1782eb9a)) THEN
@@ -1241,6 +1306,11 @@ BEGIN
   p_DetectionMethod_49941ac810d6 := 'Database';
   p_SourceEntityFieldID_49941ac810d6 := '3442E4F5-F87C-4993-9AB3-38D7FBBECF88';
   p_IsNullable_49941ac810d6 := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_49941ac810d6 := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_49941ac810d6 AND "Name" = p_SourceFieldName_49941ac810d6
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_49941ac810d6 THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_49941ac810d6
                     OR ("QueryID" = p_QueryID_49941ac810d6 AND "Name" = p_Name_49941ac810d6)) THEN
@@ -1310,6 +1380,11 @@ BEGIN
   p_DetectionMethod_285578b72efc := 'Database';
   p_SourceEntityFieldID_285578b72efc := '04E8AA9D-C2DC-489D-B081-75C4E6DDFA6B';
   p_IsNullable_285578b72efc := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_285578b72efc := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_285578b72efc AND "Name" = p_SourceFieldName_285578b72efc
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_285578b72efc THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_285578b72efc
                     OR ("QueryID" = p_QueryID_285578b72efc AND "Name" = p_Name_285578b72efc)) THEN
@@ -1380,6 +1455,11 @@ BEGIN
   p_DetectionMethod_b1d24f35a8e9 := 'Database';
   p_SourceEntityFieldID_b1d24f35a8e9 := '8677055B-2482-4250-98C1-AFC3DAE57393';
   p_IsNullable_b1d24f35a8e9 := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_b1d24f35a8e9 := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_b1d24f35a8e9 AND "Name" = p_SourceFieldName_b1d24f35a8e9
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_b1d24f35a8e9 THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_b1d24f35a8e9
                     OR ("QueryID" = p_QueryID_b1d24f35a8e9 AND "Name" = p_Name_b1d24f35a8e9)) THEN
@@ -1449,6 +1529,11 @@ BEGIN
   p_DetectionMethod_32f423237cd3 := 'Database';
   p_SourceEntityFieldID_32f423237cd3 := '14BDA941-CE85-4A14-8FDC-3681B8C52418';
   p_IsNullable_32f423237cd3 := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_32f423237cd3 := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_32f423237cd3 AND "Name" = p_SourceFieldName_32f423237cd3
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_32f423237cd3 THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_32f423237cd3
                     OR ("QueryID" = p_QueryID_32f423237cd3 AND "Name" = p_Name_32f423237cd3)) THEN
@@ -1518,6 +1603,11 @@ BEGIN
   p_DetectionMethod_0868a158aa4a := 'Database';
   p_SourceEntityFieldID_0868a158aa4a := '0E1B433E-F36B-1410-8489-00031FE78EB9';
   p_IsNullable_0868a158aa4a := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_0868a158aa4a := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_0868a158aa4a AND "Name" = p_SourceFieldName_0868a158aa4a
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_0868a158aa4a THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_0868a158aa4a
                     OR ("QueryID" = p_QueryID_0868a158aa4a AND "Name" = p_Name_0868a158aa4a)) THEN
@@ -1588,6 +1678,11 @@ BEGIN
   p_DetectionMethod_7169530cd3da := 'Database';
   p_SourceEntityFieldID_7169530cd3da := '9ED4A8CC-E0B8-4880-945A-4BD6DD6368C6';
   p_IsNullable_7169530cd3da := TRUE;
+  -- The source entity field is found on this database by entity and field name (the shipped ID
+  -- first): entity field IDs can differ between databases. NULL when the field is not there.
+  p_SourceEntityFieldID_7169530cd3da := (SELECT "ID" FROM "${mjSchema}"."EntityField"
+      WHERE "EntityID" = p_SourceEntityID_7169530cd3da AND "Name" = p_SourceFieldName_7169530cd3da
+      ORDER BY CASE WHEN "ID" = p_SourceEntityFieldID_7169530cd3da THEN 0 ELSE 1 END LIMIT 1);
   IF NOT EXISTS (SELECT 1 FROM "${mjSchema}"."QueryField"
                  WHERE "ID" = p_ID_7169530cd3da
                     OR ("QueryID" = p_QueryID_7169530cd3da AND "Name" = p_Name_7169530cd3da)) THEN
