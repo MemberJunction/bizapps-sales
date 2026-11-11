@@ -1,0 +1,44 @@
+[
+  {
+    "_comments": [
+      "Sales Contacts has DisplayNameAndEmail as its name field, deliberately and load-bearing:",
+      ".sales-contact-picker-columns.json turns on golive#259 around it ('the picker's name field is",
+      "DisplayNameAndEmail'), and the column plan is built by SUBTRACTING the name field, so which field",
+      "carries the flag decides both what the picker searches and which columns it renders.",
+      "",
+      "THE FLAG THIS FILE CLEARS IS FirstName'S, and the reason is a CodeGen reconciler, not a one-off.",
+      "Every pass runs 'UPDATE EntityField SET IsNameField = 1 WHERE ID = <its own pick> AND",
+      "AutoUpdateIsNameField = 1'. It SETS but never CLEARS, so its pick is added alongside the pinned",
+      "one rather than replacing it, and FirstName -- the first string column -- is what it picks here.",
+      "Sales Contacts then has TWO fields flagged IsNameField, and the view generator takes the lower",
+      "Sequence: FirstName at 12 beats DisplayNameAndEmail at 34.",
+      "",
+      "WHAT THAT COSTS, measured rather than feared: every denormalized contact-name column in the schema",
+      "is regenerated to join FirstName instead -- SalesContact on Deal Contact Roles, PrimaryContact and",
+      "BillingContact on Deals, DefaultPrimaryContact and DefaultBillingContact on Sales Accounts -- so",
+      "nvarchar(753) becomes nvarchar(100) and every deal and account surface shows a bare first name.",
+      "It also inverts golive#259 exactly: FirstName becomes the excluded name field while",
+      "DisplayNameAndEmail starts rendering as an ordinary column, which is the duplicate-looking-rows",
+      "complaint that issue exists to answer.",
+      "",
+      "DisplayNameAndEmail already carries AutoUpdateIsNameField = 0, which is why it survived. That pin",
+      "alone is not enough, because the reconciler never had to touch it to break this -- it only had to",
+      "add a second flag. Clearing BOTH flags on FirstName is what makes the pin hold across CodeGen runs",
+      "on every host, not just the one where someone noticed.",
+      "",
+      "Nothing in the suite asserts on a contact's rendered name, so this regenerates green. It was found",
+      "by reading a @MaxLength(753) -> @MaxLength(100) change in the generated GraphQL schema."
+    ],
+    "fields": {
+      "IsNameField": false,
+      "AutoUpdateIsNameField": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=FirstName"
+    },
+    "sync": {
+      "lastModified": "2026-11-11T12:55:03.113Z",
+      "checksum": "687c5d5cddb289a19771ed8721c6d226abed403abe2d7bf8d0bc884685394fbc"
+    }
+  }
+]

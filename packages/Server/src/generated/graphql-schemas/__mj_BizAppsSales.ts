@@ -4638,6 +4638,14 @@ export class mjBizAppsSalesSalesAccount_ {
     Status?: string;
         
     @Field({nullable: true}) 
+    @MaxLength(255)
+    WebsiteDomain?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(20)
+    Acronym?: string;
+        
+    @Field({nullable: true}) 
     @MaxLength(81)
     OwnerEmployee?: string;
         
@@ -4660,10 +4668,6 @@ export class mjBizAppsSalesSalesAccount_ {
     @Field({nullable: true}) 
     @MaxLength(753)
     DefaultBillingContact?: string;
-        
-    @Field({nullable: true}) 
-    @MaxLength(20)
-    Acronym?: string;
         
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
@@ -5057,6 +5061,14 @@ export class mjBizAppsSalesSalesContact_ {
     @Field({nullable: true}) 
     @MaxLength(36)
     SeniorityLevelID?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(250)
+    DisplayName?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(255)
+    EmailDomain?: string;
         
     @Field({nullable: true}) 
     @MaxLength(81)
