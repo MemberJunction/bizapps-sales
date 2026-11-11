@@ -387,3 +387,23 @@ describe('the dialog keeps one height', () => {
         expect(source.slice(bodyIdx, footIdx)).toContain('</div>');
     });
 });
+
+describe('the create button names the act, not the entity', () => {
+    const source = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), '../lib/form-panels/promote-party-dialog.component.ts'),
+        'utf8',
+    );
+
+    it('offers "Create Account" / "Create Contact", with the typed name in it', () => {
+        expect(PROMOTE_KINDS.Account.CreateLabel).toBe('Account');
+        expect(PROMOTE_KINDS.Contact.CreateLabel).toBe('Contact');
+        expect(source).toContain("'Create ' + Config.CreateLabel");
+        expect(source).toContain("Term().trim()");
+    });
+
+    it('keeps the row badge precise, because it states a FACT rather than an action', () => {
+        // "Account" would be ambiguous next to a row that is only an Organization.
+        expect(PROMOTE_KINDS.Account.BadgeLabel).toBe('Sales Account');
+        expect(PROMOTE_KINDS.Contact.BadgeLabel).toBe('Sales Contact');
+    });
+});

@@ -67,8 +67,14 @@ interface PromoteKindConfig {
     Confirm: string;
     /** The query returning rows that already have their sales row. */
     ExistingQueryName: string;
-    /** What a brand-new record is called, and the fields it needs. */
+    /**
+     * What the Create BUTTON calls it. Shorter than the entity's name on purpose: by the time the
+     * rep is here the dialog title has already said which kind, so "Create Account" reads as the act
+     * rather than restating the noun.
+     */
     CreateLabel: string;
+    /** What the row badge calls a party that already HAS its sales row. Stays precise. */
+    BadgeLabel: string;
     /** Person needs FirstName + LastName; Organization needs only Name. */
     CreateFields: 'name' | 'person';
     Placeholder: string;
@@ -85,7 +91,8 @@ export const PROMOTE_KINDS: Record<PromoteKind, PromoteKindConfig> = {
         ChildEntity: MJS_ENTITIES.SalesAccount,
         Title: 'Find or add a Sales Account',
         Confirm: 'Promote to Sales Account',
-        CreateLabel: 'Sales Account',
+        CreateLabel: 'Account',
+        BadgeLabel: 'Sales Account',
         CreateFields: 'name',
         Placeholder: 'Search Organizations by name, acronym or website',
         Empty: 'No Organization matches.',
@@ -98,7 +105,8 @@ export const PROMOTE_KINDS: Record<PromoteKind, PromoteKindConfig> = {
         ChildEntity: MJS_ENTITIES.SalesContact,
         Title: 'Find or add a Sales Contact',
         Confirm: 'Promote to Sales Contact',
-        CreateLabel: 'Sales Contact',
+        CreateLabel: 'Contact',
+        BadgeLabel: 'Sales Contact',
         CreateFields: 'person',
         Placeholder: 'Search People by name or email',
         Empty: 'No Person matches.',
@@ -183,7 +191,7 @@ const DEBOUNCE_MS = 250;
                                 <span class="mjs-pp__row-name">
                                     {{ row.Name }}
                                     @if (row.IsSalesParty) {
-                                        <span class="mjs-pp__badge" data-testid="promote-row-existing">{{ Config.CreateLabel }}</span>
+                                        <span class="mjs-pp__badge" data-testid="promote-row-existing">{{ Config.BadgeLabel }}</span>
                                     } @else {
                                         <span class="mjs-pp__badge mjs-pp__badge--new" data-testid="promote-row-promotable">Not yet</span>
                                     }
