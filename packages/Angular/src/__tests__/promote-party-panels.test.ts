@@ -147,7 +147,7 @@ describe('the Organization promote card', () => {
         const h = harness(() => new MJSOrganizationPromotePanel(), 'org-1', false, { Kind: 'NoParent' });
         await h.p.CheckNeedsPromotion();
         await h.p.RunPromotion();
-        expect(h.p.Error()).toBe('This record no longer exists. Reload the page.');
+        expect(h.p.Error()).toMatch(/could not be loaded/);
     });
 
     it('clears a previous refusal when the promotion is retried', async () => {

@@ -190,7 +190,7 @@ describe('the promote dialog promotion', () => {
         expect(h.promoted).toEqual([]);
         expect(h.d.Rows()).toEqual([]);
         expect(h.d.Selected()).toBeNull();
-        expect(h.d.Error()).toBe('That record no longer exists. Search again.');
+        expect(h.d.Error()).toMatch(/could not be loaded/);
     });
 
     it('cannot be cancelled or escaped while a promotion is in flight', async () => {

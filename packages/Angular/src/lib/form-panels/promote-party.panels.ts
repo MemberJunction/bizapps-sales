@@ -126,7 +126,7 @@ abstract class SalesPromotePanel extends BaseFormPanel<BaseEntity> implements Do
                 void this.FormComponent.RefreshRecord();
                 return;
             case 'NoParent':
-                this.Error.set('This record no longer exists. Reload the page.');
+                this.Error.set('This record could not be loaded. Reload the page.');
                 return;
             default:
                 this.Error.set(outcome.Message);
@@ -150,7 +150,7 @@ const PROMOTE_TEMPLATE = `
                 data-testid="promote-confirm"
                 [disabled]="Busy()"
                 (click)="RunPromotion()">
-                {{ Busy() ? 'Adding…' : ActionLabel }}
+                {{ Busy() ? 'Promoting…' : ActionLabel }}
             </button>
             @if (Error()) {
                 <p class="mjs-promote__error" data-testid="promote-error">{{ Error() }}</p>
@@ -181,7 +181,7 @@ const PROMOTE_TEMPLATE = `
 })
 export class MJSOrganizationPromotePanel extends SalesPromotePanel {
     public readonly Prompt = 'This organization is not a sales account yet, so it cannot be a deal’s customer.';
-    public readonly ActionLabel = 'Add as sales account';
+    public readonly ActionLabel = 'Promote to Sales Account';
     public readonly ParentNoun = 'organization';
     protected readonly ChildEntity = MJS_ENTITIES.SalesAccount;
     protected readonly Prefill: PromotePrefillReader = AccountPromotePrefill;
@@ -208,7 +208,7 @@ export class MJSOrganizationPromotePanel extends SalesPromotePanel {
 })
 export class MJSPersonPromotePanel extends SalesPromotePanel {
     public readonly Prompt = 'This person is not a sales contact yet, so they cannot be named on a deal.';
-    public readonly ActionLabel = 'Add as sales contact';
+    public readonly ActionLabel = 'Promote to Sales Contact';
     public readonly ParentNoun = 'person';
     protected readonly ChildEntity = MJS_ENTITIES.SalesContact;
     protected readonly Prefill: PromotePrefillReader = ContactPromotePrefill;

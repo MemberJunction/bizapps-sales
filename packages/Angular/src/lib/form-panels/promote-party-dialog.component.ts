@@ -57,6 +57,8 @@ interface PromoteKindConfig {
     QueryName: string;
     ChildEntity: string;
     Title: string;
+    /** The confirm button. Names the ACT and its result, so the button reads the same as the rule. */
+    Confirm: string;
     Placeholder: string;
     Empty: string;
     Prefill: PromotePrefillReader;
@@ -68,18 +70,20 @@ export const PROMOTE_KINDS: Record<PromoteKind, PromoteKindConfig> = {
         Kind: 'Organization',
         QueryName: 'Sales: Party Lookup Promotable Accounts',
         ChildEntity: MJS_ENTITIES.SalesAccount,
-        Title: 'Add an existing organization',
-        Placeholder: 'Search organizations by name, acronym or website',
-        Empty: 'No organization matches, or every match is already a sales account.',
+        Title: 'Promote an Organization to a Sales Account',
+        Confirm: 'Promote to Sales Account',
+        Placeholder: 'Search Organizations by name, acronym or website',
+        Empty: 'No Organization matches, or every match is already a Sales Account.',
         Prefill: AccountPromotePrefill,
     },
     Contact: {
         Kind: 'Person',
         QueryName: 'Sales: Party Lookup Promotable Contacts',
         ChildEntity: MJS_ENTITIES.SalesContact,
-        Title: 'Add an existing person',
-        Placeholder: 'Search people by name or email',
-        Empty: 'No person matches, or every match is already a sales contact.',
+        Title: 'Promote a Person to a Sales Contact',
+        Confirm: 'Promote to Sales Contact',
+        Placeholder: 'Search People by name or email',
+        Empty: 'No Person matches, or every match is already a Sales Contact.',
         Prefill: ContactPromotePrefill,
     },
 };
@@ -167,7 +171,7 @@ const DEBOUNCE_MS = 250;
                     data-testid="promote-dialog-confirm"
                     [disabled]="!Selected() || Busy()"
                     (click)="Confirm()">
-                    {{ Busy() ? 'Adding…' : 'Add to sales' }}
+                    {{ Busy() ? 'Promoting…' : Config.Confirm }}
                 </button>
                 <button type="button" mjButton Variant="outline" [disabled]="Busy()" data-testid="promote-dialog-cancel" (click)="Cancel()">
                     Cancel
@@ -383,7 +387,10 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
                 this.Closed.emit();
                 return;
             case 'NoParent':
-                this.Error.set('That record no longer exists. Search again.');
+                // `AttachToParent` returns false when the parent did not LOAD. Deleted is only one
+                // reason; unreadable here (no permission, or the owning app's server package not
+                // installed on this host) looks identical from the client. Say what is known.
+                this.Error.set('That record could not be loaded — it may have been deleted, or may not be available here. Search again.');
                 this.Rows.set(this.Rows().filter((r) => r.ID !== row.ID));
                 this.Selected.set(null);
                 return;
