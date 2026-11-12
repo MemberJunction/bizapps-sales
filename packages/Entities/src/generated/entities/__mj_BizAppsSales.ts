@@ -1571,6 +1571,12 @@ export const mjBizAppsSalesPipelineSchema = z.object({
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
         * * Description: Person who receives the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Takes precedence over CloseWonTasks.AssigneeRecordID in Close Won Policy. Empty means that policy value is used, and when both are empty the tasks are created but not assigned.`),
+    CloseWonAssigneeRoleID: z.string().nullable().describe(`
+        * * Field Name: CloseWonAssigneeRoleID
+        * * Display Name: Close Won Assignee Role
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Roles (vwRoles.ID)
+        * * Description: Role whose members all receive the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won: the task is assigned to the role, and everyone who holds it sees it and is notified. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Close Won Assignee (a person) takes precedence when both are set. Empty, with no person, means CloseWonTasks.AssigneeRecordID in Close Won Policy is used, and when that is empty too the tasks are created but not assigned.`),
     DealType: z.string().nullable().describe(`
         * * Field Name: DealType
         * * Display Name: Deal Type
@@ -1583,6 +1589,10 @@ export const mjBizAppsSalesPipelineSchema = z.object({
         * * Field Name: CloseWonAssigneePerson
         * * Display Name: Close Won Assignee Name
         * * SQL Data Type: nvarchar(250)`),
+    CloseWonAssigneeRole: z.string().nullable().describe(`
+        * * Field Name: CloseWonAssigneeRole
+        * * Display Name: Close Won Assignee Role Name
+        * * SQL Data Type: nvarchar(50)`),
 });
 
 export type mjBizAppsSalesPipelineEntityType = z.infer<typeof mjBizAppsSalesPipelineSchema>;
@@ -6624,6 +6634,20 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
     }
 
     /**
+    * * Field Name: CloseWonAssigneeRoleID
+    * * Display Name: Close Won Assignee Role
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Roles (vwRoles.ID)
+    * * Description: Role whose members all receive the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won: the task is assigned to the role, and everyone who holds it sees it and is notified. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Close Won Assignee (a person) takes precedence when both are set. Empty, with no person, means CloseWonTasks.AssigneeRecordID in Close Won Policy is used, and when that is empty too the tasks are created but not assigned.
+    */
+    get CloseWonAssigneeRoleID(): string | null {
+        return this.Get('CloseWonAssigneeRoleID');
+    }
+    set CloseWonAssigneeRoleID(value: string | null) {
+        this.Set('CloseWonAssigneeRoleID', value);
+    }
+
+    /**
     * * Field Name: DealType
     * * Display Name: Deal Type
     * * SQL Data Type: nvarchar(200)
@@ -6648,6 +6672,15 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
     */
     get CloseWonAssigneePerson(): string | null {
         return this.Get('CloseWonAssigneePerson');
+    }
+
+    /**
+    * * Field Name: CloseWonAssigneeRole
+    * * Display Name: Close Won Assignee Role Name
+    * * SQL Data Type: nvarchar(50)
+    */
+    get CloseWonAssigneeRole(): string | null {
+        return this.Get('CloseWonAssigneeRole');
     }
 }
 

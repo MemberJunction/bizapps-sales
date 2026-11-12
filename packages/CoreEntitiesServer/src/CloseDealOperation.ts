@@ -964,12 +964,12 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                     EntityName: PIPELINE_ENTITY,
                     ExtraFilter: `ID = '${deal.PipelineID}'`,
                     ResultType: 'simple',
-                    Fields: ['CloseWonPolicy', 'CloseWonAssigneePersonID'],
+                    Fields: ['CloseWonPolicy', 'CloseWonAssigneePersonID', 'CloseWonAssigneeRoleID'],
                 },
                 user,
             );
             const row = (r.Results ?? [])[0] as
-                | { CloseWonPolicy?: string | null; CloseWonAssigneePersonID?: string | null }
+                | { CloseWonPolicy?: string | null; CloseWonAssigneePersonID?: string | null; CloseWonAssigneeRoleID?: string | null }
                 | undefined;
             const raw = row?.CloseWonPolicy;
             if (r.Success && raw) {
@@ -979,8 +979,10 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                     LogError(`Sales.CloseDeal: pipeline ${deal.PipelineID} has unparseable CloseWonPolicy; using defaults`);
                 }
             }
-            // The pipeline's assignee column outranks the assignee in its JSON; see WithPipelineAssignee.
-            fromPipeline = WithPipelineAssignee(fromPipeline, r.Success ? row?.CloseWonAssigneePersonID : null);
+            // The pipeline's assignee columns outrank the assignee in its JSON; see WithPipelineAssignee.
+            fromPipeline = r.Success
+                ? WithPipelineAssignee(fromPipeline, row?.CloseWonAssigneePersonID, row?.CloseWonAssigneeRoleID)
+                : fromPipeline;
         }
 
         return { ...POLICY_DEFAULTS, ...fromPipeline, ...(input.PolicyOverrides ?? {}) };
