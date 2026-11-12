@@ -1,0 +1,57 @@
+[
+  {
+    "_comments": [
+      "Sales Contacts has DisplayNameAndEmail as its name field, deliberately and load-bearing:",
+      ".sales-contact-picker-columns.json turns on golive#259 around it ('the picker's name field is",
+      "DisplayNameAndEmail'), and an FK picker's column plan is built by SUBTRACTING the name field, so",
+      "which field carries the flag decides which columns such a picker renders. Scope that precisely:",
+      "since golive#372 the DEAL's account and contact fields are drawn by common's bizapps-party-field,",
+      "which has no column plan at all -- it renders Name and Detail from this repo's own party-lookup",
+      "queries. The DefaultInView plan now governs the Sales Contacts grid and any mj-form-field FK still",
+      "pointing at Sales Contacts, NOT the deal party picker. The pin does not rest on that, though: the",
+      "cost below is measured on the generated views and is independent of any picker.",
+      "",
+      "THE FLAG THIS FILE CLEARS IS FirstName'S, and the reason is structural rather than a one-off.",
+      "CodeGen picks ONE name field per entity and clears every other flagged field, but it clears only",
+      "fields with AutoUpdateIsNameField = 1 -- a PINNED field is deliberately never touched in either",
+      "direction (MJ CodeGenLib manage-metadata.ts, applyNameFieldUpdates). DisplayNameAndEmail is",
+      "pinned AND ineligible to win: isFieldEligibleForNameField rejects any IsVirtual field that is not",
+      "an inherited IS-A column, and DisplayNameAndEmail is a sales-only concat defined in",
+      "vwSalesContactsGenerated -- it is not a column on Person, so it is virtual WITHOUT being",
+      "inherited. With no eligible flagged field, the reconciler falls through to its AI-ranked",
+      "candidates and picks FirstName (an inherited Person column, hence eligible), sets IsNameField on",
+      "it, and cannot clear the pinned one. Two fields end up flagged, against that method's own",
+      "documented 'single winner, always', and the view generator takes the lower Sequence: FirstName at",
+      "12 beats DisplayNameAndEmail at 34.",
+      "",
+      "WHAT THAT COSTS, measured rather than feared: every denormalized contact-name column in the schema",
+      "is regenerated to join FirstName instead -- SalesContact on Deal Contact Roles, PrimaryContact and",
+      "BillingContact on Deals, DefaultPrimaryContact and DefaultBillingContact on Sales Accounts -- so",
+      "nvarchar(753) becomes nvarchar(100) and every deal and account surface shows a bare first name.",
+      "It also inverts golive#259 exactly: FirstName becomes the excluded name field while",
+      "DisplayNameAndEmail starts rendering as an ordinary column, which is the duplicate-looking-rows",
+      "complaint that issue exists to answer.",
+      "",
+      "CLEARING BOTH FLAGS IS THE POINT. IsNameField alone would be re-set on the next pass, because",
+      "AutoUpdateIsNameField = 1 is what makes FirstName an auto-pick candidate at all. With both at 0",
+      "the eligible-candidate set no longer contains it, so the pinned field stays the only one flagged.",
+      "The window is narrow but real: the reconciler only re-evaluates on a pass that ADDS fields to the",
+      "entity, which is why this surfaced when the two inherited Person columns arrived and not before.",
+      "A host installing from migrations takes the fields from captured SQL and never runs it.",
+      "",
+      "Nothing in the suite asserts on a contact's rendered name, so this regenerates green. It was found",
+      "by reading a @MaxLength(753) -> @MaxLength(100) change in the generated GraphQL schema."
+    ],
+    "fields": {
+      "IsNameField": false,
+      "AutoUpdateIsNameField": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=FirstName"
+    },
+    "sync": {
+      "lastModified": "2026-11-11T13:17:05.073Z",
+      "checksum": "687c5d5cddb289a19771ed8721c6d226abed403abe2d7bf8d0bc884685394fbc"
+    }
+  }
+]

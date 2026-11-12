@@ -3692,11 +3692,16 @@ export class DealEntityServer extends DealEntity {
      * Stamps `Deal.CreationDate` from the server's clock on create when the caller did not supply one (#532).
      *
      * `EntityField`'s constructor evaluates `DefaultValue = 'getutcdate()'` during `NewRecord()`, setting
-     * `Value = new Date()` at construction time while leaving `_NeverSet = true`. Any explicit assignment
+     * `Value = new Date()` at construction time while leaving `NeverSet = true`. Any explicit assignment
      * by a caller (an importer setting a historical creation date, or a check supplying a specific instant)
-     * flips `_NeverSet` to `false`.
+     * flips `NeverSet` to `false`.
      *
-     * Re-stamping here when `_NeverSet` is still `true` (or when a caller cleared `CreationDate` to null
+     * READ IT THROUGH THE PUBLIC `NeverSet` ACCESSOR, never the backing field. This used to reach for a
+     * private `_NeverSet` through a cast; MJ 6.2.0 renamed the backing field to `_neverSet` and exposed the
+     * public getter, so the cast silently read `undefined` and the re-stamp below stopped firing — every new
+     * deal kept its `NewRecord()` instant instead of the save clock, and only `save-deal.SD45` noticed.
+     *
+     * Re-stamping here when `NeverSet` is still `true` (or when a caller cleared `CreationDate` to null
      * before saving) ensures that:
      *   1. A deal created without an explicit `CreationDate` gets the server's save-time clock rather than
      *      the instant `NewRecord()` happened to run (or failing `Validate()` when `CreationDate` was nulled).
@@ -3708,8 +3713,8 @@ export class DealEntityServer extends DealEntity {
         if (this.IsSaved) {
             return;
         }
-        const field = this.GetFieldByName('CreationDate') as unknown as { _NeverSet?: boolean } | undefined;
-        if (!this.CreationDate || field?._NeverSet === true) {
+        const field = this.GetFieldByName('CreationDate');
+        if (!this.CreationDate || field?.NeverSet === true) {
             this.CreationDate = new Date();
         }
     }

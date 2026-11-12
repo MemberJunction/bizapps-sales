@@ -245,6 +245,7 @@ export class SalesCloseDealOperation extends BaseRemotableOperation<SalesCloseDe
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "sales:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_57e3ba4c40f3ec25";
 }
 
 // ============================================================
@@ -261,6 +262,7 @@ export class SalesRecordDiscountConcessionOperation extends BaseRemotableOperati
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "sales:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_cfdbd5c68d759b1b";
 }
 
 // ============================================================
@@ -277,5 +279,6 @@ export class SalesReopenDealOperation extends BaseRemotableOperation<SalesReopen
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "sales:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_5187c9ed4c4f62a9";
 }
 
