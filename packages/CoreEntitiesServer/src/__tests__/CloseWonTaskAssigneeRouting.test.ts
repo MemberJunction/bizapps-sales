@@ -153,6 +153,7 @@ describe('routing a close-won task to its configured assignee', () => {
         expect(runView).not.toHaveBeenCalled();
         expect(h.assignToTask).not.toHaveBeenCalled();
         expect(h.result.Issues.join(' ')).toContain('CloseWonTasks.AssigneeRecordID');
+        expect(h.result.Issues.join(' '), 'the role field is the other way to route').toContain('Close Won Assignee Role');
     });
 
     it('does not look anything up when the entity is not registered on this host', async () => {
