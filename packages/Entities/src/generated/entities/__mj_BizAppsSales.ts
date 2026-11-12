@@ -1583,11 +1583,11 @@ export const mjBizAppsSalesPipelineSchema = z.object({
         * * SQL Data Type: nvarchar(200)`),
     DefaultForecastCategoryType: z.string().nullable().describe(`
         * * Field Name: DefaultForecastCategoryType
-        * * Display Name: Default Forecast Category
+        * * Display Name: Default Forecast Category Type
         * * SQL Data Type: nvarchar(200)`),
     CloseWonAssigneePerson: z.string().nullable().describe(`
         * * Field Name: CloseWonAssigneePerson
-        * * Display Name: Close Won Assignee
+        * * Display Name: Close Won Assignee Name
         * * SQL Data Type: nvarchar(250)`),
     CloseWonAssigneeRole: z.string().nullable().describe(`
         * * Field Name: CloseWonAssigneeRole
@@ -1739,6 +1739,13 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Field Name: Status
         * * Display Name: Status
         * * SQL Data Type: nvarchar(50)`),
+    WebsiteDomain: z.string().nullable().describe(`
+        * * Field Name: WebsiteDomain
+        * * Display Name: Website Domain
+        * * SQL Data Type: nvarchar(255)`),
+    Acronym: z.string().nullable().describe(`
+        * * Field Name: Acronym
+        * * SQL Data Type: nvarchar(20)`),
     OwnerEmployee: z.string().nullable().describe(`
         * * Field Name: OwnerEmployee
         * * Display Name: Owner
@@ -1763,9 +1770,6 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Field Name: DefaultBillingContact
         * * Display Name: Default Billing Contact
         * * SQL Data Type: nvarchar(753)`),
-    Acronym: z.string().nullable().describe(`
-        * * Field Name: Acronym
-        * * SQL Data Type: nvarchar(20)`),
 });
 
 export type mjBizAppsSalesSalesAccountEntityType = z.infer<typeof mjBizAppsSalesSalesAccountSchema>;
@@ -1892,7 +1896,16 @@ export const mjBizAppsSalesSalesContactSchema = z.object({
     SeniorityLevelID: z.string().nullable().describe(`
         * * Field Name: SeniorityLevelID
         * * Display Name: Seniority
-        * * SQL Data Type: uniqueidentifier`),
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Common: Seniority Levels (vwSeniorityLevels.ID)`),
+    DisplayName: z.string().describe(`
+        * * Field Name: DisplayName
+        * * Display Name: Display Name
+        * * SQL Data Type: nvarchar(250)`),
+    EmailDomain: z.string().nullable().describe(`
+        * * Field Name: EmailDomain
+        * * Display Name: Email Domain
+        * * SQL Data Type: nvarchar(255)`),
     OwnerEmployee: z.string().nullable().describe(`
         * * Field Name: OwnerEmployee
         * * Display Name: Owner
@@ -2281,7 +2294,7 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Deal Contact Roles entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * Influence: Influence score must be between 0 and 100, if specified.
+    * * Influence: Influence score must be between 0 and 100 percent if provided.
     * @public
     * @method
     * @override
@@ -2295,7 +2308,7 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
     }
 
     /**
-    * Influence score must be between 0 and 100, if specified.
+    * Influence score must be between 0 and 100 percent if provided.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -2304,7 +2317,7 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
     	if (this.Influence != null && (this.Influence < 0 || this.Influence > 100)) {
     		result.Errors.push(new ValidationErrorInfo(
     			"Influence",
-    			"Influence score must be between 0 and 100.",
+    			"Influence must be between 0 and 100.",
     			this.Influence,
     			ValidationErrorType.Failure
     		));
@@ -2818,7 +2831,7 @@ export class mjBizAppsSalesDealSequenceEntity extends BaseEntity<mjBizAppsSalesD
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Deal Sequences entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * ID: Ensures that the record ID is restricted to a value of 1, effectively keeping this entity as a single-row configuration or sequence generator.
+    * * ID: The record ID must always be equal to 1 to ensure a singleton pattern or fixed identifier.
     * * NextSequenceNumber: Next sequence number must be greater than zero.
     * @public
     * @method
@@ -2834,7 +2847,7 @@ export class mjBizAppsSalesDealSequenceEntity extends BaseEntity<mjBizAppsSalesD
     }
 
     /**
-    * Ensures that the record ID is restricted to a value of 1, effectively keeping this entity as a single-row configuration or sequence generator.
+    * The record ID must always be equal to 1 to ensure a singleton pattern or fixed identifier.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -2843,7 +2856,7 @@ export class mjBizAppsSalesDealSequenceEntity extends BaseEntity<mjBizAppsSalesD
     	if (this.ID !== 1) {
     		result.Errors.push(new ValidationErrorInfo(
     			"ID",
-    			"The ID for this entity must be 1.",
+    			"ID must be 1.",
     			this.ID,
     			ValidationErrorType.Failure
     		));
@@ -2860,7 +2873,7 @@ export class mjBizAppsSalesDealSequenceEntity extends BaseEntity<mjBizAppsSalesD
     	if (this.NextSequenceNumber != null && this.NextSequenceNumber <= 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"NextSequenceNumber",
-    			"Next sequence number must be greater than 0.",
+    			"Next sequence number must be greater than zero.",
     			this.NextSequenceNumber,
     			ValidationErrorType.Failure
     		));
@@ -2959,7 +2972,7 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Deal Stage Events entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * DaysInPreviousStage: Days in previous stage cannot be negative
+    * * DaysInPreviousStage: Days in previous stage cannot be negative.
     * * ProbabilityAtTransition: Probability at transition must be between 0 and 100 percent, if specified.
     * @public
     * @method
@@ -2967,7 +2980,7 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
     */
     public override Validate(): ValidationResult {
         const result = super.Validate();
-        this.ValidateDaysInPreviousStageGreaterThanOrEqualToZero(result);
+        this.ValidateDaysInPreviousStageNonNegative(result);
         this.ValidateProbabilityAtTransitionRange(result);
         result.Success = result.Success && (result.Errors.length === 0);
 
@@ -2975,16 +2988,16 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
     }
 
     /**
-    * Days in previous stage cannot be negative
+    * Days in previous stage cannot be negative.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateDaysInPreviousStageGreaterThanOrEqualToZero(result: ValidationResult) {
+    public ValidateDaysInPreviousStageNonNegative(result: ValidationResult) {
     	if (this.DaysInPreviousStage != null && this.DaysInPreviousStage < 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"DaysInPreviousStage",
-    			"Days in previous stage must be 0 or greater.",
+    			"Days in previous stage must be zero or greater.",
     			this.DaysInPreviousStage,
     			ValidationErrorType.Failure
     		));
@@ -3283,7 +3296,7 @@ export class mjBizAppsSalesDealStatusTypeEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Deal Status Types entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * Table-Level: An entity cannot be marked as both Won and Lost simultaneously.
+    * * Table-Level: A deal stage cannot be marked as both won and lost at the same time.
     * @public
     * @method
     * @override
@@ -3297,7 +3310,7 @@ export class mjBizAppsSalesDealStatusTypeEntity extends BaseEntity<mjBizAppsSale
     }
 
     /**
-    * An entity cannot be marked as both Won and Lost simultaneously.
+    * A deal stage cannot be marked as both won and lost at the same time.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -3306,7 +3319,7 @@ export class mjBizAppsSalesDealStatusTypeEntity extends BaseEntity<mjBizAppsSale
     	if (this.IsWon && this.IsLost) {
     		result.Errors.push(new ValidationErrorInfo(
     			"IsWon",
-    			"An item cannot be marked as both Won and Lost at the same time.",
+    			"A stage cannot be marked as both Won and Lost simultaneously.",
     			this.IsWon,
     			ValidationErrorType.Failure
     		));
@@ -3509,9 +3522,9 @@ export class mjBizAppsSalesDealTeamMemberEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Deal Team Members entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * AttributionPct: Attribution percentage must be between 0 and 100 when provided to ensure valid split calculations.
-    * * Table-Level: Either an Employee or a Person must be specified for the deal role, but not both at the same time.
-    * * Table-Level: End date must be on or after the start date when both dates are provided.
+    * * AttributionPct: Attribution percentage must be between 0 and 100 if specified.
+    * * Table-Level: Each record must be assigned to either an employee or a person, but cannot be assigned to both or neither.
+    * * Table-Level: End date must be on or after start date.
     * @public
     * @method
     * @override
@@ -3527,7 +3540,7 @@ export class mjBizAppsSalesDealTeamMemberEntity extends BaseEntity<mjBizAppsSale
     }
 
     /**
-    * Attribution percentage must be between 0 and 100 when provided to ensure valid split calculations.
+    * Attribution percentage must be between 0 and 100 if specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -3544,27 +3557,27 @@ export class mjBizAppsSalesDealTeamMemberEntity extends BaseEntity<mjBizAppsSale
     }
 
     /**
-    * Either an Employee or a Person must be specified for the deal role, but not both at the same time.
+    * Each record must be assigned to either an employee or a person, but cannot be assigned to both or neither.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateEmployeeIDOrPersonIDExclusive(result: ValidationResult) {
-    	const hasEmployee = this.EmployeeID != null;
-    	const hasPerson = this.PersonID != null;
+    	public ValidateEmployeeIDOrPersonIDExclusive(result: ValidationResult) {
+    		const hasEmployee = this.EmployeeID != null;
+    		const hasPerson = this.PersonID != null;
     
-    	if ((hasEmployee && hasPerson) || (!hasEmployee && !hasPerson)) {
-    		result.Errors.push(new ValidationErrorInfo(
-    			"EmployeeID",
-    			"You must specify either an Employee or a Person, but not both.",
-    			this.EmployeeID,
-    			ValidationErrorType.Failure
-    		));
+    		if ((hasEmployee && hasPerson) || (!hasEmployee && !hasPerson)) {
+    			result.Errors.push(new ValidationErrorInfo(
+    				"EmployeeID",
+    				"Exactly one of Employee or Person must be specified.",
+    				this.EmployeeID,
+    				ValidationErrorType.Failure
+    			));
+    		}
     	}
-    }
 
     /**
-    * End date must be on or after the start date when both dates are provided.
+    * End date must be on or after start date.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -4012,11 +4025,11 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Deals entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * AnnualIncreasePctOverride: The annual increase percentage override must be between 0% and 100% when specified.
-    * * CancellationNoticeDaysOverride: Cancellation notice days override, if specified, must be 0 or greater.
-    * * EstimatedProjectWeeks: Ensures that the estimated project weeks, if specified, is zero or a positive number to accurately reflect project duration.
-    * * Probability: Probability percentage must be between 0 and 100 inclusive, or left empty.
-    * * TermMonths: Ensures that the deal or contract term in months cannot be a negative number.
+    * * AnnualIncreasePctOverride: Annual increase percentage override must be between 0 and 100 percent when specified.
+    * * CancellationNoticeDaysOverride: Cancellation notice days override must be zero or a positive number if specified.
+    * * EstimatedProjectWeeks: Estimated project duration in weeks cannot be negative.
+    * * Probability: Deal probability must be between 0% and 100% when specified.
+    * * TermMonths: Term months must be zero or a positive number if provided.
     * @public
     * @method
     * @override
@@ -4024,17 +4037,17 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     public override Validate(): ValidationResult {
         const result = super.Validate();
         this.ValidateAnnualIncreasePctOverrideRange(result);
-        this.ValidateCancellationNoticeDaysOverrideMin(result);
-        this.ValidateEstimatedProjectWeeksMin(result);
+        this.ValidateCancellationNoticeDaysOverrideNonNegative(result);
+        this.ValidateEstimatedProjectWeeksNonNegative(result);
         this.ValidateProbabilityRange(result);
-        this.ValidateTermMonthsGreaterThanOrEqualToZero(result);
+        this.ValidateTermMonthsNonNegative(result);
         result.Success = result.Success && (result.Errors.length === 0);
 
         return result;
     }
 
     /**
-    * The annual increase percentage override must be between 0% and 100% when specified.
+    * Annual increase percentage override must be between 0 and 100 percent when specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -4051,16 +4064,16 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
-    * Cancellation notice days override, if specified, must be 0 or greater.
+    * Cancellation notice days override must be zero or a positive number if specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateCancellationNoticeDaysOverrideMin(result: ValidationResult) {
+    public ValidateCancellationNoticeDaysOverrideNonNegative(result: ValidationResult): void {
     	if (this.CancellationNoticeDaysOverride != null && this.CancellationNoticeDaysOverride < 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"CancellationNoticeDaysOverride",
-    			"Cancellation notice days override must be greater than or equal to 0.",
+    			"Cancellation notice days override must be zero or greater.",
     			this.CancellationNoticeDaysOverride,
     			ValidationErrorType.Failure
     		));
@@ -4068,12 +4081,12 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
-    * Ensures that the estimated project weeks, if specified, is zero or a positive number to accurately reflect project duration.
+    * Estimated project duration in weeks cannot be negative.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateEstimatedProjectWeeksMin(result: ValidationResult) {
+    public ValidateEstimatedProjectWeeksNonNegative(result: ValidationResult) {
     	if (this.EstimatedProjectWeeks != null && this.EstimatedProjectWeeks < 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"EstimatedProjectWeeks",
@@ -4085,12 +4098,12 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
-    * Probability percentage must be between 0 and 100 inclusive, or left empty.
+    * Deal probability must be between 0% and 100% when specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateProbabilityRange(result: ValidationResult) {
+    public ValidateProbabilityRange(result: ValidationResult): void {
     	if (this.Probability != null && (this.Probability < 0 || this.Probability > 100)) {
     		result.Errors.push(new ValidationErrorInfo(
     			"Probability",
@@ -4102,16 +4115,16 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
-    * Ensures that the deal or contract term in months cannot be a negative number.
+    * Term months must be zero or a positive number if provided.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateTermMonthsGreaterThanOrEqualToZero(result: ValidationResult) {
+    public ValidateTermMonthsNonNegative(result: ValidationResult): void {
     	if (this.TermMonths != null && this.TermMonths < 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"TermMonths",
-    			"Term months must be greater than or equal to 0.",
+    			"Term months cannot be negative. Please enter a value of 0 or greater.",
     			this.TermMonths,
     			ValidationErrorType.Failure
     		));
@@ -5191,30 +5204,30 @@ export class mjBizAppsSalesForecastSnapshotEntity extends BaseEntity<mjBizAppsSa
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Forecast Snapshots entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * Table-Level: The period end date must be on or after the period start date to ensure valid reporting and tracking timeframes.
+    * * Table-Level: Period end date must be on or after the period start date.
     * @public
     * @method
     * @override
     */
     public override Validate(): ValidationResult {
         const result = super.Validate();
-        this.ValidatePeriodEndAfterPeriodStart(result);
+        this.ValidatePeriodEndAfterOrEqualPeriodStart(result);
         result.Success = result.Success && (result.Errors.length === 0);
 
         return result;
     }
 
     /**
-    * The period end date must be on or after the period start date to ensure valid reporting and tracking timeframes.
+    * Period end date must be on or after the period start date.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidatePeriodEndAfterPeriodStart(result: ValidationResult) {
-    	if (this.PeriodEnd != null && this.PeriodStart != null && this.PeriodEnd < this.PeriodStart) {
+    public ValidatePeriodEndAfterOrEqualPeriodStart(result: ValidationResult) {
+    	if (this.PeriodStart != null && this.PeriodEnd != null && new Date(this.PeriodEnd).getTime() < new Date(this.PeriodStart).getTime()) {
     		result.Errors.push(new ValidationErrorInfo(
     			"PeriodEnd",
-    			"Period End date must be on or after Period Start date.",
+    			"Period end date must be on or after the period start date.",
     			this.PeriodEnd,
     			ValidationErrorType.Failure
     		));
@@ -5452,30 +5465,30 @@ export class mjBizAppsSalesLeadSourceTypeEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Lead Source Types entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * AttributionWindowDays: Attribution window days must be greater than or equal to zero if specified
+    * * AttributionWindowDays: Attribution window days must be zero or a positive number when specified.
     * @public
     * @method
     * @override
     */
     public override Validate(): ValidationResult {
         const result = super.Validate();
-        this.ValidateAttributionWindowDaysGreaterThanOrEqualToZero(result);
+        this.ValidateAttributionWindowDaysNonNegative(result);
         result.Success = result.Success && (result.Errors.length === 0);
 
         return result;
     }
 
     /**
-    * Attribution window days must be greater than or equal to zero if specified
+    * Attribution window days must be zero or a positive number when specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateAttributionWindowDaysGreaterThanOrEqualToZero(result: ValidationResult) {
+    public ValidateAttributionWindowDaysNonNegative(result: ValidationResult) {
     	if (this.AttributionWindowDays != null && this.AttributionWindowDays < 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"AttributionWindowDays",
-    			"Attribution window days must be greater than or equal to 0.",
+    			"Attribution window days must be zero or greater.",
     			this.AttributionWindowDays,
     			ValidationErrorType.Failure
     		));
@@ -6106,8 +6119,8 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Pipeline Stages entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * Probability: Probability, if provided, must be a percentage value between 0 and 100.
-    * * RottingDays: Rotting days must be a non-negative number if specified.
+    * * Probability: Probability, if provided, must be a value between 0 and 100 percent.
+    * * RottingDays: Rotting days must be zero or a positive number when specified.
     * @public
     * @method
     * @override
@@ -6115,14 +6128,14 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
     public override Validate(): ValidationResult {
         const result = super.Validate();
         this.ValidateProbabilityRange(result);
-        this.ValidateRottingDaysGreaterThanOrEqualToZero(result);
+        this.ValidateRottingDaysNonNegative(result);
         result.Success = result.Success && (result.Errors.length === 0);
 
         return result;
     }
 
     /**
-    * Probability, if provided, must be a percentage value between 0 and 100.
+    * Probability, if provided, must be a value between 0 and 100 percent.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -6139,16 +6152,16 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
     }
 
     /**
-    * Rotting days must be a non-negative number if specified.
+    * Rotting days must be zero or a positive number when specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateRottingDaysGreaterThanOrEqualToZero(result: ValidationResult) {
+    public ValidateRottingDaysNonNegative(result: ValidationResult) {
     	if (this.RottingDays != null && this.RottingDays < 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"RottingDays",
-    			"Rotting days must be greater than or equal to 0.",
+    			"Rotting days cannot be negative.",
     			this.RottingDays,
     			ValidationErrorType.Failure
     		));
@@ -6645,7 +6658,7 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
 
     /**
     * * Field Name: DefaultForecastCategoryType
-    * * Display Name: Default Forecast Category
+    * * Display Name: Default Forecast Category Type
     * * SQL Data Type: nvarchar(200)
     */
     get DefaultForecastCategoryType(): string | null {
@@ -6654,7 +6667,7 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
 
     /**
     * * Field Name: CloseWonAssigneePerson
-    * * Display Name: Close Won Assignee
+    * * Display Name: Close Won Assignee Name
     * * SQL Data Type: nvarchar(250)
     */
     get CloseWonAssigneePerson(): string | null {
@@ -6704,7 +6717,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Sales Accounts entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * ICPFitScore: ICP Fit Score must be a value between 0 and 100, or left blank.
+    * * ICPFitScore: ICP Fit Score must be between 0 and 100 if specified.
     * @public
     * @method
     * @override
@@ -6718,7 +6731,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     }
 
     /**
-    * ICP Fit Score must be a value between 0 and 100, or left blank.
+    * ICP Fit Score must be between 0 and 100 if specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -7119,6 +7132,27 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     }
 
     /**
+    * * Field Name: WebsiteDomain
+    * * Display Name: Website Domain
+    * * SQL Data Type: nvarchar(255)
+    */
+    get WebsiteDomain(): string | null {
+        return this.Get('WebsiteDomain');
+    }
+
+    /**
+    * * Field Name: Acronym
+    * * SQL Data Type: nvarchar(20)
+    * * IS-A Source: Inherited from MJ_BizApps_Common: Organizations
+    */
+    get Acronym(): string | null {
+        return this.Get('Acronym');
+    }
+    set Acronym(value: string | null) {
+        this.Set('Acronym', value);
+    }
+
+    /**
     * * Field Name: OwnerEmployee
     * * Display Name: Owner
     * * SQL Data Type: nvarchar(81)
@@ -7170,18 +7204,6 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     */
     get DefaultBillingContact(): string | null {
         return this.Get('DefaultBillingContact');
-    }
-
-    /**
-    * * Field Name: Acronym
-    * * SQL Data Type: nvarchar(20)
-    * * IS-A Source: Inherited from MJ_BizApps_Common: Organizations
-    */
-    get Acronym(): string | null {
-        return this.Get('Acronym');
-    }
-    set Acronym(value: string | null) {
-        this.Set('Acronym', value);
     }
 }
 
@@ -7552,6 +7574,7 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
     * * Field Name: SeniorityLevelID
     * * Display Name: Seniority
     * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Common: Seniority Levels (vwSeniorityLevels.ID)
     * * IS-A Source: Inherited from MJ_BizApps_Common: People
     */
     get SeniorityLevelID(): string | null {
@@ -7559,6 +7582,24 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
     }
     set SeniorityLevelID(value: string | null) {
         this.Set('SeniorityLevelID', value);
+    }
+
+    /**
+    * * Field Name: DisplayName
+    * * Display Name: Display Name
+    * * SQL Data Type: nvarchar(250)
+    */
+    get DisplayName(): string {
+        return this.Get('DisplayName');
+    }
+
+    /**
+    * * Field Name: EmailDomain
+    * * Display Name: Email Domain
+    * * SQL Data Type: nvarchar(255)
+    */
+    get EmailDomain(): string | null {
+        return this.Get('EmailDomain');
     }
 
     /**

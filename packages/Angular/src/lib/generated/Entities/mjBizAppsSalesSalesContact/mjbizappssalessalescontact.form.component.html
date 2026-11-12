@@ -10,11 +10,11 @@
     <!-- ========================================
          FIELD PANELS
          ======================================== -->
-    <!-- Details Section -->
+    <!-- Sales & Engagement Section -->
     <mj-collapsible-panel
-        SectionKey="details"
-        SectionName="Details"
-        Icon="fa fa-align-left"
+        SectionKey="salesEngagement"
+        SectionName="Sales & Engagement"
+        Icon="fa fa-chart-line"
         [Form]="this"
         [FormContext]="formContext">
         <mj-form-field 
@@ -56,6 +56,40 @@
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
+            FieldName="LastEngagedAt"
+            Type="datepicker"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="DisplayName"
+            Type="textbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="EmailDomain"
+            Type="textbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
+
+    </mj-collapsible-panel>
+
+    <!-- Communication Preferences Section -->
+    <mj-collapsible-panel
+        SectionKey="communicationPreferences"
+        SectionName="Communication Preferences"
+        Icon="fa fa-ban"
+        [Form]="this"
+        [FormContext]="formContext">
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
             FieldName="OptedOutOfOutreach"
             Type="checkbox"
             [EditMode]="EditMode"
@@ -69,30 +103,18 @@
             [EditMode]="EditMode"
             [FormContext]="formContext"
         ></mj-form-field>
-        <mj-form-field 
-            [Record]="record"
-            [ShowLabel]="true"
-            FieldName="LastEngagedAt"
-            Type="datepicker"
-            [EditMode]="EditMode"
-            [FormContext]="formContext"
-        ></mj-form-field>
-        <mj-form-field 
-            [Record]="record"
-            [ShowLabel]="true"
-            FieldName="__mj_CreatedAt"
-            Type="textbox"
-            [EditMode]="EditMode"
-            [FormContext]="formContext"
-        ></mj-form-field>
-        <mj-form-field 
-            [Record]="record"
-            [ShowLabel]="true"
-            FieldName="__mj_UpdatedAt"
-            Type="textbox"
-            [EditMode]="EditMode"
-            [FormContext]="formContext"
-        ></mj-form-field>
+
+    </mj-collapsible-panel>
+
+    <!-- People Details Section -->
+    <mj-collapsible-panel
+        SectionKey="peopleDetails"
+        SectionName="People Details"
+        Icon="fa fa-user"
+        Variant="inherited"
+        InheritedFromEntity="MJ_BizApps_Common: People"
+        [Form]="this"
+        [FormContext]="formContext">
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
@@ -221,6 +243,33 @@
             Type="textbox"
             [EditMode]="EditMode"
             [FormContext]="formContext"
+            LinkType="Record"
+        ></mj-form-field>
+
+    </mj-collapsible-panel>
+
+    <!-- System Metadata Section -->
+    <mj-collapsible-panel
+        SectionKey="systemMetadata"
+        SectionName="System Metadata"
+        Icon="fa fa-cog"
+        [Form]="this"
+        [FormContext]="formContext">
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="__mj_CreatedAt"
+            Type="textbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="__mj_UpdatedAt"
+            Type="textbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
         ></mj-form-field>
 
     </mj-collapsible-panel>
@@ -310,7 +359,7 @@
     <mj-collapsible-panel
         SectionKey="mJBizAppsSalesSalesAccountsDefaultPrimaryContactID"
         SectionName="Accounts (default primary contact)"
-        Icon="fa fa-table"
+        Icon="fa fa-briefcase"
         Variant="related-entity"
         [Form]="this"
         [FormContext]="formContext"
@@ -335,7 +384,7 @@
     <mj-collapsible-panel
         SectionKey="mJBizAppsSalesSalesAccountsDefaultBillingContactID"
         SectionName="Accounts (default billing contact)"
-        Icon="fa fa-table"
+        Icon="fa fa-briefcase"
         Variant="related-entity"
         [Form]="this"
         [FormContext]="formContext"
