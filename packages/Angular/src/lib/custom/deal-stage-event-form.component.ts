@@ -7,14 +7,16 @@
  * Editing one does not correct history; it destroys the record that made history checkable.
  *
  * Unlike the Deal Line form, this one CAN be expressed exactly: the whole record is read-only, and
- * `BaseFormComponent.EditMode` is a whole-form switch. So this form simply refuses to enter edit mode
- * and says why, rather than offering an Edit button that leads to a wall.
+ * `BaseFormComponent.EditMode` is a whole-form switch. So this form offers no Edit button and refuses
+ * to enter edit mode, and `MJSDealStageEventNoticePanel` says why on the record itself.
  *
  * @module @mj-biz-apps/sales-ng
  */
 import { Component } from '@angular/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
+
+import { STAGE_EVENT_APPEND_ONLY_NOTICE } from '../form-panels/deal-stage-event-notice.panel';
 
 import { mjBizAppsSalesDealStageEventFormComponent } from '../generated/Entities/mjBizAppsSalesDealStageEvent/mjbizappssalesdealstageevent.form.component';
 
@@ -33,22 +35,32 @@ import { mjBizAppsSalesDealStageEventFormComponent } from '../generated/Entities
         '../generated/Entities/mjBizAppsSalesDealStageEvent/mjbizappssalesdealstageevent.form.component.html',
 })
 export class DealStageEventFormComponentExtended extends mjBizAppsSalesDealStageEventFormComponent {
-    /** Shown instead of silently doing nothing, so a refused Edit click explains itself. */
-    public ReadOnlyNotice: string | null = null;
+    /**
+     * The append-only explanation. Rendered by `MJSDealStageEventNoticePanel` in the `before-fields`
+     * slot; kept here so a caller holding the form can read the same sentence.
+     */
+    public get ReadOnlyNotice(): string {
+        return STAGE_EVENT_APPEND_ONLY_NOTICE;
+    }
 
     /**
-     * Refuses edit mode outright.
+     * No Edit button. The toolbar shows Edit when `ShowEditButton && UserCanEdit`, and the base getter
+     * answers from the entity's Update permission, which a user can hold on an append-only table. The
+     * button then led to a refusal that rendered nothing (bizapps-sales#284).
+     */
+    public override get UserCanEdit(): boolean {
+        return false;
+    }
+
+    /**
+     * Refuses edit mode outright, for callers that do not go through the toolbar.
      *
-     * Overriding this rather than hiding the Edit button in a forked template: the button lives in
-     * generated chrome, a fork would drift from CodeGen, and hiding a control is a weaker guarantee than
-     * refusing the transition it triggers — a keyboard shortcut or a programmatic caller still lands here.
+     * Overriding this rather than only hiding the button: hiding a control is a weaker guarantee than
+     * refusing the transition it triggers — a keyboard shortcut or a programmatic caller still lands
+     * here. Nothing to show on refusal: the notice panel is already on the record.
      */
     public override StartEditMode(): void {
-        this.ReadOnlyNotice =
-            'Stage events are append-only. This row records what the deal looked like at a transition, ' +
-            'and editing it would rewrite the history the forecast is checked against. To change the ' +
-            'deal, change the deal — a new event will be recorded.';
-        this.cdr?.detectChanges();
+        /* append-only: never enters edit mode */
     }
 }
 
