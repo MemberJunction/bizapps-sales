@@ -168,7 +168,7 @@ describe('how Save() uses it', () => {
     it('refuses the save when the read fails, naming the check', () => {
         expect(call, 'Save() must call the check').toBeGreaterThan(-1);
         const after = source.slice(call, call + 400);
-        expect(after).toMatch(/catch \(err\) \{\s*return this\.refuseSave\(`could not check the company against the pipeline: \$\{err\}`\);/);
+        expect(after).toMatch(/catch \(err\) \{\s*return this\.refuseSave\(\s*`The deal's company could not be checked against its pipeline, so nothing was saved\. Try again\. ` \+\s*`Details: \$\{err\}`,\s*\);/);
         expect(after).toMatch(/if \(companyRefusal\) \{\s*return this\.refuseSave\(companyRefusal\);/);
     });
 

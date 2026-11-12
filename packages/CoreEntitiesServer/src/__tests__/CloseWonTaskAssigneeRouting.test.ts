@@ -160,7 +160,7 @@ describe('routing a close-won task to its configured assignee', () => {
         expect(await route(h)).toBeNull();
         expect(runView).not.toHaveBeenCalled();
         expect(h.assignToTask).not.toHaveBeenCalled();
-        expect(h.result.Issues.join(' ')).toContain('is not registered on this host');
+        expect(h.result.Issues.join(' ')).toContain('is not installed on this system');
     });
 
     it('escapes a quote in the configured id rather than building broken SQL', async () => {

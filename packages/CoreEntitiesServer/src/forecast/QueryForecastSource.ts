@@ -104,9 +104,9 @@ export class QueryForecastSource implements IForecastSource {
                 return {
                     Rows: [],
                     Issues: [
-                        `The forecast query '${this.Name}' did not run. Either it does not exist in `
-                            + `MJ: Queries yet, or it failed. Nothing was snapshotted, deliberately — a row of `
-                            + `nulls would be indistinguishable from a measured zero.`,
+                        `The forecast query '${this.Name}' did not run: either it is not installed yet, or it `
+                            + `failed. Nothing was captured, because empty values would look the same as a `
+                            + `measured zero. Ask an administrator to check the query.`,
                     ],
                 };
             }
@@ -136,8 +136,8 @@ export class QueryForecastSource implements IForecastSource {
         const companyID = text(pick(raw, FORECAST_QUERY_COLUMNS.CompanyID));
         if (!companyID) {
             issues.push(
-                `A forecast row from '${this.Name}' carried no CompanyID and was `
-                    + 'skipped. The query must project it — it is NOT NULL on ForecastSnapshot.',
+                `A forecast row from '${this.Name}' had no company and was skipped. `
+                    + 'The query must return a CompanyID on every row.',
             );
             return null;
         }

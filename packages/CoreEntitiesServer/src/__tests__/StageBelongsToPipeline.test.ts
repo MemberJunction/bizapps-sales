@@ -126,7 +126,7 @@ describe('a stage must belong to the deal\'s pipeline', () => {
 
     it('throws when the read itself fails, rather than passing', async () => {
         const d = deal({ readSucceeds: false });
-        await expect(d.stageBelongsToPipelineRefusal()).rejects.toThrow(/could not read the stage/i);
+        await expect(d.stageBelongsToPipelineRefusal()).rejects.toThrow(/stage.s pipeline could not be read/i);
     });
 });
 

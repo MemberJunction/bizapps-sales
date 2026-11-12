@@ -144,8 +144,8 @@ export class ForecastSnapshotJob {
 
         if (period.PeriodEnd < period.PeriodStart) {
             result.Issues.push(
-                'The period ends before it starts. CK_ForecastSnapshot_PeriodOrder would refuse it, and the '
-                    + 'constraint name would not say which caller was wrong.',
+                'The forecast period ends before it starts, so no snapshot was taken. Check the period\'s '
+                    + 'start and end dates.',
             );
             return result;
         }
@@ -171,8 +171,8 @@ export class ForecastSnapshotJob {
          */
         if (batch.Rows.length === 0 && batch.Issues.length > 0) {
             result.Issues.push(
-                'The source reported no rows AND raised issues, so this is a failed measurement rather '
-                    + 'than an empty period. Nothing was captured.',
+                'The forecast source returned no rows and reported problems, so this was treated as a failed '
+                    + 'measurement, not an empty period. Nothing was captured.',
             );
             return result;
         }
@@ -306,8 +306,8 @@ export async function RunForecastSnapshot(
             SkippedAsAlreadyCaptured: 0,
             Period: null,
             Issues: [
-                'No forecast source is registered: the source factory returned none, so nothing was '
-                    + `measured. The default reads '${DEFAULT_FORECAST_QUERY}'; something replaced it.`,
+                'No forecast source is set up, so nothing was measured. The default source reads the '
+                    + `'${DEFAULT_FORECAST_QUERY}' query and has been replaced. Ask a developer to check the forecast source setup.`,
             ],
         };
     }

@@ -72,7 +72,7 @@ export async function RelinkWonDealOrdersToContracts(
 ): Promise<ContractOrderRelinkResult> {
     if (!new Metadata().Entities.some((e) => e.Name === E_CONTRACT_ORDER)) {
         return result('SKIPPED', true, [
-            'The installed bizapps-contracts has no order links yet; nothing to link until it is upgraded.',
+            'The installed Contracts app cannot link orders to contracts yet, so there is nothing to link until it is upgraded.',
         ]);
     }
     const pairs = await readWonDealPairs(user);

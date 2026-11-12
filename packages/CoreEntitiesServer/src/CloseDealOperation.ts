@@ -431,7 +431,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             return { ...empty, Issues: [issue('deal', 'A deal is required.', 'DealID')] };
         }
         if (!input.DealStatusTypeID) {
-            return { ...empty, Issues: [issue('deal', 'A target status is required.', 'DealStatusTypeID')] };
+            return { ...empty, Issues: [issue('deal', 'Pick the status to close the deal with.', 'DealStatusTypeID')] };
         }
 
         const db = provider as unknown as DatabaseProviderBase;
@@ -441,14 +441,14 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             // ── 1. Load the deal and resolve the target status FLAGS ──────────────
             const deal = await provider.GetEntityObject<DealEntityServer>(DEAL_ENTITY, user);
             if (!(await deal.Load(input.DealID))) {
-                return { ...empty, Issues: [issue('deal', `Deal ${input.DealID} was not found.`, 'DealID')] };
+                return { ...empty, Issues: [issue('deal', `The deal (ID ${input.DealID}) was not found. It may have been deleted. Refresh the page and try again.`, 'DealID')] };
             }
 
             const target = await this.loadStatusFlags(input.DealStatusTypeID, provider, user);
             if (!target) {
                 const message = !GUID_SHAPE.test(input.DealStatusTypeID)
                     ? 'Deal status is not a valid ID.'
-                    : `Status ${input.DealStatusTypeID} was not found.`;
+                    : `The chosen status (ID ${input.DealStatusTypeID}) was not found. Refresh the page and pick the status again.`;
                 return {
                     ...empty,
                     Issues: [issue('deal', message, 'DealStatusTypeID')],
@@ -472,7 +472,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                     Issues: [
                         issue(
                             'deal',
-                            'This deal is already closed and locked. Reopen it through Sales.ReopenDeal first.',
+                            'This deal is already closed and locked. Reopen it first, then close it again.',
                         ),
                     ],
                 };
@@ -626,7 +626,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             // The close stamps are writable only inside this call (#252); every other save refuses them.
             if (!(await deal.BeginClose(() => deal.Save()))) {
                 throw new Error(
-                    `the deal could not be saved: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+                    `The deal save failed: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`,
                 );
             }
             if (target.IsWon && !orderBeforeSave && deal.OrderID) {
@@ -804,7 +804,7 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 return { ...empty, Issues: [issue('deal', err.message, err.Field)] };
             }
             LogError(`Sales.CloseDeal failed: ${err}`);
-            return { ...empty, Issues: [issue('deal', `The deal could not be closed: ${err}`)] };
+            return { ...empty, Issues: [issue('deal', `The deal could not be closed: ${err instanceof Error ? err.message : String(err)}`)] };
         }
     }
 
@@ -1022,8 +1022,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 Executed: false,
                 LineCount: 0,
                 Reason:
-                    'Subscription materialization needs orders\' Subscription.BillingMode (C0), which does ' +
-                    'not exist yet.',
+                    'Subscriptions cannot be created from a won deal yet, because the Orders app does not ' +
+                    'support subscription billing modes yet.',
             });
         }
         return plans;
@@ -1607,7 +1607,7 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
         try {
             const deal = await provider.GetEntityObject<DealEntityServer>(DEAL_ENTITY, user);
             if (!(await deal.Load(input.DealID))) {
-                return { ...empty, Issues: [issue('deal', `Deal ${input.DealID} was not found.`, 'DealID')] };
+                return { ...empty, Issues: [issue('deal', `The deal (ID ${input.DealID}) was not found. It may have been deleted. Refresh the page and try again.`, 'DealID')] };
             }
 
             const target = input.DealStatusTypeID
@@ -1620,7 +1620,7 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
                     Issues: [
                         issue(
                             'deal',
-                            'No open status is available to reopen into. Seed a DealStatusType with IsOpen = 1.',
+                            'No open status is available to reopen the deal into. Ask an administrator to add an active open deal status.',
                             'DealStatusTypeID',
                         ),
                     ],
@@ -1629,7 +1629,7 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             if (target.LocksDeal) {
                 return {
                     ...empty,
-                    Issues: [issue('deal', 'Cannot reopen into a status that locks the deal.', 'DealStatusTypeID')],
+                    Issues: [issue('deal', 'The chosen status locks the deal, so the deal cannot be reopened into it. Pick an open status.', 'DealStatusTypeID')],
                 };
             }
 
@@ -1693,10 +1693,9 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
                     Issues: [
                         issue(
                             'deal',
-                            `This deal cannot be reopened: it points at order ${deal.OrderID}, which could `
-                                + `not be read, so whether that order has booked is unknown. Reopening on an `
-                                + `unknown ledger state is the one thing this refusal exists to prevent. `
-                                + `Try again, and if it persists the order is the thing to look at.`,
+                            `This deal cannot be reopened: its order (ID ${deal.OrderID}) could not be read, so it `
+                                + `is not known whether the order has been booked. Try again. If it keeps `
+                                + `failing, ask an administrator to check the order.`,
                             'DealID',
                         ),
                     ],
@@ -1711,10 +1710,9 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
                     Issues: [
                         issue(
                             'deal',
-                            `This deal cannot be reopened: order ${order?.OrderNumber ?? '(unnumbered)'} has `
-                                + `booked, so the ledger has already moved. Reopening would edit a deal whose `
-                                + `order can no longer be edited. What to do about the order is an orders `
-                                + `decision — resolve it there first, then reopen this deal.`,
+                            `This deal cannot be reopened: order ${order?.OrderNumber ?? '(unnumbered)'} has been `
+                                + `booked, so it can no longer be edited. Resolve the order in the Orders app `
+                                + `first, then reopen this deal.`,
                             'DealID',
                         ),
                     ],
@@ -1835,7 +1833,7 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             // — scoped to this call and self-restoring.
             const saved = await deal.BeginReopen(() => deal.Save());
             if (!saved) {
-                throw new Error(`the deal could not be saved: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`);
+                throw new Error(`The deal save failed: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`);
             }
 
             await db.CommitTransaction();
@@ -1872,7 +1870,7 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
                 }
             }
             LogError(`Sales.ReopenDeal failed: ${err}`);
-            return { ...empty, Issues: [issue('deal', `The deal could not be reopened: ${err}`)] };
+            return { ...empty, Issues: [issue('deal', `The deal could not be reopened: ${err instanceof Error ? err.message : String(err)}`)] };
         }
     }
 

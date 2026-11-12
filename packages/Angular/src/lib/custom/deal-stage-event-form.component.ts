@@ -45,9 +45,9 @@ export class DealStageEventFormComponentExtended extends mjBizAppsSalesDealStage
      */
     public override StartEditMode(): void {
         this.ReadOnlyNotice =
-            'Stage events are append-only. This row records what the deal looked like at a transition, ' +
-            'and editing it would rewrite the history the forecast is checked against. To change the ' +
-            'deal, change the deal — a new event will be recorded.';
+            'Stage history entries cannot be edited. Each one records what the deal looked like when it ' +
+            'changed stage, and the forecast is checked against them. To change the deal, edit the ' +
+            'deal itself; a new entry will be recorded.';
         this.cdr?.detectChanges();
     }
 }

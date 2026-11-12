@@ -340,7 +340,7 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
      */
     protected async ReadAccountContactDefaults(accountID: string): Promise<ContactPair> {
         if (!GUID_PATTERN.test(accountID)) {
-            throw new Error(`DealEntity: the deal's account id "${accountID}" is not a record id.`);
+            throw new Error(`The deal's customer ID "${accountID}" is not a valid record ID.`);
         }
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView<AccountContactDefaultsRow>(
@@ -353,7 +353,7 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
             this.ContextCurrentUser,
         );
         if (!result.Success) {
-            throw new Error(`DealEntity: could not read the account's default contacts: ${result.ErrorMessage}`);
+            throw new Error(`The customer's default contacts could not be read: ${result.ErrorMessage}`);
         }
         const row = (result.Results ?? [])[0];
         return {
@@ -499,12 +499,12 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
             this.ContextCurrentUser,
         );
         if (!result.Success) {
-            throw new Error(`DealEntity: could not resolve the owner role: ${result.ErrorMessage}`);
+            throw new Error(`The deal owner role could not be read: ${result.ErrorMessage}`);
         }
         const ownerRole = (result.Results ?? [])[0];
         if (!ownerRole?.ID) {
             throw new Error(
-                'DealEntity: no active DealRole has IsOwnerRole = 1. Seed one before assigning an owner.',
+                'No active deal role is marked as the owner role, so no owner can be assigned. Ask an administrator to mark one deal role as the owner role.',
             );
         }
         return ownerRole.ID;

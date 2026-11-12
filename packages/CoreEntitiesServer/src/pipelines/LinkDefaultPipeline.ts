@@ -98,10 +98,10 @@ async function readSource(user: UserInfo): Promise<SourceRead> {
         return refusal('READ_FAILED', `Could not read pipelines, companies or links: ${failed?.ErrorMessage ?? 'no result'}`);
     }
     if (defaults.Results.length === 0) {
-        return refusal('NO_DEFAULT', 'No active pipeline is marked IsDefault, so there is nothing to link.');
+        return refusal('NO_DEFAULT', 'No active pipeline is marked as the default, so there is nothing to link. Mark one pipeline as the default, then try again.');
     }
     if (defaults.Results.length > 1) {
-        return refusal('AMBIGUOUS_DEFAULT', `${defaults.Results.length} active pipelines are marked IsDefault; mark one.`);
+        return refusal('AMBIGUOUS_DEFAULT', `${defaults.Results.length} active pipelines are marked as the default. Leave exactly one marked as the default, then try again.`);
     }
     const pipelineID = String((defaults.Results[0] as { ID: string }).ID);
     const linkRows = links.Results as Array<{ PipelineID: string; CompanyID: string }>;

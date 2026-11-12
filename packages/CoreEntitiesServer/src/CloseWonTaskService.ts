@@ -417,8 +417,8 @@ export class CloseWonTaskService {
          */
         if (raiseOrderReview && !input.OrderID) {
             result.Issues.push(
-                `${NO_ORDER_ISSUE_PREFIX}, so no order-review task was created. The order is created with the `
-                    + 'deal, so this means the deal predates that or its order was never written.',
+                `${NO_ORDER_ISSUE_PREFIX}, so no order-review task was created. Deals get an order when they `
+                    + 'are created, so this deal is either older than that or its order was never saved.',
             );
             result.Success = false;
         }
@@ -541,7 +541,7 @@ export class CloseWonTaskService {
         const info = provider.Entities.find((e) => e.Name === E_TASK_TYPE);
         if (!info) {
             result.Issues.push(
-                `bizapps-tasks is not installed on this host, so the ${code} task could not be created.`,
+                `The Tasks app (bizapps-tasks) is not installed, so the ${code} task could not be created.`,
             );
             result.Success = false;
             return null;
@@ -592,8 +592,8 @@ export class CloseWonTaskService {
              * had never pushed the metadata at all. This says which, and where the row comes from.
              */
             result.Issues.push(
-                `No task type with ${column} '${value}' exists, so that task was not created. The row is `
-                    + `seeded from this repo: run \`mj sync push --dir metadata\` against this database.`,
+                `No task type with ${column} '${value}' exists, so that task was not created. Ask an `
+                    + `administrator to load the Sales app's seed data (run \`mj sync push --dir metadata\` against this database).`,
             );
             result.Success = false;
         }
@@ -831,8 +831,8 @@ export class CloseWonTaskService {
         const entity = provider.Entities.find((e) => e.Name === target.EntityName);
         if (!entity) {
             result.Issues.push(
-                `The ${kind} task was created but could not be linked: entity '${target.EntityName}' is `
-                    + 'not registered on this host.',
+                `The ${kind} task was created but could not be linked to its record, because `
+                    + `'${target.EntityName}' is not installed on this system.`,
             );
             return false;
         }
@@ -890,8 +890,8 @@ export class CloseWonTaskService {
         const assigneeEntity = provider.Entities.find((e) => e.Name === input.Assignee!.EntityName);
         if (!assigneeEntity) {
             result.Issues.push(
-                `The ${kind} task was created but could not be routed: entity `
-                    + `'${input.Assignee!.EntityName}' is not registered on this host.`,
+                `The ${kind} task was created but could not be assigned, because `
+                    + `'${input.Assignee!.EntityName}' is not installed on this system.`,
             );
             return null;
         }
@@ -911,10 +911,10 @@ export class CloseWonTaskService {
         const present = await this.assigneeExists(input.Assignee!.EntityName, input.Assignee!.RecordID, contextUser);
         if (present === false) {
             result.Issues.push(
-                `The ${kind} task was created but NOT routed: the configured assignee `
-                    + `'${input.Assignee!.RecordID}' does not exist in ${input.Assignee!.EntityName}. `
-                    + "Set the pipeline's Close Won Assignee, or point CloseWonTasks.AssigneeRecordID in "
-                    + 'its CloseWonPolicy at a real record.',
+                `The ${kind} task was created but NOT routed: the assignee set for this pipeline `
+                    + `(ID ${input.Assignee!.RecordID}) does not exist in ${input.Assignee!.EntityName}. `
+                    + "Ask an administrator to set the pipeline's Close Won Assignee, or a valid "
+                    + "CloseWonTasks.AssigneeRecordID in the pipeline's close-won policy.",
             );
             return null;
         }

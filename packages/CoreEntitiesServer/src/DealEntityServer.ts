@@ -474,8 +474,8 @@ export class DealEntityServer extends DealEntity {
         if (transition?.Kind === 'Unreadable') {
             return this.refuseSave(
                 'The deal status could not be read, so this save cannot tell whether it closes the ' +
-                    'deal. Nothing was changed. Try again, and if it persists check that the Deal ' +
-                    'Status Types list is readable.',
+                    'deal. Nothing was changed. Try again. If it keeps failing, ask an administrator to ' +
+                    'check that the deal status list can be read.',
             );
         }
 
@@ -515,8 +515,8 @@ export class DealEntityServer extends DealEntity {
          */
         if (transition?.Kind === 'Close' && transition.TargetIsLost && !this.LossReasonID) {
             return this.refuseSave(
-                'A loss reason is required to close a deal as lost. Set LossReasonID alongside the ' +
-                'status, or close the deal through Sales.CloseDeal.',
+                'A loss reason is required to close a deal as lost. Pick a loss reason, then set the ' +
+                'status again.',
             );
         }
 
@@ -590,7 +590,10 @@ export class DealEntityServer extends DealEntity {
         try {
             stageRefusal = await this.stageBelongsToPipelineRefusal();
         } catch (err) {
-            return this.refuseSave(`could not check the stage against the pipeline: ${err}`);
+            return this.refuseSave(
+                `The stage could not be checked against the deal's pipeline, so nothing was saved. ` +
+                    `Try again. Details: ${err}`,
+            );
         }
         if (stageRefusal) {
             return this.refuseSave(stageRefusal);
@@ -612,7 +615,10 @@ export class DealEntityServer extends DealEntity {
         try {
             companyRefusal = await this.companyLinkedToPipelineRefusal();
         } catch (err) {
-            return this.refuseSave(`could not check the company against the pipeline: ${err}`);
+            return this.refuseSave(
+                `The deal's company could not be checked against its pipeline, so nothing was saved. Try again. ` +
+                    `Details: ${err}`,
+            );
         }
         if (companyRefusal) {
             return this.refuseSave(companyRefusal);
@@ -621,7 +627,10 @@ export class DealEntityServer extends DealEntity {
         try {
             await this.stampOwnerFromTeam();
         } catch (err) {
-            return this.refuseSave(`could not resolve a server-maintained stamp: ${err}`);
+            return this.refuseSave(
+                `The deal's owner could not be filled in from its team, so nothing was saved. Try again. ` +
+                    `Details: ${err}`,
+            );
         }
 
         /**
@@ -1149,9 +1158,9 @@ export class DealEntityServer extends DealEntity {
         const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
         if (!provider?.BeginEntityTransaction) {
             throw new Error(
-                'DealEntityServer.Save: the provider cannot open a transaction, so a deal number, an order ' +
-                'status and a stage event cannot be written atomically. This class is server-only — it must ' +
-                'run against a database provider.',
+                'This deal cannot be saved here: deals are saved on the server, where the deal number, the ' +
+                'order status and the stage history are written together in one transaction, and this ' +
+                'connection cannot open one.',
             );
         }
 
@@ -1293,9 +1302,9 @@ export class DealEntityServer extends DealEntity {
              */
             return this.reportPostSaveFailure(
                 rolledBack
-                    ? `This deal could not be saved, and the change was rolled back: ${err}`
-                    : `This deal could not be saved AND the rollback failed, so the row may be ` +
-                      `partly written. Check it before retrying: ${err}`,
+                    ? `This deal could not be saved, and the change was undone. Details: ${err}`
+                    : `This deal could not be saved, and undoing the change also failed, so the deal ` +
+                      `may be partly saved. Check the deal before trying again. Details: ${err}`,
             );
         }
     }
@@ -1383,7 +1392,7 @@ export class DealEntityServer extends DealEntity {
         if (!(await event.Save())) {
             // THROWN, not returned: the caller's scope must roll the deal move back with it.
             throw new Error(
-                `the stage event could not be written: ${event.LatestResult?.CompleteMessage ?? 'unknown error'}`,
+                `The stage change could not be added to the deal's stage history: ${event.LatestResult?.CompleteMessage ?? 'unknown error'}`,
             );
         }
 
@@ -1665,8 +1674,8 @@ export class DealEntityServer extends DealEntity {
             // Not fatal, for the same reason the order-status read is not: a stage lookup that fails must
             // not stop a rep moving a card. Recorded as a warning like anything else that did not happen.
             this._orderStatusWarnings.push(
-                `Stage defaults were not applied: the stage could not be read ` +
-                `(${result.ErrorMessage ?? 'unknown error'}).`,
+                `The stage's default probability, forecast category and status were not applied, because ` +
+                `the stage could not be read (${result.ErrorMessage ?? 'unknown error'}).`,
             );
             return null;
         }
@@ -1959,8 +1968,8 @@ export class DealEntityServer extends DealEntity {
             // Not fatal, and deliberately so: a stage lookup that fails must not stop a rep moving a
             // card. It is recorded as a warning like any other thing that did not happen.
             this._orderStatusWarnings.push(
-                `The order was not updated: the stage's OrderStatusOnEntry could not be read ` +
-                `(${result.ErrorMessage ?? 'unknown error'}).`,
+                `The order status was not updated, because the stage's order status setting could not be ` +
+                `read (${result.ErrorMessage ?? 'unknown error'}).`,
             );
             return null;
         }
@@ -2197,7 +2206,7 @@ export class DealEntityServer extends DealEntity {
         if (!verdict.Allowed) {
             this._orderStatusWarnings.push(
                 `The deal moved stage, but its order stayed ${from}: ${verdict.Reason ?? 'orders refused the move.'} ` +
-                `The stage change was kept — a sales stage is not held hostage by an order-side rule.`,
+                `The stage change was kept.`,
             );
             LogError(
                 `DealEntityServer: stage ${plan.StageID} asked for order status '${plan.Target}' on order ` +
@@ -2531,7 +2540,7 @@ export class DealEntityServer extends DealEntity {
             // save the rep asked for. Recorded where the order warnings go, because that is what it is.
             this._orderStatusWarnings.push(
                 `The deal saved, but its amount could not be refreshed from the order ` +
-                `(${result.ErrorMessage ?? 'unknown error'}), so it may be stale.`,
+                `(${result.ErrorMessage ?? 'unknown error'}), so the amount shown may be out of date.`,
             );
             return;
         }
@@ -3384,10 +3393,10 @@ export class DealEntityServer extends DealEntity {
             this.ContextCurrentUser,
         );
         if (!result.Success) {
-            throw new Error(`DealEntityServer: could not read the pipeline's companies: ${result.ErrorMessage}`);
+            throw new Error(`Could not read the pipeline's companies: ${result.ErrorMessage}`);
         }
         if ((result.Results ?? []).length === 0) {
-            return 'the pipeline on this deal is not available to its company. Pick a pipeline linked to the company, or link the company to the pipeline.';
+            return 'The pipeline on this deal is not available to its company. Pick a pipeline linked to the company, or link the company to the pipeline.';
         }
         return null;
     }
@@ -3453,12 +3462,12 @@ export class DealEntityServer extends DealEntity {
             this.ContextCurrentUser,
         );
         if (!result.Success) {
-            throw new Error(`DealEntityServer: could not read the stage's pipeline: ${result.ErrorMessage}`);
+            throw new Error(`The stage's pipeline could not be read: ${result.ErrorMessage}`);
         }
 
         const stage = (result.Results ?? [])[0];
         if (!stage) {
-            return `the stage on this deal could not be read, so it cannot be checked against the pipeline.`;
+            return `The stage on this deal could not be read, so it cannot be checked against the pipeline.`;
         }
 
         /**
@@ -3474,7 +3483,7 @@ export class DealEntityServer extends DealEntity {
         const stageName = stage.Name ?? stageID;
         const owner = stage.Pipeline ?? 'another pipeline';
         return (
-            `the stage "${stageName}" belongs to ${owner}, not to this deal's pipeline. `
+            `The stage "${stageName}" belongs to ${owner}, not to this deal's pipeline. `
             + `Pick a stage from the deal's own pipeline, or change the pipeline first.`
         );
     }
