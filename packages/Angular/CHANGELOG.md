@@ -1,5 +1,31 @@
 # @mj-biz-apps/sales-ng
 
+## 6.30.0
+
+### Patch Changes
+
+- Updated dependencies [11e699f]
+  - @mj-biz-apps/sales-entities@6.30.0
+
+## 6.29.0
+
+### Patch Changes
+
+- Updated dependencies [00c22d3]
+  - @mj-biz-apps/sales-entities@6.29.0
+
+## 6.28.0
+
+### Minor Changes
+
+- b0c6867: All Deals shows the section's filter bar, without the period, so the list can be narrowed by selling company, product company, pipeline and deal owner; the selection carries across the Dashboard, the Board and All Deals (bc-aidp-next-golive#453).
+
+### Patch Changes
+
+- Updated dependencies [8be0442]
+- Updated dependencies [acb1c0a]
+  - @mj-biz-apps/sales-entities@6.28.0
+
 ## 6.27.0
 
 ### Patch Changes
