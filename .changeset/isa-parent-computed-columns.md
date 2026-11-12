@@ -2,7 +2,7 @@
 '@mj-biz-apps/sales-entities': minor
 ---
 
-`V202611102330__v6.31.x__ISA_Parent_Computed_Columns.sql` and its PostgreSQL counterpart bring three
+`V202611121753__v6.31.x__ISA_Parent_Computed_Columns.sql` and its PostgreSQL counterpart bring three
 inherited parent COMPUTED columns into this app's IS-A views, which CodeGen emits but no migration
 carried: `Organization.WebsiteDomain` onto `vwSalesAccounts`, and `Person.DisplayName` and
 `Person.EmailDomain` onto `vwSalesContactsGenerated` (the app-owned `vwSalesContacts` wrapper is
