@@ -11,7 +11,8 @@ company is the first one actively linked (`PipelineCompany`) to the first active
 choice the integration fixture makes; a second company carries the products the
 cross-tenant check (PP2) must not see. **The rows make each picker filter observable**, not realistic:
 all four `Status` values, availability windows that are open-ended, already closed and not yet open,
-and one subscription product so the term start shows.
+one subscription product so the term start shows, and one product that takes its service period
+from the line (close-deal.CD43).
 
 Needs an active pipeline with an active company link (`scripts/seed-dev-data.sh`), a second `Company`, and orders'
 `metadata/product-types` and `metadata/revenue-recognition-types` pushed. Without orders'
