@@ -331,7 +331,10 @@ test.describe('promote an existing party into sales', () => {
 
         const link = PromoteLinkFor(page, 'PrimaryContactID');
         await expect(link, 'the Primary Contact field must offer the promote link').toBeVisible({ timeout: 30_000 });
-        await expect(link).toHaveText(/Can't find the Primary Contact\?.*Search People.*Add Contact/i);
+        // The link is worded per KIND, not per field: one string serves Primary and Billing Contact.
+        // Asserting "Primary Contact" here failed against the app, which renders "the Contact" — and
+        // `test:spec-gate` only typechecks specs, so nothing but a real run could have caught it.
+        await expect(link).toHaveText(/Can't find the Contact\?.*Search People.*Add Contact/i);
         await link.click();
 
         await expect(ByTestId(page, 'promote-dialog')).toBeVisible({ timeout: 20_000 });
