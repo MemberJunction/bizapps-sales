@@ -59,6 +59,7 @@ import {
 } from '../data/company-pipelines';
 import { MJSDealLineEditorComponent } from './deal-line-editor.component';
 import { MJSDealLineCardsComponent } from './deal-line-cards.component';
+import { MJSDealAccountEditComponent } from './deal-account-edit.component';
 import { BusinessDayOf, DealCloseDay } from './deal-close-day';
 import { WeightedAmount } from './deal-weighted-amount';
 import { FormatDealMoney } from './deal-money';
@@ -1679,7 +1680,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     selector: 'mjs-deal-pipeline-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent],
+    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent, MJSDealAccountEditComponent],
     styles: [FIELD_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="pipeline" [SectionName]="HidePipelines() ? 'Stage' : 'Pipeline'" Icon="fa-solid fa-diagram-project"
@@ -1695,6 +1696,9 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                             <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                                 (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
+                        }
+                        @if (f.name === 'AccountID') {
+                            <mjs-deal-account-edit [Record]="Record" [Form]="FormComponent" [DealEditMode]="EditMode" />
                         }
                         <!-- What a save will write here from the stage just picked (sales#247). Text
                              only: the server stays the one writer of these two fields. -->
@@ -2646,7 +2650,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
     selector: 'mjs-deal-party-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent],
+    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent, MJSDealAccountEditComponent],
     styles: [FIELD_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="party" SectionName="Account &amp; people" Icon="fa-solid fa-building"
@@ -2685,6 +2689,9 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                             @if (EditMode && f.name === 'CompanyID') {
                                 <small class="mjs-field__hint" data-testid="deal-company-hint">Change it with Company on the Pipeline panel.</small>
                             }
+                        }
+                        @if (f.name === 'AccountID') {
+                            <mjs-deal-account-edit [Record]="Record" [Form]="FormComponent" [DealEditMode]="EditMode" />
                         }
                     </div>
                 }
