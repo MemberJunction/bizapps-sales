@@ -146,7 +146,7 @@ interface PartyCheck {
     /** The Common entity the sales row extends (IsA): its ID is the party's ID. */
     ParentEntityName: string;
     ID: string;
-    Label: 'customer' | 'primary contact';
+    Label: 'customer' | 'primary contact' | 'billing contact';
 }
 
 /** Why a supplied party was refused: the sales row is missing but its parent exists, or neither does. */
@@ -3223,10 +3223,13 @@ export class DealEntityServer extends DealEntity {
     /* ── Parties ────────────────────────────────────────────────────────────── */
 
     /**
-     * Refuses a customer or primary contact that this save writes and the database no longer holds.
+     * Refuses a customer, primary contact or billing contact that this save writes and the database no
+     * longer holds.
      *
      * Only a value the caller SUPPLIES is checked. One already on disk is guaranteed by
-     * `FK_Deal_SalesAccount` and `FK_Deal_PrimaryContact`, so reading it again proves nothing. A
+     * `FK_Deal_SalesAccount`, `FK_Deal_PrimaryContact` and `FK_Deal_BillingContact`, so reading it again
+     * proves nothing. The billing contact does not reach the embedded order, but a stale one still fails
+     * on its own foreign key as a SQL error rather than by name. A
      * supplied value can name a row that does not exist in two measured ways: it was picked from a list
      * read before a data reload re-keyed the customers, or the inline-create slide-in reported an id
      * other than the one it wrote (`DECISIONS-NEEDED.md` DN-19, the "INTERMITTENT" entry).
@@ -3311,7 +3314,7 @@ export class DealEntityServer extends DealEntity {
             return c.Label === 'customer'
                 ? 'The selected customer is not set up as a sales customer. Add the organization as a ' +
                       'sales account first, or pick another customer.'
-                : 'The selected primary contact is not set up as a sales contact. Add the person as a ' +
+                : `The selected ${c.Label} is not set up as a sales contact. Add the person as a ` +
                       'sales contact first, or pick another contact.';
         });
         return `Nothing was saved. ${sentences.join(' ')}`;
@@ -3333,6 +3336,14 @@ export class DealEntityServer extends DealEntity {
                 ParentEntityName: PERSON_ENTITY,
                 ID: this.PrimaryContactID,
                 Label: 'primary contact',
+            });
+        }
+        if (this.BillingContactID && this.callerSuppliedValue('BillingContactID', this.BillingContactID)) {
+            checks.push({
+                EntityName: SALES_CONTACT_ENTITY,
+                ParentEntityName: PERSON_ENTITY,
+                ID: this.BillingContactID,
+                Label: 'billing contact',
             });
         }
         return checks;
