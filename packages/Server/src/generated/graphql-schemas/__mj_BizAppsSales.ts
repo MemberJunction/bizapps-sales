@@ -4317,6 +4317,10 @@ export class mjBizAppsSalesPipeline_ {
     @MaxLength(36)
     CloseWonAssigneePersonID?: string;
         
+    @Field({nullable: true, description: "Role whose members all receive the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won: the task is assigned to the role, and everyone who holds it sees it and is notified. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Close Won Assignee (a person) takes precedence when both are set. Empty, with no person, means CloseWonTasks.AssigneeRecordID in Close Won Policy is used, and when that is empty too the tasks are created but not assigned."}) 
+    @MaxLength(36)
+    CloseWonAssigneeRoleID?: string;
+        
     @Field({nullable: true}) 
     @MaxLength(200)
     DealType?: string;
@@ -4328,6 +4332,10 @@ export class mjBizAppsSalesPipeline_ {
     @Field({nullable: true}) 
     @MaxLength(250)
     CloseWonAssigneePerson?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(50)
+    CloseWonAssigneeRole?: string;
         
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
@@ -4378,6 +4386,9 @@ export class CreatemjBizAppsSalesPipelineInput {
     @Field({ nullable: true })
     CloseWonAssigneePersonID: string | null;
 
+    @Field({ nullable: true })
+    CloseWonAssigneeRoleID: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -4426,6 +4437,9 @@ export class UpdatemjBizAppsSalesPipelineInput {
 
     @Field({ nullable: true })
     CloseWonAssigneePersonID?: string | null;
+
+    @Field({ nullable: true })
+    CloseWonAssigneeRoleID?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
