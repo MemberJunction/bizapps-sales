@@ -3,6 +3,7 @@ import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 import { CloseDealOperation } from '../CloseDealOperation.js';
 import {
     CLOSE_WON_ASSIGNEE_ENTITY,
+    CLOSE_WON_ASSIGNEE_ROLE_ENTITY,
     CloseWonTaskService,
     ReadCloseWonTaskConfig,
     WithPipelineAssignee,
@@ -26,6 +27,8 @@ const NO_CLOSING = { StageID: null, Probability: 100, ForecastCategoryTypeID: nu
 const COLUMN_PERSON = 'aaaaaaaa-0000-4000-a000-000000000001';
 const JSON_PERSON = 'bbbbbbbb-0000-4000-a000-000000000002';
 const ROLE = 'cccccccc-0000-4000-a000-000000000003';
+/** An MJ role (`MJ: Roles`), the shared-queue assignee; not the TaskRole in `ROLE`. */
+const FINANCE_ROLE = 'dddddddd-0000-4000-a000-000000000004';
 
 afterEach(() => {
     vi.restoreAllMocks();
@@ -34,6 +37,7 @@ afterEach(() => {
 interface PipelineRow {
     CloseWonPolicy: string | null;
     CloseWonAssigneePersonID: string | null;
+    CloseWonAssigneeRoleID?: string | null;
 }
 
 async function wonClose(row: PipelineRow) {
@@ -138,6 +142,34 @@ describe('who a won close routes its tasks to', () => {
         expect(taskInput?.Assignee?.RecordID).toBe(COLUMN_PERSON);
         expect(taskInput?.Assignee?.EntityName).toBe(CLOSE_WON_ASSIGNEE_ENTITY);
     });
+
+    it('reads the role column in the same pipeline read (bc-aidp-next-golive#442)', async () => {
+        const { fieldsRead } = await wonClose({ CloseWonPolicy: null, CloseWonAssigneePersonID: null });
+        expect(fieldsRead.some((f) => f.includes('CloseWonPolicy') && f.includes('CloseWonAssigneeRoleID'))).toBe(true);
+    });
+
+    it('routes to the MJ role when only the role column is set, keeping the TaskRole from the JSON', async () => {
+        const { taskInput } = await wonClose({
+            CloseWonPolicy: policyWithAssignee(JSON_PERSON),
+            CloseWonAssigneePersonID: null,
+            CloseWonAssigneeRoleID: FINANCE_ROLE,
+        });
+        expect(taskInput?.Assignee).toEqual({
+            EntityName: CLOSE_WON_ASSIGNEE_ROLE_ENTITY,
+            RecordID: FINANCE_ROLE,
+            RoleID: ROLE,
+        });
+    });
+
+    it('routes to the person when both columns are set', async () => {
+        const { taskInput } = await wonClose({
+            CloseWonPolicy: policyWithAssignee(null),
+            CloseWonAssigneePersonID: COLUMN_PERSON,
+            CloseWonAssigneeRoleID: FINANCE_ROLE,
+        });
+        expect(taskInput?.Assignee?.EntityName).toBe(CLOSE_WON_ASSIGNEE_ENTITY);
+        expect(taskInput?.Assignee?.RecordID).toBe(COLUMN_PERSON);
+    });
 });
 
 describe('WithPipelineAssignee', () => {
@@ -161,5 +193,48 @@ describe('WithPipelineAssignee', () => {
             RaiseOrderReviewTask: false,
         });
         expect(ReadCloseWonTaskConfig(policy).AssigneeRecordID, 'the input is not mutated').toBe(JSON_PERSON);
+    });
+
+    it('neither column set: the policy is returned unchanged', () => {
+        const policy = { CloseWonTasks: { AssigneeRecordID: JSON_PERSON } };
+        expect(WithPipelineAssignee(policy, null, null)).toBe(policy);
+        expect(WithPipelineAssignee(policy, '', '')).toBe(policy);
+        expect(WithPipelineAssignee(policy, undefined)).toBe(policy);
+    });
+
+    it('person only: the assignee is the person', () => {
+        const merged = WithPipelineAssignee({ CloseWonTasks: { AssigneeRecordID: JSON_PERSON } }, COLUMN_PERSON, null);
+        expect(ReadCloseWonTaskConfig(merged)).toEqual({
+            AssigneeEntityName: CLOSE_WON_ASSIGNEE_ENTITY,
+            AssigneeRecordID: COLUMN_PERSON,
+        });
+    });
+
+    it('role only: the assignee is the MJ role, and the other task settings are kept', () => {
+        const policy = {
+            CreateContract: false,
+            CloseWonTasks: {
+                AssigneeEntityName: CLOSE_WON_ASSIGNEE_ENTITY,
+                AssigneeRecordID: JSON_PERSON,
+                AssigneeRoleID: ROLE,
+                DueInDays: 3,
+            },
+        };
+        const merged = WithPipelineAssignee(policy, null, FINANCE_ROLE);
+        expect(ReadCloseWonTaskConfig(merged)).toEqual({
+            AssigneeEntityName: CLOSE_WON_ASSIGNEE_ROLE_ENTITY,
+            AssigneeRecordID: FINANCE_ROLE,
+            AssigneeRoleID: ROLE,
+            DueInDays: 3,
+        });
+        expect(ReadCloseWonTaskConfig(policy).AssigneeRecordID, 'the input is not mutated').toBe(JSON_PERSON);
+    });
+
+    it('both set: the person wins', () => {
+        const merged = WithPipelineAssignee({}, COLUMN_PERSON, FINANCE_ROLE);
+        expect(ReadCloseWonTaskConfig(merged)).toEqual({
+            AssigneeEntityName: CLOSE_WON_ASSIGNEE_ENTITY,
+            AssigneeRecordID: COLUMN_PERSON,
+        });
     });
 });
