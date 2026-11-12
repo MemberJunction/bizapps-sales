@@ -40,6 +40,10 @@
  * The override fires for the case it is written for: a team row saved on its OWN, which is what the
  * grid does.
  *
+ * NOT TRUE OF DELETES. A row removed from the deal's `Team` collection is deleted by the graph through
+ * its own `Delete()`, so the `Delete()` override below does run inside a graph save; measured on MJ
+ * 6.2.1, where `SetOwner`'s swap reached it. `PartOfGraphSave` is how the overrides tell the two apart.
+ *
  * That also means a CLOSED deal is handled correctly without a special case. `checkCloseLock` freezes
  * `OwnerEmployeeID`, but it keys on the field being dirty and the stamp is applied after it runs, so
  * a roster-driven change passes — which golive#206 item 2 requires, because reassigning a rep on a
@@ -57,9 +61,9 @@ import {
     type IRunViewProvider,
     LogError,
 } from '@memberjunction/core';
-import { RegisterClass } from '@memberjunction/global';
+import { RegisterClass, UUIDsEqual } from '@memberjunction/global';
 import { DealTeamMemberEntity } from '@mj-biz-apps/sales-entities';
-import { DealEntityServer } from './DealEntityServer.js';
+import { DealEntityServer, type OwnerSeatCandidate } from './DealEntityServer.js';
 
 const DEAL_TEAM_MEMBER_ENTITY = 'MJ_BizApps_Sales: Deal Team Members';
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
@@ -94,19 +98,15 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
          *
          * The seed sets this false for Owner / AE and true for every other role, and NOTHING read it.
          * So a rep "taking" a deal added a SECOND Owner / AE row, saw themselves listed as owner, and
-         * the deal stayed with the first one — because `stampOwnerFromTeam()` resolves with
-         *
-         *     this.Team.Items.find((m) => m.DealRoleID === ownerRoleID)
-         *
-         * and `find` returns the OLDEST matching row. Reports, rollups and anything crediting the
-         * owner kept pointing at the previous rep while the grid showed the new one. Refusing here is
-         * what the flag already means, and it is read from the ROLE rather than keyed on Owner, so a
+         * the deal stayed with the first one — because `stampOwnerFromTeam()` resolves with `find`
+         * over `HoldsOwnerSeat`, and `find` returns the OLDEST matching row. Reports, rollups and
+         * anything crediting the owner kept pointing at the previous rep while the grid showed the
+         * new one. Refusing here is what the flag already means, and it is read from the ROLE rather than keyed on Owner, so a
          * future single-holder role is covered without another change.
          *
-         * INACTIVE ROWS COUNT. `stampOwnerFromTeam` never reads `IsActive` — an inactive Owner / AE
-         * row still owns the deal — so an inactive row still holds the seat here. Counting it keeps
-         * this check and the derivation answering the same question. Whether ownership should respect
-         * `IsActive` at all is open and deliberately not decided here.
+         * INACTIVE ROWS COUNT FOR THE SEAT. `stampOwnerFromTeam` credits only an active owner row
+         * (`HoldsOwnerSeat`), but an inactive row still occupies the single-holder seat in the roster
+         * until its employee is changed or the row is removed.
          */
         let refusal: string | null;
         try {
@@ -122,6 +122,12 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
         }
 
         const before = this.priorSnapshot();
+        const lastOwner = PartOfGraphSave(options)
+            ? null
+            : await this.lastOwnerRefusal(before.dealID, this.seatAfterEdit(before));
+        if (lastOwner) {
+            return this.refuseSave(lastOwner);
+        }
         const saved = await super.Save(options);
         if (!saved) {
             return saved;
@@ -130,14 +136,14 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
          * UNCONDITIONAL ON PURPOSE — there is no "did anything owner-relevant change" gate here, and
          * one should not be added from the snapshot above.
          *
-         * `stampOwnerFromTeam()` derives the owner by finding the row whose `DealRoleID` is the owner
-         * role and taking its `EmployeeID`:
+         * `stampOwnerFromTeam()` derives the owner by finding the active row whose `DealRoleID` is the
+         * owner role and taking its `EmployeeID`:
          *
-         *     const owner = this.Team.Items.find((m) => m.DealRoleID === ownerRoleID);
+         *     const owner = this.Team.Items.find((m) => HoldsOwnerSeat(m, ownerRoleID));
          *     this.OwnerEmployeeID = owner?.EmployeeID ?? null;
          *
-         * So the fields that can change the answer are `DealID`, `DealRoleID` and `EmployeeID`.
-         * `priorSnapshot()` carries the first two and NOT the third, so a gate built from it would
+         * So the fields that can change the answer are `DealID`, `DealRoleID`, `IsActive` and
+         * `EmployeeID`. `priorSnapshot()` carries the first three and NOT `EmployeeID`, so a gate built from it would
          * miss an employee swap: same deal, same role, different person, no re-stamp, and the deal
          * keeps the old owner — which is the exact defect this class exists to fix, arriving through
          * a different door.
@@ -156,8 +162,16 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
     }
 
     public override async Delete(options?: EntityDeleteOptions): Promise<boolean> {
-        // Captured before the delete, because afterwards the fields are gone.
-        const dealID = this.DealID ?? null;
+        // Captured before the delete, because afterwards the fields are gone. The PERSISTED deal: the
+        // row is removed from the deal it is on in the database, not one an unsaved edit points at.
+        const dealID = this.priorSnapshot().dealID;
+
+        // A deal is never left without an owner by deleting its last owner row (sales#568).
+        const lastOwner = PartOfGraphSave(options) ? null : await this.lastOwnerRefusal(dealID, null);
+        if (lastOwner) {
+            return this.refuseSave(lastOwner, 'delete');
+        }
+
         const deleted = await super.Delete(options);
         if (deleted) {
             await this.restampDeals([dealID]);
@@ -266,12 +280,68 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
         );
     }
 
+    /**
+     * What this row will be once a save lands, for the owner-seat check: null when the save moves it to
+     * another deal (it leaves the old deal's seat entirely), or for a row not saved yet (it holds no seat
+     * to leave, so there is nothing to ask).
+     */
+    private seatAfterEdit(before: { dealID: string | null }): OwnerSeatCandidate | null {
+        if (!UUIDsEqual(before.dealID, this.DealID ?? null)) {
+            return null;
+        }
+        return { DealRoleID: this.DealRoleID ?? null, IsActive: this.IsActive ?? null };
+    }
+
+    /**
+     * THE LAST OWNER ROW STAYS (sales#568). Deleting, deactivating, re-roling or moving away the only
+     * active owner row on a deal left the deal with no owner, with no warning, and it dropped out of its
+     * rep's lists. Refused instead, pointing at the Owner field, whose `SetOwner` swaps the row in one
+     * graph save of the deal.
+     *
+     * ONLY FOR A ROW SAVED OR DELETED ON ITS OWN. MJ's graph save does call this class's `Save` and
+     * `Delete` for each team row (`EntitySavePlan` runs `node.Entity.Delete(options)`), and it runs the
+     * deletes before the inserts, so `SetOwner`'s swap would see the old row leave before the new one
+     * exists and be refused. The callers skip this check when the options carry `GraphVisited`, which
+     * MJ sets on every child node of a graph save and on nothing else (`PartOfGraphSave`).
+     *
+     * The deal answers, through `DealEntityServer.LastOwnerSeatRefusal` and `HoldsOwnerSeat`, the same
+     * predicate its owner stamp uses. Skipped for a new row, and for an edit that touches none of
+     * `DealID`, `DealRoleID` and `IsActive`, so ordinary edits cost no extra read. Fails closed: a deal or
+     * team that cannot be read cannot show that another owner remains.
+     */
+    private async lastOwnerRefusal(dealID: string | null, after: OwnerSeatCandidate | null): Promise<string | null> {
+        if (!dealID || !this.IsSaved || !this.ID || !this.leavesSeatCandidate(after)) {
+            return null;
+        }
+        try {
+            const provider = this.ProviderToUse as unknown as IMetadataProvider;
+            const deal = await provider.GetEntityObject<DealEntityServer>(DEAL_ENTITY, this.ContextCurrentUser);
+            if (!(await deal.Load(dealID))) {
+                return `Deal ${dealID} could not be read to check that it keeps an owner, so nothing was changed.`;
+            }
+            return await deal.LastOwnerSeatRefusal(this.ID, after);
+        } catch (err) {
+            return (
+                `Deal ${dealID} could not be checked for keeping an owner, so nothing was changed. `
+                + (err instanceof Error ? err.message : String(err))
+            );
+        }
+    }
+
+    /** A delete or move always could; an edit only when it touches the role or the active flag. */
+    private leavesSeatCandidate(after: OwnerSeatCandidate | null): boolean {
+        if (!after) {
+            return true;
+        }
+        return Boolean(this.GetFieldByName('DealRoleID')?.Dirty || this.GetFieldByName('IsActive')?.Dirty);
+    }
+
     /** Mirrors `DealEntityServer.refuseSave`: log it, register a failed result, return false. */
-    private refuseSave(message: string): false {
-        LogError(`DealTeamMemberEntityServer.Save refused: ${message}`);
+    private refuseSave(message: string, type?: 'delete'): false {
+        LogError(`DealTeamMemberEntityServer.${type === 'delete' ? 'Delete' : 'Save'} refused: ${message}`);
         const failed = new BaseEntityResult();
         failed.Success = false;
-        failed.Type = this.IsSaved ? 'update' : 'create';
+        failed.Type = type ?? (this.IsSaved ? 'update' : 'create');
         failed.Message = message;
         failed.StartedAt = new Date();
         failed.EndedAt = new Date();
@@ -324,6 +394,15 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
             throw new Error(`deal ${dealID} refused the save that refreshes its owner stamp`);
         }
     }
+}
+
+/**
+ * Whether this save or delete is one node of a graph save of the deal (`SetOwner`, a deal saved with its
+ * `Team` dirty). MJ's graph executor sets `GraphVisited` on the options it hands each child node; a row
+ * saved or deleted on its own (the Internal team grid, an API call) gets none.
+ */
+export function PartOfGraphSave(options: EntitySaveOptions | EntityDeleteOptions | undefined): boolean {
+    return Boolean(options?.GraphVisited);
 }
 
 /**
