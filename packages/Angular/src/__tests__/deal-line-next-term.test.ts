@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.component';
 
 /**
- * "ADD AS NEXT TERM" STARTS WHERE ORDERS SAYS, AND THE DIALOG SHOWS THAT START.
+ * "RENEW" (ADD AS NEXT TERM) STARTS WHERE ORDERS SAYS, AND THE DIALOG SHOWS THAT START.
  *
  * Orders starts an added term the day after the existing coverage ends, over any start the line
  * states. The dialog still offered an editable Term start for it, a date orders would ignore, and
@@ -38,7 +38,7 @@ function editor(action: 'ExtendExisting' | 'CreateNew' | null, holdingEnd: strin
 }
 
 describe('the Term start field when the line adds a term to a held subscription', () => {
-    it('shows the continuation start instead of an input once "Add as next term" is chosen', () => {
+    it('shows the continuation start instead of an input once "Renew" is chosen', () => {
         const e = editor('ExtendExisting', '2026-12-31');
         expect(e.TermStartFollowsHolding).toBe(true);
         expect(e.HoldingContinuationStart).toBe('2027-01-01');
@@ -78,9 +78,28 @@ describe('the Term start field when the line adds a term to a held subscription'
 describe('the subscription prompt dates', () => {
     it('render through orders\' mjoDate pipe, the format the line cards use', () => {
         const t = editorTemplate();
-        expect(t).toContain('covered through {{ HoldingCoverageEnd | mjoDate }}');
+        expect(t).toContain('which runs through {{ HoldingCoverageEnd | mjoDate }}');
         expect(t).toContain('starts {{ HoldingContinuationStart | mjoDate }}');
         expect(t).not.toMatch(/\{\{ Holding(CoverageEnd|ContinuationStart) \}\}/);
         expect(EDITOR).toMatch(/imports: \[[^\]]*MJODatePipe[^\]]*\]/);
+    });
+});
+
+describe('the subscription prompt wording (golive #480)', () => {
+    it('asks the question and names both outcomes as the order line does', () => {
+        const t = editorTemplate();
+        expect(t).toContain('Is this line a renewal of that subscription, or a new one?');
+        const extend = t.indexOf('data-testid="line-subscription-extend"');
+        const create = t.indexOf('data-testid="line-subscription-new"');
+        expect(extend).toBeGreaterThan(-1);
+        expect(create).toBeGreaterThan(extend);
+        expect(t.slice(extend, create)).toContain('Renew {{ holding.SubscriptionNumber }}');
+        expect(t.slice(create)).toContain('Create new subscription');
+        expect(t).not.toContain('Add as next term');
+    });
+
+    it('puts a start on the new-subscription choice only when the line stores its own', () => {
+        const t = editorTemplate();
+        expect(t).toContain("@if (HasExplicitTermStart) { (starts {{ TermStartInput | mjoDate }}) } @else { (keeps this line's dates) }");
     });
 });
