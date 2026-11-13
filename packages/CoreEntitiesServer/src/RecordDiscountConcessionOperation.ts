@@ -20,13 +20,15 @@
  * ── A RAISED DISCOUNT REPLACES THE LINE'S EARLIER CONCESSION ────────────────────────────────────
  *
  * Orders values a line's Price concession at the line's whole discount, not at the increase, and its
- * share check sums every concession on the order that is not rejected. Left in place, the concession for
+ * share check sums every Pending and Approved concession on the order. Left in place, the concession for
  * the line's earlier discount is counted twice: once on its own and once inside the new one. The new one
  * routes to a higher tier than it should, and the order cannot be confirmed even after it is approved.
- * So the earlier one is withdrawn first, as orders' own header says to ("withdraw a Pending one and
- * record again"). Orders' `Delete` decides which can go: a Pending one, or one approved on the
- * requester's own authority while the order is a draft. One an approver decided stays; the confirm gate
- * covers a line by its largest approved concession, so it does no harm. No status name is read here.
+ * So the earlier one is withdrawn first (golive #403): its status is set to Withdrawn, which orders keeps
+ * as a record and counts toward nothing. Deleting it would lose that history, and a role that may record
+ * concessions but not delete them could not do it. Orders lets the concession's requester withdraw it
+ * without the right to update concessions, and decides which can be withdrawn: a Pending one, or an
+ * Approved one while the order is not confirmed. A refusal refuses the whole recording, since leaving the
+ * earlier one in place would count the line twice.
  *
  * The withdrawal and the new record share one transaction, which orders' approval-task writes join. A
  * refused new concession rolls the withdrawal back, so the line keeps the concession it had.
@@ -54,7 +56,7 @@ import {
 
 import { OrdersIsInstalled } from './orders-availability.js';
 
-// The line ID goes into a RunView filter, and the rows that filter returns are deleted, so anything else
+// The line ID goes into a RunView filter, and the rows that filter returns are withdrawn, so anything else
 // is refused before the transaction opens.
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
@@ -110,9 +112,9 @@ export class RecordDiscountConcessionOperation extends SalesRecordDiscountConces
     }
 
     /**
-     * Withdraws the line's earlier line-price concessions: every Price or Scope one on the line that names
-     * no term (an amount change names the term it lowers, and is a different concession). Orders' `Delete`
-     * refuses one an approver decided; that one is left in place, and the refusal is logged, not returned.
+     * Withdraws the line's earlier line-price concessions still standing: every Pending or Approved Price or
+     * Scope one on the line that names no term (an amount change names the term it lowers, and is a
+     * different concession). A withdrawal orders refuses throws with orders' reason, which rolls back.
      *
      * When the caller supplies `concessionID` and a concession with that ID already sits on the line, a
      * prior attempt with the same client-generated ID already wrote it (#512): return it untouched so a
@@ -127,7 +129,9 @@ export class RecordDiscountConcessionOperation extends SalesRecordDiscountConces
         const result = await (provider as unknown as IRunViewProvider).RunView<mjBizAppsOrdersOrderConcessionEntity>(
             {
                 EntityName: ORDER_CONCESSION_ENTITY,
-                ExtraFilter: `OrderLineID = '${orderLineID}' AND DeliveryForm IN ('Price', 'Scope') AND SubscriptionTermID IS NULL`,
+                ExtraFilter:
+                    `OrderLineID = '${orderLineID}' AND DeliveryForm IN ('Price', 'Scope') AND SubscriptionTermID IS NULL ` +
+                    `AND Status IN ('Pending', 'Approved')`,
                 ResultType: 'entity_object',
             },
             user,
@@ -139,11 +143,10 @@ export class RecordDiscountConcessionOperation extends SalesRecordDiscountConces
             if (matching) return matching;
         }
         for (const earlier of earlierRows) {
-            if (!(await earlier.Delete())) {
-                LogError(
-                    `Sales.RecordDiscountConcession kept concession ${earlier.ID} on order line ${orderLineID}: ` +
-                        (earlier.LatestResult?.CompleteMessage?.trim() || 'orders gave no reason'),
-                );
+            earlier.Status = 'Withdrawn';
+            if (!(await earlier.Save())) {
+                const reason = earlier.LatestResult?.CompleteMessage?.trim() || 'orders gave no reason';
+                throw new Error(`The line's earlier concession could not be withdrawn, so the raised discount was not recorded: ${reason}`);
             }
         }
         return null;
