@@ -16,7 +16,12 @@ export class mjBizAppsSalesSalesAccountFormComponent extends BaseFormComponent {
     override async ngOnInit() {
         await super.ngOnInit();
         this.initSections([
-            { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
+            { sectionKey: 'accountOwnership', sectionName: 'Account Ownership', isExpanded: true },
+            { sectionKey: 'accountClassification', sectionName: 'Account Classification', isExpanded: true },
+            { sectionKey: 'accountMetrics', sectionName: 'Account Metrics', isExpanded: true },
+            { sectionKey: 'defaultContacts', sectionName: 'Default Contacts', isExpanded: true },
+            { sectionKey: 'organizationsDetails', sectionName: 'Organizations Details', isExpanded: true },
+            { sectionKey: 'systemMetadata', sectionName: 'System Metadata', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDeals', sectionName: 'Deals', isExpanded: false }
         ]);
     }

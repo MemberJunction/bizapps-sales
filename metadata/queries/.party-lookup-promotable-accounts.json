@@ -1,0 +1,19 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Party Lookup Promotable Accounts",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "Which organizations could be added as sales accounts?",
+      "Description": "Search for the promote dialog: organizations that do NOT yet have a sales account row, whose name, legal name, acronym or website domain starts with the term.",
+      "SQL": "@file:SQL/party-lookup-promotable-accounts.sql",
+      "TechnicalDescription": "Grain: Organization WITHOUT a SalesAccount row -- the exact complement of 'Sales: Party Lookup Accounts', differing only in EXISTS vs NOT EXISTS. Party lookup contract (bc-aidp-next-golive#372): columns ID, Name, Detail (Acronym and WebsiteDomain joined by ' · ', whichever are set); parameters Term (required) and Domain (optional; matched against Organization.WebsiteDomain). Prefix LIKE on indexed base columns (Name, LegalName, Acronym, WebsiteDomain), TOP 20 ordered by Name, no view and no count. Read by the sales-owned promote dialog, NOT by bizapps-party-field: that control cannot mark a row unselectable, so a promotable organization must never reach the deal's account picker (PL1/PL3).",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 1,
+      "UsesTemplate": true
+    },
+    "primaryKey": {
+      "ID": "18456E6E-A8E6-4852-990B-713E1EACCAF2"
+    }
+  }
+]

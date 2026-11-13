@@ -42,6 +42,8 @@ import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizApps
 import { MJS_ENTITIES } from '../data/entity-names';
 import { SameDealID, WatchDealSaves, type DealSave } from '../data/deal-saves';
 import { OnlyLinkedCompany, ShouldStampCompanyFromPipeline, type PipelineCompanyRow } from './company-from-pipeline';
+import { NoPipelineMessage } from '../data/company-pipelines';
+import { SalesSettings } from '../data/sales-settings';
 
 /** See `deal-stage-event-form.component.ts` for why the priority is explicit rather than import-order. */
 @RegisterClass(BaseFormComponent, 'MJ_BizApps_Sales: Deals', 2)
@@ -235,7 +237,53 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      */
     public override async SaveRecord(StopEditModeAfterSave: boolean): Promise<boolean> {
         await this.stampCompanyFromPipeline();
+        this.NoPipelineMessage = await this.resolveNoPipelineMessage();
         return super.SaveRecord(StopEditModeAfterSave);
+    }
+
+    /**
+     * What `Validate()` says in place of the entity's "Choose a pipeline" when the deal has none, or null
+     * to leave that message alone. Worked out by `SaveRecord` just before validating, because it needs a
+     * read and `Validate()` is synchronous.
+     */
+    public NoPipelineMessage: string | null = null;
+
+    /**
+     * Why this deal has no pipeline: read only when it has none, so an ordinary save costs nothing.
+     *
+     * The entity refuses with "Choose a pipeline", which is wrong in two cases: the deal's company has no
+     * pipeline linked to it, so there is nothing to choose, and pipelines are hidden, so there is no
+     * Pipeline field to choose in. A failed read leaves the entity's message, which is no worse than before.
+     */
+    private async resolveNoPipelineMessage(): Promise<string | null> {
+        const record = this.record;
+        if (!record || record.Get('PipelineID')) return null;
+        const companyID = (record.Get('CompanyID') as string | null | undefined) ?? null;
+        const knownName = (record.Get('Company') as string | null | undefined) ?? null;
+        const [hide, results] = await Promise.all([
+            SalesSettings.LoadHidePipelines(),
+            new RunView().RunViews([
+                { EntityName: MJS_ENTITIES.Pipeline, ExtraFilter: 'IsActive = 1', ResultType: 'simple', Fields: ['ID'] },
+                { EntityName: MJS_ENTITIES.PipelineCompany, ExtraFilter: 'IsActive = 1', ResultType: 'simple', Fields: ['PipelineID', 'CompanyID'] },
+                ...(companyID && !knownName
+                    ? [{ EntityName: 'MJ: Companies', ExtraFilter: `ID = '${companyID.replace(/'/g, "''")}'`, ResultType: 'simple' as const, Fields: ['Name'] }]
+                    : []),
+            ]),
+        ]);
+        const [pipelines, links, company] = results ?? [];
+        if (!pipelines?.Success || !links?.Success) return null;
+
+        const same = (a: unknown, b: unknown): boolean => String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
+        const active = new Set((pipelines.Results as { ID: string }[]).map((p) => String(p.ID).toLowerCase()));
+        const served = (links.Results as { PipelineID: string; CompanyID: string }[]).filter((l) => active.has(String(l.PipelineID).toLowerCase()));
+        const companyName = knownName ?? ((company?.Results?.[0] as { Name?: string } | undefined)?.Name ?? null);
+        return NoPipelineMessage({
+            HidePipelines: hide,
+            CompanyID: companyID,
+            CompanyName: companyName,
+            CompanyHasPipeline: served.some((l) => same(l.CompanyID, companyID)),
+            OtherCompanyHasPipeline: served.some((l) => !same(l.CompanyID, companyID)),
+        });
     }
 
     /**
@@ -308,13 +356,36 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     }
 
     /**
+     * Collapses the no-pipeline refusals into one error carrying `message`.
+     *
+     * Both MJ's required-field check and the entity's own rule flag `PipelineID`, and a deal with no
+     * pipeline usually has no company either, which MJ flags as "Company ID cannot be null". All three
+     * are the one problem `message` explains, so the toast listed it three times in two vocabularies.
+     * A CompanyID error is dropped only while the deal has no company: then the message covers it.
+     */
+    private replaceNoPipelineErrors(result: ValidationResult, message: string): void {
+        const first = result.Errors.find((e) => e.Source === 'PipelineID');
+        if (!first) return;
+        first.Message = message;
+        const noCompany = !this.record?.Get('CompanyID');
+        result.Errors = result.Errors.filter(
+            (e) => e === first || (e.Source !== 'PipelineID' && !(noCompany && e.Source === 'CompanyID')),
+        );
+    }
+
+    /**
      * Refuses a locked edit BEFORE the round trip, naming the fields.
      *
      * The server would refuse anyway; the value here is that the user finds out while looking at the
      * field rather than after a save that reports a wall.
+     *
+     * Also swaps the entity's "Choose a pipeline" for {@link NoPipelineMessage} when the deal has none.
      */
     public override Validate(): ValidationResult {
         const result = super.Validate();
+        if (this.NoPipelineMessage && !this.record?.Get('PipelineID')) {
+            this.replaceNoPipelineErrors(result, this.NoPipelineMessage);
+        }
         if (!this.IsLocked || !this.record) {
             return result;
         }

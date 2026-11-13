@@ -174,8 +174,11 @@ export function BuildLeftNavSections(pages: SalesSubPage[], badges: SalesNavBadg
 export interface SalesPrimaryAction {
     Label: string;
     Icon: string;
-    /** What the button creates. */
-    Creates: 'deal' | 'account' | 'contact';
+    /**
+     * What the button does. The three `*` kinds CREATE a record; the two `promote-*` kinds open the
+     * promote dialog instead, because the record already exists and only its sales half is missing.
+     */
+    Creates: 'deal' | 'account' | 'contact' | 'promote-account' | 'promote-contact';
 }
 
 /**
@@ -204,9 +207,37 @@ export function PrimaryActionFor(pageId: string): SalesPrimaryAction | null {
 const NEW_ACCOUNT: SalesPrimaryAction = { Label: 'New account', Icon: 'fa-solid fa-building', Creates: 'account' };
 
 /**
- * A second, outline button beside the primary. Only the dashboard has one: a new account is the
- * other thing someone starting work there needs, and the Accounts page is otherwise a click away.
+ * ADD EXISTING, beside NEW. A Sales Account is the sales half of an Organization Common may already
+ * hold, so "New account" is the wrong verb for most of them — and a rep who cannot find a company
+ * does not conclude it needs promoting, they create a second one (bc-aidp-next-golive#259). Offering
+ * both verbs on the page where accounts are managed is what makes the existing one findable (D-PR3).
+ */
+const ADD_EXISTING_ACCOUNT: SalesPrimaryAction = {
+    Label: 'Add existing',
+    Icon: 'fa-solid fa-building-circle-arrow-right',
+    Creates: 'promote-account',
+};
+const ADD_EXISTING_CONTACT: SalesPrimaryAction = {
+    Label: 'Add existing',
+    Icon: 'fa-solid fa-user-plus',
+    Creates: 'promote-contact',
+};
+
+/**
+ * A second, outline button beside the primary. The dashboard offers a new account, because that is
+ * the other thing someone starting work there needs and the Accounts page is otherwise a click away.
+ * Accounts and Contacts offer the EXISTING one instead: on those pages "New" is already the primary,
+ * and the thing that page cannot otherwise do is reach a record Common already has.
  */
 export function SecondaryActionFor(pageId: string): SalesPrimaryAction | null {
-    return pageId === 'dashboard' ? NEW_ACCOUNT : null;
+    switch (pageId) {
+        case 'dashboard':
+            return NEW_ACCOUNT;
+        case 'accounts':
+            return ADD_EXISTING_ACCOUNT;
+        case 'contacts':
+            return ADD_EXISTING_CONTACT;
+        default:
+            return null;
+    }
 }
