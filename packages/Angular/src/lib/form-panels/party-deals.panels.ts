@@ -14,30 +14,20 @@ import { Component, Directive, DoCheck, signal } from '@angular/core';
 import { RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule } from '@memberjunction/ng-base-forms';
 import type { AfterDataLoadEventArgs } from '@memberjunction/ng-entity-viewer';
-import { RunView, type BaseEntity, type RunViewParams } from '@memberjunction/core';
+import { type BaseEntity, type RunViewParams } from '@memberjunction/core';
 import { CommonModule } from '@angular/common';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
+import { SalesPartyRowExists, type PartyRowReader } from '../data/promote-party';
 
 const EMPTY_STATE_STYLES =
     '.mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }';
 
-/** Reads whether a row exists in an entity by ID. A seam so the gate tests without a provider. */
-export type PartyRowReader = (entityName: string, id: string) => Promise<boolean | null>;
-
 /**
- * Whether the Sales Account or Sales Contact row exists for this ID: true, false, or null when the read
- * failed. IsA means it shares the Organization's or Person's ID, so one read by ID answers it.
+ * The existence read moved to `data/promote-party.ts` when the promote panels needed the same
+ * answer, and is re-exported here because this is where it was first published. ONE definition:
+ * two copies of "is this record a sales record" would be two things to keep in step.
  */
-export async function SalesPartyRowExists(entityName: string, id: string): Promise<boolean | null> {
-    const result = await new RunView().RunView<{ ID: string }>({
-        EntityName: entityName,
-        ExtraFilter: `ID = '${id.replace(/'/g, "''")}'`,
-        ResultType: 'simple',
-        Fields: ['ID'],
-    });
-    if (!result?.Success) return null;
-    return (result.Results ?? []).length > 0;
-}
+export { SalesPartyRowExists, type PartyRowReader };
 
 /**
  * ── NEW IS OFFERED ONLY WHERE A DEAL CAN BE SAVED ─────────────────────────────────────────────
@@ -66,6 +56,17 @@ abstract class SalesPartyDealsPanel extends BaseFormPanel<BaseEntity> implements
         if (this.recordID() !== this.checkedID) {
             void this.CheckSalesParty();
         }
+    }
+
+    /**
+     * A refresh re-asks the gate. The record ID does not change when the record is PROMOTED, so
+     * without this the panel keeps saying "Not a sales customer" next to a record that now is one —
+     * the promote panel refreshes the form precisely so this answer is taken again.
+     */
+    public override OnRecordRefreshed(record: BaseEntity): void {
+        super.OnRecordRefreshed(record);
+        this.checkedID = null;
+        void this.CheckSalesParty();
     }
 
     /** Reads once per record ID; a later ID starts a new read and the earlier answer is discarded. */
