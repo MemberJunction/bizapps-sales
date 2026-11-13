@@ -223,7 +223,7 @@ interface RemoteOperationRouter {
                         <input id="mjs-le-product" data-testid="line-product" type="text" autocomplete="off"
                                role="combobox" aria-autocomplete="list" aria-controls="mjs-le-product-list"
                                [attr.aria-expanded]="PickerOpen" [attr.data-product-id]="Working.ProductID || null"
-                               placeholder="Type a name or SKU…"
+                               placeholder="Type a name, SKU or company…"
                                [ngModel]="ProductQuery" (ngModelChange)="OnProductQuery($event)"
                                (focus)="OnPickerFocus($event)" (click)="OpenPicker()" (blur)="ClosePicker()" (keydown)="OnPickerKey($event)"
                                [disabled]="IsLocked || ProductLockedByPrice"
@@ -949,8 +949,12 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
 
     /* ── The product type-ahead (golive#360) ───────────────────────────────────── */
 
-    /** Rows the list shows at once. The catalogue runs to hundreds; past this the rep narrows by typing. */
-    private static readonly PickerLimit = 50;
+    /**
+     * Rows the list shows at once; past this the rep narrows by typing. Sized to hold the whole active
+     * catalogue: at 50, the selling company's own products filled the list (Blue Cypress Consulting
+     * alone has 44), so other companies' products, a bundle's among them, sat below the cut.
+     */
+    private static readonly PickerLimit = 250;
 
     /** The catalog price beside a product in the list, when orders has one. */
     public PriceLabel(p: ProductLookup): string | null {

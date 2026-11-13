@@ -83,11 +83,98 @@
   Horizontal scroll lives HERE rather than on the page: a board with eight stages must not make the whole
   shell scroll sideways, which would drag the rail and the header out of view.
 */
+.db-scroll {
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+}
+
+/*
+  The bar above the columns. It scrolls an empty spacer as wide as the board, and the component keeps it
+  in step with .db-scroll. Sticky so it stays in reach while a tall board is scrolled down; hidden by the
+  component when the board fits.
+*/
+.db-topscroll {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    overflow-x: auto;
+    overflow-y: hidden;
+    background: var(--mj-bg-page);
+}
+
+.db-topscroll__spacer {
+    height: 1px;
+}
+
+/*
+  Styled so the bar always shows. macOS hides an unstyled scrollbar until the area is scrolled, which
+  left this one invisible, and a bar nobody can see cannot be grabbed.
+*/
+/*
+  Chrome ignores the ::-webkit-scrollbar styling below whenever scrollbar-color is set, and Explorer sets
+  it on an ancestor, so it is reset here. Firefox has no ::-webkit-scrollbar and takes the block after.
+*/
+.db-topscroll {
+    scrollbar-color: auto;
+    scrollbar-width: auto;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+    .db-topscroll {
+        scrollbar-width: thin;
+        scrollbar-color: var(--mj-border-strong) var(--mj-bg-surface-sunken);
+    }
+}
+
+.db-topscroll::-webkit-scrollbar {
+    height: 10px;
+}
+
+.db-topscroll::-webkit-scrollbar-track {
+    background: var(--mj-bg-surface-sunken);
+    border-radius: 5px;
+}
+
+.db-topscroll::-webkit-scrollbar-thumb {
+    background: var(--mj-border-strong);
+    border-radius: 5px;
+}
+
+/*
+  Lanes stack; the scroller is as wide as the widest, so every lane scrolls together. Each lane spans
+  the full scroll width so its heading can stay pinned on the left while the columns move.
+*/
+.db-lane {
+    min-width: 100%;
+    width: max-content;
+}
+
+.db-scroll .db-lane + .db-lane {
+    margin-top: 1rem;
+}
+
+.db-lane__head {
+    position: sticky;
+    left: 0;
+    width: fit-content;
+    max-width: 48rem;
+    margin: 0 0 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--mj-text-primary);
+}
+
+.db-lane__count {
+    margin-left: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--mj-text-muted);
+}
+
 .db-cols {
     display: flex;
     gap: 0.75rem;
-    overflow-x: auto;
-    padding-bottom: 0.5rem;
+    width: max-content;
     align-items: flex-start;
 }
 

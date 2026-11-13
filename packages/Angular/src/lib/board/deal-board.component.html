@@ -20,14 +20,26 @@
       <span class="db-bar__label">{{ HidePipelines ? 'Company' : 'Pipeline' }}</span>
     }
     @if (tabs.length > 1) {
+      @let all = ShowingAll;
       <div class="db-bar__pipes" role="tablist" [attr.aria-label]="HidePipelines ? 'Company' : 'Pipeline'" data-testid="db-pipeline-tabs">
+        <!-- Every allowed pipeline at once, one lane each: stages belong to a pipeline, so they are not merged. -->
+        <button
+          type="button"
+          role="tab"
+          class="db-pipe"
+          data-testid="db-pipeline-all"
+          [class.db-pipe--on]="all"
+          [attr.aria-selected]="all"
+          (click)="SelectPipeline(AllPipelines)">
+          {{ AllLabel }}
+        </button>
         @for (pipeline of tabs; track pipeline.ID) {
           <button
             type="button"
             role="tab"
             class="db-pipe"
-            [class.db-pipe--on]="pipeline.ID === ActivePipelineID"
-            [attr.aria-selected]="pipeline.ID === ActivePipelineID"
+            [class.db-pipe--on]="!all && pipeline.ID === ActivePipelineID"
+            [attr.aria-selected]="!all && pipeline.ID === ActivePipelineID"
             (click)="SelectPipeline(pipeline.ID)">
             {{ TabLabel(pipeline) }}
           </button>
@@ -47,214 +59,241 @@
     </p>
   }
 
-  @let columns = Columns;
-  @if (columns.length === 0) {
-    <p class="db-empty">{{ HidePipelines ? 'No stages are set up for this company yet.' : 'This pipeline has no stages yet.' }}</p>
-  } @else {
-    <div class="db-cols">
-      @for (column of columns; track TrackColumn($index, column)) {
-        <section
-          class="db-col"
-          [class.db-col--closing]="column.IsClosing"
-          [attr.data-closing]="column.IsClosing ? column.Label : null"
-          [attr.aria-label]="column.Label">
-
-          <header class="db-col__head">
-            <span class="db-col__name">
-              {{ column.Label }}
-              @if (column.IsClosing) {
-                <!--
-                     THIS SAID THE OPPOSITE OF WHAT HAPPENS. "Arriving here closes and locks the
-                     deal" describes a behaviour the server deliberately refuses: a stage whose
-                     status locks contributes NO status to a save, so a deal moved into this
-                     column keeps the status it had (`planStageDefaults` gates on `LocksDeal`).
-                     A rep reading the old text would think a drag closes the deal.
-
-                     And the drag cannot happen either: `CanDropInto` returns false for a closing
-                     column, with a second guard behind it. So the tooltip says what the lock icon
-                     actually means -- this column is not a destination -- and where closing lives,
-                     which is the same place the empty state below points.
-                -->
-                <i class="fa-solid fa-lock db-col__lock"
-                   aria-hidden="true"
-                   title="Deals cannot be moved here. Close a deal from the deal form."></i>
-              }
-            </span>
-            <span class="db-col__meta">
-              <span class="db-col__count">{{ column.Cards.length }}</span>
-              <!--
-                A SUM of stored Deal.Amount values. This app prices nothing; the marker says whether the
-                ORDERS engine did, and the currency question is separate from the provenance question.
-
-                NO TOTAL WHEN THE COLUMN MIXES CURRENCIES. Adding EUR to USD produces a number that is
-                wrong in a way nobody can see; an absent figure prompts a question instead.
-
-                UNIONED, and the board branch's half needed one correction to survive: it carried
-                `currency:'USD'`, which is the hardcoding the currency work removed. The `--stated` class
-                is its contribution and is kept; the literal is not.
-              -->
-              @if (column.MixedCurrency) {
-                <span class="db-col__total db-col__total--mixed"
-                      title="This stage holds deals in more than one currency, so a single total would be meaningless.">
-                  mixed currencies
-                </span>
-              } @else {
-                <span class="db-col__total" [class.db-col__total--stated]="column.Unpriced > 0">
-                  <!-- `?? DefaultCurrency` because Currency is null in two different situations and only
-                       one of them is "mixed": an EMPTY column has no currency to disagree about, and its
-                       total is 0. The mixed case never reaches here — it is the @if above. -->
-                  {{ column.Total | currency:(column.Currency ?? DefaultCurrency):'symbol':'1.0-0' }}
-                </span>
-              }
-            </span>
-            @if (column.Unpriced > 0) {
-              <!--
-                SAYS WHICH OF THE TWO IT IS. A total nobody priced and a total that is only partly
-                priced are different claims, and collapsing them is how a stated figure passes for an
-                authoritative one. The wording lives in PricingNote() -- a template expression cannot
-                hold a sentence without becoming unreadable.
-              -->
-              <span class="db-col__partial" [title]="PricingNote(column)">
-                <i class="fa-solid fa-pen-nib" aria-hidden="true"></i>
-                @if (column.NonePriced) {
-                  stated, not priced
-                } @else {
-                  {{ column.Unpriced }} of {{ column.Cards.length }} stated
-                }
-              </span>
-            }
-          </header>
-
-          <div
-            class="db-col__drop"
-            cdkDropList
-            [id]="'col-' + column.StageID"
-            [cdkDropListData]="column"
-            [cdkDropListConnectedTo]="ColumnIDs"
-            [cdkDropListEnterPredicate]="CanDropInto(column)"
-            (cdkDropListDropped)="OnDrop($event, column)">
-
-            @for (deal of column.Cards; track TrackCard($index, deal)) {
-              <!--
-                The card opens on a click anywhere; for the keyboard its name is a real button, so Enter
-                and Space both open it (bizapps-sales#371). The card is not itself a button, because it
-                also holds the "Move to stage" control and a button may not contain other controls.
-              -->
-              <article
-                class="db-card"
-                cdkDrag
-                [cdkDragData]="deal"
-                [cdkDragDisabled]="Moving || !deal.IsOpen"
-                (click)="OpenCard(deal)">
-
-                <button type="button" class="db-card__name" [attr.aria-label]="'Open ' + deal.Name"
-                        (click)="$event.stopPropagation(); OpenCard(deal)">{{ deal.Name }}</button>
-                <div class="db-card__customer">
-                  <i class="fa-solid fa-building" aria-hidden="true"></i> {{ deal.CustomerName }}
-                </div>
-
-                <div class="db-card__figures">
-                  <span class="db-card__amount">
-                    @if (deal.Amount === null) {
-                      <span class="db-card__noamount" title="No amount recorded yet">—</span>
-                    } @else {
-                      {{ deal.Amount | currency:deal.CurrencyCode:'symbol':'1.0-0' }}
-                    }
-                    <!--
-                      BOTH CASES ARE MARKED, and marking only one was the defect. A calculator on the
-                      priced figure and nothing on the stated one means the reader has to notice an
-                      ABSENCE to learn anything -- and on data where nothing is priced, no card carries
-                      a marker at all, so the whole board reads as authoritative. A positive mark on
-                      each says which it is without anyone having to know the convention.
-                    -->
-                    @if (deal.Amount !== null) {
-                      @if (deal.AmountIsComputed) {
-                        <i class="fa-solid fa-calculator db-card__computed"
-                           aria-hidden="true"
-                           title="Priced by Orders"></i>
-                      } @else {
-                        <i class="fa-solid fa-pen-nib db-card__stated"
-                           aria-hidden="true"
-                           title="Entered manually rather than priced by Orders"></i>
-                      }
-                    }
-                  </span>
-                  @if (deal.Probability !== null) {
-                    <span class="db-card__prob">{{ deal.Probability }}%</span>
-                  }
-                </div>
-
-                <div class="db-card__foot">
-                  <span class="db-card__owner">{{ deal.OwnerEmployee?.trim() || 'No owner' }}</span>
-                  <span class="db-card__close">
-                    @if (CardClosed(deal)) {
-                      <span class="db-card__closed">Closed</span>
-                    }
-                    <span class="db-card__day">{{ CardDayLabel(deal) || 'No date' }}</span>
-                  </span>
-                </div>
-
-                @if (IdleFor(deal); as idle) {
-                  <!-- Past the stage's Rotting Days (bizapps-sales#450). Icon AND words, so colour is not
-                       the only signal, and the words are what a screen reader reads. -->
-                  <div class="db-card__idle" [title]="idle.Label">
-                    <i class="fa-solid fa-hourglass-end" aria-hidden="true"></i>
-                    <span>Idle {{ idle.Days }} days (limit {{ idle.Limit }})</span>
-                  </div>
-                }
-
-                @if (MoveTargets(columns, deal); as targets) {
-                  @if (targets.length) {
-                    <!-- The keyboard path to a stage change (bizapps-sales#371). Pick, then Move: a select
-                         that saved on change would move the deal on a stray arrow key. Clicks and keys stay
-                         here, so they neither open the deal nor start a drag. -->
-                    <div class="db-card__move" (click)="$event.stopPropagation()" (mousedown)="$event.stopPropagation()"
-                         (keydown)="$event.stopPropagation()">
-                      <select class="db-card__move-select" [attr.aria-label]="'Stage to move ' + deal.Name + ' to'"
-                              [disabled]="Moving"
-                              [ngModel]="PendingMove.get(deal.ID) ?? ''"
-                              (ngModelChange)="PendingMove.set(deal.ID, $event)">
-                        <option value="">Move to stage…</option>
-                        @for (t of targets; track t.StageID) {
-                          <option [value]="t.StageID">{{ t.Label }}</option>
-                        }
-                      </select>
-                      <button type="button" class="db-card__move-go" [disabled]="Moving || !PendingMove.get(deal.ID)"
-                              [attr.aria-label]="'Move ' + deal.Name" (click)="MoveToPicked(deal)">Move</button>
-                    </div>
-                  }
-                }
-
-                <div class="db-card__ghost" *cdkDragPreview>{{ deal.Name }}</div>
-              </article>
-            }
-
-            @if (column.Cards.length === 0) {
-              <p class="db-col__empty">
-                @if (column.IsClosing) { Close deals from the deal form. } @else { Nothing here. }
-              </p>
-            }
-          </div>
-        </section>
+  @let lanes = Lanes;
+  @if (lanes.length === 0) {
+    <p class="db-empty" data-testid="db-empty">
+      @if (ShowingAll) {
+        No deals match these filters.
+      } @else {
+        {{ HidePipelines ? 'No stages are set up for this company yet.' : 'This pipeline has no stages yet.' }}
       }
+    </p>
+  } @else {
+    <!-- A second horizontal bar above the columns, kept in step with the board's own (see the component).
+         Sticky, so it stays reachable while a tall board is scrolled down. -->
+    <div class="db-topscroll" #topBar data-testid="db-top-scroll" aria-hidden="true" (scroll)="OnTopScroll()">
+      <div class="db-topscroll__spacer" #topBarSpacer></div>
     </div>
+    <div class="db-scroll" #scroller (scroll)="OnBodyScroll()">
+      @for (lane of lanes; track lane.PipelineID) {
+        @let columns = lane.Columns;
+        <div class="db-lane" [attr.data-pipeline]="lane.PipelineID">
+          @if (ShowingAll) {
+            <h3 class="db-lane__head" data-testid="db-lane-head">
+              {{ LaneLabel(lane.PipelineID) }} <span class="db-lane__count">{{ LaneCount(lane) }}</span>
+            </h3>
+          }
+          @if (columns.length === 0) {
+            <p class="db-empty">{{ HidePipelines ? 'No stages are set up for this company yet.' : 'This pipeline has no stages yet.' }}</p>
+          } @else {
+            <div class="db-cols">
+              @for (column of columns; track TrackColumn($index, column)) {
+                <section
+                  class="db-col"
+                  [class.db-col--closing]="column.IsClosing"
+                  [attr.data-closing]="column.IsClosing ? column.Label : null"
+                  [attr.aria-label]="column.Label">
 
-    @if (Unstaged.length > 0) {
-      <!-- Deals with no stage would otherwise be invisible on a board built from stage columns, and
-           "missing from the board" is indistinguishable from "does not exist". -->
-      <section class="db-unstaged">
-        <h4 class="db-unstaged__head">
-          <i class="fa-solid fa-circle-question" aria-hidden="true"></i>
-          No stage set ({{ Unstaged.length }})
-        </h4>
-        <div class="db-unstaged__list">
-          @for (deal of Unstaged; track TrackCard($index, deal)) {
-            <button type="button" class="db-chip" (click)="OpenCard(deal)">
-              {{ deal.Name }}
-            </button>
+                  <header class="db-col__head">
+                    <span class="db-col__name">
+                      {{ column.Label }}
+                      @if (column.IsClosing) {
+                        <!--
+                             THIS SAID THE OPPOSITE OF WHAT HAPPENS. "Arriving here closes and locks the
+                             deal" describes a behaviour the server deliberately refuses: a stage whose
+                             status locks contributes NO status to a save, so a deal moved into this
+                             column keeps the status it had (`planStageDefaults` gates on `LocksDeal`).
+                             A rep reading the old text would think a drag closes the deal.
+
+                             And the drag cannot happen either: `CanDropInto` returns false for a closing
+                             column, with a second guard behind it. So the tooltip says what the lock icon
+                             actually means -- this column is not a destination -- and where closing lives,
+                             which is the same place the empty state below points.
+                        -->
+                        <i class="fa-solid fa-lock db-col__lock"
+                           aria-hidden="true"
+                           title="Deals cannot be moved here. Close a deal from the deal form."></i>
+                      }
+                    </span>
+                    <span class="db-col__meta">
+                      <span class="db-col__count">{{ column.Cards.length }}</span>
+                      <!--
+                        A SUM of stored Deal.Amount values. This app prices nothing; the marker says whether the
+                        ORDERS engine did, and the currency question is separate from the provenance question.
+
+                        NO TOTAL WHEN THE COLUMN MIXES CURRENCIES. Adding EUR to USD produces a number that is
+                        wrong in a way nobody can see; an absent figure prompts a question instead.
+
+                        UNIONED, and the board branch's half needed one correction to survive: it carried
+                        `currency:'USD'`, which is the hardcoding the currency work removed. The `--stated` class
+                        is its contribution and is kept; the literal is not.
+                      -->
+                      @if (column.MixedCurrency) {
+                        <span class="db-col__total db-col__total--mixed"
+                              title="This stage holds deals in more than one currency, so a single total would be meaningless.">
+                          mixed currencies
+                        </span>
+                      } @else {
+                        <span class="db-col__total" [class.db-col__total--stated]="column.Unpriced > 0">
+                          <!-- `?? DefaultCurrency` because Currency is null in two different situations and only
+                               one of them is "mixed": an EMPTY column has no currency to disagree about, and its
+                               total is 0. The mixed case never reaches here — it is the @if above. -->
+                          {{ column.Total | currency:(column.Currency ?? DefaultCurrency):'symbol':'1.0-0' }}
+                        </span>
+                      }
+                    </span>
+                    @if (column.Unpriced > 0) {
+                      <!--
+                        SAYS WHICH OF THE TWO IT IS. A total nobody priced and a total that is only partly
+                        priced are different claims, and collapsing them is how a stated figure passes for an
+                        authoritative one. The wording lives in PricingNote() -- a template expression cannot
+                        hold a sentence without becoming unreadable.
+                      -->
+                      <span class="db-col__partial" [title]="PricingNote(column)">
+                        <i class="fa-solid fa-pen-nib" aria-hidden="true"></i>
+                        @if (column.NonePriced) {
+                          stated, not priced
+                        } @else {
+                          {{ column.Unpriced }} of {{ column.Cards.length }} stated
+                        }
+                      </span>
+                    }
+                  </header>
+
+                  <div
+                    class="db-col__drop"
+                    cdkDropList
+                    [id]="'col-' + column.StageID"
+                    [cdkDropListData]="column"
+                    [cdkDropListConnectedTo]="ColumnIDsFor(lane.PipelineID, columns)"
+                    [cdkDropListEnterPredicate]="CanDropInto(column)"
+                    (cdkDropListDropped)="OnDrop($event, column)">
+
+                    @for (deal of column.Cards; track TrackCard($index, deal)) {
+                      <!--
+                        The card opens on a click anywhere; for the keyboard its name is a real button, so Enter
+                        and Space both open it (bizapps-sales#371). The card is not itself a button, because it
+                        also holds the "Move to stage" control and a button may not contain other controls.
+                      -->
+                      <article
+                        class="db-card"
+                        cdkDrag
+                        [cdkDragData]="deal"
+                        [cdkDragDisabled]="Moving || !deal.IsOpen"
+                        (click)="OpenCard(deal)">
+
+                        <button type="button" class="db-card__name" [attr.aria-label]="'Open ' + deal.Name"
+                                (click)="$event.stopPropagation(); OpenCard(deal)">{{ deal.Name }}</button>
+                        <div class="db-card__customer">
+                          <i class="fa-solid fa-building" aria-hidden="true"></i> {{ deal.CustomerName }}
+                        </div>
+
+                        <div class="db-card__figures">
+                          <span class="db-card__amount">
+                            @if (deal.Amount === null) {
+                              <span class="db-card__noamount" title="No amount recorded yet">—</span>
+                            } @else {
+                              {{ deal.Amount | currency:deal.CurrencyCode:'symbol':'1.0-0' }}
+                            }
+                            <!--
+                              BOTH CASES ARE MARKED, and marking only one was the defect. A calculator on the
+                              priced figure and nothing on the stated one means the reader has to notice an
+                              ABSENCE to learn anything -- and on data where nothing is priced, no card carries
+                              a marker at all, so the whole board reads as authoritative. A positive mark on
+                              each says which it is without anyone having to know the convention.
+                            -->
+                            @if (deal.Amount !== null) {
+                              @if (deal.AmountIsComputed) {
+                                <i class="fa-solid fa-calculator db-card__computed"
+                                   aria-hidden="true"
+                                   title="Priced by Orders"></i>
+                              } @else {
+                                <i class="fa-solid fa-pen-nib db-card__stated"
+                                   aria-hidden="true"
+                                   title="Entered manually rather than priced by Orders"></i>
+                              }
+                            }
+                          </span>
+                          @if (deal.Probability !== null) {
+                            <span class="db-card__prob">{{ deal.Probability }}%</span>
+                          }
+                        </div>
+
+                        <div class="db-card__foot">
+                          <span class="db-card__owner">{{ deal.OwnerEmployee?.trim() || 'No owner' }}</span>
+                          <span class="db-card__close">
+                            @if (CardClosed(deal)) {
+                              <span class="db-card__closed">Closed</span>
+                            }
+                            <span class="db-card__day">{{ CardDayLabel(deal) || 'No date' }}</span>
+                          </span>
+                        </div>
+
+                        @if (IdleFor(deal); as idle) {
+                          <!-- Past the stage's Rotting Days (bizapps-sales#450). Icon AND words, so colour is not
+                               the only signal, and the words are what a screen reader reads. -->
+                          <div class="db-card__idle" [title]="idle.Label">
+                            <i class="fa-solid fa-hourglass-end" aria-hidden="true"></i>
+                            <span>Idle {{ idle.Days }} days (limit {{ idle.Limit }})</span>
+                          </div>
+                        }
+
+                        @if (MoveTargets(columns, deal); as targets) {
+                          @if (targets.length) {
+                            <!-- The keyboard path to a stage change (bizapps-sales#371). Pick, then Move: a select
+                                 that saved on change would move the deal on a stray arrow key. Clicks and keys stay
+                                 here, so they neither open the deal nor start a drag. -->
+                            <div class="db-card__move" (click)="$event.stopPropagation()" (mousedown)="$event.stopPropagation()"
+                                 (keydown)="$event.stopPropagation()">
+                              <select class="db-card__move-select" [attr.aria-label]="'Stage to move ' + deal.Name + ' to'"
+                                      [disabled]="Moving"
+                                      [ngModel]="PendingMove.get(deal.ID) ?? ''"
+                                      (ngModelChange)="PendingMove.set(deal.ID, $event)">
+                                <option value="">Move to stage…</option>
+                                @for (t of targets; track t.StageID) {
+                                  <option [value]="t.StageID">{{ t.Label }}</option>
+                                }
+                              </select>
+                              <button type="button" class="db-card__move-go" [disabled]="Moving || !PendingMove.get(deal.ID)"
+                                      [attr.aria-label]="'Move ' + deal.Name" (click)="MoveToPicked(deal)">Move</button>
+                            </div>
+                          }
+                        }
+
+                        <div class="db-card__ghost" *cdkDragPreview>{{ deal.Name }}</div>
+                      </article>
+                    }
+
+                    @if (column.Cards.length === 0) {
+                      <p class="db-col__empty">
+                        @if (column.IsClosing) { Close deals from the deal form. } @else { Nothing here. }
+                      </p>
+                    }
+                  </div>
+                </section>
+              }
+            </div>
+
+            @if (lane.Unstaged.length > 0) {
+              <!-- Deals with no stage would otherwise be invisible on a board built from stage columns, and
+                   "missing from the board" is indistinguishable from "does not exist". -->
+              <section class="db-unstaged">
+                <h4 class="db-unstaged__head">
+                  <i class="fa-solid fa-circle-question" aria-hidden="true"></i>
+                  No stage set ({{ lane.Unstaged.length }})
+                </h4>
+                <div class="db-unstaged__list">
+                  @for (deal of lane.Unstaged; track TrackCard($index, deal)) {
+                    <button type="button" class="db-chip" (click)="OpenCard(deal)">
+                      {{ deal.Name }}
+                    </button>
+                  }
+                </div>
+              </section>
+            }
           }
         </div>
-      </section>
-    }
+      }
+    </div>
   }
 </div>

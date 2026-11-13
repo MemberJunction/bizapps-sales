@@ -39,6 +39,10 @@ function standIn(p: ProductLookup): MJOProductOption {
  * `products` matching `query`, best first, with `dealCompanyID`'s products ahead of other companies'
  * within each tier. An empty query returns them all in that order. Nothing is dropped for its company:
  * a deal may sell any company's product (#29).
+ *
+ * Products whose company name contains the query follow the name and SKU matches, so typing "Sidecar"
+ * on a Blue Cypress Consulting deal lists Sidecar's catalog: a bundle that adds another company's SKUs
+ * is found by that company's name, not only by knowing each product's name.
  */
 export function RankDealProducts(
     products: readonly ProductLookup[],
@@ -49,9 +53,25 @@ export function RankDealProducts(
     for (const p of products) {
         byStandIn.set(standIn(p), p);
     }
-    return RankCatalogMatches([...byStandIn.keys()], query, dealCompanyID).map(
+    const ranked = RankCatalogMatches([...byStandIn.keys()], query, dealCompanyID).map(
         (option) => byStandIn.get(option) as ProductLookup,
     );
+    return [...ranked, ...companyMatches(products, query, new Set(ranked))];
+}
+
+/** Products, by name, whose company name contains `query` and that `already` does not hold. */
+function companyMatches(
+    products: readonly ProductLookup[],
+    query: string,
+    already: ReadonlySet<ProductLookup>,
+): ProductLookup[] {
+    const needle = query.trim().toLowerCase();
+    if (!needle) {
+        return [];
+    }
+    return products
+        .filter((p) => !already.has(p) && (p.Company ?? '').toLowerCase().includes(needle))
+        .sort((a, b) => (a.Name ?? '').localeCompare(b.Name ?? ''));
 }
 
 /**
