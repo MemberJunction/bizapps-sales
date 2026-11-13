@@ -90,13 +90,15 @@ export async function PromoteParty(
     const id = String(parentID ?? '').trim();
     if (!id) return { Kind: 'Failed', Message: 'No record to promote.' };
 
-    const exists = await deps.ReadPartyRow(childEntity, id);
-    if (exists === true) return { Kind: 'AlreadyPromoted' };
-    if (exists === null) {
-        return { Kind: 'Failed', Message: 'Could not check whether it is already a sales record. Try again.' };
-    }
-
+    // THE READ IS INSIDE THE TRY. It was above it, so a RunView that THREW rather than returning
+    // `{Success:false}` escaped this function entirely instead of becoming a `Failed` outcome — and
+    // every caller handles outcomes, not exceptions, so the UI showed nothing at all.
     try {
+        const exists = await deps.ReadPartyRow(childEntity, id);
+        if (exists === true) return { Kind: 'AlreadyPromoted' };
+        if (exists === null) {
+            return { Kind: 'Failed', Message: 'Could not check whether it is already a sales record. Try again.' };
+        }
         return await writeChild(childEntity, id, fields, deps);
     } catch (error) {
         return { Kind: 'Failed', Message: messageOf(error) };
@@ -128,6 +130,14 @@ async function writeChild(
 
 function messageOf(error: unknown): string {
     return error instanceof Error && error.message ? error.message : 'The promotion failed.';
+}
+
+/**
+ * A thrown value as the sentence a surface shows. Exported so the dialog and the promote card turn an
+ * escaped rejection into the same words this module already uses, rather than inventing their own.
+ */
+export function ErrorMessageOf(error: unknown): string {
+    return messageOf(error);
 }
 
 /** What choosing the prospect type needs from an Account Type row. */
@@ -199,5 +209,29 @@ export async function CreateParty(
         return { Kind: 'Promoted', ID: String(child.Get('ID') ?? '') };
     } catch (error) {
         return { Kind: 'Failed', Message: messageOf(error) };
+    }
+}
+
+/**
+ * Whether the signed-in user may CREATE this entity.
+ *
+ * D-PR4 gives promotion no authorization of its own, on the reasoning that it produces exactly what a
+ * create produces. That only holds if the surfaces actually respect the create permission — otherwise
+ * "no new authorization" quietly became "no authorization", and a read-only user was offered a button
+ * the server would refuse.
+ *
+ * FAILS OPEN. No metadata, no current user, or an entity the metadata does not know all read as
+ * allowed, because the server is the authority either way and a false negative would hide a
+ * legitimate action. The only behaviour this changes is for a user the server would have refused.
+ */
+export function CanCreateEntity(entityName: string): boolean {
+    try {
+        const md = new Metadata();
+        const user = md.CurrentUser;
+        const entity = md.EntityByName(entityName);
+        if (!user || !entity) return true;
+        return entity.GetUserPermisions(user).CanCreate !== false;
+    } catch {
+        return true;
     }
 }

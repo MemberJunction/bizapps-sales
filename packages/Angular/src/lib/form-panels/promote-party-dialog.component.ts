@@ -40,7 +40,7 @@ import {
     ContactPromotePrefill,
     type PromotePrefillReader,
 } from './promote-party.panels';
-import { CreateParty, PromoteParty, type PromoteOutcome } from '../data/promote-party';
+import { CreateParty, ErrorMessageOf, PromoteParty, type PromoteOutcome } from '../data/promote-party';
 
 /** Which promotion this dialog is doing. */
 export type PromoteKind = 'Account' | 'Contact';
@@ -415,6 +415,13 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
     }
 
     public OnTermChange(value: string): void {
+        // RETIRE THE SEARCH IN FLIGHT. Without this bump a search started under the PREVIOUS term
+        // still satisfies `mine === this.sequence` when it lands, so it writes its rows over the
+        // current term's: type "Acmx", correct it to "Acme" inside the 250 ms debounce, and "Acmx"'s
+        // empty result arrives and offers to create "Acme" although Acme exists. That is the
+        // duplicate this whole dialog exists to prevent. It also stops a late result repopulating
+        // rows after the term has dropped below two characters.
+        this.sequence += 1;
         this.Term.set(value ?? '');
         this.Selected.set(null);
         this.Error.set(null);
@@ -488,6 +495,11 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
         this.Error.set(null);
         try {
             this.Apply(await this.Promote(this.Config.ChildEntity, row.ID, await this.Prefill()), row);
+        } catch (error) {
+            // `Prefill()` is a RunView over Account Types and can throw. With only try/finally the
+            // rejection escaped unhandled: Busy went back to false, Error stayed null, and the rep
+            // clicked Promote and watched nothing happen.
+            this.Error.set(ErrorMessageOf(error));
         } finally {
             this.Busy.set(false);
         }
@@ -549,6 +561,8 @@ export class MJSPromotePartyDialog implements OnInit, OnDestroy {
                 return;
             }
             this.Error.set(outcome.Kind === 'Failed' ? outcome.Message : 'It could not be created.');
+        } catch (error) {
+            this.Error.set(ErrorMessageOf(error));
         } finally {
             this.Busy.set(false);
         }

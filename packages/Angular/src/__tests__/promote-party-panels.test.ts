@@ -258,3 +258,79 @@ describe('the deal form offers the promote route wherever it draws a party field
         expect(source).not.toMatch(/PromotableFieldKind[\s\S]{0,200}f\.name === 'AccountID'/);
     });
 });
+
+describe('the promote card respects create permission (review #589)', () => {
+    /**
+     * D-PR4 gives promotion no authorization of its own BECAUSE it produces exactly what a create
+     * produces. That only holds if the surfaces respect the create permission — otherwise "no new
+     * authorization" silently became "no authorization", and a read-only user was offered a button
+     * the server would refuse.
+     */
+    it('hides the card from a user who cannot create the child entity', async () => {
+        const h = harness(() => new MJSOrganizationPromotePanel(), 'org-1', false);
+        h.p.CanCreateChild = () => false;
+        await h.p.CheckNeedsPromotion();
+        expect(h.p.NeedsPromotion()).toBe(false);
+    });
+
+    it('still offers it when the permission is allowed', async () => {
+        const h = harness(() => new MJSOrganizationPromotePanel(), 'org-1', false);
+        h.p.CanCreateChild = () => true;
+        await h.p.CheckNeedsPromotion();
+        expect(h.p.NeedsPromotion()).toBe(true);
+    });
+
+    it('fails OPEN when the permission cannot be determined', () => {
+        // No metadata and no signed-in user in a unit context: the real helper must not hide a
+        // legitimate action, because the server is the authority either way.
+        const p = new MJSOrganizationPromotePanel();
+        expect(p.CanCreateChild()).toBe(true);
+    });
+
+    it('reports a thrown Prefill rather than failing silently', async () => {
+        const h = harness(() => new MJSOrganizationPromotePanel(), 'org-1', false);
+        Object.defineProperty(h.p, 'Prefill', {
+            value: async () => {
+                throw new Error('Account Types could not be read');
+            },
+            configurable: true,
+            writable: true,
+        });
+        await h.p.CheckNeedsPromotion();
+        await h.p.RunPromotion();
+
+        expect(h.p.Error()).toBe('Account Types could not be read');
+        expect(h.p.Busy()).toBe(false);
+    });
+});
+
+describe('a promotion re-keys the field it landed in (review #589)', () => {
+    const source = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), '../lib/form-panels/deal-form.panels.ts'),
+        'utf8',
+    );
+
+    /**
+     * Only `AccountID` was re-keyed, so a contact promoted or created from the dialog could sit blank
+     * in its own picker until the form reloaded — the same reason the account field needs it: the row
+     * the picker would now show did not exist when it last rendered.
+     *
+     * Asserted on the source because the alternative is mounting the whole deal form; the behaviour
+     * either side of it is pinned by `deal-account-default-contacts` (choosing an account must NOT
+     * re-key the account field) and by the Playwright specs.
+     */
+    it('bumps the contact key for a contact field, not only the account key', () => {
+        const onPromoted = source.slice(source.indexOf('public async OnPromoted'));
+        const body = onPromoted.slice(0, onPromoted.indexOf('\n    }'));
+        expect(body).toContain('accountRenderKey.update');
+        expect(body).toContain('contactRenderKey.update');
+        expect(body).toContain('CREATION_PARTY_CONTACT_FIELDS.includes(field)');
+    });
+
+    it('leaves OnFieldValueChange alone, which must not re-key the account field', () => {
+        // `deal-account-default-contacts` pins this: tearing the picker down mid-pick resets it.
+        const onChange = source.slice(source.indexOf('public async OnFieldValueChange'));
+        const body = onChange.slice(0, onChange.indexOf('\n    }'));
+        expect(body).not.toContain('accountRenderKey.update');
+    });
+});

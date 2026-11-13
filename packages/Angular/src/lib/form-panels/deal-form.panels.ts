@@ -21,6 +21,7 @@ import { RegisterClassEx } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import { PartyFieldComponent, type PartyKind } from '@mj-biz-apps/common-ng';
 import { MJSPromotePartyDialog, type PromoteKind } from './promote-party-dialog.component';
+import { CanCreateEntity } from '../data/promote-party';
 import { BaseFormPanel, BaseFormsModule, type FormContext } from '@memberjunction/ng-base-forms';
 import {
     EntityViewerModule,
@@ -787,8 +788,16 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
      */
     public PromotableFieldKind(f: DealFieldSpec): 'account' | 'contact' | null {
         if (!f.party) return null;
-        return f.party.Kind === 'Organization' ? 'account' : 'contact';
+        const kind = f.party.Kind === 'Organization' ? 'account' : 'contact';
+        // The dialog can promote or CREATE, so offering the route to someone who may do neither sends
+        // them to a server refusal. Same rule as the promote card (D-PR4): promotion rides on the
+        // create permission rather than carrying one of its own.
+        const child = kind === 'account' ? MJS_ENTITIES.SalesAccount : MJS_ENTITIES.SalesContact;
+        return this.CanCreateChild(child) ? kind : null;
     }
+
+    /** Whether this user may create the child entity. Replaced in tests. */
+    public CanCreateChild: (entityName: string) => boolean = (entityName) => CanCreateEntity(entityName);
 
     public PromoteLinkFor(f: DealFieldSpec): string {
         // Names the FIELD the rep is looking at, then where to look and what they can add. The
@@ -827,8 +836,16 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         this.promoteField = null;
         if (!field || !this.Record) return;
         this.Record.Set(field, id);
+        // RE-KEY WHICHEVER FIELD IT WAS. The reason given for the account field applies just as much
+        // to a contact: the row the picker would now show did not exist when it last rendered, so
+        // without this a contact promoted or created from the dialog can sit blank in its own picker
+        // until the form reloads. `OnFieldValueChange` deliberately does NOT bump these — tearing a
+        // picker down mid-pick is what `deal-account-default-contacts` pins — so a promotion is the
+        // one caller that must.
         if (field === 'AccountID') {
             this.accountRenderKey.update((k) => k + 1);
+        } else if (CREATION_PARTY_CONTACT_FIELDS.includes(field)) {
+            this.contactRenderKey.update((k) => k + 1);
         }
         await this.OnFieldValueChange({ FieldName: field });
     }

@@ -27,6 +27,8 @@ import { MJButtonDirective } from '@memberjunction/ng-ui-components';
 import type { BaseEntity } from '@memberjunction/core';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import {
+    CanCreateEntity,
+    ErrorMessageOf,
     PromoteParty,
     ReadProspectAccountTypeID,
     SalesPartyRowExists,
@@ -102,8 +104,17 @@ abstract class SalesPromotePanel extends BaseFormPanel<BaseEntity> implements Do
         if (!id) return;
         const exists = await this.ReadPartyRow(this.ChildEntity, id);
         if (this.checkedID !== id) return;
-        this.NeedsPromotion.set(exists === false);
+        // A MISSING SALES ROW IS NOT ENOUGH: the rep must also be allowed to create one. A user with
+        // read but not create access on Sales Accounts was shown "Promote to Sales Account" and got a
+        // server refusal for clicking it. D-PR4 says promotion carries no authorization OF ITS OWN —
+        // it deliberately rides on the create permission — so this is that rule enforced, not a new
+        // gate. Unknown permissions (no metadata, no user) read as allowed, so the only behaviour
+        // that changes is for someone the server would have refused anyway.
+        this.NeedsPromotion.set(exists === false && this.CanCreateChild());
     }
+
+    /** Whether this user may create the child entity. Defaults to true when it cannot be determined. */
+    public CanCreateChild: () => boolean = () => CanCreateEntity(this.ChildEntity);
 
     public async RunPromotion(): Promise<void> {
         const id = this.RecordID();
@@ -112,6 +123,11 @@ abstract class SalesPromotePanel extends BaseFormPanel<BaseEntity> implements Do
         this.Error.set(null);
         try {
             this.Apply(await this.Promote(this.ChildEntity, id, await this.Prefill()));
+        } catch (error) {
+            // Same gap the dialog had: `Prefill()` is a RunView and can throw, and with only
+            // try/finally the rejection escaped unhandled — button re-enabled, no message, nothing
+            // apparently wrong.
+            this.Error.set(ErrorMessageOf(error));
         } finally {
             this.Busy.set(false);
         }

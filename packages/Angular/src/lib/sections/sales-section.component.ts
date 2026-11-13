@@ -47,6 +47,7 @@ import {
     MJSPromotePartyDialog,
     type PromoteKind,
 } from '../form-panels/promote-party-dialog.component';
+import { CanCreateEntity } from '../data/promote-party';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseResourceComponent, NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
@@ -571,7 +572,15 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     public get SecondaryAction(): SalesPrimaryAction | null {
-        return SecondaryActionFor(this.Page);
+        const action = SecondaryActionFor(this.Page);
+        if (!action) return null;
+        // "Add existing" opens the promote dialog, which promotes or creates. Hide it from a user who
+        // may do neither, rather than sending them to a server refusal (D-PR4: promotion rides on the
+        // create permission instead of carrying one of its own). The CREATING actions are left alone —
+        // MJ's own New affordances already answer for those.
+        if (action.Creates === 'promote-account' && !CanCreateEntity(E_ACCOUNT)) return null;
+        if (action.Creates === 'promote-contact' && !CanCreateEntity(E_CONTACT)) return null;
+        return action;
     }
 
     public get Title(): string {

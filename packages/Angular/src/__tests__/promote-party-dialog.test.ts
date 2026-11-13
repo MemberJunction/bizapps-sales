@@ -421,3 +421,101 @@ describe('the create button names the act, not the entity', () => {
         expect(PROMOTE_KINDS.Contact.BadgeLabel).toBe('Sales Contact');
     });
 });
+
+describe('a stale search can never write over the current term (review #589)', () => {
+    /**
+     * The defect: `OnTermChange` did not bump `sequence`, so a search started under the PREVIOUS term
+     * still satisfied `mine === this.sequence` when it landed. Type "Acmx", correct it to "Acme"
+     * inside the debounce, and "Acmx"'s empty result arrives and offers to create "Acme" — the
+     * duplicate this dialog exists to prevent.
+     */
+    it('discards the in-flight result and does not offer Create for a term that has matches', async () => {
+        const h = harness();
+        let releaseStale: (() => void) | null = null;
+        h.d.Search = async (q, term) => {
+            if (!q.includes('Promotable')) return [];
+            if (term === 'Acmx') {
+                await new Promise<void>((r) => (releaseStale = r));
+                return [];                       // the stale term genuinely has no matches
+            }
+            return [ROW];                        // "Acme" does
+        };
+
+        h.d.OnTermChange('Acmx');
+        const stale = h.d.RunSearch();           // in flight
+        h.d.OnTermChange('Acme');                // corrected inside the debounce
+        releaseStale?.();
+        await stale;                             // the stale result lands LAST
+
+        expect(h.d.Rows()).toEqual([]);          // it must not have written its empty result...
+        expect(h.d.CanOfferCreate()).toBe(false); // ...and must not offer to create a duplicate
+        expect(h.d.CanCreate()).toBe(false);
+    });
+
+    it('does not let a late result repopulate rows after the term drops below two characters', async () => {
+        const h = harness();
+        let release: (() => void) | null = null;
+        h.d.Search = async (q) => {
+            if (!q.includes('Promotable')) return [];
+            await new Promise<void>((r) => (release = r));
+            return [ROW];
+        };
+        h.d.OnTermChange('harbor');
+        const slow = h.d.RunSearch();
+        h.d.OnTermChange('h');                   // too short: Params() is null
+        release?.();
+        await slow;
+
+        expect(h.d.Rows()).toEqual([]);
+    });
+});
+
+describe('a thrown error is shown, not swallowed (review #589)', () => {
+    /**
+     * `Prefill()` is a RunView over Account Types and can throw. With try/finally and no catch the
+     * rejection escaped: Busy went back to false, Error stayed null, and the rep clicked the button
+     * and saw nothing happen at all.
+     */
+    it('Confirm reports a throwing Prefill instead of failing silently', async () => {
+        const h = harness();
+        h.d.Prefill = async () => {
+            throw new Error('Account Types could not be read');
+        };
+        h.d.OnTermChange('harbor');
+        await h.d.RunSearch();
+        h.d.Choose(ROW);
+        await h.d.Confirm();
+
+        expect(h.d.Error()).toBe('Account Types could not be read');
+        expect(h.d.Busy()).toBe(false);
+        expect(h.promoted).toEqual([]);
+        expect(h.closed).toBe(0);
+    });
+
+    it('Confirm reports a throwing Promote', async () => {
+        const h = harness();
+        h.d.Promote = async () => {
+            throw new Error('network down');
+        };
+        h.d.OnTermChange('harbor');
+        await h.d.RunSearch();
+        h.d.Choose(ROW);
+        await h.d.Confirm();
+        expect(h.d.Error()).toBe('network down');
+        expect(h.d.Busy()).toBe(false);
+    });
+
+    it('CreateNew reports a throwing Prefill', async () => {
+        const h = harness('Account', []);
+        h.d.Prefill = async () => {
+            throw new Error('prefill exploded');
+        };
+        h.d.OnTermChange('zzz');
+        await h.d.RunSearch();
+        await h.d.CreateNew();
+
+        expect(h.d.Error()).toBe('prefill exploded');
+        expect(h.d.Busy()).toBe(false);
+        expect(h.promoted).toEqual([]);
+    });
+});
