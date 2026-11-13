@@ -55,7 +55,7 @@ function deal(opts: { persisted: string; target?: string; dirty: string[] }): Ha
         _reopenInProgress: false,
         _orderStatusWarnings: [],
         _ownerStampWarnings: [],
-        Team: { Load: async () => true, IsLoaded: false, Count: 0, Items: [] },
+        Team: { Load: async () => true, IsLoaded: false, Count: 0, Items: [], Removed: [] },
         _orderJustProvisioned: false,
         _lockedAtSave: false,
         _lastStageEventID: null,

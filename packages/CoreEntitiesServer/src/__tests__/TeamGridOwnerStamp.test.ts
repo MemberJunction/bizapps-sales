@@ -43,7 +43,11 @@ type Opts = {
     ownerRole?: boolean;
     /** The row's EmployeeID; null for a row that names a Person instead. */
     EmployeeID?: string | null;
+    /** Deals the deal's own check reports as closed, by id. */
+    closedDeals?: string[];
 };
+
+const CLOSED_REFUSAL = 'closed-deal refusal from the deal';
 
 function member(opts: Opts) {
     const loadedTeams: string[] = [];
@@ -104,6 +108,8 @@ function member(opts: Opts) {
                         savedDeals.push(loadedID);
                         return !(opts.saveRefuses ?? []).includes(loadedID);
                     },
+                    StandaloneTeamRemovalRefusal: async () =>
+                        (opts.closedDeals ?? []).includes(loadedID) ? CLOSED_REFUSAL : null,
                 };
             },
         },
@@ -226,6 +232,62 @@ describe('deleting a team row refreshes the deal', () => {
         const m = member({});
         expect(await runDelete(m, false)).toBe(false);
         expect(m.SavedDeals).toEqual([]);
+    });
+});
+
+/**
+ * NO ONE IS REMOVED FROM A CLOSED DEAL'S TEAM (bc-aidp-next-golive#465).
+ *
+ * The deal decides what "closed" means (`StandaloneTeamRemovalRefusal`, pinned in
+ * `ClosedDealTeamRemoval.test.ts`); these pin that the delete asks it, asks about the PERSISTED
+ * deal, and stops before anything is deleted or re-stamped.
+ */
+describe('deleting a team row from a closed deal', () => {
+    async function deleteWithBaseSpy(m: ReturnType<typeof member>): Promise<{ result: boolean; baseCalled: boolean }> {
+        const proto = Object.getPrototypeOf(Object.getPrototypeOf(m));
+        const original = proto.Delete;
+        let baseCalled = false;
+        proto.Delete = async () => {
+            baseCalled = true;
+            return true;
+        };
+        try {
+            return { result: await m.Delete(), baseCalled };
+        } finally {
+            proto.Delete = original;
+        }
+    }
+
+    it('is refused with the deal\'s message, and nothing is deleted or re-stamped', async () => {
+        const m = member({ closedDeals: [DEAL_A] });
+        const { result, baseCalled } = await deleteWithBaseSpy(m);
+        expect(result).toBe(false);
+        expect(baseCalled, 'the row must not reach the database delete').toBe(false);
+        expect(m.SavedDeals).toEqual([]);
+        expect(m.Refusals).toEqual([CLOSED_REFUSAL]);
+    });
+
+    it('asks about the deal the row is on in the database, not an unsaved re-point', async () => {
+        // Persisted on the closed deal A, edited in memory to point at open deal B.
+        const m = member({ priorDealID: DEAL_A, DealID: DEAL_B, closedDeals: [DEAL_A] });
+        const { result } = await deleteWithBaseSpy(m);
+        expect(result).toBe(false);
+        expect(m.LoadedDeals[0]).toBe(DEAL_A);
+    });
+
+    it('goes ahead on an open deal', async () => {
+        const m = member({ closedDeals: [DEAL_B] });
+        const { result, baseCalled } = await deleteWithBaseSpy(m);
+        expect(result).toBe(true);
+        expect(baseCalled).toBe(true);
+    });
+
+    it('fails closed when the deal cannot be read', async () => {
+        const m = member({ loadFails: [DEAL_A] });
+        const { result, baseCalled } = await deleteWithBaseSpy(m);
+        expect(result).toBe(false);
+        expect(baseCalled).toBe(false);
+        expect(m.Refusals[0]).toContain('could not be read');
     });
 });
 

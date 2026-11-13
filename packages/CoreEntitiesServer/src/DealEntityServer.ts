@@ -140,6 +140,20 @@ const ORGANIZATION_ENTITY = 'MJ_BizApps_Common: Organizations';
 const PERSON_ENTITY = 'MJ_BizApps_Common: People';
 const GUID_SHAPE = /^[0-9a-fA-F-]{36}$/;
 
+/**
+ * Removing someone from a closed deal's team (bc-aidp-next-golive#465). "Undo the removal" comes first
+ * because the form saves pending edits BEFORE it reopens: a staged removal would otherwise block the
+ * very reopen this sentence asks for.
+ */
+export const CLOSED_TEAM_REMOVAL =
+    'This deal is closed, so no one can be removed from its team. Undo the removal, reopen the deal, ' +
+    'then remove them. Changing the owner is still allowed.';
+
+/** The same, when the save that removes them also reopens the deal (#390's two-save rule). */
+export const CLOSED_TEAM_REMOVAL_WITH_REOPEN =
+    'This deal is closed, and no one can be removed from its team in the same save that reopens it. ' +
+    'Save the status change on its own first, then remove them. Nothing was changed.';
+
 /** A party this save writes onto the deal, checked for existence before anything is written. */
 interface PartyCheck {
     EntityName: string;
@@ -3047,6 +3061,11 @@ export class DealEntityServer extends DealEntity {
             .filter((c) => c.Dirty && !DealEntityServer.LOCK_EDITABLE_COMPANIONS.has(c.Name))
             .map((c) => c.Name);
 
+        const teamRemovalRefusal = await this.closedTeamRemovalRefusal(reopening);
+        if (teamRemovalRefusal) {
+            return teamRemovalRefusal;
+        }
+
         const all = [...changed, ...dirtyCollections];
         if (all.length === 0) {
             if (fillingBlankAccount && accountField?.Dirty) {
@@ -3098,6 +3117,76 @@ export class DealEntityServer extends DealEntity {
             return DealEntityServer.reopenWithEditsRefusal(named);
         }
         return `This deal is closed. ${named} cannot be changed until the status is set back to Open.`;
+    }
+
+    /**
+     * The refusal when someone is taken off a CLOSED deal's team (bc-aidp-next-golive#465).
+     *
+     * ── WHY REMOVALS ARE FROZEN WHEN THE REST OF THE TEAM IS NOT ─────────────────────────────────
+     *
+     * `Team` is on {@link LOCK_EDITABLE_COMPANIONS} because golive#206 item 2 makes reassigning a rep
+     * after close record-keeping. Taking someone off the team is a different act: the closed deal is the
+     * record of who worked it, and attribution and per-rep rollups read that roster. So adding people
+     * and editing their rows stay open, and removing them waits for a reopen.
+     *
+     * ── THE OWNER SWAP IS THE ONE REMOVAL ALLOWED ────────────────────────────────────────────────
+     *
+     * `SetOwner` replaces an owner as a REMOVE plus an ADD, because `DealTeamMember` is unique on
+     * (deal, employee, role) and re-pointing the row could collide. Refusing that removal would undo
+     * golive#206 item 2. It is recognised by its shape rather than by who called: every removed row
+     * holds the owner role and the same save adds a new owner-role row. A removal of anyone else, or
+     * of the owner with no replacement, is refused.
+     *
+     * ── ONLY ONE OF THE TWO DELETE PATHS COMES THROUGH HERE ──────────────────────────────────────
+     *
+     * A removal staged on this deal's `Team` is executed by MJ's graph save, which deletes the row
+     * through a private path that never reaches `DealTeamMemberEntityServer.Delete`. A team row deleted
+     * on its own (the Internal team grid, an API call) never reaches this save at all. Each path gets
+     * its own check, and both return the same sentence: {@link StandaloneTeamRemovalRefusal}.
+     */
+    private async closedTeamRemovalRefusal(reopening: boolean): Promise<string | null> {
+        const removed = this.Team.Removed.filter((m) => m.IsSaved);
+        if (removed.length === 0) {
+            return null;
+        }
+        try {
+            if (await this.isOwnerSwap(removed)) {
+                return null;
+            }
+        } catch (err) {
+            // Fails closed: the owner role could not be read, so nothing proves this is a swap.
+            return (
+                'This deal is closed, and this team change could not be checked, so nothing was changed. ' +
+                (err instanceof Error ? err.message : String(err))
+            );
+        }
+        return reopening ? CLOSED_TEAM_REMOVAL_WITH_REOPEN : CLOSED_TEAM_REMOVAL;
+    }
+
+    /** True when every removed row holds the owner role and this save adds a new owner-role row. */
+    private async isOwnerSwap(removed: readonly BaseEntity[]): Promise<boolean> {
+        const ownerRoleID = await this.ResolveOwnerRoleID();
+        const holdsOwnerRole = (m: BaseEntity): boolean => UUIDsEqual(m.Get('DealRoleID'), ownerRoleID);
+        return removed.every(holdsOwnerRole) && this.Team.Items.some((m) => !m.IsSaved && holdsOwnerRole(m));
+    }
+
+    /**
+     * The refusal for a team row deleted ON ITS OWN while this deal is closed, or null when it is open.
+     *
+     * Called by `DealTeamMemberEntityServer.Delete` on a freshly loaded deal. A standalone delete is
+     * never half of an owner swap — `SetOwner` stages its removal on the deal's `Team`, which the graph
+     * save executes without calling `Delete` — so there is no exception to make here.
+     *
+     * Locked means what {@link checkCloseLock} means: the persisted status locks the deal, cannot be
+     * read, or names no row. All three refuse.
+     */
+    public async StandaloneTeamRemovalRefusal(): Promise<string | null> {
+        const persistedStatusID = this.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
+        if (!persistedStatusID) {
+            return null;
+        }
+        const persisted = await this.readStatusLockFlags(persistedStatusID);
+        return persisted.LocksDeal || persisted.Absent ? CLOSED_TEAM_REMOVAL : null;
     }
 
     /**

@@ -57,6 +57,7 @@ function wonDeal(opts: { target: string; dirty: string[] }): Harness {
         // The status is reverted before the lock runs, so it is clean by then; only the others stay dirty.
         Fields: opts.dirty.map((Name) => ({ Name, CodeName: Name, Dirty: true, OldValue: null })),
         Companions: [],
+        Team: { Items: [], Removed: [] },
         RosterDrivesThisSave: false,
         ProviderToUse: { RunView: statusView() },
         Set: () => undefined,
