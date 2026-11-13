@@ -39,8 +39,8 @@
     "both, because the interesting failure is a bundle that registers 4 and runs 0."
   ],
   "bundles": {
-    "save-deal": { "count": 43, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD47" },
-    "close-deal": { "count": 42, "requires": "orders", "ids": "CD1-CD42" },
+    "save-deal": { "count": 44, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD48" },
+    "close-deal": { "count": 43, "requires": "orders", "ids": "CD1-CD43" },
     "product-picker": { "count": 5, "requires": "orders", "ids": "PP1-PP5" },
     "close-won-order": { "count": 5, "requires": "orders", "ids": "CO1-CO5" },
     "close-won-schedule": { "count": 5, "requires": "orders", "ids": "CS1-CS5 — a deal's payment schedule reaches its order at Close Won and after (golive #290)" },

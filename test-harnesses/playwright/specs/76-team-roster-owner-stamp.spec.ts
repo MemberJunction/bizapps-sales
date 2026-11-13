@@ -28,10 +28,9 @@
  *
  * ── WHAT IT DELIBERATELY DOES NOT ASSERT ────────────────────────────────────────────────────────
  *
- * Deactivating the owner row does NOT clear the deal's owner, and this spec does not claim it does.
- * `stampOwnerFromTeam()` matches on `DealRoleID` alone and never reads `IsActive`, as does
- * `DealEntity.SetOwner`. That is pre-existing in both and unchanged here — but this PR's summary
- * lists "deactivated" beside "role changed" as cases it catches, and only the second is true today.
+ * Deactivating the owner row. `stampOwnerFromTeam()` credits only an active owner row
+ * (`HoldsOwnerSeat`), and deactivating the LAST one on its own is refused (sales#568, save-deal.SD48),
+ * so there is no "deactivated, now unowned" state for this spec to drive.
  */
 import { randomUUID } from 'node:crypto';
 
