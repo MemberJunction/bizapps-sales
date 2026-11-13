@@ -405,3 +405,24 @@ test.describe('the deal form no longer offers the picker its own Create', () => 
         await expect(DealForm(page).locator('.mj-fk-create-footer')).toHaveCount(0);
     });
 });
+
+/*
+ * NO BROWSER TEST FOR THE STALE-SEARCH RACE, deliberately, and this is the record of why.
+ *
+ * Review #589 asked for `++this.sequence` in `OnTermChange` so a search started under the previous
+ * term cannot write over the current one's results. The fix is right and is pinned by two unit tests
+ * in `promote-party-dialog.test.ts`, both of which go red when the bump is removed.
+ *
+ * It is NOT pinned here, because the defect is not reliably observable through a browser. `RunSearch`
+ * does `const mine = ++this.sequence`, so the stale result is discarded the moment the corrected
+ * term's search STARTS — which the 250 ms debounce guarantees happens shortly after the correction.
+ * The bad state therefore exists only between the stale result landing and the next search beginning:
+ * measured here at roughly 150 ms, after which `Searching` goes true again and Create is hidden
+ * regardless of the fix.
+ *
+ * Two attempts were made, delaying the queries at the network boundary to widen the window. Both
+ * PASSED against a build with the fix REMOVED — verified by taking it out of the host copy,
+ * rebuilding and re-running. A test that cannot fail is worse than no test, so neither was kept.
+ * If this needs browser coverage later, it needs a hook that holds the component between the stale
+ * write and the next search, not longer waits.
+ */
