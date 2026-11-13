@@ -43,11 +43,14 @@ import { CdkDrag, CdkDragDrop, CdkDropList } from '@angular/cdk/drag-drop';
 import { CommonModule, DOCUMENT } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
+    AfterViewChecked,
     ChangeDetectorRef,
     Component,
+    ElementRef,
     EventEmitter,
     Input,
     Output,
+    ViewChild,
     inject,
 } from '@angular/core';
 
@@ -219,6 +222,23 @@ export interface BoardColumn {
 }
 
 /**
+ * The tab value that shows every allowed pipeline at once, one lane per pipeline. Not a pipeline ID, so
+ * it never matches a pipeline; it travels in the URL as the board's `pipeline` like any other choice.
+ */
+export const ALL_PIPELINES = 'all';
+
+/**
+ * One pipeline's slice of the board. Stages belong to a pipeline, so pipelines cannot share columns:
+ * the All tab stacks one lane per pipeline instead of merging their stages.
+ */
+export interface BoardLane {
+    PipelineID: string;
+    Columns: BoardColumn[];
+    /** Deals on this pipeline with no stage set. */
+    Unstaged: DealRosterRow[];
+}
+
+/**
  * The pipelines the Board offers as tabs (bc-aidp-next-golive#351): those the section's filter bar
  * allows, in picker order. The Pipeline list when it names any; else the selling companies' pipelines;
  * else every pipeline, including those flagged out of the forecast, which the Board still shows.
@@ -242,7 +262,7 @@ export function BoardPipelines<T extends CompanyPipeline>(
     templateUrl: './deal-board.component.html',
     styleUrls: ['./deal-board.component.css'],
 })
-export class DealBoardComponent {
+export class DealBoardComponent implements AfterViewChecked {
     private readonly service = inject(DealWorkspaceService);
     private readonly cdr = inject(ChangeDetectorRef);
     private readonly document = inject(DOCUMENT);
@@ -311,6 +331,52 @@ export class DealBoardComponent {
         return withStages?.ID ?? pipelines[0]?.ID ?? null;
     }
 
+    /** The All tab's value, for the template. */
+    public readonly AllPipelines = ALL_PIPELINES;
+
+    /** True when the All tab is chosen and there is more than one pipeline to show. */
+    public get ShowingAll(): boolean {
+        return this.SelectedPipelineID === ALL_PIPELINES && this.TabPipelines.length > 1;
+    }
+
+    /** The All tab's text: the board names pipelines by company when pipelines are hidden. */
+    public get AllLabel(): string {
+        return this.HidePipelines ? 'All companies' : 'All pipelines';
+    }
+
+    /**
+     * The lanes in view: the active pipeline alone, or under the All tab every allowed pipeline that holds
+     * a deal, in tab order. Pipelines with no deals are left out of All so the page is not mostly empty
+     * columns; picking that pipeline's own tab still shows its stages.
+     */
+    public get Lanes(): BoardLane[] {
+        if (!this.ShowingAll) {
+            const id = this.ActivePipelineID;
+            return id ? [this.laneFor(id)] : [];
+        }
+        return this.TabPipelines.map((p) => this.laneFor(p.ID))
+            .filter((lane) => lane.Unstaged.length > 0 || lane.Columns.some((c) => c.Cards.length > 0));
+    }
+
+    private laneFor(pipelineID: string): BoardLane {
+        return {
+            PipelineID: pipelineID,
+            Columns: this.ColumnsFor(pipelineID),
+            Unstaged: this.UnstagedFor(pipelineID),
+        };
+    }
+
+    /** A lane's heading under the All tab: the same text its own tab carries. */
+    public LaneLabel(pipelineID: string): string {
+        const pipeline = this.TabPipelines.find((p) => p.ID === pipelineID);
+        return pipeline ? this.TabLabel(pipeline) : this.NameOf(pipelineID);
+    }
+
+    /** How many deals a lane holds, staged or not. */
+    public LaneCount(lane: BoardLane): number {
+        return lane.Unstaged.length + lane.Columns.reduce((n, c) => n + c.Cards.length, 0);
+    }
+
     /**
      * A tab's text: with more than one selling company among the tabs, the company too — unless the
      * pipeline serves several companies, where naming one of them would be wrong.
@@ -335,7 +401,11 @@ export class DealBoardComponent {
      * and a rep has tens of deals, not thousands — so the clarity is worth more than the memoization.
      */
     public get Columns(): BoardColumn[] {
-        const pipelineID = this.ActivePipelineID;
+        return this.ColumnsFor(this.ActivePipelineID);
+    }
+
+    /** One pipeline's columns, in `DisplayOrder`. See {@link Columns}. */
+    public ColumnsFor(pipelineID: string | null): BoardColumn[] {
         if (!pipelineID) {
             return [];
         }
@@ -423,7 +493,11 @@ export class DealBoardComponent {
 
     /** Deals on this pipeline that have no stage set — otherwise they would vanish from the board. */
     public get Unstaged(): DealRosterRow[] {
-        const pipelineID = this.ActivePipelineID;
+        return this.UnstagedFor(this.ActivePipelineID);
+    }
+
+    /** One pipeline's deals with no stage set. */
+    public UnstagedFor(pipelineID: string | null): DealRosterRow[] {
         return this.Deals.filter((d) => d.PipelineID === pipelineID && !d.PipelineStageID);
     }
 
@@ -446,17 +520,76 @@ export class DealBoardComponent {
      * which is the whole point.
      */
     public get ColumnIDs(): string[] {
-        const ids = this.Columns.map((c) => `col-${c.StageID}`);
-        const key = ids.join('|');
-        if (key !== this._columnIDsKey) {
-            this._columnIDsKey = key;
-            this._columnIDs = ids;
-        }
-        return this._columnIDs;
+        return this.ColumnIDsFor(this.ActivePipelineID, this.Columns);
     }
 
-    private _columnIDsKey = ' ';   // not '' — an empty board must still populate the cache once
-    private _columnIDs: string[] = [];
+    /**
+     * {@link ColumnIDs} for one lane. Keyed by pipeline, so under the All tab a card can travel only
+     * between its own pipeline's columns: another pipeline's stage is not a stage this deal can be in.
+     */
+    public ColumnIDsFor(pipelineID: string | null, columns: readonly BoardColumn[]): string[] {
+        const ids = columns.map((c) => `col-${c.StageID}`);
+        const key = ids.join('|');
+        const cached = this.columnIDCache.get(pipelineID ?? '');
+        if (cached && cached.Key === key) {
+            return cached.IDs;
+        }
+        this.columnIDCache.set(pipelineID ?? '', { Key: key, IDs: ids });
+        return ids;
+    }
+
+    private readonly columnIDCache = new Map<string, { Key: string; IDs: string[] }>();
+
+    /* ── The scrollbar above the columns ─────────────────────────────────────────
+     *
+     * A board wider than the page scrolls sideways, and the browser's bar sits under the last row of
+     * cards, often below the fold. A second bar sits above the columns, sticky to the top of the page,
+     * and the two are kept in step. Its width is written straight to the DOM after each check, because a
+     * binding fed from the layout would change during the check that read it.
+     */
+    @ViewChild('scroller') private scroller?: ElementRef<HTMLElement>;
+    @ViewChild('topBar') private topBar?: ElementRef<HTMLElement>;
+    @ViewChild('topBarSpacer') private topBarSpacer?: ElementRef<HTMLElement>;
+    /** Which bar moved last, so the echo of setting the other one is ignored. */
+    private scrollSource: 'top' | 'body' | null = null;
+
+    public ngAfterViewChecked(): void {
+        const body = this.scroller?.nativeElement;
+        const bar = this.topBar?.nativeElement;
+        const spacer = this.topBarSpacer?.nativeElement;
+        if (!body || !bar || !spacer) {
+            return;
+        }
+        spacer.style.width = `${body.scrollWidth}px`;
+        bar.hidden = body.scrollWidth <= body.clientWidth;
+    }
+
+    public OnTopScroll(): void {
+        this.syncScroll('top');
+    }
+
+    public OnBodyScroll(): void {
+        this.syncScroll('body');
+    }
+
+    private syncScroll(from: 'top' | 'body'): void {
+        const body = this.scroller?.nativeElement;
+        const bar = this.topBar?.nativeElement;
+        if (!body || !bar) {
+            return;
+        }
+        if (this.scrollSource && this.scrollSource !== from) {
+            this.scrollSource = null;   // the echo of our own write
+            return;
+        }
+        this.scrollSource = from;
+        const [source, target] = from === 'top' ? [bar, body] : [body, bar];
+        if (target.scrollLeft !== source.scrollLeft) {
+            target.scrollLeft = source.scrollLeft;
+        } else {
+            this.scrollSource = null;
+        }
+    }
 
     public SelectPipeline(pipelineID: string): void {
         this.SelectedPipelineID = pipelineID;
@@ -519,7 +652,9 @@ export class DealBoardComponent {
 
     /** The keyboard path to a stage change (bizapps-sales#371): the same save as a drop. */
     public async MoveToPicked(deal: DealRosterRow): Promise<void> {
-        const target = this.Columns.find((c) => c.StageID === this.PendingMove.get(deal.ID));
+        // The deal's own pipeline, not the active tab's: under All, every lane's cards offer moves.
+        const target = this.ColumnsFor(deal.PipelineID ?? this.ActivePipelineID)
+            .find((c) => c.StageID === this.PendingMove.get(deal.ID));
         if (!target || target.IsClosing) {
             return;
         }

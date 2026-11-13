@@ -42,6 +42,13 @@ describe('RankDealProducts', () => {
     it('returns the lookup rows themselves, not copies', () => {
         expect(RankDealProducts(CATALOG, 'listing', SOUNDPOST)[0]).toBe(CATALOG[2]);
     });
+
+    it("finds another company's products by that company's name, after name and SKU matches", () => {
+        expect(ids(RankDealProducts(CATALOG, 'betty', SOUNDPOST))).toEqual(['p1', 'p4']);
+        // "Betty.Core" matches by name; "Core Bot" only by its company, so it comes after.
+        expect(ids(RankDealProducts(CATALOG, 'betty.', SOUNDPOST))).toEqual(['p1']);
+        expect(ids(RankDealProducts(CATALOG, 'soundpost', BETTY))).toEqual(['p2', 'p3']);
+    });
 });
 
 function editor(productID: string) {
