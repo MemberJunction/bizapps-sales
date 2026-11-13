@@ -2177,7 +2177,7 @@ export class DealEntityServer extends DealEntity {
         this._orderStatusWarnings.push(
             `The deal moved stage, but its order stayed ${from}: ${labels.length === 1 ? 'line' : 'lines'} ` +
             `${labels.join(', ')} ${labels.length === 1 ? 'is' : 'are'} for a product the customer already holds. ` +
-            'Open each one and choose whether it is the next term of that subscription or a new subscription, ' +
+            'Open each one and choose whether it renews that subscription or creates a new one, ' +
             'then confirm the order. The stage change was kept.',
         );
         return true;

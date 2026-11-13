@@ -82,8 +82,8 @@ export function SubscriptionChoiceIssue(entry: UnansweredSubscriptionLine): Sale
         Severity: 'error',
         Message:
             `Line ${Line.LineNumber} (${product}): the customer already holds this product ` +
-            `(${Held.Holding.SubscriptionNumber}${coveredThrough}). Open the line and choose whether it is ` +
-            'the next term of that subscription or a new subscription on its own dates, then close the deal.',
+            `(${Held.Holding.SubscriptionNumber}${coveredThrough}). Open the line and choose whether it ` +
+            'renews that subscription or creates a new one on its own dates, then close the deal.',
     };
 }
 
