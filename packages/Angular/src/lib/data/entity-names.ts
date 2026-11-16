@@ -11,6 +11,8 @@ export const MJS_ENTITIES = {
     DealContactRole: 'MJ_BizApps_Sales: Deal Contact Roles',
     DealStageEvent: 'MJ_BizApps_Sales: Deal Stage Events',
     DealPaymentSchedule: 'MJ_BizApps_Sales: Deal Payment Schedules',
+    /** The companies a deal involves (golive #484). The deal's `Companies` collection. */
+    DealCompany: 'MJ_BizApps_Sales: Deal Companies',
     Pipeline: 'MJ_BizApps_Sales: Pipelines',
     /** A pipeline's selling companies. Read to offer a company's pipelines and to pre-fill a deal's company. */
     PipelineCompany: 'MJ_BizApps_Sales: Pipeline Companies',
@@ -29,6 +31,8 @@ export const MJS_FOREIGN_ENTITIES = {
     Employee: 'MJ: Employees',
     OrderHeader: 'MJ_BizApps_Orders: Order Headers',
     OrderLine: 'MJ_BizApps_Orders: Order Lines',
+    /** The selling companies, read for the deal's Companies panel. */
+    Company: 'MJ: Companies',
     /** Read to warn when a deal's account has no Bill.com customer. See `billcom-customer.ts`. */
     PaymentProviderType: 'MJ_BizApps_Orders: Payment Provider Types',
     PaymentProvider: 'MJ_BizApps_Orders: Payment Providers',

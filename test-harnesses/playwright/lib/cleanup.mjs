@@ -103,7 +103,7 @@ function readEnv() {
 }
 
 /**
- * Child-first order. DealTeamMember / DealStageEvent / DealContactRole / DealPaymentSchedule all
+ * Child-first order. DealTeamMember / DealStageEvent / DealContactRole / DealPaymentSchedule / DealCompany all
  * reference Deal; Deal references Pipeline; PipelineStage and PipelineCompany reference Pipeline. Deleting a parent first
  * would be refused by the very foreign keys the S1 baseline put there on purpose.
  *
@@ -352,6 +352,7 @@ DELETE ps FROM __mj_BizAppsSales.DealPaymentSchedule ps JOIN @deals d ON ps.Deal
 DELETE tm FROM __mj_BizAppsSales.DealTeamMember tm JOIN @deals d ON tm.DealID = d.ID;
 DELETE se FROM __mj_BizAppsSales.DealStageEvent se JOIN @deals d ON se.DealID = d.ID;
 DELETE cr FROM __mj_BizAppsSales.DealContactRole cr JOIN @deals d ON cr.DealID = d.ID;
+DELETE dc FROM __mj_BizAppsSales.DealCompany dc JOIN @deals d ON dc.DealID = d.ID;
 
 /*
  * AUDIT ROWS GO WITH THE RECORDS THEY DESCRIBE.

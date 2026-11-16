@@ -101,7 +101,7 @@ async function deleteAs(ctx: Ctx, user: UserInfo, dealID: string): Promise<{ Del
     return { Deleted: deleted, Message: deal.LatestResult?.Message ?? '' };
 }
 
-/** What is left of a deal: the row, its four child tables and its order. */
+/** What is left of a deal: the row, its five child tables and its order. */
 async function remains(ctx: Ctx, dealID: string, orderID: string | null): Promise<Record<string, number>> {
     const order = orderID ? `(SELECT COUNT(*) FROM ${ORDERS_SCHEMA}.OrderHeader WHERE ID = '${orderID}')` : '0';
     const row = await TxOne<Record<string, number>>(ctx, `
@@ -111,6 +111,7 @@ async function remains(ctx: Ctx, dealID: string, orderID: string | null): Promis
             (SELECT COUNT(*) FROM ${SALES_SCHEMA}.DealPaymentSchedule WHERE DealID = '${dealID}') AS Schedule,
             (SELECT COUNT(*) FROM ${SALES_SCHEMA}.DealContactRole WHERE DealID = '${dealID}') AS Contacts,
             (SELECT COUNT(*) FROM ${SALES_SCHEMA}.DealStageEvent WHERE DealID = '${dealID}') AS StageEvents,
+            (SELECT COUNT(*) FROM ${SALES_SCHEMA}.DealCompany WHERE DealID = '${dealID}') AS Companies,
             ${order} AS OrderHeader`);
     return Object.fromEntries(Object.entries(row).map(([k, v]) => [k, Number(v)]));
 }

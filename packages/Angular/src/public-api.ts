@@ -71,6 +71,7 @@ import {
 import { MJSPromotePartyDialog } from './lib/form-panels/promote-party-dialog.component';
 import { MJSOrderRelatedPanel } from './lib/form-panels/order-related.panel';
 import { MJSAccountContactsPanel } from './lib/form-panels/account-contacts.panel';
+import { MJSDealCompaniesPanel } from './lib/form-panels/deal-companies.panel';
 import { MJSContactAccountsPanel } from './lib/form-panels/contact-accounts.panel';
 
 // Re-export for consumers
@@ -145,6 +146,8 @@ export {
 } from './lib/form-panels/promote-party-dialog.component';
 export { MJSOrderRelatedPanel } from './lib/form-panels/order-related.panel';
 export { MJSAccountContactsPanel } from './lib/form-panels/account-contacts.panel';
+export { MJSDealCompaniesPanel } from './lib/form-panels/deal-companies.panel';
+export { DealCompanyRows, type DealCompanyRow, type CompanyOption } from './lib/form-panels/deal-companies';
 export { MJSContactAccountsPanel } from './lib/form-panels/contact-accounts.panel';
 export { AccountContactsWhere, ContactAccountsWhere } from './lib/form-panels/account-contacts';
 export {
@@ -210,6 +213,7 @@ export function LoadBizAppsSalesClient(): void {
     void MJSPromotePartyDialog;
     void MJSPersonDealTeamPanel;
     void MJSAccountContactsPanel;
+    void MJSDealCompaniesPanel;
     void MJSContactAccountsPanel;
     // The provenance row on the ORDER form. Contributed onto an entity this app does not own, so
     // nothing in orders imports it — this anchor is the only thing keeping it in the bundle.

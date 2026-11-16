@@ -189,19 +189,19 @@ describe('DealEntityServer.Delete', () => {
     it('deletes children, the deal and its order in one transaction, in that order', async () => {
         const { instance, log } = deal({ lockingStatuses: [WON], historyTo: [OPEN], orderStatus: 'Draft' });
         expect(await instance.Delete()).toBe(true);
-        expect(log).toEqual(['begin', 'sql:4', 'deal', 'order', 'commit']);
+        expect(log).toEqual(['begin', 'sql:5', 'deal', 'order', 'commit']);
     });
 
     it('skips the order when the deal has none', async () => {
         const { instance, log } = deal({ lockingStatuses: [WON], historyTo: [], orderStatus: null });
         expect(await instance.Delete()).toBe(true);
-        expect(log).toEqual(['begin', 'sql:4', 'deal', 'commit']);
+        expect(log).toEqual(['begin', 'sql:5', 'deal', 'commit']);
     });
 
     it('rolls everything back when the order refuses, and says why', async () => {
         const { instance, log, results } = deal({ lockingStatuses: [WON], historyTo: [], orderStatus: 'Draft', orderDeletes: false });
         expect(await instance.Delete()).toBe(false);
-        expect(log).toEqual(['begin', 'sql:4', 'deal', 'order', 'rollback']);
+        expect(log).toEqual(['begin', 'sql:5', 'deal', 'order', 'rollback']);
         expect(results.at(-1)?.Message).toContain('Order is locked');
     });
 
@@ -217,7 +217,7 @@ describe('DealEntityServer.Delete', () => {
         vi.spyOn(UserCache.Instance, 'GetSystemUser').mockReturnValue(system);
         const { instance, log, usedAs } = deal({ lockingStatuses: [WON], historyTo: [OPEN], orderStatus: 'Draft' });
         expect(await instance.Delete()).toBe(true);
-        expect(log).toEqual(['begin', 'sql:4', 'deal', 'order', 'commit']);
+        expect(log).toEqual(['begin', 'sql:5', 'deal', 'order', 'commit']);
         expect(usedAs.order).toBe(system);
         expect(usedAs.reads).toBe(system);
     });

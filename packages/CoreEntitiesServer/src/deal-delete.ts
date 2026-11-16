@@ -20,7 +20,7 @@
  *
  * WHY THE DEAL'S OWN CHILD ROWS GO BY SQL. `DealStageEvent` refuses a delete through its entity on
  * purpose, and the team-member and payment-schedule entities re-stamp or re-sync the deal after each
- * row they remove, which would re-save the deal this delete is removing. These four tables belong to the
+ * row they remove, which would re-save the deal this delete is removing. These five tables belong to the
  * deal and nothing else, the caller has already passed the deal's own delete check, and the whole delete
  * runs in one transaction, so removing them directly is the narrow path. The order is deleted through
  * orders' own entity, which owns its rules.
@@ -84,7 +84,7 @@ const ORDER_HEADER_ENTITY = 'MJ_BizApps_Orders: Order Headers';
 const GUID_SHAPE = /^[0-9a-fA-F-]{36}$/;
 
 /** The deal's own child tables, in the order they are removed. None of them is referenced by another. */
-const DEAL_CHILD_TABLES = ['DealStageEvent', 'DealContactRole', 'DealPaymentSchedule', 'DealTeamMember'] as const;
+const DEAL_CHILD_TABLES = ['DealStageEvent', 'DealContactRole', 'DealPaymentSchedule', 'DealTeamMember', 'DealCompany'] as const;
 
 /**
  * Which delete grant `user` holds. `Any` is checked on its own; `Own` with ancestors, so a holder of

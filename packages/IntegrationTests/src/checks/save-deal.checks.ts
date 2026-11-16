@@ -2832,6 +2832,58 @@ export const SaveDealChecks: NamedCheck[] = [
                 AssertEqual(Number(after.Rows), 1, 'and the owner row is still there and active');
             }),
     },
+    {
+        Id: 'save-deal.SD49',
+        Name: 'SD49: a deal\'s company list keeps the companies the rep added and always holds its billing company (golive #484)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * The list travels with the deal as its `Companies` collection. The server adds the
+                 * billing company on save, so the rep never has to, and puts it back when a save
+                 * removed it. The rows are READ BACK with SQL rather than trusted from the collection.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const others = await new RunView().RunView<{ ID: string }>(
+                    {
+                        EntityName: 'MJ: Companies',
+                        ExtraFilter: `ID <> '${f.CompanyID}'`,
+                        ResultType: 'simple',
+                        Fields: ['ID'],
+                        OrderBy: 'Name ASC, ID ASC',
+                    },
+                    ctx.User,
+                );
+                Assert(others.Success, `reading companies failed — ${others.ErrorMessage}`);
+                const otherID = (others.Results ?? [])[0]?.ID;
+                Assert(!!otherID, 'setup: the host needs a second company — run scripts/seed-demo-data.sh');
+
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD49 company list'; });
+                const added = await deal.Companies.Create();
+                added.CompanyID = otherID as string;
+                await saveOk(deal, 'a create that lists a second company');
+
+                const listed = async (): Promise<string[]> => {
+                    const row = await TxOne<{ IDs: string | null }>(
+                        ctx,
+                        `SELECT STRING_AGG(CAST(CompanyID AS nvarchar(36)), ',') AS IDs
+                           FROM ${SALES_SCHEMA}.DealCompany WHERE DealID = '${deal.ID}'`,
+                    );
+                    return String(row.IDs ?? '').split(',').filter(Boolean).map((id) => id.toLowerCase()).sort();
+                };
+                const expected = [String(f.CompanyID).toLowerCase(), String(otherID).toLowerCase()].sort();
+                AssertEqual(JSON.stringify(await listed()), JSON.stringify(expected), 'the list holds the billing company and the added one');
+
+                const reloaded = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+                Assert(await reloaded.Load(deal.ID), 'the deal reloads');
+                await reloaded.Companies.Load();
+                const billingRow = reloaded.Companies.Items.find((c) => UUIDsEqual(c.CompanyID, f.CompanyID));
+                Assert(!!billingRow, 'the billing company is in the loaded list');
+                reloaded.Companies.Remove(billingRow!);
+                await saveOk(reloaded, 'a save that removes the billing company from the list');
+                AssertEqual(JSON.stringify(await listed()), JSON.stringify(expected), 'the server puts the billing company back');
+            }),
+    },
 ];
 
 for (const check of SaveDealChecks) {

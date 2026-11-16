@@ -124,6 +124,49 @@ export const mjBizAppsSalesBuyingRoleTypeSchema = z.object({
 export type mjBizAppsSalesBuyingRoleTypeEntityType = z.infer<typeof mjBizAppsSalesBuyingRoleTypeSchema>;
 
 /**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Companies
+ */
+export const mjBizAppsSalesDealCompanySchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    DealID: z.string().describe(`
+        * * Field Name: DealID
+        * * Display Name: Deal
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deals (vwDeals.ID)
+        * * Description: The deal.`),
+    CompanyID: z.string().describe(`
+        * * Field Name: CompanyID
+        * * Display Name: Company
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
+        * * Description: A company the deal involves. The product picker offers this company's products, and the deal matches a filter on this company.`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Deal: z.string().describe(`
+        * * Field Name: Deal
+        * * Display Name: Deal Name
+        * * SQL Data Type: nvarchar(500)`),
+    Company: z.string().describe(`
+        * * Field Name: Company
+        * * Display Name: Company Name
+        * * SQL Data Type: nvarchar(50)`),
+});
+
+export type mjBizAppsSalesDealCompanyEntityType = z.infer<typeof mjBizAppsSalesDealCompanySchema>;
+
+/**
  * zod schema definition for the entity MJ_BizApps_Sales: Deal Contact Roles
  */
 export const mjBizAppsSalesDealContactRoleSchema = z.object({
@@ -2263,6 +2306,117 @@ export class mjBizAppsSalesBuyingRoleTypeEntity extends BaseEntity<mjBizAppsSale
 
 
 /**
+ * MJ_BizApps_Sales: Deal Companies - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsSales
+ * * Base Table: DealCompany
+ * * Base View: vwDealCompanies
+ * * @description A company involved in a deal. A deal can involve several companies; the deal's own company (the billing company) is always one of them, and so is the company of every product on the deal.
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Companies')
+export class mjBizAppsSalesDealCompanyEntity extends BaseEntity<mjBizAppsSalesDealCompanyEntityType> {
+    /**
+    * Loads the MJ_BizApps_Sales: Deal Companies record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Deal Companies record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsSalesDealCompanyEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: DealID
+    * * Display Name: Deal
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deals (vwDeals.ID)
+    * * Description: The deal.
+    */
+    get DealID(): string {
+        return this.Get('DealID');
+    }
+    set DealID(value: string) {
+        this.Set('DealID', value);
+    }
+
+    /**
+    * * Field Name: CompanyID
+    * * Display Name: Company
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
+    * * Description: A company the deal involves. The product picker offers this company's products, and the deal matches a filter on this company.
+    */
+    get CompanyID(): string {
+        return this.Get('CompanyID');
+    }
+    set CompanyID(value: string) {
+        this.Set('CompanyID', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: Deal
+    * * Display Name: Deal Name
+    * * SQL Data Type: nvarchar(500)
+    */
+    get Deal(): string {
+        return this.Get('Deal');
+    }
+
+    /**
+    * * Field Name: Company
+    * * Display Name: Company Name
+    * * SQL Data Type: nvarchar(50)
+    */
+    get Company(): string {
+        return this.Get('Company');
+    }
+}
+
+
+/**
  * MJ_BizApps_Sales: Deal Contact Roles - strongly typed entity sub-class
  * * Schema: __mj_BizAppsSales
  * * Base Table: DealContactRole
@@ -3979,6 +4133,25 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
   public readonly Team = this.DeclareRelatedRecords<mjBizAppsSalesDealTeamMemberEntity>({
       Name: 'Team',
         RelatedEntity: 'MJ_BizApps_Sales: Deal Team Members',
+        RelatedEntityJoinField: 'DealID',
+        OrderBy: '__mj_CreatedAt ASC',
+        Load: 'explicit',
+        OnRemove: 'delete',
+        Source: 'database',
+  });
+
+
+  /**
+  * Related records: MJ_BizApps_Sales: Deal Companies
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Sales: Deals record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Sales: Deals → MJ_BizApps_Sales: Deal Companies' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Companies = this.DeclareRelatedRecords<mjBizAppsSalesDealCompanyEntity>({
+      Name: 'Companies',
+        RelatedEntity: 'MJ_BizApps_Sales: Deal Companies',
         RelatedEntityJoinField: 'DealID',
         OrderBy: '__mj_CreatedAt ASC',
         Load: 'explicit',

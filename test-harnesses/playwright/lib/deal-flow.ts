@@ -401,7 +401,7 @@ export async function PurgeByPrefix(prefix: string): Promise<void> {
 
 /** Every row this suite created for one deal, removed child-first. Returns what it deleted. */
 export async function PurgeDeal(dealID: string, orderID: string | null): Promise<void> {
-    for (const t of ['DealStageEvent', 'DealTeamMember', 'DealPaymentSchedule', 'DealContactRole']) {
+    for (const t of ['DealStageEvent', 'DealTeamMember', 'DealPaymentSchedule', 'DealContactRole', 'DealCompany']) {
         await QueryAll(`DELETE FROM __mj_BizAppsSales.${t} WHERE DealID = '${dealID}'`);
     }
     /**

@@ -185,6 +185,7 @@ ck((await dbLines(orderID)).length === 2, 'setup: two lines in the database');
 await pool.request().query(`DELETE FROM __mj_BizAppsSales.DealPaymentSchedule WHERE DealID = '${deal.ID}'`);
 await pool.request().query(`DELETE FROM __mj_BizAppsSales.DealStageEvent WHERE DealID = '${deal.ID}'`);
 await pool.request().query(`DELETE FROM __mj_BizAppsSales.DealTeamMember WHERE DealID = '${deal.ID}'`);
+await pool.request().query(`DELETE FROM __mj_BizAppsSales.DealCompany WHERE DealID = '${deal.ID}'`);
 await pool.request().query(`UPDATE __mj_BizAppsSales.Deal SET OrderID = NULL WHERE ID = '${deal.ID}'`);
 await pool.request().query(`DELETE FROM __mj_BizAppsOrders.OrderLine WHERE OrderHeaderID = '${orderID}'`);
 await pool.request().query(`DELETE FROM __mj_BizAppsOrders.OrderHeader WHERE ID = '${orderID}'`);
