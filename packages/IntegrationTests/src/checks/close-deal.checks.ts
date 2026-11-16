@@ -3462,6 +3462,7 @@ export const CloseDealChecks: NamedCheck[] = [
                     ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD43 team removal under lock',
                 );
                 const memberID = await addSupportingMember(ctx, f, dealID);
+                const rosterBeforeClose = await teamCount(ctx, dealID);
 
                 const out = await close(ctx, { DealID: dealID, DealStatusTypeID: f.WonStatusID });
                 Assert(out.Success, `the close failed: ${JSON.stringify(out.Issues)}`);
@@ -3494,6 +3495,13 @@ export const CloseDealChecks: NamedCheck[] = [
                 // ── THE CONTROL: reopened, the same delete goes through ────────────────────────
                 const reopened = await reopen(ctx, { DealID: dealID, Reason: 'CD43: reopening to correct the team.' });
                 Assert(reopened.Success, `the reopen failed — ${JSON.stringify(reopened.Issues)}`);
+                // golive#465's first requirement: the reopen itself deletes no team row. The reported
+                // failure was a team-row delete during a reopen, so a reopen that passed by removing
+                // someone would hide exactly that defect.
+                AssertEqual(
+                    await teamCount(ctx, dealID), rosterBeforeClose,
+                    'the reopen must leave every team row in place',
+                );
                 const again = await ProviderOf(ctx).GetEntityObject<DealTeamMemberEntity>(E_DEAL_TEAM_MEMBER, ctx.User);
                 Assert(await again.Load(memberID), 'the team row loads after the reopen');
                 Assert(
@@ -3539,6 +3547,13 @@ async function addSupportingMember(ctx: Ctx, f: SalesFixture, dealID: string): P
     member.Set('IsActive', true);
     Assert(await member.Save(), `setup: the supporting member could not be added — ${member.LatestResult?.Message ?? ''}`);
     return String(member.Get('ID'));
+}
+
+async function teamCount(ctx: Ctx, dealID: string): Promise<number> {
+    const row = await TxOne<{ n: number }>(
+        ctx, `SELECT COUNT(*) AS n FROM ${SALES_SCHEMA}.DealTeamMember WHERE DealID = '${dealID}'`,
+    );
+    return Number(row.n);
 }
 
 async function memberCount(ctx: Ctx, memberID: string): Promise<number> {
