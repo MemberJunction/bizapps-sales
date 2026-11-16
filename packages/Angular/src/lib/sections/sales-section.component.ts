@@ -172,6 +172,7 @@ const E_DEAL_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_FORECAST_CATEGORY_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
 const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
+const E_DEAL_COMPANY = 'MJ_BizApps_Sales: Deal Companies';
 
 /** The defaults a null URL field stands for. */
 const DEFAULT_PERIOD: PeriodKey = 'quarter';
@@ -1036,9 +1037,15 @@ export class MJSSalesSectionComponent implements OnInit {
 
     // ── Filter bar ─────────────────────────────────────────────────────────────
 
-    /** Selling companies: the companies that own a pipeline. */
+    /**
+     * Every company, for the one Company filter (golive #484): it matches a deal's selling company, its
+     * listed companies and its lines' companies, so a company with no pipeline can still match.
+     */
     public get CompanyOptions(): FilterOption[] {
-        return SortedOptions(PipelineCompanies(this.Pipelines).map((c) => ({ ID: c.CompanyID, Name: c.CompanyName ?? 'Unnamed company' })));
+        return SortedOptions([
+            ...PipelineCompanies(this.Pipelines).map((c) => ({ ID: c.CompanyID, Name: c.CompanyName ?? 'Unnamed company' })),
+            ...this.companies.map((c) => ({ ID: c.ID, Name: c.Name })),
+        ]);
     }
 
     /** Product companies: those on any loaded deal's lines, and any already selected. */
@@ -1361,7 +1368,7 @@ export class MJSSalesSectionComponent implements OnInit {
         const status = tableOf(E_DEAL_STATUS_TYPE);
         const pipeline = closedOnly ? status : tableOf(E_PIPELINE);
         const forecast = closedOnly ? status : tableOf(E_FORECAST_CATEGORY_TYPE);
-        return status && pipeline && forecast ? { Status: status, Pipeline: pipeline, Forecast: forecast, OrderLine: tableOf(E_ORDER_LINE) } : null;
+        return status && pipeline && forecast ? { Status: status, Pipeline: pipeline, Forecast: forecast, OrderLine: tableOf(E_ORDER_LINE), DealCompany: tableOf(E_DEAL_COMPANY) } : null;
     }
 
     /**
@@ -1372,7 +1379,7 @@ export class MJSSalesSectionComponent implements OnInit {
     private async refreshAllDealsView(): Promise<void> {
         const token = ++this.allDealsToken;
         try {
-            const where = DealFiltersWhere(this.Filters, tableOf(E_ORDER_LINE)) || undefined;
+            const where = DealFiltersWhere(this.Filters, tableOf(E_ORDER_LINE), tableOf(E_DEAL_COMPANY)) || undefined;
             const view = this.pipelineView ? await DealPipelineViewWith(this.pipelineView, where) : null;
             // Two filter changes in quick succession: only the latest one's view is shown.
             if (token === this.allDealsToken) {

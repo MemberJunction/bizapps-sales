@@ -68,7 +68,12 @@ WHERE 1 = 1
   AND d.CompanyID = {{ CompanyID | sqlString }}
   {% endif %}
   {% if CompanyIDs %}
-  AND d.CompanyID IN {{ CompanyIDs | sqlIn }}
+  -- Company (golive #484): the selling company, a company listed on the deal, or a line's company.
+  AND (d.CompanyID IN {{ CompanyIDs | sqlIn }}
+       OR EXISTS (SELECT 1 FROM [__mj_BizAppsSales].DealCompany dc
+                  WHERE dc.DealID = d.ID AND dc.CompanyID IN {{ CompanyIDs | sqlIn }})
+       OR EXISTS (SELECT 1 FROM [__mj_BizAppsOrders].OrderLine ol
+                  WHERE ol.OrderHeaderID = d.OrderID AND ol.CompanyID IN {{ CompanyIDs | sqlIn }}))
   {% endif %}
   {% if PipelineID %}
   AND d.PipelineID = {{ PipelineID | sqlString }}

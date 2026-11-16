@@ -73,3 +73,30 @@ export function CountDraftMatches(drafts: readonly DraftProductLookup[], query: 
     }));
     return RankDealProducts(asLookups, query, null).length;
 }
+
+/**
+ * `ranked` split into the products of the deal's companies, in their ranked order, and how many of the
+ * rest matched (golive #484). The picker lists the first and names the count, so a product of a company
+ * not on the deal is never hidden without saying so. An empty company list narrows nothing: a deal whose
+ * companies could not be read offers every product, as before.
+ */
+export function SplitByDealCompanies(
+    ranked: readonly ProductLookup[],
+    dealCompanyIDs: readonly string[],
+): { InDeal: ProductLookup[]; OtherCount: number } {
+    if (!dealCompanyIDs.length) {
+        return { InDeal: [...ranked], OtherCount: 0 };
+    }
+    const companies = new Set(dealCompanyIDs.map((id) => id.trim().toLowerCase()));
+    const inDeal = ranked.filter((p) => companies.has(String(p.CompanyID ?? '').trim().toLowerCase()));
+    return { InDeal: inDeal, OtherCount: ranked.length - inDeal.length };
+}
+
+/** The note under the list when the search matches products of companies not on the deal, or null. */
+export function OtherCompanyMatchNote(count: number, query: string): string | null {
+    if (count <= 0 || !query.trim()) {
+        return null;
+    }
+    const subject = count === 1 ? '1 product from another company matches' : `${count} products from other companies match`;
+    return `${subject}. Add the company under Companies on the deal to choose ${count === 1 ? 'it' : 'them'}.`;
+}

@@ -208,8 +208,10 @@ export interface InspectTables {
     Status: SqlTable;
     Pipeline: SqlTable;
     Forecast: SqlTable;
-    /** Orders' order lines, for the Product company filter. Needed only while that filter is set. */
+    /** Orders' order lines, for the Company and Product company filters. Needed only while one is set. */
     OrderLine?: SqlTable | null;
+    /** The deal's listed companies (`DealCompany`), for the Company filter (golive #484). */
+    DealCompany?: SqlTable | null;
 }
 
 /** What narrows an Inspect list beside its own slice: the period, the filter bar, and an argument. */
@@ -229,17 +231,21 @@ export type CriteriaInspectKey = Exclude<InspectKey, 'idle'>;
  * same criteria the Inspect lists apply, with no period. Empty when no list is set, so the grid lists
  * every deal.
  */
-export function DealFiltersWhere(filters: DashboardFilters, orderLineTable: SqlTable | null): string {
-    return filterParts(filters, orderLineTable).join(' AND ');
+export function DealFiltersWhere(filters: DashboardFilters, orderLineTable: SqlTable | null, dealCompanyTable: SqlTable | null = null): string {
+    return filterParts(filters, orderLineTable, dealCompanyTable).join(' AND ');
 }
 
 /**
  * The filter bar's lists as criteria on the Deals view, the same rule each dashboard query applies.
  * Product company keeps a deal when one line of its order belongs to a selected company.
  */
-function filterParts(filters: DashboardFilters, orderLineTable: SqlTable | null | undefined): string[] {
+function filterParts(
+    filters: DashboardFilters,
+    orderLineTable: SqlTable | null | undefined,
+    dealCompanyTable: SqlTable | null | undefined = null,
+): string[] {
     const parts: string[] = [];
-    if (filters.CompanyIDs.length) parts.push(`CompanyID IN ${sqlList(filters.CompanyIDs)}`);
+    if (filters.CompanyIDs.length) parts.push(companyPart(filters.CompanyIDs, orderLineTable, dealCompanyTable));
     if (filters.OwnerEmployeeIDs.length) parts.push(`OwnerEmployeeID IN ${sqlList(filters.OwnerEmployeeIDs)}`);
     if (filters.PipelineIDs.length) parts.push(`PipelineID IN ${sqlList(filters.PipelineIDs)}`);
     if (filters.ProductCompanyIDs.length) {
@@ -250,6 +256,19 @@ function filterParts(filters: DashboardFilters, orderLineTable: SqlTable | null 
             : '1 = 0');
     }
     return parts;
+}
+
+/**
+ * The Company filter (golive #484), as the dashboard queries apply it: the selling company, a company
+ * listed on the deal (`DealCompany`), or a company on one of its order lines. A table missing from
+ * metadata drops its half, so the list still matches on the selling company.
+ */
+function companyPart(ids: readonly string[], orderLineTable: SqlTable | null | undefined, dealCompanyTable: SqlTable | null | undefined): string {
+    const list = sqlList(ids);
+    const matches = [`CompanyID IN ${list}`];
+    if (dealCompanyTable) matches.push(`ID IN (SELECT DealID FROM ${tableRef(dealCompanyTable)} WHERE CompanyID IN ${list})`);
+    if (orderLineTable) matches.push(`OrderID IN (SELECT OrderHeaderID FROM ${tableRef(orderLineTable)} WHERE CompanyID IN ${list})`);
+    return matches.length === 1 ? matches[0] : `(${matches.join(' OR ')})`;
 }
 
 /** `column` inside the window. A null bound is no bound; a NULL date fails a bounded window. */
@@ -285,14 +304,14 @@ export function InspectCriteriaWhere(
     const bounded = PERIOD_BOUND_KEYS.includes(key) ? scope.Window : undefined;
     const status = (flag: string): string => `DealStatusTypeID IN (SELECT ID FROM ${tableRef(tables.Status)} WHERE ${flag} = 1)`;
     if (key === 'won' || key === 'closed') {
-        return [status(key === 'won' ? 'IsWon' : 'IsClosed'), ...windowParts('ActualCloseDate', bounded), ...filterParts(filters, tables.OrderLine)].join(' AND ');
+        return [status(key === 'won' ? 'IsWon' : 'IsClosed'), ...windowParts('ActualCloseDate', bounded), ...filterParts(filters, tables.OrderLine, tables.DealCompany)].join(' AND ');
     }
     const open = [
         status('IsOpen'),
         // Naming pipelines in the filter includes them, as the summary query's PipelineIDs does.
         ...(filters.PipelineIDs.length ? [] : [`PipelineID IN (SELECT ID FROM ${tableRef(tables.Pipeline)} WHERE IncludeInForecast = 1)`]),
     ];
-    return [...open, ...sliceParts(key, tables, today, scope.Arg ?? null), ...windowParts('ExpectedCloseDate', bounded), ...filterParts(filters, tables.OrderLine)]
+    return [...open, ...sliceParts(key, tables, today, scope.Arg ?? null), ...windowParts('ExpectedCloseDate', bounded), ...filterParts(filters, tables.OrderLine, tables.DealCompany)]
         .join(' AND ');
 }
 

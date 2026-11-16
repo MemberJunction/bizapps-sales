@@ -2,7 +2,7 @@ import '@angular/compiler';
 import { describe, expect, it, vi } from 'vitest';
 import type { DraftProductLookup, ProductLookup } from '@mj-biz-apps/sales-entities';
 import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.component';
-import { CountDraftMatches, RankDealProducts } from '../lib/form-panels/deal-product-ranking';
+import { CountDraftMatches, OtherCompanyMatchNote, RankDealProducts, SplitByDealCompanies } from '../lib/form-panels/deal-product-ranking';
 
 /**
  * golive#360: the deal's Add a product was a plain list of every product in the catalogue, with no
@@ -156,5 +156,45 @@ describe('the note for Draft products the search matches', () => {
 
         expect(e.DraftMatchNote).toBeNull();
         expect(e.PickerResults.length).toBeGreaterThan(0);
+    });
+});
+
+describe("narrowing to the deal's companies (golive #484)", () => {
+    it('keeps only the products of the deal\'s companies, in ranked order, and counts the rest', () => {
+        const ranked = RankDealProducts(CATALOG, 'core', SOUNDPOST);
+        const { InDeal, OtherCount } = SplitByDealCompanies(ranked, [SOUNDPOST]);
+        expect(ids(InDeal)).toEqual(['p3', 'p2']);
+        expect(OtherCount).toBe(2);
+    });
+
+    it('offers every product when the deal lists both companies, compared without case', () => {
+        const { InDeal, OtherCount } = SplitByDealCompanies(CATALOG, [SOUNDPOST, BETTY.toUpperCase()]);
+        expect(InDeal).toHaveLength(4);
+        expect(OtherCount).toBe(0);
+    });
+
+    it('narrows nothing when the deal\'s companies are unknown', () => {
+        expect(SplitByDealCompanies(CATALOG, []).InDeal).toHaveLength(4);
+    });
+
+    it('says how many other companies\' products match a search, and nothing without one', () => {
+        expect(OtherCompanyMatchNote(2, 'core')).toBe(
+            '2 products from other companies match. Add the company under Companies on the deal to choose them.',
+        );
+        expect(OtherCompanyMatchNote(1, 'bot')).toBe(
+            '1 product from another company matches. Add the company under Companies on the deal to choose it.',
+        );
+        expect(OtherCompanyMatchNote(2, '')).toBeNull();
+        expect(OtherCompanyMatchNote(0, 'core')).toBeNull();
+    });
+
+    it('the editor lists the deal\'s companies\' products and notes the others', () => {
+        const e = Object.create(MJSDealLineEditorComponent.prototype) as MJSDealLineEditorComponent;
+        Object.assign(e, { Products: CATALOG, draftProducts: [], dealCompanyIDs: [SOUNDPOST], PickerOpen: false, Deal: { CompanyID: SOUNDPOST } });
+        e.OnProductQuery('core');
+        expect(ids(e.PickerResults)).toEqual(['p3', 'p2']);
+        expect(e.OtherCompanyNote).toBe(
+            '2 products from other companies match. Add the company under Companies on the deal to choose them.',
+        );
     });
 });
