@@ -71,6 +71,8 @@ import {
     DealFieldsEditableWhileLocked,
     DealFieldLabel,
     DealEntity,
+    DEAL_ORDER_PRICED_FIELDS,
+    DealOrderPricedEditRefusal,
     JoinLabels,
     type mjBizAppsSalesDealStageEventEntity,
 } from '@mj-biz-apps/sales-entities';
@@ -190,9 +192,25 @@ interface PipelineCompanyLinkRow {
 const STAGE_ENTITY = 'MJ_BizApps_Sales: Pipeline Stages';
 const ORDER_HEADER_ENTITY = 'MJ_BizApps_Orders: Order Headers';
 
-/** The one column the order lookup selects for the amount cache. */
+/** The columns the order lookup selects for the amount cache. */
 interface OrderTotalRow {
     TotalGross: number | null;
+    /** Orders' recurring totals (golive #485). Absent on a host whose orders release predates them. */
+    RecurringMonthlyTotal?: number | null;
+    RecurringAnnualTotal?: number | null;
+}
+
+/** Orders' recurring totals and the deal columns each is copied to (golive #485). */
+const ORDER_RECURRING_COPIES = [
+    { Order: 'RecurringMonthlyTotal', Deal: 'MRR' },
+    { Order: 'RecurringAnnualTotal', Deal: 'ARR' },
+] as const;
+
+/** A finite number from a decimal column, or null. See the note in `refreshAmountFromOrder`. */
+function finiteOrNull(raw: unknown): number | null {
+    if (raw === null || raw === undefined) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
 }
 
 /** What the stage lookup selects for the order rule: the status it names, and the stage's own status. */
@@ -531,6 +549,12 @@ export class DealEntityServer extends DealEntity {
         if (stampRefusal) {
             const wonRefusal = await this.staleWonSaveRefusal();
             return this.refuseSave(wonRefusal ?? stampRefusal);
+        }
+
+        // Amount, MRR and ARR are copied from the order once the deal has products (golive #485).
+        const pricedRefusal = this.orderPricedEditRefusal();
+        if (pricedRefusal) {
+            return this.refuseSave(pricedRefusal);
         }
 
         /**
@@ -2522,7 +2546,7 @@ export class DealEntityServer extends DealEntity {
                 EntityName: ORDER_HEADER_ENTITY,
                 ExtraFilter: `ID = '${this.OrderID}'`,
                 ResultType: 'simple',
-                Fields: ['TotalGross'],
+                Fields: ['TotalGross', ...this.orderRecurringFields()],
             },
             this.ContextCurrentUser,
         );
@@ -2549,11 +2573,12 @@ export class DealEntityServer extends DealEntity {
          * So the rule is the one a money cache should have had from the start: cache a finite number, or
          * do not touch the columns.
          */
-        const raw = (result.Results ?? [])[0]?.TotalGross;
-        const total = raw === null || raw === undefined ? null : Number(raw);
-        if (total === null || !Number.isFinite(total)) {
+        const row = (result.Results ?? [])[0];
+        const total = finiteOrNull(row?.TotalGross);
+        if (total === null) {
             return;   // no usable answer — see the note above; this still guards the mid-transaction read
         }
+        const recurring = this.recurringCopies(row);
 
         /**
          * ── "NO PRICED LINES" IS NOT REACHABLE ON THIS SCHEMA, AND THE COMMENT ABOVE OVERCLAIMED ───────
@@ -2583,7 +2608,8 @@ export class DealEntityServer extends DealEntity {
          * a reader holding the order can recompute this and compare without a second table.
          */
         const hash = createHash('sha256').update(`${this.OrderID}|${total}`).digest('hex');
-        if (Number(this.Amount) === Number(total) && this.AmountSourceHash === hash && this.AmountIsComputed) {
+        const recurringCurrent = recurring.every((c) => Number(this.Get(c.Deal)) === c.Value && this.Get(c.Deal) !== null);
+        if (Number(this.Amount) === Number(total) && this.AmountSourceHash === hash && this.AmountIsComputed && recurringCurrent) {
             return;   // already current; a no-op write would only churn the row
         }
 
@@ -2596,11 +2622,14 @@ export class DealEntityServer extends DealEntity {
                 user: unknown,
             ) => Promise<unknown>;
         };
+        // MRR and ARR travel in the same statement, as copies of orders' figures (golive #485).
+        const recurringSet = recurring.map((c) => `, ${c.Deal} = @${c.Deal}`).join('');
+        const recurringParams = Object.fromEntries(recurring.map((c) => [c.Deal, c.Value]));
         await sql.ExecuteSQL(
             `UPDATE ${SALES_SCHEMA}.Deal
-                SET Amount = @amount, AmountIsComputed = 1, AmountComputedAt = @at, AmountSourceHash = @hash
+                SET Amount = @amount, AmountIsComputed = 1, AmountComputedAt = @at, AmountSourceHash = @hash${recurringSet}
               WHERE ID = @id`,
-            { amount: total, at: now, hash, id: this.ID },
+            { amount: total, at: now, hash, id: this.ID, ...recurringParams },
             { isMutation: true, description: 'DealEntityServer: refresh Deal.Amount from OrderHeader.TotalGross' },
             this.ContextCurrentUser,
         );
@@ -2611,6 +2640,9 @@ export class DealEntityServer extends DealEntity {
         this.AmountIsComputed = true;
         this.AmountComputedAt = now;
         this.AmountSourceHash = hash;
+        for (const c of recurring) {
+            this.Set(c.Deal, c.Value);
+        }
 
         /**
          * ── ...AND THE DIRTY FLAGS THOSE FOUR ASSIGNMENTS JUST SET ARE CLEARED ──────────────
@@ -2626,9 +2658,37 @@ export class DealEntityServer extends DealEntity {
          * legitimate to reset because the database already holds precisely what is in memory: this
          * method put it there itself, in the statement above.
          */
-        for (const name of ['Amount', 'AmountIsComputed', 'AmountComputedAt', 'AmountSourceHash']) {
+        for (const name of ['Amount', 'AmountIsComputed', 'AmountComputedAt', 'AmountSourceHash', ...recurring.map((c) => c.Deal)]) {
             this.GetFieldByName(name)?.ResetOldValue();
         }
+    }
+
+    /**
+     * Orders' recurring-total columns this host has (golive #485).
+     *
+     * Sales builds against RELEASED orders packages, and a host can run an orders release older than
+     * the one that added `RecurringMonthlyTotal` / `RecurringAnnualTotal`. Asking for a column the
+     * view lacks fails the whole read, Amount included, so each is requested only when the Order
+     * Headers entity's metadata lists it. Until orders ships them, MRR and ARR stay as typed; once it
+     * does, they are copied with no change here.
+     */
+    private orderRecurringFields(): string[] {
+        const provider = this.ProviderToUse as unknown as IMetadataProvider;
+        const fields = provider.Entities?.find((e) => e.Name === ORDER_HEADER_ENTITY)?.Fields ?? [];
+        return ORDER_RECURRING_COPIES.map((c) => c.Order).filter((name) => fields.some((f) => f.Name === name));
+    }
+
+    /**
+     * The MRR and ARR values to copy from an order row: each recurring total the row carries as a
+     * finite number. A copy, never a calculation: ARR is orders' annual figure, not twelve times MRR here.
+     */
+    private recurringCopies(row: OrderTotalRow | undefined): { Deal: 'MRR' | 'ARR'; Value: number }[] {
+        const out: { Deal: 'MRR' | 'ARR'; Value: number }[] = [];
+        for (const c of ORDER_RECURRING_COPIES) {
+            const value = finiteOrNull(row?.[c.Order]);
+            if (value !== null) out.push({ Deal: c.Deal, Value: value });
+        }
+        return out;
     }
 
     /* ── The close lock (L-17, master plan §7.3) ────────────────────────────── */
@@ -2818,6 +2878,18 @@ export class DealEntityServer extends DealEntity {
             'use Expected Close Date. If this page was open while the deal was closed or reopened, ' +
             'reload it and try again. Nothing was changed.'
         );
+    }
+
+    /**
+     * Refuses a typed Amount, MRR or ARR on a deal whose saved row says its money comes from the order
+     * (golive #485). Keyed on the PERSISTED `AmountIsComputed`, the rule the deal form's
+     * `FieldEditable` reads, so a header-only deal can take a typed figure and its first products in
+     * one save; `refreshAmountFromOrder` then replaces the figure.
+     */
+    private orderPricedEditRefusal(): string | null {
+        const dirty = DEAL_ORDER_PRICED_FIELDS.filter((name) => this.GetFieldByName(name)?.Dirty === true);
+        const persisted = this.GetFieldByName('AmountIsComputed')?.OldValue as boolean | null | undefined;
+        return DealOrderPricedEditRefusal(this.IsSaved ? persisted : null, dirty, DealFieldLabel);
     }
 
     /**

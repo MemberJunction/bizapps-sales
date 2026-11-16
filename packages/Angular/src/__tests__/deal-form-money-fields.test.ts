@@ -147,3 +147,38 @@ describe('the fields the Commercial section treats as money', () => {
         expect(p.Fields.find((f) => f.name === 'CurrencyID')?.link).toBe('Record');
     });
 });
+
+describe('Amount, MRR and ARR on a deal with products (golive #485)', () => {
+    function withPricing(computed: boolean | null, editMode = true) {
+        const p = panel({ editMode });
+        const record = (p as unknown as { Record: Record<string, unknown> }).Record;
+        Object.defineProperty(p, 'Record', {
+            value: {
+                ...record,
+                AmountIsComputed: computed,
+                GetFieldByName: (name: string) => (name === 'AmountIsComputed' ? { OldValue: computed } : undefined),
+            },
+            configurable: true,
+        });
+        return p;
+    }
+
+    it('renders all three read-only once the order prices the deal', () => {
+        const p = withPricing(true);
+        for (const name of ['Amount', 'MRR', 'ARR']) {
+            expect(p.FieldEditable(name), name).toBe(false);
+        }
+        expect(p.DrawsOwnMoney(MRR)).toBe(true);
+    });
+
+    it('leaves them editable on a deal without products', () => {
+        const p = withPricing(false);
+        for (const name of ['Amount', 'MRR', 'ARR']) {
+            expect(p.FieldEditable(name), name).toBe(true);
+        }
+    });
+
+    it('does not touch other Commercial fields', () => {
+        expect(withPricing(true).FieldEditable('TermMonths')).toBe(true);
+    });
+});
