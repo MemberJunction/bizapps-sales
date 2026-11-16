@@ -129,8 +129,15 @@ describe('the currency a new deal is born with', () => {
         expect(d.Views).toEqual([]);
     });
 
-    it('does not fill a currency somebody cleared on a saved deal', async () => {
+    it('fills an empty currency on a saved open deal too (golive #486)', async () => {
         const d = deal({ IsSaved: true, functionalCurrencyCode: 'GBP' });
+        await d.defaultCurrencyOnCreate();
+        expect(d.CurrencyID).toBe(GBP_ID);
+    });
+
+    it('leaves a locked deal alone', async () => {
+        const d = deal({ IsSaved: true, functionalCurrencyCode: 'GBP' });
+        Object.defineProperty(d, '_lockedAtSave', { value: true });
         await d.defaultCurrencyOnCreate();
         expect(d.CurrencyID).toBeNull();
         expect(d.Views).toEqual([]);

@@ -82,6 +82,7 @@ import { FindUnansweredSubscriptionLines } from './subscription-choice.js';
 import { KeptOnDealNote, SendDealScheduleToOrder, StatusIsWon } from './deal-schedule-to-order.js';
 import { OrdersIsInstalled } from './orders-availability.js';
 import { VetoReader } from './veto-reader.js';
+import { PipelineDefaultTermMonths, PlanCommercialDefaults } from './deal-commercial-defaults.js';
 import {
     DealDeleteRefusal,
     DeleteDealChildRows,
@@ -190,6 +191,7 @@ interface PipelineCompanyLinkRow {
 }
 
 const STAGE_ENTITY = 'MJ_BizApps_Sales: Pipeline Stages';
+const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const ORDER_HEADER_ENTITY = 'MJ_BizApps_Orders: Order Headers';
 
 /** The columns the order lookup selects for the amount cache. */
@@ -651,8 +653,12 @@ export class DealEntityServer extends DealEntity {
         /**
          * AFTER the company check, because the company is what decides the currency, and OUTSIDE the
          * try above, because this one may not refuse a save. See {@link defaultCurrencyOnCreate}.
+         *
+         * The term and start date fill the same way (golive #486): only when empty, never on a locked
+         * deal, never refusing the save. See `deal-commercial-defaults.ts`.
          */
         await this.defaultCurrencyOnCreate();
+        await this.defaultEmptyTermAndStart();
         this.defaultCreationDateOnCreate();
 
         /**
@@ -3733,9 +3739,9 @@ export class DealEntityServer extends DealEntity {
      *
      * ── THE THREE THINGS IT WILL NOT DO ────────────────────────────────────────────────────────
      *
-     * 1. NOT ON UPDATE. `IsSaved` returns early: a default belongs to birth. A saved deal whose
-     *    currency is null is one somebody cleared, and re-filling it behind them is a write nobody
-     *    asked for -- the same reasoning `seedOwnerOnCreate` states for the owner.
+     * 1. NOT ON A LOCKED DEAL. A closed deal is the record of what was agreed. Until golive #486 this
+     *    ran only at create; older and migrated deals then kept no currency, so it now fills an empty
+     *    currency on every save of an open deal.
      * 2. NOT OVER A CALLER'S CHOICE. A supplied `CurrencyID` is left exactly as it is.
      * 3. NEVER REFUSES THE SAVE. Every failure path returns and leaves the field null, which is the
      *    state this method found. It sits outside the stamp try/catch for that reason: a *stamp* that
@@ -3745,8 +3751,9 @@ export class DealEntityServer extends DealEntity {
      * Absence of accounting is therefore ordinary, not exceptional: a host without it creates deals
      * with no currency exactly as it did before this existed.
      */
+    // Named for where it started; since golive #486 it also fills an empty currency on update.
     private async defaultCurrencyOnCreate(): Promise<void> {
-        if (this.IsSaved || this.CurrencyID) {
+        if (this._lockedAtSave || this.CurrencyID) {
             return;
         }
         if (!this.CompanyID) {
@@ -3758,6 +3765,41 @@ export class DealEntityServer extends DealEntity {
         if (currencyID) {
             this.CurrencyID = currencyID;
         }
+    }
+
+    /**
+     * Fills an empty `TermMonths` from the pipeline's Close Won Policy and an empty `StartDate` from
+     * `ExpectedCloseDate` (golive #486). Never on a locked deal, never over a value, never refusing the
+     * save: a pipeline that cannot be read leaves the term empty.
+     */
+    private async defaultEmptyTermAndStart(): Promise<void> {
+        if (this._lockedAtSave) {
+            return;
+        }
+        const pipelineTerm = this.TermMonths == null ? await this.pipelineDefaultTermMonths() : null;
+        const plan = PlanCommercialDefaults(
+            { TermMonths: this.TermMonths, StartDate: this.StartDate, ExpectedCloseDate: this.ExpectedCloseDate },
+            pipelineTerm,
+        );
+        if (plan.TermMonths !== undefined) this.TermMonths = plan.TermMonths;
+        if (plan.StartDate !== undefined) this.StartDate = plan.StartDate;
+    }
+
+    /** The deal's pipeline's Close Won Policy `TermMonths`, or null when there is none to read. */
+    private async pipelineDefaultTermMonths(): Promise<number | null> {
+        if (!this.PipelineID || !GUID_SHAPE.test(this.PipelineID)) {
+            return null;
+        }
+        const result = await (this.ProviderToUse as unknown as IRunViewProvider).RunView<{ CloseWonPolicy: string | null }>(
+            {
+                EntityName: PIPELINE_ENTITY,
+                ExtraFilter: `ID='${this.PipelineID}'`,
+                ResultType: 'simple',
+                Fields: ['CloseWonPolicy'],
+            },
+            this.ContextCurrentUser,
+        );
+        return result.Success ? PipelineDefaultTermMonths((result.Results ?? [])[0]?.CloseWonPolicy) : null;
     }
 
     /**
