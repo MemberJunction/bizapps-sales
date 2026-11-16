@@ -24,6 +24,12 @@ import {
 } from '@mj-biz-apps/sales-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { DealRelatedLinks, DealRelatedLinksKey } from './deal-related-links';
+import {
+    ContractLookupParams,
+    ContractLookupResult,
+    NoExecutedAgreementWarning,
+    type OrderAgreementWarning,
+} from './executed-agreement-warning';
 import { DealCloseDay } from './deal-close-day';
 import { IsFieldReadable } from './field-readable';
 import { WeightedAmount } from './deal-weighted-amount';
@@ -127,6 +133,22 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
                             <span class="mjs-deal-hero__chip" data-tone="warning">
                                 <i class="fa-solid fa-lock"></i> Closed
                             </span>
+                        }
+                        <!-- A won deal whose contract has no file marked as its executed agreement
+                             (golive #490). The same rule the order header warns with; the button opens
+                             the contract, where the agreement is uploaded and marked. Warn only. -->
+                        @if (AgreementWarning; as warning) {
+                            <span class="mjs-deal-hero__chip" data-tone="warning" [title]="warning.Detail"
+                                  data-testid="deal-hero-no-agreement">
+                                <i class="fa-solid fa-file-circle-exclamation" aria-hidden="true"></i> {{ warning.Label }}
+                            </span>
+                            @if (AgreementContractID) {
+                                <button type="button" class="mjs-deal-hero__chip-action" [title]="warning.Detail"
+                                        data-testid="deal-hero-open-contract"
+                                        (click)="OpenAgreementContract($event)">
+                                    Open contract
+                                </button>
+                            }
                         }
                     </div>
                 </div>
@@ -358,6 +380,11 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
             background: var(--mj-status-warning-bg); color: var(--mj-status-warning-text);
             border-color: var(--mj-status-warning);
         }
+        .mjs-deal-hero__chip-action {
+            border: 0; padding: 2px 4px; background: transparent; color: var(--mj-text-link);
+            cursor: pointer; font: inherit; font-size: var(--mj-text-xs); font-weight: 650;
+        }
+        .mjs-deal-hero__chip-action:hover { text-decoration: underline; }
         /* The chip row brings its own styling — design tokens, its own class prefix — so the hero
            only places it. 'display: contents' rather than a margin because the hero is a COLUMN FLEX
            WITH A GAP: a host box that renders nothing still takes a gap, so every open deal (no
@@ -486,6 +513,12 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     }
     public LockNotice: string | null = null;
     public StaleAmountNotice: string | null = null;
+    /** "No executed agreement" on a won deal whose contract awaits it (golive #490); null otherwise. */
+    public AgreementWarning: OrderAgreementWarning | null = null;
+    /** The contract the warning is about, which its button opens. */
+    public AgreementContractID: string | null = null;
+    /** Guards against a slower contract read for a previous record landing after the form moved on. */
+    private agreementGeneration = 0;
     /** The `HidePipelines` setting, read in `ngOnInit`. */
     public HidePipelines = false;
 
@@ -766,6 +799,9 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     public OpenOwner(event: MouseEvent): void {
         this.open(event, MJS_FOREIGN_ENTITIES.Employee, this.Record?.OwnerEmployeeID);
     }
+    public OpenAgreementContract(event: MouseEvent): void {
+        this.open(event, MJS_FOREIGN_ENTITIES.Contract, this.AgreementContractID);
+    }
 
     private open(event: MouseEvent, entity: string, id: string | null | undefined): void {
         if (!id) return;
@@ -782,6 +818,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         await RefreshDealCurrencyCodes();
         await this.resolveLock();
         await this.resolveReversals();
+        await this.resolveAgreementWarning();
         await this.resolveStale();
         this.cdr.detectChanges();
     }
@@ -825,6 +862,33 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         }
         if (generation === this.reversalsGeneration) {
             this.reversalOrderIDs = ids;
+        }
+    }
+
+    /**
+     * The "No executed agreement" warning (golive #490), through the same contract lookup and rule as
+     * the order header (`executed-agreement-warning.ts`). Read only for a saved, won deal; a deal with
+     * no contract gets no warning here, only the order does. A refused or failed read warns nothing.
+     */
+    private async resolveAgreementWarning(): Promise<void> {
+        const generation = ++this.agreementGeneration;
+        const deal = { DealID: this.Record?.IsSaved ? this.Record.ID : null, ContractID: this.Record?.ContractID };
+        const lookup = this.IsWon ? ContractLookupParams(deal) : null;
+        let warning: OrderAgreementWarning | null = null;
+        let contractID: string | null = null;
+        if (lookup) {
+            try {
+                const result = await RunView.FromMetadataProvider(this.FormComponent?.ProviderToUse ?? Metadata.Provider).RunView(lookup);
+                const found = ContractLookupResult(result);
+                warning = NoExecutedAgreementWarning({ ...deal, DealIsWon: true, ...found }, 'deal');
+                contractID = found.Contract?.ID ?? null;
+            } catch {
+                warning = null;
+            }
+        }
+        if (generation === this.agreementGeneration) {
+            this.AgreementWarning = warning;
+            this.AgreementContractID = warning ? contractID : null;
         }
     }
 
