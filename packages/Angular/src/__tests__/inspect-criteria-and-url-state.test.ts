@@ -31,7 +31,6 @@ describe('InspectCriteriaWhere', () => {
     });
 
     it.each<[CriteriaInspectKey, string]>([
-        ['closing', "ExpectedCloseDate >= '2026-08-15' AND ExpectedCloseDate <= '2026-09-14'"],
         ['commit', `${PIPE} AND ForecastCategoryTypeID IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInCommit = 1)`],
         ['best', `${PIPE} AND (ForecastCategoryTypeID IS NULL OR ForecastCategoryTypeID NOT IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInCommit = 1)) AND ForecastCategoryTypeID IN (SELECT ID FROM [s].[vwForecastCategoryTypes] WHERE IncludeInBestCase = 1)`],
         ['weighted', PIPE],
@@ -47,7 +46,7 @@ describe('InspectCriteriaWhere', () => {
     });
 
     it('splits the date buckets where the roster filter does, near month end too', () => {
-        expect(InspectDateBounds('2026-08-28')).toEqual({ WeekEnd: '2026-09-04', MonthEnd: '2026-08-31', LaterFrom: '2026-09-04', ClosingEnd: '2026-09-27' });
+        expect(InspectDateBounds('2026-08-28')).toEqual({ WeekEnd: '2026-09-04', MonthEnd: '2026-08-31', LaterFrom: '2026-09-04' });
         // FilterInspect reads the same bounds: a deal on the week's last day is in "week", not "later".
         const deal = { IsOpen: true, ExpectedCloseDate: '2026-09-04' } as Parameters<typeof FilterInspect>[0][number];
         expect(FilterInspect([deal], 'week', '2026-08-28')).toHaveLength(1);
@@ -77,8 +76,14 @@ describe('InspectCriteriaWhere with a period and filters', () => {
             .toMatch(/^DealStatusTypeID IN \(SELECT ID FROM \[s\]\.\[vwDealStatusTypes\] WHERE IsClosed = 1\) AND ActualCloseDate >= /);
     });
 
-    it('leaves the attention slices and the default list unbounded by the period', () => {
-        for (const key of ['slipped', 'noowner', 'nodate', 'closing'] as const) {
+    it('bounds the default list by the period alone: open deals expected to close in it (bc-aidp-next-golive#489)', () => {
+        expect(InspectCriteriaWhere('closing', TABLES, today, { Window: Q3 }))
+            .toBe(`${OPEN_IN_FORECAST} AND ExpectedCloseDate >= '2026-07-01' AND ExpectedCloseDate <= '2026-09-30'`);
+        expect(InspectCriteriaWhere('closing', TABLES, today), 'All time: every open deal').toBe(OPEN_IN_FORECAST);
+    });
+
+    it('leaves the attention slices unbounded by the period', () => {
+        for (const key of ['slipped', 'noowner', 'nodate'] as const) {
             expect(InspectCriteriaWhere(key, TABLES, today, { Window: Q3 })).toBe(InspectCriteriaWhere(key, TABLES, today));
         }
     });

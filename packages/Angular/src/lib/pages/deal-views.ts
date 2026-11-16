@@ -270,8 +270,9 @@ function windowParts(column: string, window: PeriodWindow | undefined): string[]
  *    (`Pipeline.IncludeInForecast`), unless the Pipeline filter names pipelines, which includes them;
  *  - forecast slices read the category's `IncludeInCommit` / `IncludeInBestCase` / `IncludeInPipeline`
  *    flags; a deal with no category counts toward the pipeline, as the roster's `ISNULL(…, 1)` does;
- *  - the period bounds open slices on `ExpectedCloseDate` and `won` / `closed` on `ActualCloseDate`
- *    (bc-aidp-next-golive#350). The attention slices and `closing` ignore it;
+ *  - the period bounds open slices, the default `closing` list included (bc-aidp-next-golive#489), on
+ *    `ExpectedCloseDate`, and `won` / `closed` on `ActualCloseDate` (bc-aidp-next-golive#350). The
+ *    attention slices ignore it;
  *  - date buckets compare `ExpectedCloseDate` with the same business-day bounds the buckets use;
  *  - the filter bar's lists narrow every slice.
  */
@@ -305,7 +306,8 @@ function sliceParts(key: Exclude<CriteriaInspectKey, 'won' | 'closed'>, tables: 
     const bounds = InspectDateBounds(today);
     switch (key) {
         case 'closing':
-            return [`ExpectedCloseDate >= ${sqlString(today)}`, `ExpectedCloseDate <= ${sqlString(bounds.ClosingEnd)}`];
+            // Open deals expected to close in the period: the period itself is the bound (bc-aidp-next-golive#489).
+            return [];
         case 'commit':
             return [inPipeline, category('IncludeInCommit = 1')];
         case 'best':
