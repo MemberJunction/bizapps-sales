@@ -20,6 +20,8 @@ import { CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions, ty
 import { RegisterClassEx } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import { PartyFieldComponent, type PartyKind } from '@mj-biz-apps/common-ng';
+import { MJSPromotePartyDialog, type PromoteKind } from './promote-party-dialog.component';
+import { CanCreateEntity } from '../data/promote-party';
 import { BaseFormPanel, BaseFormsModule, type FormContext } from '@memberjunction/ng-base-forms';
 import {
     EntityViewerModule,
@@ -45,9 +47,12 @@ import { LinkedParties, type ActivityLinkFields, type LinkedParty } from '../act
 import { RelatedRecordTarget, SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import {
+    CHOOSE_PIPELINE_MESSAGE,
     CompanyDefaultPipeline,
+    CompanyHasPipeline,
     CompanyLabel,
     InitialCompanyID,
+    NoPipelineMessage,
     OrderPipelinesByCompany,
     PipelineCompanies,
     PipelineLabel,
@@ -748,7 +753,17 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
      * it is.
      */
     public FieldTrackKey(f: DealFieldSpec): string {
-        return CREATION_PARTY_CONTACT_FIELDS.includes(f.name) ? `${f.name}:${this.contactRenderKey()}` : f.name;
+        if (CREATION_PARTY_CONTACT_FIELDS.includes(f.name)) {
+            return `${f.name}:${this.contactRenderKey()}`;
+        }
+        // Keyed on its OWN signal, which only a promotion bumps. Choosing an account must NOT rebuild
+        // this field -- that would tear the picker down under the rep mid-pick, which is what
+        // `deal-account-default-contacts` pins. A promotion is the one case where it has to re-read,
+        // because the row it would have shown did not exist when it last rendered.
+        if (f.name === 'AccountID') {
+            return `AccountID:${this.accountRenderKey()}`;
+        }
+        return f.name;
     }
 
     /**
@@ -758,6 +773,86 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
     public readonly AccountDefaultsError = signal<string | null>(null);
     public readonly BillComCustomerWarning = signal<string | null>(null);
     private readonly contactRenderKey = signal(0);
+    /** `protected`: the party panel bumps it when a promotion adds the row the picker could not offer. */
+    protected readonly accountRenderKey = signal(0);
+
+    // ── Reaching a record the picker cannot offer (D-PR2 / D-PR3) ──────────────
+
+    /** Which promotion the dialog is doing; meaningless while `PromoteOpen` is false. */
+    public PromoteKind: PromoteKind = 'Account';
+    public PromoteOpen = false;
+    /** The field the dialog was opened from, so the promoted record lands in the right one. */
+    private promoteField: string | null = null;
+
+    /**
+     * `'account'` for the account field, `'contact'` for either contact field, null for anything
+     * else. Derived from the field's party Kind rather than its name, so a fourth party field added
+     * to the spec list gets the affordance without this method being touched.
+     */
+    public PromotableFieldKind(f: DealFieldSpec): 'account' | 'contact' | null {
+        if (!f.party) return null;
+        const kind = f.party.Kind === 'Organization' ? 'account' : 'contact';
+        // The dialog can promote or CREATE, so offering the route to someone who may do neither sends
+        // them to a server refusal. Same rule as the promote card (D-PR4): promotion rides on the
+        // create permission rather than carrying one of its own.
+        const child = kind === 'account' ? MJS_ENTITIES.SalesAccount : MJS_ENTITIES.SalesContact;
+        return this.CanCreateChild(child) ? kind : null;
+    }
+
+    /** Whether this user may create the child entity. Replaced in tests. */
+    public CanCreateChild: (entityName: string) => boolean = (entityName) => CanCreateEntity(entityName);
+
+    public PromoteLinkFor(f: DealFieldSpec): string {
+        // Names the FIELD the rep is looking at, then where to look and what they can add. The
+        // field's own label is Account, not Sales Account, so the link matching it reads as part of
+        // the field rather than as a sentence about the data model.
+        return this.PromotableFieldKind(f) === 'account'
+            ? "Can't find the Account? Search Organizations / Add Account."
+            : "Can't find the Contact? Search People / Add Contact.";
+    }
+
+    public OpenPromote(f: DealFieldSpec): void {
+        const kind = this.PromotableFieldKind(f);
+        if (!kind) return;
+        this.PromoteKind = kind === 'account' ? 'Account' : 'Contact';
+        this.promoteField = f.name;
+        this.PromoteOpen = true;
+    }
+
+    public ClosePromote(): void {
+        this.PromoteOpen = false;
+        this.promoteField = null;
+    }
+
+    /**
+     * The promoted record's ID IS its Organization's or Person's ID (IsA), so it can be stored
+     * straight into the field the rep opened the dialog from.
+     *
+     * It then runs the SAME field-change path a normal pick runs, rather than re-deriving what
+     * choosing an account means: filling the deal's empty contacts and the Bill.com check both live
+     * there (#254). The account field is re-keyed because the row it would now show did not exist
+     * when it last rendered.
+     */
+    public async OnPromoted(id: string): Promise<void> {
+        const field = this.promoteField;
+        this.PromoteOpen = false;
+        this.promoteField = null;
+        if (!field || !this.Record) return;
+        this.Record.Set(field, id);
+        // RE-KEY WHICHEVER FIELD IT WAS. The reason given for the account field applies just as much
+        // to a contact: the row the picker would now show did not exist when it last rendered, so
+        // without this a contact promoted or created from the dialog can sit blank in its own picker
+        // until the form reloads. `OnFieldValueChange` deliberately does NOT bump these — tearing a
+        // picker down mid-pick is what `deal-account-default-contacts` pins — so a promotion is the
+        // one caller that must.
+        if (field === 'AccountID') {
+            this.accountRenderKey.update((k) => k + 1);
+        } else if (CREATION_PARTY_CONTACT_FIELDS.includes(field)) {
+            this.contactRenderKey.update((k) => k + 1);
+        }
+        await this.OnFieldValueChange({ FieldName: field });
+    }
+
 
     public DrawsOwnMoney(f: DealFieldSpec): boolean {
         return f.currency === true && !(this.EditMode && this.FieldEditable(f.name));
@@ -1010,6 +1105,25 @@ interface DealFieldSpec {
 const EMPTY_STATE_STYLES =
     '.mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }';
 
+/**
+ * The link under a party field that opens the promote dialog. A button, not an anchor: it performs an
+ * action rather than going somewhere, which is also what keeps it reachable by keyboard for free.
+ */
+const PROMOTE_LINK_STYLES = `
+.mjs-promote-link {
+    display: block;
+    margin-top: var(--mj-space-1);
+    padding: 0;
+    background: none;
+    border: 0;
+    font-size: var(--mj-text-sm);
+    color: var(--mj-brand-primary);
+    cursor: pointer;
+    text-align: left;
+}
+.mjs-promote-link:hover { text-decoration: underline; }
+`;
+
 const FIELD_STYLES = `
     .mjs-fields {
         display: grid;
@@ -1200,7 +1314,11 @@ const FIELD_STYLES = `
                                 <div class="l">Account</div>
                                 <div class="v">
                                     @if (Record.AccountID && G('Account')) {
-                                        <button type="button" class="mjs-ov-link" (click)="OpenAccount($event)">{{ G('Account') }}</button>
+                                        <button type="button" class="mjs-ov-link"
+                                            [mjRecordLink]="Record"
+                                            FieldName="AccountID"
+                                            [HandleClick]="false"
+                                            (click)="OpenAccount($event)">{{ G('Account') }}</button>
                                     } @else { {{ G('Account') || '—' }} }
                                 </div>
                             </div>
@@ -1208,7 +1326,11 @@ const FIELD_STYLES = `
                                 <div class="l">Owner</div>
                                 <div class="v">
                                     @if (Record.OwnerEmployeeID && G('OwnerEmployee')) {
-                                        <button type="button" class="mjs-ov-link" (click)="OpenOwner($event)">{{ G('OwnerEmployee') }}</button>
+                                        <button type="button" class="mjs-ov-link"
+                                            [mjRecordLink]="Record"
+                                            FieldName="OwnerEmployeeID"
+                                            [HandleClick]="false"
+                                            (click)="OpenOwner($event)">{{ G('OwnerEmployee') }}</button>
                                     } @else { {{ G('OwnerEmployee') || 'No owner' }} }
                                 </div>
                             </div>
@@ -1679,8 +1801,8 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     selector: 'mjs-deal-pipeline-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent],
-    styles: [FIELD_STYLES],
+    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent, MJSPromotePartyDialog],
+    styles: [FIELD_STYLES, PROMOTE_LINK_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="pipeline" [SectionName]="HidePipelines() ? 'Stage' : 'Pipeline'" Icon="fa-solid fa-diagram-project"
             [Form]="FormComponent" [FormContext]="FormContext">
@@ -1690,7 +1812,20 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                         @if (f.party) {
                             <bizapps-party-field [Record]="Record" [FieldName]="f.name" [Kind]="f.party.Kind" [QueryName]="f.party.QueryName"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext"
+                                [AllowCreate]="false"
                                 (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></bizapps-party-field>
+                            @if (EditMode && FieldEditable(f.name) && PromotableFieldKind(f)) {
+                                <!-- The picker only offers organizations and people that ALREADY have a
+                                     sales row, because it cannot mark a row unselectable (PL1/PL3). This
+                                     is the way to the ones it leaves out, so the rep reaches the existing
+                                     record instead of creating a second one (golive#259). -->
+                                <!-- A STATIC testid, scoped by the enclosing data-field. Built as
+                                     'deal-promote-' + kind it was greppable by nobody and invisible to
+                                     assert-harness-selectors, which collects literal data-testid only. -->
+                                <button type="button" class="mjs-promote-link"
+                                        data-testid="deal-promote-party"
+                                        (click)="OpenPromote(f)">{{ PromoteLinkFor(f) }}</button>
+                            }
                         } @else {
                             <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
@@ -1728,18 +1863,33 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                      pipeline, where it would offer no choice and SetPipeline fills the company.
                      With pipelines hidden (the HidePipelines setting) this is the only choice: the
                      company's default pipeline follows it, and the Pipeline control below is gone. -->
-                @if (EditMode && FieldEditable('PipelineID') && CompanyOptions.length > 1) {
+                @if (EditMode && FieldEditable('PipelineID') && ShowCompanyPicker) {
                     <div class="mjs-field" data-field="PipelineCompany">
                         <div class="mj-forms-field mj-forms-field--editing">
                             <label class="mj-forms-field-label" [attr.for]="FieldIdPrefix + '-company'">Company</label>
                             <select [id]="FieldIdPrefix + '-company'" [ngModel]="SelectedCompanyID" data-testid="deal-pipeline-company"
                                     (ngModelChange)="SetCompany($event)"
                                     [compareWith]="CompareID">
+                                @if (!CompanyIsListed) {
+                                    <option [ngValue]="Record.CompanyID" disabled>{{ DealCompanyName ?? 'Current company' }} (no pipeline)</option>
+                                }
                                 @for (c of CompanyOptions; track c.CompanyID) {
                                     <option [ngValue]="c.CompanyID">{{ CompanyText(c) }}</option>
                                 }
                             </select>
                         </div>
+                        <!-- A company with no pipeline is left out of the list, so say so: a rep
+                             looking for one learns why it is missing and whom to ask. -->
+                        <div class="mjs-hint" data-testid="deal-company-picker-note">
+                            Only companies with a pipeline are listed. Ask a Sales admin to link a pipeline to a missing company.
+                        </div>
+                    </div>
+                }
+                <!-- Says why the deal has no pipeline and what to do, before a save refuses it. The
+                     save's own refusal says the same, through DealFormComponentExtended. -->
+                @if (NoPipelineHint; as hint) {
+                    <div class="mjs-hint mjs-hint--warning" role="status" data-testid="deal-no-pipeline-hint">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ hint }}
                     </div>
                 }
 
@@ -1793,7 +1943,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                     <option [ngValue]="st.ID">{{ st.Name }}</option>
                                 }
                             </select>
-                            @if (!StageIsEditable) {
+                            @if (!StageIsEditable && !NoPipelineHint) {
                                 <!-- Says which of the two it is. An empty disabled control otherwise
                                      reads as "broken" whether the pipeline is unset or has no stages. -->
                                 <div class="mjs-hint" data-testid="stage-hint">
@@ -1952,6 +2102,12 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 </div>
             </div>
         </mj-collapsible-panel>
+        @if (PromoteOpen) {
+            <mjs-promote-party-dialog
+                [PromoteKind]="PromoteKind"
+                (PartyChosen)="OnPromoted($event)"
+                (Closed)="ClosePromote()"></mjs-promote-party-dialog>
+        }
     `,
 })
 export class MJSDealPipelinePanel extends MJSDealFieldPanel {
@@ -1970,6 +2126,9 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     /** Signals for the same reason `statuses` is one — see the note above it. */
     private readonly pipelines = signal<PipelineOption[]>([]);
     private readonly stages = signal<PipelineStageOption[]>([]);
+
+    /** Whether the pipelines have loaded, so an empty list is not read as "no company has a pipeline". `?.` for the `Object.create` suites. */
+    private readonly pipelinesLoaded = signal(false);
 
     /**
      * The `HidePipelines` setting. A signal for the reason `statuses` is one. Starts from the engine when
@@ -2003,6 +2162,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         const loadedStages = valueOf(settled[3] as PromiseSettledResult<PipelineStageOption[]>);
         if (loadedPipelines) {
             this.pipelines.set(loadedPipelines);
+            this.pipelinesLoaded?.set(true);
         }
         if (loadedStages) {
             this.stages.set(loadedStages);
@@ -2026,6 +2186,46 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     /** Every company with a pipeline linked to it, default company first. */
     public get CompanyOptions(): PipelineCompany[] {
         return PipelineCompanies(this.offeredPipelines);
+    }
+
+    /** Whether the deal's company is in the Company list, which holds only companies with a pipeline. */
+    public get CompanyIsListed(): boolean {
+        const id = this.Record?.CompanyID;
+        return !id || CompanyHasPipeline(this.offeredPipelines, id);
+    }
+
+    /**
+     * The Company picker shows when there is a choice to make: several companies, or a deal whose company
+     * has no pipeline while another company has one. Without the second, a deal on a company with no
+     * pipeline could not be moved off it when only one other company has a pipeline.
+     */
+    public get ShowCompanyPicker(): boolean {
+        return this.CompanyOptions.length > 1 || (!this.CompanyIsListed && this.CompanyOptions.length > 0);
+    }
+
+    /** The deal's company name, from the deal or the pipeline links; null when neither has it. */
+    public get DealCompanyName(): string | null {
+        const id = this.Record?.CompanyID ?? null;
+        const listed = this.CompanyOptions.find((c) => c.CompanyID.toLowerCase() === String(id ?? '').toLowerCase());
+        return this.Record?.Company || listed?.CompanyName || null;
+    }
+
+    /**
+     * Why the deal has no pipeline, when that is something other than an unmade choice in a visible
+     * Pipeline field: its company has none, no company has one, or pipelines are hidden. Null while the
+     * deal has a pipeline, outside edit mode, and until the pipelines load.
+     */
+    public get NoPipelineHint(): string | null {
+        if (!this.Record || this.Record.PipelineID || !this.EditMode || !this.pipelinesLoaded?.()) return null;
+        const companyID = this.Record.CompanyID || null;
+        const message = NoPipelineMessage({
+            HidePipelines: this.HidePipelines(),
+            CompanyID: companyID,
+            CompanyName: companyID ? this.DealCompanyName : null,
+            CompanyHasPipeline: CompanyHasPipeline(this.offeredPipelines, companyID),
+            OtherCompanyHasPipeline: this.CompanyOptions.some((c) => c.CompanyID.toLowerCase() !== String(companyID ?? '').toLowerCase()),
+        });
+        return message === CHOOSE_PIPELINE_MESSAGE ? null : message;
     }
 
     /**
@@ -2646,8 +2846,8 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
     selector: 'mjs-deal-party-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent],
-    styles: [FIELD_STYLES],
+    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent, MJSPromotePartyDialog],
+    styles: [FIELD_STYLES, PROMOTE_LINK_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="party" SectionName="Account &amp; people" Icon="fa-solid fa-building"
             [Form]="FormComponent" [FormContext]="FormContext">
@@ -2677,7 +2877,20 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                         } @else if (f.party) {
                             <bizapps-party-field [Record]="Record" [FieldName]="f.name" [Kind]="f.party.Kind" [QueryName]="f.party.QueryName"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext"
+                                [AllowCreate]="false"
                                 (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></bizapps-party-field>
+                            @if (EditMode && FieldEditable(f.name) && PromotableFieldKind(f)) {
+                                <!-- The picker only offers organizations and people that ALREADY have a
+                                     sales row, because it cannot mark a row unselectable (PL1/PL3). This
+                                     is the way to the ones it leaves out, so the rep reaches the existing
+                                     record instead of creating a second one (golive#259). -->
+                                <!-- A STATIC testid, scoped by the enclosing data-field. Built as
+                                     'deal-promote-' + kind it was greppable by nobody and invisible to
+                                     assert-harness-selectors, which collects literal data-testid only. -->
+                                <button type="button" class="mjs-promote-link"
+                                        data-testid="deal-promote-party"
+                                        (click)="OpenPromote(f)">{{ PromoteLinkFor(f) }}</button>
+                            }
                         } @else {
                             <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
@@ -2698,6 +2911,12 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                 }
             </div>
         </mj-collapsible-panel>
+        @if (PromoteOpen) {
+            <mjs-promote-party-dialog
+                [PromoteKind]="PromoteKind"
+                (PartyChosen)="OnPromoted($event)"
+                (Closed)="ClosePromote()"></mjs-promote-party-dialog>
+        }
     `,
 })
 export class MJSDealPartyPanel extends MJSDealFieldPanel {

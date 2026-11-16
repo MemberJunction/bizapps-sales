@@ -96,7 +96,10 @@ export interface CloseWonTaskTarget {
     RecordID: string;
 }
 
-/** Who the task is routed to. `TaskAssignment` is polymorphic; in practice this is a Person. */
+/**
+ * Who the task is routed to. `TaskAssignment` is polymorphic: a Person, or an MJ role (`MJ: Roles`),
+ * which the tasks app expands to every holder of the role (bc-aidp-next-golive#442).
+ */
 export interface CloseWonTaskAssignee {
     EntityName: string;
     RecordID: string;
@@ -104,8 +107,8 @@ export interface CloseWonTaskAssignee {
      * The `TaskRole` this assignee holds — `Primary`, `Reviewer`, `Observer` as seeded.
      *
      * An ID, not a name, and optional because `TaskAssignment.RoleID` is nullable. Note this is a
-     * RESPONSIBILITY role ("who owns this"), not an organisational one — nothing in tasks models
-     * "finance/AR" as a group, which is why the assignee itself carries the routing.
+     * RESPONSIBILITY role ("who owns this"), not an organisational one. A group such as finance is
+     * routed through the assignee itself, as an MJ role assignee, never through this field.
      */
     RoleID?: string;
 }
@@ -152,11 +155,11 @@ export interface CloseWonTaskInput {
     /**
      * Who the task is routed to. OPTIONAL, and its absence is the interesting case.
      *
-     * Nothing in tasks or common models "finance" as a group, and `TaskAssignment` needs a CONCRETE
-     * record — pointing it at a role would never surface in anyone's task list, because nothing expands
-     * a role-typed assignee. So the assignee is deployment configuration, and when it is unset the task
-     * is still created and linked but left UNROUTED with an issue naming the missing key. A guessed
-     * person is worse than an unassigned task: it looks routed and nobody is actually looking at it.
+     * The assignee is deployment configuration: a person, or an MJ role whose holders all see the task
+     * (the tasks app expands a role assignee to its members; bc-aidp-next-golive#442). When it is unset
+     * the task is still created and linked but left UNROUTED with an issue naming the missing key. A
+     * guessed person is worse than an unassigned task: it looks routed and nobody is actually looking
+     * at it.
      */
     Assignee?: CloseWonTaskAssignee;
     AssignedByPersonID?: string;
@@ -219,7 +222,7 @@ export interface CloseWonTasksPolicyConfig {
      * JSON is ignored rather than mis-honoured. What remains is the part that genuinely differs per
      * deployment -- WHO the work is routed to.
      */
-    /** The assignee's entity NAME — in practice `'MJ_BizApps_Common: People'`. */
+    /** The assignee's entity NAME: `'MJ_BizApps_Common: People'`, or `'MJ: Roles'` for a shared queue. */
     AssigneeEntityName?: string | null;
     /** The assignee record. NULL by default: an unconfigured deployment routes nothing. */
     AssigneeRecordID?: string | null;
@@ -338,28 +341,47 @@ export function ReadCloseWonTaskConfig(policy: unknown): CloseWonTasksPolicyConf
 /** The entity a pipeline's own assignee column points at. */
 export const CLOSE_WON_ASSIGNEE_ENTITY = 'MJ_BizApps_Common: People';
 
+/** The entity a pipeline's assignee ROLE column points at: an MJ role, every holder of which gets the task. */
+export const CLOSE_WON_ASSIGNEE_ROLE_ENTITY = 'MJ: Roles';
+
 /**
- * The policy with the pipeline's `CloseWonAssigneePersonID` folded into its `CloseWonTasks` block.
+ * The policy with the pipeline's assignee columns folded into its `CloseWonTasks` block.
  *
- * ── THE COLUMN WINS OVER THE JSON (bc-aidp-next-golive#326) ──────────────────────────────────────
+ * ── THE COLUMNS WIN OVER THE JSON (bc-aidp-next-golive#326) ──────────────────────────────────────
  *
  * The two default pipelines ship as rows in `metadata/pipelines`, and a metadata push writes the file's
  * `CloseWonPolicy` back over the database with the assignee null. An assignee a deployment typed into
- * the JSON therefore lasts until the next install of this app. The column is not in the metadata files,
- * so a push leaves it alone, and its foreign key refuses a person who is not there.
+ * the JSON therefore lasts until the next install of this app. The columns are not in the metadata files,
+ * so a push leaves them alone, and their foreign keys refuse a person or role that is not there.
  *
- * Only the assignee is replaced. `AssigneeRoleID`, `DueInDays` and `RaiseOrderReviewTask` still come from
- * the policy. An empty column changes nothing, so a deployment that configured the JSON keeps working.
+ * ── A ROLE IS A SHARED QUEUE (bc-aidp-next-golive#442) ───────────────────────────────────────────
+ *
+ * `CloseWonAssigneeRoleID` assigns the task to an MJ role (`MJ: Roles` + the role's ID). The tasks app
+ * expands a role assignee to the role's current members, so every holder sees the task and is notified.
+ *
+ * ── THE PERSON WINS WHEN BOTH ARE SET ───────────────────────────────────────────────────────────
+ *
+ * A task has one assignment, so one column has to win. The person is the narrower, more deliberate
+ * choice; a deployment moving to the shared queue clears the person. The field descriptions say so.
+ *
+ * Only the assignee is replaced. `AssigneeRoleID` (the TaskRole the assignee holds, not an MJ role),
+ * `DueInDays` and `RaiseOrderReviewTask` still come from the policy. Empty columns change nothing, so a
+ * deployment that configured the JSON keeps working.
  */
-export function WithPipelineAssignee<T extends object>(policy: T, personID: string | null | undefined): T {
-    if (!personID) return policy;
+export function WithPipelineAssignee<T extends object>(
+    policy: T,
+    personID: string | null | undefined,
+    roleID?: string | null,
+): T {
+    const assignee = personID
+        ? { AssigneeEntityName: CLOSE_WON_ASSIGNEE_ENTITY, AssigneeRecordID: personID }
+        : roleID
+          ? { AssigneeEntityName: CLOSE_WON_ASSIGNEE_ROLE_ENTITY, AssigneeRecordID: roleID }
+          : null;
+    if (!assignee) return policy;
     return {
         ...policy,
-        CloseWonTasks: {
-            ...ReadCloseWonTaskConfig(policy),
-            AssigneeEntityName: CLOSE_WON_ASSIGNEE_ENTITY,
-            AssigneeRecordID: personID,
-        },
+        CloseWonTasks: { ...ReadCloseWonTaskConfig(policy), ...assignee },
     };
 }
 
@@ -877,7 +899,8 @@ export class CloseWonTaskService {
         if (!input.Assignee?.RecordID || !input.Assignee?.EntityName) {
             result.Issues.push(
                 `The ${kind} task was created but NOT routed: no finance assignee is configured. Set the `
-                    + "pipeline's Close Won Assignee (or CloseWonTasks.AssigneeRecordID in its CloseWonPolicy).",
+                    + "pipeline's Close Won Assignee or Close Won Assignee Role (or CloseWonTasks.AssigneeRecordID "
+                    + 'in its CloseWonPolicy).',
             );
             return null;
         }
@@ -913,7 +936,7 @@ export class CloseWonTaskService {
             result.Issues.push(
                 `The ${kind} task was created but NOT routed: the configured assignee `
                     + `'${input.Assignee!.RecordID}' does not exist in ${input.Assignee!.EntityName}. `
-                    + "Set the pipeline's Close Won Assignee, or point CloseWonTasks.AssigneeRecordID in "
+                    + "Set the pipeline's Close Won Assignee or Close Won Assignee Role, or point CloseWonTasks.AssigneeRecordID in "
                     + 'its CloseWonPolicy at a real record.',
             );
             return null;

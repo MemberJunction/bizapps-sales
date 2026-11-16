@@ -1,0 +1,19 @@
+[
+  {
+    "fields": {
+      "Name": "Sales: Party Lookup Promotable Contacts",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "Which people could be added as sales contacts?",
+      "Description": "Search for the promote dialog: people who do NOT yet have a sales contact row, whose last name, display name or email starts with the term.",
+      "SQL": "@file:SQL/party-lookup-promotable-contacts.sql",
+      "TechnicalDescription": "Grain: Person WITHOUT a SalesContact row -- the exact complement of 'Sales: Party Lookup Contacts', differing only in EXISTS vs NOT EXISTS. Party lookup contract (bc-aidp-next-golive#372): columns ID, Name (Person.DisplayName), Detail (Person.Email); parameters Term (required) and Domain (optional; matched against Person.EmailDomain). Prefix LIKE on indexed base columns (LastName, DisplayName, Email, EmailDomain), TOP 20 ordered by DisplayName, no view and no count. Read by the sales-owned promote dialog, NOT by bizapps-party-field: that control cannot mark a row unselectable, so a promotable person must never reach a deal's contact picker (PL1).",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 1,
+      "UsesTemplate": true
+    },
+    "primaryKey": {
+      "ID": "2DC466E2-C634-48EC-AB6E-73A6E7D961DF"
+    }
+  }
+]

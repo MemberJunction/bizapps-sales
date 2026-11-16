@@ -435,3 +435,12 @@
     </mj-left-nav-content>
   </mj-page-body>
 </mj-page-layout>
+
+<!-- Promoting an existing Organization or Person (D-PR3). Mounted with @if, like the line editor:
+     the dialog reads nothing until it is on screen. -->
+@if (PromoteOpen) {
+  <mjs-promote-party-dialog
+      [PromoteKind]="PromoteKind"
+      (PartyChosen)="OnPromoted($event)"
+      (Closed)="ClosePromote()"></mjs-promote-party-dialog>
+}

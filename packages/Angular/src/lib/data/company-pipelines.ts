@@ -177,3 +177,51 @@ export function PipelineLabel(pipeline: Pick<CompanyPipeline, 'Name' | 'CompanyN
 export function CompanyLabel(company: PipelineCompany): string {
     return company.CompanyName ?? 'Unnamed company';
 }
+
+/** Whether `companyID` has at least one pipeline linked to it. */
+export function CompanyHasPipeline(pipelines: readonly CompanyPipeline[], companyID: string | null): boolean {
+    return !!companyID && pipelines.some((p) => sameID(p.CompanyID, companyID));
+}
+
+/** What {@link NoPipelineMessage} needs to say why a deal has no pipeline. */
+export interface NoPipelineState {
+    /** The `HidePipelines` setting: the rep cannot choose a pipeline, only a company. */
+    HidePipelines: boolean;
+    /** The deal's company, or null when it has none. */
+    CompanyID: string | null;
+    /** The company's name, or null when it is not known. */
+    CompanyName: string | null;
+    /** Whether the deal's company has a pipeline linked to it. */
+    CompanyHasPipeline: boolean;
+    /** Whether any company other than the deal's has a pipeline linked to it. */
+    OtherCompanyHasPipeline: boolean;
+}
+
+/** The generic refusal, for a rep who can see the Pipeline field and has a pipeline to choose. */
+export const CHOOSE_PIPELINE_MESSAGE = 'Choose a pipeline. It determines the stages and the selling company.';
+
+/**
+ * Why a deal with no pipeline cannot be saved, and what to do about it.
+ *
+ * `Deal.PipelineID` is NOT NULL, and a deal can only sit in a pipeline linked to its company. A company
+ * with no linked pipeline therefore leaves the deal unsaveable, and "Choose a pipeline" names a choice
+ * that does not exist — with pipelines hidden, a field the rep cannot even see. This names the company
+ * and the fix: another company, or an admin linking a pipeline to this one.
+ */
+export function NoPipelineMessage(state: NoPipelineState): string {
+    if (state.CompanyID && !state.CompanyHasPipeline) {
+        const name = state.CompanyName?.trim() || 'This company';
+        const subject = state.CompanyName?.trim() || 'this company';
+        const fix = state.OtherCompanyHasPipeline
+            ? `Choose another company, or ask a Sales admin to link a pipeline to ${subject}.`
+            : `Ask a Sales admin to link a pipeline to ${subject}.`;
+        return `${name} has no pipeline, so this deal can't be saved. ${fix}`;
+    }
+    if (!state.CompanyHasPipeline && !state.OtherCompanyHasPipeline) {
+        return 'No company has a pipeline, so deals can\'t be saved. Ask a Sales admin to link a pipeline to a company.';
+    }
+    if (!state.CompanyID && state.HidePipelines) {
+        return 'Choose a company. Its pipeline decides the deal\'s stages.';
+    }
+    return CHOOSE_PIPELINE_MESSAGE;
+}

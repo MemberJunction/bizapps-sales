@@ -9,7 +9,7 @@ decision without its reasoning gets re-litigated by the next person, or silently
 assumes it was an accident.
 
 **IDs.** This file holds `D1`–`D7` (the S1 rulings, no hyphen), `I1`–`I10`, and the prefixed series
-`D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL`, `D-FY`, `D-ST` and `D-SE`. `D-3`, `D-4` and `D-6` are the master
+`D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL`, `D-FY`, `D-ST`, `D-SE` and `D-PR`. `D-3`, `D-4` and `D-6` are the master
 plan's IDs; their rulings here are D2, D5 and "Master plan D-6". `DN-n` and every other `D-n`
 are in [`DECISIONS-NEEDED.md`](../DECISIONS-NEEDED.md), which also lists what is still open. A bare `Dn`
 cited as orders' (`D6/D7`, `D8`, `D53`) is orders' own log.
@@ -919,3 +919,130 @@ and a link copied on one opens the other with the same filters. On the Board:
 - **The Inspect slice stays Dashboard-only**, and All deals keeps its own grid filters.
 
 ---
+
+---
+
+## Promoting an existing Organization or Person into sales (2026-11-11)
+
+Sales Accounts and Sales Contacts are IS-A subtypes: `SalesAccount.ID` **is** `Organization.ID`, and
+`SalesContact.ID` **is** `Person.ID`. So a company or person bizapps-common already holds does not need
+re-entering to become a sales record — it needs **promoting**, which inserts only the subtype row and
+leaves the parent untouched. `IS4` and `IS5` prove the mechanism; these rulings decide the product
+around it. The sequence is MJ's and is not ours to vary: `NewRecord()`, `AttachToParent`, the child's
+own fields, `Save()`.
+
+### D-PR1 — A promotion prefills Account Type and nothing else
+
+**Decision:** promoting an Organization sets `AccountTypeID` to the `AccountType` row carrying
+`IsProspect = 1`. `LifecycleStageTypeID`, `OwnerEmployeeID` and `Territory` stay null. When no row
+carries the flag, Account Type stays null too — never a fallback to the name `Prospect`. Promoting a
+Person sets nothing.
+
+**Why:** every one of those columns is nullable, so a blank promotion is already legal and the rep
+finishes the record on the form. Account Type is the one field where a default is safe: "we are now
+selling to this company" is the entire content of the act of promoting, and `IsProspect` is that
+statement expressed as a behaviour flag. The others are not. An owner assigned by whoever promoted is
+an attribution claim, and `DealTeamMember` — not a stamped column — is the source of truth for who owns
+what. A lifecycle stage would have to be inferred from `DisplayRank`, because `LifecycleStageType` has
+no `IsDefault` column; "lowest rank with no qualification flags" is a guess about the seeds, and it
+would assert that a company somebody is already selling to is a fresh subscriber.
+
+> Found by flag, never by name (Rule 2), and **filtered, not counted**: "exactly one row is flagged"
+> is a statement about today's seeds. Two flagged rows is a seeding error this cannot fix, so it takes
+> the lowest `DisplayRank` and breaks ties on ID — a stable answer rather than whichever row the view
+> happened to return first.
+
+### D-PR2 — The deal's pickers stay restricted; promotion sits BESIDE the field
+
+**Decision:** the account and contact pickers on the deal form continue to offer only Organizations and
+People that already have their sales row. A promotable record is reached from a link under the field,
+which opens a sales-owned dialog reading `Sales: Party Lookup Promotable {Accounts,Contacts}` — the
+exact complement of the picker's own queries.
+
+**Why, and this reverses the first instinct:** the obvious design is to show promotable rows *in* the
+picker, marked. It cannot be done safely. That picker is common's `bizapps-party-field`, whose row
+template is compiled into the component — no row template input, no chips, no per-row action and no
+`BeforeSelect` hook. A promotable row placed there would therefore be **selectable**, setting
+`Deal.AccountID` to a row the server must refuse, which is precisely what `PL1` and `PL3` exist to
+prevent. Relaxing the picker's `EXISTS` is a one-token change that reads like an improvement and
+removes a guarantee.
+
+A separate query and a sales-owned dialog keep that guarantee whole and still answer the real
+complaint (golive#259): the rep who cannot find a company does not conclude it needs promoting, they
+create a second one. `PL7` and `PL8` assert the pair **partitions** the set — disjoint and covering —
+so relaxing the picker's filter cannot stay green.
+
+> The in-picker version needs an upstream contract from common-ng (a row-action or `BeforeSelect`
+> seam). That is worth asking for; it is not worth forking the control or reverting to the
+> `%term%`-unordered-20-row FK picker that golive#372 replaced.
+
+### D-PR3 — All three entry points ship together
+
+**Decision:** promotion is reachable from the Organization or Person record (a form panel), from the
+Sales Accounts and Contacts rail pages (an **Add existing** button beside **New**), and from the deal
+form under the party field.
+
+**Why:** they are three different moments, not three styles of one button. The record surface is where
+someone browsing a company decides to sell to it; the rail pages are where someone deliberately
+onboarding accounts works; the deal form is where the need is discovered under time pressure. Omitting
+any one sends that user to re-entry, which is the duplicate this feature removes. The record-surface
+one needs no change to bizapps-common: `@RegisterClassEx(BaseFormPanel, { entity: … })` already lets
+this app contribute onto another's form, which `party-deals.panels.ts` has done since golive#372.
+
+> The panel renders **nothing** once the record is promoted, and nothing while the existence check is
+> unanswered. An unanswered check must not offer a promotion: `AttachToParent` returns true for an
+> already-promoted record — it only asks whether the PARENT exists — so a second promotion reaches the
+> database and dies on a raw primary-key violation. The pre-check is what turns that into a sentence.
+
+### D-PR4 — Promotion carries no new authorization
+
+**Decision:** no `MJ.BizApps.Sales.*.Promote` authorization. Anyone who can create a Sales Account or
+Sales Contact can promote one.
+
+**Why:** promotion and creation produce the same row with the same permissions; the only difference is
+whether the parent already existed. An authorization separating them would assert that reusing an
+existing company is more sensitive than inventing a new one, which is backwards — re-entry is the
+outcome being prevented. It would also have to be granted to `Sales User` on day one for D-PR3 to work
+at all, so it would gate nothing while adding a surface to maintain.
+
+> Promotion writes only the subtype row. It never updates the parent Organization or Person, so it does
+> not need — and must not acquire — write permission on another app's entity.
+
+> **Undo is not symmetric, so do not add one casually.** `IS8` records that deleting a Sales Contact
+> which is its Person's only subtype deletes the Person too. An "undo promotion" built from a child
+> delete can therefore destroy a record this app does not own.
+
+### D-PR5 — One dialog finds, promotes or creates; the picker's own Create is removed
+
+**Decision:** the promote dialog lists **both** halves — parties that already have their sales row,
+badged and selectable outright, and those that do not, which promote on selection. When a search
+matches nothing it offers to create a new one. The deal form's pickers pass `[AllowCreate]="false"`,
+so creating a party is reachable only through this dialog.
+
+**Why:** D-PR2 kept the picker honest by withholding rows it cannot store, but that left the rep with
+a control that says "no matches" and a separate route whose name presumes the answer — they had to
+know *why* the company was missing before choosing where to look. Showing both states answers that
+instead of asking it: "is this company already an account?" is the thing they came to find out.
+
+Selecting an existing account writes **nothing**. Promotion is for the other half only, which is also
+what keeps `PromoteParty`'s second-promotion refusal from ever being needed here.
+
+Creation moved off the picker for the same reason it exists at all. The picker's built-in Create row
+is offered *while matches are still on screen*, so it competes with the record the rep is looking
+for — which is how golive#259's duplicate was made. In the dialog it appears only **after** a search
+has returned nothing, so it is the last resort rather than the first.
+
+> The merged list needs no de-duplication and cannot be missing a row, because the two queries are
+> the exact complement of one another — the partition `PL7`/`PL8` assert. The test is what lets the
+> union be taken on trust.
+
+> **The search box is the name.** A second field asking for what the rep has already typed is
+> friction at the moment they just want to get on with the deal, so Create takes the term.
+>
+> A Person is the awkward case: `FirstName` and `LastName` are both NOT NULL and `Person.DisplayName`
+> is a persisted computed column that must never be written, so one string has to become two. It
+> splits on the FIRST run of whitespace — `Grace Hopper` gives Grace / Hopper, and
+> `Juan Carlos de la Cruz` gives Juan / `Carlos de la Cruz`, which keeps a compound surname whole.
+> A single word cannot produce a last name, so Create stays disabled and says so rather than
+> inventing one. Splitting is a guess, and this is the one place the app makes it; a rep who needs a
+> different split edits the contact, where the fields are separate.
