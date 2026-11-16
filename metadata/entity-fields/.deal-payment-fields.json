@@ -1,0 +1,74 @@
+[
+  {
+    "_comments": [
+      "Labels and descriptions for the Deals view's payment columns (bc-aidp-next-golive#487), added by",
+      "V202611170200__v6.32.x__Deal_Payment_Status.sql. The columns are view-computed, so they carry no",
+      "extended property; AutoUpdateDescription goes to 0 so CodeGen's schema sync does not put NULL back,",
+      "and AutoUpdateDisplayName to 0 so the label is a choice rather than derived from the column name."
+    ],
+    "fields": {
+      "DisplayName": "Invoices",
+      "AutoUpdateDisplayName": false,
+      "Description": "How many invoices have been issued on this won deal's order: one per invoiced instalment of its payment schedule, or one when an order without a schedule is confirmed. Canceled and written-off instalments are not counted. Empty when the deal is not won or has no order.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=InvoiceCount"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Invoiced",
+      "AutoUpdateDisplayName": false,
+      "Description": "The total of the invoices issued on this won deal's order, as orders recorded them. Empty until something is invoiced.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=InvoicedAmount"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Paid",
+      "AutoUpdateDisplayName": false,
+      "Description": "What the customer has paid against the invoices issued on this won deal's order, as orders recorded it. Empty until something is invoiced.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=PaidAmount"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Balance Due",
+      "AutoUpdateDisplayName": false,
+      "Description": "What is still owed on the invoices issued on this won deal's order. Negative means a credit owed to the customer. Instalments not yet invoiced are not included. Empty until something is invoiced.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=OutstandingBalance"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Payment Status",
+      "AutoUpdateDisplayName": false,
+      "Description": "Whether this won deal's invoices are paid: Not invoiced (nothing invoiced yet), Outstanding (nothing paid), Partly paid, or Paid (every invoice issued so far is paid). Empty when the deal is not won or has no order. Open the Sales: Won Deal Payments query for each invoice.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=PaymentStatus"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Next Payment Due",
+      "AutoUpdateDisplayName": false,
+      "Description": "The earliest due date among this won deal's instalments that still have a balance, invoiced or not; for an order without a payment schedule, the order's due date while it has a balance.",
+      "AutoUpdateDescription": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=NextPaymentDueDate"
+    }
+  }
+]
