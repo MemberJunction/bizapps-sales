@@ -13,6 +13,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
+import { UUIDsEqual } from '@memberjunction/global';
 import { RankCatalogMatches, type MJOProductOption } from '@mj-biz-apps/orders-ng';
 import type { DraftProductLookup, ProductLookup } from '@mj-biz-apps/sales-entities';
 
@@ -52,6 +53,19 @@ export function RankDealProducts(
     return RankCatalogMatches([...byStandIn.keys()], query, dealCompanyID).map(
         (option) => byStandIn.get(option) as ProductLookup,
     );
+}
+
+/**
+ * The products the picker offers when "Only selling company products" is checked: those owned by the
+ * deal's company. The box starts checked; a rep unchecks it to put another company's product on a
+ * multi-company deal (#29). A deal with no company has nothing to narrow to, so every product is kept.
+ */
+export function KeepDealCompanyProducts(
+    products: readonly ProductLookup[],
+    dealCompanyID: string | null | undefined,
+): ProductLookup[] {
+    if (!dealCompanyID) return [...products];
+    return products.filter((p) => !!p.CompanyID && UUIDsEqual(p.CompanyID, dealCompanyID));
 }
 
 /**
