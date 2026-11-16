@@ -85,7 +85,7 @@ describe('InspectCriteriaWhere with a period and filters', () => {
 
     it('narrows every slice by the filter bar, and a named pipeline replaces the forecast rule', () => {
         const where = InspectCriteriaWhere('commit', TABLES_WITH_LINES, today, {
-            Filters: { CompanyIDs: ['C1', 'C2'], OwnerEmployeeIDs: ['E1'], PipelineIDs: ['P1'], ProductCompanyIDs: ['PC1'] },
+            Filters: { CompanyIDs: ['C1', 'C2'], OwnerEmployeeIDs: ['E1'], PipelineIDs: ['P1'], ProductCompanyIDs: ['PC1'], StageIDs: [] },
         });
         expect(where).toContain("CompanyID IN ('C1', 'C2')");
         expect(where).toContain("OwnerEmployeeID IN ('E1')");
@@ -95,7 +95,7 @@ describe('InspectCriteriaWhere with a period and filters', () => {
     });
 
     it('matches nothing for a product company when the order-line table is unknown, rather than ignoring it', () => {
-        expect(InspectCriteriaWhere('pipe', TABLES, today, { Filters: { CompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: [], ProductCompanyIDs: ['PC1'] } }))
+        expect(InspectCriteriaWhere('pipe', TABLES, today, { Filters: { CompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: [], ProductCompanyIDs: ['PC1'], StageIDs: [] } }))
             .toContain('1 = 0');
     });
 
@@ -107,7 +107,7 @@ describe('InspectCriteriaWhere with a period and filters', () => {
     });
 
     it('escapes a quote in an ID', () => {
-        expect(InspectCriteriaWhere('pipe', TABLES, today, { Filters: { CompanyIDs: ["x'y"], OwnerEmployeeIDs: [], PipelineIDs: [], ProductCompanyIDs: [] } }))
+        expect(InspectCriteriaWhere('pipe', TABLES, today, { Filters: { CompanyIDs: ["x'y"], OwnerEmployeeIDs: [], PipelineIDs: [], ProductCompanyIDs: [], StageIDs: [] } }))
             .toContain("CompanyID IN ('x''y')");
     });
 });
@@ -163,7 +163,7 @@ describe('the section URL state (bizapps-sales#371)', () => {
 
     it('writes every key, null for a default, so a default leaves the URL', () => {
         expect(SalesUrlParams({ ...DEFAULT_SALES_URL_STATE, Period: 'alltime' })).toEqual({
-            page: null, period: 'alltime', from: null, to: null, companies: null, productCompanies: null, owners: null, pipelines: null,
+            page: null, period: 'alltime', from: null, to: null, companies: null, productCompanies: null, owners: null, pipelines: null, stages: null,
             inspect: null, inspectArg: null, company: null, pipeline: null,
         });
     });

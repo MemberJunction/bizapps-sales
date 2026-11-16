@@ -1,5 +1,5 @@
 <!--
-  The filter bar (bc-aidp-next-golive#350, #351): period, then the four lists. The fiscal year basis is
+  The filter bar (bc-aidp-next-golive#350, #351): period, then the lists. The fiscal year basis is
   the Period dropdown's tooltip, because a period whose boundaries are invisible is a figure that looks
   settled while meaning something else.
 -->
@@ -36,7 +36,16 @@
         @if (!State.Options[list.Kind].length) {
           <span class="muted">Nothing to choose from yet.</span>
         }
-        @for (option of State.Options[list.Kind]; track option.ID) {
+        <!-- Stages: picks every listed stage whose status is open (bc-aidp-next-golive#488). -->
+        @if (list.Kind === 'StageIDs' && State.OpenStageIDs?.length) {
+          <button type="button" class="filterlist__preset" data-testid="sales-filter-open-stages" (click)="PickOpenStages()">
+            Open stages
+          </button>
+        }
+        @for (option of State.Options[list.Kind]; track option.ID; let i = $index) {
+          @if (GroupHeading(list.Kind, i); as heading) {
+            <span class="filterlist__group">{{ heading }}</span>
+          }
           <label class="filterlist__item">
             <input type="checkbox" [checked]="IsPicked(list.Kind, option.ID)" (change)="FilterToggled.emit({ Kind: list.Kind, ID: option.ID })">
             <span>{{ option.Name }}</span>

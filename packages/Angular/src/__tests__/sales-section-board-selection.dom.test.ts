@@ -155,7 +155,7 @@ describe('the filter bar carries over between the Dashboard and the Board (bc-ai
         expect(section.Window.End, 'the default period has an end').not.toBeNull();
         expect(service.LoadRoster).toHaveBeenLastCalledWith(
             section.Window.Start,
-            { CompanyIDs: ['company-2'], ProductCompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: ['pipeline-2'] },
+            { CompanyIDs: ['company-2'], ProductCompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: ['pipeline-2'], StageIDs: [] },
             section.Window.End,
         );
     });
@@ -200,17 +200,37 @@ describe('the Board tabs (bc-aidp-next-golive#351)', () => {
         expect(BoardPipelines(PIPELINES, ['company-a'], ['p-b1'])).toEqual([]);
     });
 
-    function boardWith(selected: string | null, companyIDs: string[], pipelineIDs: string[], pipelines = PIPELINES) {
+    function boardWith(selected: string | null, companyIDs: string[], pipelineIDs: string[], pipelines = PIPELINES, stageIDs: string[] = []) {
         const b = Object.create(DealBoardComponent.prototype) as DealBoardComponent;
         Object.assign(b, {
             Pipelines: pipelines,
-            Stages: [{ ID: 's1', PipelineID: 'p-a2' }, { ID: 's2', PipelineID: 'p-b1' }],
+            Stages: [
+                { ID: 's1', PipelineID: 'p-a2', DisplayOrder: 1 },
+                { ID: 's3', PipelineID: 'p-a2', DisplayOrder: 2 },
+                { ID: 's2', PipelineID: 'p-b1', DisplayOrder: 1 },
+            ],
+            DealStatusTypes: [],
+            Deals: [],
             CompanyIDs: companyIDs,
             PipelineIDs: pipelineIDs,
+            StageIDs: stageIDs,
             SelectedPipelineID: selected,
         });
         return b;
     }
+
+    describe('with stages picked (bc-aidp-next-golive#488)', () => {
+        it('shows only the pipelines with a picked stage, No stage included, and only the picked columns', () => {
+            const board = boardWith(null, [], [], PIPELINES, ['s3']);
+            expect(board.TabPipelines.map((p) => p.ID)).toEqual(['p-a2']);
+            expect(board.Columns.map((c) => c.StageID)).toEqual(['s3']);
+            expect(boardWith(null, [], [], PIPELINES, ['unstaged:p-b1']).TabPipelines.map((p) => p.ID)).toEqual(['p-b1']);
+        });
+
+        it('shows every column with no stage picked', () => {
+            expect(boardWith('p-a2', [], []).Columns.map((c) => c.StageID)).toEqual(['s1', 's3']);
+        });
+    });
 
     it('shows the chosen tab while the filters allow it, else the first tab with stages', () => {
         expect(boardWith('p-b1', [], []).ActivePipelineID).toBe('p-b1');

@@ -16,7 +16,7 @@ import { MJS_ENTITIES } from '../data/entity-names';
 import type { PeriodWindow } from './dashboard-period';
 import { GRID_DAY_FORMAT } from './dashboard-dates';
 import { InspectDateBounds, NO_OWNER_ARG, PERIOD_BOUND_KEYS, type InspectKey } from './dashboard-inspect';
-import { NO_FILTERS, type DashboardFilters } from './dashboard-filters';
+import { NO_FILTERS, SplitStageIDs, type DashboardFilters } from './dashboard-filters';
 
 export const SALES_PIPELINE_VIEW_NAME = 'Sales: Pipeline';
 
@@ -242,6 +242,8 @@ function filterParts(filters: DashboardFilters, orderLineTable: SqlTable | null 
     if (filters.CompanyIDs.length) parts.push(`CompanyID IN ${sqlList(filters.CompanyIDs)}`);
     if (filters.OwnerEmployeeIDs.length) parts.push(`OwnerEmployeeID IN ${sqlList(filters.OwnerEmployeeIDs)}`);
     if (filters.PipelineIDs.length) parts.push(`PipelineID IN ${sqlList(filters.PipelineIDs)}`);
+    const stage = stageFilterPart(filters.StageIDs);
+    if (stage) parts.push(stage);
     if (filters.ProductCompanyIDs.length) {
         // Without the order-line table no deal can be shown to match, so the list says so by matching
         // none rather than ignoring the filter and listing deals the figure did not count.
@@ -250,6 +252,19 @@ function filterParts(filters: DashboardFilters, orderLineTable: SqlTable | null 
             : '1 = 0');
     }
     return parts;
+}
+
+/**
+ * The Stage list as one criterion (bc-aidp-next-golive#488): the picked stages, or no stage on a pipeline
+ * whose "No stage" entry is picked. The same rule as the queries' `StageIDs` / `UnstagedPipelineIDs`.
+ */
+function stageFilterPart(ids: readonly string[]): string | null {
+    const split = SplitStageIDs(ids);
+    const either: string[] = [];
+    if (split.StageIDs.length) either.push(`PipelineStageID IN ${sqlList(split.StageIDs)}`);
+    if (split.UnstagedPipelineIDs.length) either.push(`(PipelineStageID IS NULL AND PipelineID IN ${sqlList(split.UnstagedPipelineIDs)})`);
+    if (!either.length) return null;
+    return either.length === 1 ? either[0] : `(${either.join(' OR ')})`;
 }
 
 /** `column` inside the window. A null bound is no bound; a NULL date fails a bounded window. */

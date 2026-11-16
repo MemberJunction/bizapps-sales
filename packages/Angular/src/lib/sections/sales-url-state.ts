@@ -34,6 +34,8 @@ export interface SalesUrlState {
     ProductCompanies: string[];
     Owners: string[];
     Pipelines: string[];
+    /** Stage IDs, and `unstaged:<pipeline ID>` entries (bc-aidp-next-golive#488). */
+    Stages: string[];
     Inspect: InspectKey | null;
     /** The deal list's argument: a stage ID for `stage`, an owner for `owner`. */
     InspectArg: string | null;
@@ -51,6 +53,7 @@ const PARAM = {
     ProductCompanies: 'productCompanies',
     Owners: 'owners',
     Pipelines: 'pipelines',
+    Stages: 'stages',
     Inspect: 'inspect',
     InspectArg: 'inspectArg',
     Pipeline: 'pipeline',
@@ -59,8 +62,8 @@ const PARAM = {
 /** The Board's own company before the shared filters (bc-aidp-next-golive#351). Written empty, never read. */
 const RETIRED_COMPANY_PARAM = 'company';
 
-type ListField = 'Companies' | 'ProductCompanies' | 'Owners' | 'Pipelines';
-const LIST_FIELDS: readonly ListField[] = ['Companies', 'ProductCompanies', 'Owners', 'Pipelines'];
+type ListField = 'Companies' | 'ProductCompanies' | 'Owners' | 'Pipelines' | 'Stages';
+const LIST_FIELDS: readonly ListField[] = ['Companies', 'ProductCompanies', 'Owners', 'Pipelines', 'Stages'];
 
 /** A section on its defaults. */
 export const DEFAULT_SALES_URL_STATE: SalesUrlState = {
@@ -72,6 +75,7 @@ export const DEFAULT_SALES_URL_STATE: SalesUrlState = {
     ProductCompanies: [],
     Owners: [],
     Pipelines: [],
+    Stages: [],
     Inspect: null,
     InspectArg: null,
     Pipeline: null,
@@ -95,6 +99,7 @@ export function ParseSalesUrlState(params: Record<string, string>, pages: readon
         ProductCompanies: list(params[PARAM.ProductCompanies]),
         Owners: list(params[PARAM.Owners]),
         Pipelines: list(params[PARAM.Pipelines]),
+        Stages: list(params[PARAM.Stages]),
         Inspect: inspect,
         // An argument means something only on a slice that takes one.
         InspectArg: inspect === 'stage' || inspect === 'owner' ? id(params[PARAM.InspectArg]) : null,
@@ -114,6 +119,7 @@ export function SalesUrlParams(state: SalesUrlState): Record<string, string | nu
         [PARAM.ProductCompanies]: list(state.ProductCompanies),
         [PARAM.Owners]: list(state.Owners),
         [PARAM.Pipelines]: list(state.Pipelines),
+        [PARAM.Stages]: list(state.Stages),
         [PARAM.Inspect]: state.Inspect,
         [PARAM.InspectArg]: state.InspectArg,
         [RETIRED_COMPANY_PARAM]: null,

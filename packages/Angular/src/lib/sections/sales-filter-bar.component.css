@@ -59,6 +59,23 @@
     overflow-y: auto;
     min-width: 14rem;
 }
+.filterlist__group {
+    margin-top: var(--mj-space-2);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--mj-text-secondary);
+}
+.filterlist__preset {
+    align-self: flex-start;
+    padding: var(--mj-space-1) var(--mj-space-2);
+    border: 1px solid var(--mj-border-default);
+    border-radius: var(--mj-radius-md);
+    background: var(--mj-bg-surface);
+    color: var(--mj-text-primary);
+    font: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
 .filterlist__item {
     display: flex;
     align-items: center;

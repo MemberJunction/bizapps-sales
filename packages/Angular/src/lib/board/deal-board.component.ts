@@ -57,7 +57,7 @@ import { DealWorkspaceService, DEFAULT_DISPLAY_CURRENCY, type DealRosterRow } fr
 import { BusinessToday, DayLabel, UtcDatePart } from '../pages/dashboard-dates';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
 import { DistinctPipelines, OrderPipelinesByCompany, PipelineCompanyNames, PipelineLabel, type CompanyPipeline } from '../data/company-pipelines';
-import { HasID } from '../pages/dashboard-filters';
+import { HasID, StagePipelineOf } from '../pages/dashboard-filters';
 
 /**
  * A `DATE` column's day, as a value the `date` pipe can format with `'UTC'` (bc-aidp-next-golive#168).
@@ -270,6 +270,12 @@ export class DealBoardComponent {
      */
     @Input() public CompanyIDs: readonly string[] = [];
     @Input() public PipelineIDs: readonly string[] = [];
+    /**
+     * The filter bar's Stage list (bc-aidp-next-golive#488). Empty is "All". While set, a pipeline with
+     * no picked stage has no tab, and a stage not picked has no column: its deals are filtered out, so
+     * the column could only ever be empty.
+     */
+    @Input() public StageIDs: readonly string[] = [];
 
     /**
      * The pipeline tab's choice; null until a rep picks one. Owned by the section and bound two-way,
@@ -290,7 +296,12 @@ export class DealBoardComponent {
 
     /** The tabs: the pipelines the filter bar allows, in picker order. See {@link BoardPipelines}. */
     public get TabPipelines(): PipelineLookup[] {
-        return BoardPipelines(this.Pipelines, this.CompanyIDs, this.PipelineIDs);
+        const tabs = BoardPipelines(this.Pipelines, this.CompanyIDs, this.PipelineIDs);
+        if (!this.StageIDs.length) {
+            return tabs;
+        }
+        const picked = this.StageIDs.map((id) => StagePipelineOf(id, this.Stages)).filter((p): p is string => !!p);
+        return tabs.filter((p) => HasID(picked, p.ID));
     }
 
     /**
@@ -344,7 +355,7 @@ export class DealBoardComponent {
             this.DealStatusTypes.filter((s) => s.LocksDeal).map((s) => s.ID),
         );
 
-        return this.Stages.filter((s) => s.PipelineID === pipelineID)
+        return this.Stages.filter((s) => s.PipelineID === pipelineID && (!this.StageIDs.length || HasID(this.StageIDs, s.ID)))
             .slice()
             .sort((a, b) => a.DisplayOrder - b.DisplayOrder)
             .map<BoardColumn>((stage) => {
