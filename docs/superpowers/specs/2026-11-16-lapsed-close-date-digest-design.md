@@ -122,7 +122,11 @@ become three rows:
 | `COMPANY_LEADER` | 0 | NULL | 0 | 0 |
 | `CEO` | 1 | 14 | 1 | 1 |
 | `CFO` | 1 | NULL | 1 | 1 |
-| `CTO` | — **open question, see below** — | | | |
+| `CTO` | 1 | 14 | **0** | 1 |
+
+The CTO is the CEO's slice — portfolio-wide, more than 14 days past, plus never-set close dates —
+but it does not send when there is nothing. All four flags already existed, so the CTO needed no
+schema change: it is four values in a seed row, which is the claim approach A was chosen to make.
 
 `SubjectTemplate` and `IntroTemplate` are columns rather than code because CDP's copy had host
 specifics welded into it — its leader intro names a particular person to contact when deals vanish
@@ -217,12 +221,10 @@ Sidecar's "Sales Pipeline" was a legacy non-revenue lane while the same name mea
 elsewhere. That cannot be expressed here: `V202611062300__v6.25.x__Pipeline_Company_Link.sql` dropped
 `Pipeline.CompanyID` so that one pipeline row is shared by every company linked to it through
 `PipelineCompany`, while `IncludeInForecast` stayed on `Pipeline`. Excluding a shared pipeline
-excludes it for everyone. Whether this bites depends on the host's data — aidp-next's HubSpot
-onboarding derives the pipeline and stage table per connection, which suggests each portal has its
-own pipeline rows and the shared-row case does not arise. **To check against the data before
-building:** whether any pipeline row is linked to more than one company. If per-company exclusion is
-genuinely needed, the right home is a flag on `PipelineCompany`, not another column on `Pipeline` —
-a later change, not this one.
+excludes it for everyone. **Checked against aidp-next production on 2026-11-16: every one of the 31
+pipeline rows is linked to exactly one company**, so the shared-row case does not arise there and the
+limitation is theoretical for this host. If it ever becomes real, the right home is a flag on
+`PipelineCompany`, not another column on `Pipeline` — a later change, not this one.
 
 **The deal query.** One RunView over `MJ_BizApps_Sales: Deals`, `ResultType: 'simple'`:
 
@@ -382,35 +384,73 @@ Vitest, porting the intent of CDP's suite and adding what the new model makes te
 - Column ordering, index choices, and the exact shape of the two migrations.
 - Whether the Explorer forms for the new entities are generated-only or warrant a custom form.
 
-## Open questions
+## What the data says, measured
 
-Migrations here are additive-only and immutable once applied, and metadata reaches a host through one
-consolidated Metadata_Sync per release — so a schema answer that arrives late costs a second
-migration *and* a second release cycle. Questions 1 and 3 are the ones that can move the schema.
+Read-only queries against aidp-next production on 2026-11-16, with the owner's explicit go.
 
-1. **What does the CTO digest slice on, and does its row ship?** The CEO sees deals more than 14 days
-   past; the CFO sees everything. The CTO has no equivalent in CDP — it is new. If it is expressible
-   as the flags already present (portfolio-wide or not, a day threshold, whether it sends when empty)
-   it is purely a seed value and nothing here changes. If it slices by amount, deal type or pipeline,
-   `DealDigestAudienceType` needs another column. And shipping a row whose flags nobody has chosen is
-   worse than shipping none, so if the answer is unsettled, ship `COMPANY_LEADER`/`CEO`/`CFO` only and
-   document the CTO as a host-added row.
+**The schema fits. No column needs adding.**
 
-2. **Is there a date by which Monday's email has to be flowing again?** Approach A reaches aidp-next
-   only through a sales release, an aidp-next pin bump, a database upgrade, recipients seeded by hand,
-   the job enabled, and an MJAPI restart — the scheduler does not pick up job rows written out of
-   process. With a near deadline the plan is "C now, A next release", sequenced so the JSON becomes
-   A's seed rows and nothing is thrown away. With no deadline it is A only. That is a different plan,
-   not a different detail.
+- `Deal.CompanyID` is populated per company — 17 companies carry deals. `DealEntityServer` stamps it
+  from the deal's pipeline, so the per-company leader digest works as designed.
+- 11 of the 14 CDP leaders already exist as `MJ: Employees` rows with addresses (386 employees, none
+  missing an email). So `DealDigestRecipient.EmployeeID` can stay NOT NULL and **no override-address
+  column is needed** — the gap is three employee records, which is host data work, not schema.
+- `Employee.CompanyID` confirms why approach B had to be rejected: the CEO, the CFO and one company
+  leader are all employed by `BCHQ`, not by the companies they lead.
 
-3. **Is the host's data shaped for A?** Two facts I cannot check without database access, and neither
-   is safe to assume:
-   - **Does every intended leader exist as an `MJ: Employees` row with a current address?** CDP's
-     roster is ~15 people across 9 companies, several on non-`@bluecypress.io` domains, and one
-     leading a company they are not employed by. `DealDigestRecipient.EmployeeID` is NOT NULL and the
-     address comes from the employee. If some leaders are not employees, the choice is host data work
-     or a nullable override-address column on the recipient — a schema decision, hence this question's
-     place here.
-   - **Is `Deal.CompanyID` populated per portfolio company across the synced portals?** It is NOT NULL
-     and holds the selling company. If in practice it resolves to one company, `COMPANY_LEADER` is
-     dead on arrival and only the portfolio-wide digests work.
+**Three host-data prerequisites, all of which must be done before a first real send:**
+
+1. **Three leaders have no employee record:** Rob Barnes (Betty Bot), Michael Keller (Cimatri) and
+   Molly Quast (rasa.io). Betty Bot matters most — it is one of only two companies with anything to
+   report on the 23rd, and its other leader does have a record, so the digest would go to one of two.
+2. **One leader is inactive:** Jared Loftus (rasa.io) has `Active = 0`. Recipients filter on an active
+   employee, so rasa.io would have no leader. Moot for the 23rd — rasa.io has nothing lapsed.
+3. **There are zero `CompanySenderIdentity` rows in production.** Step 1 of From-address resolution
+   therefore resolves nothing today, and by this design's own rule every send would fail. The
+   `DigestFromAddress` Application Setting must be set, or mailbox identities created, before the job
+   is enabled. This is the single most likely cause of a silent-but-for-the-error-log first Monday.
+
+**What Monday 23 November would actually contain**, run against the live filter:
+
+| | Deals |
+|---|---|
+| Blue Cypress Consulting | 4 (2 with no close date, 2 newly past) |
+| Betty Bot | 2 (both with no close date) |
+| Everything else | 0 |
+| **Deals more than 14 days past** | **0** |
+
+So: two leader digests, and the CEO, CFO and CTO digests carrying the four never-set-close-date deals
+(which bypass the 14-day floor by design). Nothing is empty, so the CTO's new `SendWhenEmpty = 0`
+does not suppress anything on the first run.
+
+That is a very small first digest, and it is worth knowing why rather than being surprised: of 9,918
+deals, only 157 are open, and **every open deal's close date is in the future** — the earliest is
+17 November. The portfolio is clean right now. The volume CDP used to report came from pipelines that
+are now all Won or Lost. This does not argue against building it; it argues that the first few runs
+will be quiet and that a near-empty digest is the correct output, not a bug to chase.
+
+## The one decision left: how this reaches production by the 23rd
+
+There is a tension between "implement in bizapps-sales" and "email goes out Monday the 23rd", and it
+is mine to surface rather than resolve quietly.
+
+bizapps-sales is a published app. For anything built here to send a real email on the 23rd it must
+travel: PR into `next` → a sales release (version packages, and **one consolidated Metadata_Sync
+generated by the build engineer from a clean database**) → aidp-next bumps its `@mj-biz-apps/sales-*`
+pins from 6.31.0 → lockfile closure and PR to `stage` → MJ Setup on the test server → verification →
+promotion PR `stage` → `prod` → MJ Setup on production → seed recipients and the three missing
+employees → set the From address → enable the job → restart MJAPI, because the scheduler does not pick
+up job rows written out of process.
+
+That is seven days, spanning two MJ Setups, a release cut by another person, and a production
+promotion on a fixed date. It is possible and it is tight, and the tightness is all in the release
+train rather than in the code.
+
+Worth noting: approach C would **not** meaningfully help. C removes the migration and the CodeGen
+step, but the agent code still has to reach production by the same release path, so C buys a day of
+schema work and none of the train. The genuine alternative, if the date is firm, is to build the
+digest in aidp-next itself for the 23rd — it deploys through its own workflow with no npm release and
+no pin bump, and `sales-entities` is already installed there — and then port it to bizapps-sales
+properly without a deadline. That trades throwaway work for certainty about Monday.
+
+This is a sequencing call for the owner, recorded here as open.
