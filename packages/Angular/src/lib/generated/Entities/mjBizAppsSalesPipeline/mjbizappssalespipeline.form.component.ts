@@ -23,7 +23,8 @@ export class mjBizAppsSalesPipelineFormComponent extends BaseFormComponent {
             { sectionKey: 'mJBizAppsSalesDealTypes', sectionName: 'Deal Types', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDeals', sectionName: 'Deals', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesForecastSnapshots', sectionName: 'Forecast Snapshots', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesPipelineStages', sectionName: 'Pipeline Stages', isExpanded: false }
+            { sectionKey: 'mJBizAppsSalesPipelineStages', sectionName: 'Pipeline Stages', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesPipelineCompanies', sectionName: 'Pipeline Companies', isExpanded: false }
         ]);
     }
 }

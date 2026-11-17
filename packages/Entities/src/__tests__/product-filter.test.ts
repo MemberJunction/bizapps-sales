@@ -20,7 +20,7 @@
 import { describe, expect, it } from 'vitest';
 import { CalendarDayIn, TodayIn, UTC_ZONE } from '@mj-biz-apps/common-entities';
 
-import { ProductFilterFor, ProductWindowCovers } from '../product-filter.js';
+import { DraftProductFilterFor, ProductFilterFor, ProductWindowCovers } from '../product-filter.js';
 
 /** West of Greenwich, so the business day and the UTC day genuinely differ at the instant below. */
 const BUSINESS_ZONE = 'America/Chicago';
@@ -47,6 +47,24 @@ describe('ProductFilterFor', () => {
         expect(() => ProductFilterFor("2026-08-27' OR 1=1 --")).toThrow(/calendar day/);
         expect(() => ProductFilterFor('2026-02-30')).toThrow(/calendar day/);
         expect(() => ProductFilterFor('')).toThrow(/calendar day/);
+    });
+});
+
+/**
+ * golive#433: the picker counts Draft products a search matches, so the rep who just created one
+ * learns why it is missing. The count must use the same window as the list, or it would name products
+ * that activating today still would not bring in.
+ */
+describe('DraftProductFilterFor', () => {
+    it('asks for Draft rather than Active, under the same availability window', () => {
+        const sql = DraftProductFilterFor('2026-08-27');
+        expect(sql).toContain("Status = 'Draft'");
+        expect(sql).not.toContain("'Active'");
+        expect(sql.replace("'Draft'", "'Active'")).toBe(ProductFilterFor('2026-08-27'));
+    });
+
+    it('refuses anything that is not a calendar day, naming itself', () => {
+        expect(() => DraftProductFilterFor("2026-08-27' OR 1=1 --")).toThrow(/^DraftProductFilterFor: .*calendar day/);
     });
 });
 

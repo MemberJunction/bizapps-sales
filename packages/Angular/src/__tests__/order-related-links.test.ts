@@ -1,6 +1,22 @@
 import '@angular/compiler';
 import { describe, it, expect } from 'vitest';
-import { DealLookupOrderID, OrderRelatedLinks, OrderRelatedLinksKey } from '../lib/form-panels/order-related-links';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import {
+    ContractChipName,
+    ContractFileLinksFilter,
+    ContractLookupFilter,
+    DealLookupOrderID,
+    EXECUTED_AGREEMENT_FILE_CATEGORY,
+    ExecutedAgreementFileFilter,
+    NoExecutedAgreementWarning,
+    OrderContractChips,
+    OrderRelatedLinks,
+    OrderRelatedLinksKey,
+    ShouldReadAgreement,
+    type OrderContractRow,
+} from '../lib/form-panels/order-related-links';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../lib/data/entity-names';
 
 /**
@@ -115,5 +131,218 @@ describe('bizapps-orders#740 — a reversal finds the deal of the order it rever
     it('answers null for an order with no id yet', () => {
         expect(DealLookupOrderID({ ID: null, ReversesOrderHeaderID: null })).toBeNull();
         expect(DealLookupOrderID(null)).toBeNull();
+    });
+});
+
+/**
+ * bc-aidp-next-golive#445: reviewing an order meant going deal → contract → back, and the signed paper
+ * was never on the order at all. The From row now names the contract by number and status, opens its
+ * executed agreement, and says when the agreement is still missing.
+ */
+const FILE = 'F11E0000-0000-4000-8000-000000000003';
+const ACTIVE: OrderContractRow = { ID: CONTRACT, ContractNumber: 'CTR-000123', State: 'Active', IsAwaitingDocument: false };
+const AWAITING: OrderContractRow = { ...ACTIVE, State: 'Draft', IsAwaitingDocument: true };
+
+describe('#445 — finding the contract behind the deal', () => {
+    it('uses Deal.ContractID when the deal holds one', () => {
+        expect(ContractLookupFilter({ DealID: DEAL, ContractID: CONTRACT })).toBe(`ID = '${CONTRACT}'`);
+    });
+
+    /** The case the issue suspects: a contract the close created, with the deal's link never written. */
+    it('falls back to the contract the deal created when Deal.ContractID is empty', () => {
+        expect(ContractLookupFilter({ DealID: DEAL, ContractID: null })).toBe(
+            `CreatingEntity = '${MJS_ENTITIES.Deal}' AND CreatingRecordID = '${DEAL}'`,
+        );
+        expect(ContractLookupFilter({ DealID: DEAL, ContractID: '  ' })).toContain('CreatingRecordID');
+    });
+
+    it('looks for nothing without a deal', () => {
+        expect(ContractLookupFilter({})).toBeNull();
+    });
+
+    it('escapes quotes in the ids it embeds', () => {
+        expect(ContractLookupFilter({ DealID: "a'b" })).toContain("CreatingRecordID = 'a''b'");
+    });
+});
+
+describe('#445 — finding the executed agreement', () => {
+    it('lists the files linked to the contract by entity name and record', () => {
+        expect(ContractFileLinksFilter(CONTRACT)).toBe(`Entity = '${MJS_FOREIGN_ENTITIES.Contract}' AND RecordID = '${CONTRACT}'`);
+    });
+
+    it('picks the linked file in the Executed Agreement category', () => {
+        expect(ExecutedAgreementFileFilter([FILE, 'other'])).toBe(`Category = 'Executed Agreement' AND ID IN ('${FILE}','other')`);
+    });
+
+    it('reads no files when none is linked', () => {
+        expect(ExecutedAgreementFileFilter([])).toBeNull();
+        expect(ExecutedAgreementFileFilter(['  '])).toBeNull();
+    });
+
+    /** The view says awaiting exactly when no such file exists, so the two reads would find nothing. */
+    it('skips the file reads for a contract the view reports as awaiting', () => {
+        expect(ShouldReadAgreement(AWAITING)).toBe(false);
+        expect(ShouldReadAgreement(ACTIVE)).toBe(true);
+        expect(ShouldReadAgreement(null)).toBe(false);
+    });
+
+    /** Same spelling as contracts' seed and vwContracts, or every contract reads as having no agreement. */
+    it('spells the category as the contracts migration seeds it', () => {
+        expect(EXECUTED_AGREEMENT_FILE_CATEGORY).toBe('Executed Agreement');
+    });
+});
+
+describe('#445 — what the From row shows for the contract', () => {
+    it('names the contract by number and status', () => {
+        const view = OrderContractChips({ DealID: DEAL, ContractID: CONTRACT, Contract: ACTIVE });
+        const contract = view.Chips.find((c) => c.Key === 'contract');
+        expect(contract).toMatchObject({ EntityName: MJS_FOREIGN_ENTITIES.Contract, RecordID: CONTRACT, Label: 'Contract', Name: 'CTR-000123 · Active' });
+    });
+
+    it('opens the executed agreement file when one is linked', () => {
+        const view = OrderContractChips({ DealID: DEAL, Contract: ACTIVE, Agreement: { ID: FILE, Name: 'Signed SOW.pdf' } });
+        const agreement = view.Chips.find((c) => c.Key === 'agreement');
+        expect(agreement).toMatchObject({ EntityName: MJS_FOREIGN_ENTITIES.File, RecordID: FILE, Label: 'Executed agreement', Name: 'Signed SOW.pdf' });
+        expect(view.AwaitingNote).toBeNull();
+    });
+
+    it('says "Awaiting signed agreement" when the contract needs paper and has none', () => {
+        const view = OrderContractChips({ DealID: DEAL, Contract: AWAITING });
+        expect(view.Chips.map((c) => c.Key)).toEqual(['contract']);
+        expect(view.AwaitingNote).toBe('Awaiting signed agreement');
+    });
+
+    /** A Payment Link needs no paper: nothing is missing, so nothing is said. */
+    it('says nothing about an agreement the contract type does not require', () => {
+        const view = OrderContractChips({ DealID: DEAL, Contract: ACTIVE, Agreement: null });
+        expect(view.Chips.map((c) => c.Key)).toEqual(['contract']);
+        expect(view.AwaitingNote).toBeNull();
+    });
+
+    it('draws no contract chip without a contract row or a deal', () => {
+        expect(OrderContractChips({ DealID: DEAL, ContractID: CONTRACT })).toEqual({ Chips: [], AwaitingNote: null, Warning: null });
+        expect(OrderContractChips({ Contract: ACTIVE })).toEqual({ Chips: [], AwaitingNote: null, Warning: null });
+    });
+
+    /** One contract chip, never two: with the row read, the shared row's plain contract link is dropped. */
+    it('drops the plain contract link once the contract row is read', () => {
+        expect(OrderRelatedLinks({ DealID: DEAL, ContractID: CONTRACT, Contract: ACTIVE }).map((l) => l.Key)).toEqual(['deal']);
+    });
+
+    it('keeps the plain contract link when the contract row could not be read', () => {
+        expect(OrderRelatedLinks({ DealID: DEAL, ContractID: CONTRACT, Contract: null }).map((l) => l.Key)).toEqual(['deal', 'contract']);
+    });
+
+    it('shows a number alone, or a status alone, without a stray separator', () => {
+        expect(ContractChipName({ ...ACTIVE, State: null })).toBe('CTR-000123');
+        expect(ContractChipName({ ...ACTIVE, ContractNumber: null })).toBe('Active');
+    });
+
+    it('moves the links key when the contract status or agreement changes', () => {
+        const base = { DealID: DEAL, ContractID: CONTRACT, Contract: AWAITING };
+        expect(OrderRelatedLinksKey('order-1', base)).not.toBe(OrderRelatedLinksKey('order-1', { ...base, Contract: ACTIVE }));
+        expect(OrderRelatedLinksKey('order-1', { ...base, Contract: ACTIVE })).not.toBe(
+            OrderRelatedLinksKey('order-1', { ...base, Contract: ACTIVE, Agreement: { ID: FILE, Name: 'x' } }),
+        );
+    });
+});
+
+/** The panel template must reach these chips; pinned so a template edit cannot drop them silently. */
+describe('#445 — the panel renders the contract view', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const panel = readFileSync(resolve(here, '../lib/form-panels/order-related.panel.ts'), 'utf8');
+    it('binds the contract chips and the awaiting note', () => {
+        expect(panel).toContain('ContractView.Chips');
+        expect(panel).toContain('ContractView.AwaitingNote');
+        expect(panel).toContain('this.ContractView = OrderContractChips(state)');
+    });
+    it('binds the no-executed-agreement warning', () => {
+        expect(panel).toContain('@if (ContractView.Warning; as warning)');
+        expect(panel).toContain('data-testid="order-related-no-agreement"');
+    });
+});
+
+/**
+ * bc-aidp-next-golive#443: an invoice could go to Bill.com for an order whose contract had no signed
+ * agreement, and nothing said so. g443.1 A: warn, sending unchanged. g443.2 A: won-deal orders only.
+ */
+describe('#443 — the "No executed agreement" warning', () => {
+    const won = { DealID: DEAL, DealIsWon: true, ContractRead: true };
+
+    it('warns for a won deal with no contract', () => {
+        const warning = NoExecutedAgreementWarning({ ...won, Contract: null });
+        expect(warning?.Label).toBe('No executed agreement');
+        expect(warning?.Detail).toContain('no contract');
+    });
+
+    it('warns for a won deal whose contract awaits its executed agreement', () => {
+        expect(NoExecutedAgreementWarning({ ...won, Contract: AWAITING })?.Label).toBe('No executed agreement');
+    });
+
+    it('says nothing when the executed agreement is linked', () => {
+        expect(NoExecutedAgreementWarning({ ...won, Contract: ACTIVE, Agreement: { ID: FILE, Name: 'x' } })).toBeNull();
+    });
+
+    /** Payment Link: its type needs no paper, so vwContracts never reports it awaiting. Counted as covered. */
+    it('treats a contract whose type needs no paper as covered', () => {
+        expect(NoExecutedAgreementWarning({ ...won, Contract: ACTIVE, Agreement: null })).toBeNull();
+    });
+
+    /** g443.2 A: an open or lost deal has no agreement to expect yet. */
+    it('says nothing for a deal that is not won, or whose status is unknown', () => {
+        expect(NoExecutedAgreementWarning({ ...won, DealIsWon: false, Contract: null })).toBeNull();
+        expect(NoExecutedAgreementWarning({ ...won, DealIsWon: null, Contract: null })).toBeNull();
+    });
+
+    /** Renewals, checkout orders and conversions reach the panel with no deal at all. */
+    it('says nothing for an order no deal names', () => {
+        expect(NoExecutedAgreementWarning({ DealIsWon: true, ContractRead: true, Contract: null })).toBeNull();
+    });
+
+    /** The deal names the order a reversal reverses; the warning belongs on that order, not this one. */
+    it('says nothing for a reversal reached through the order it reverses', () => {
+        expect(NoExecutedAgreementWarning({ ...won, Contract: null, ViaReversedOrder: true })).toBeNull();
+    });
+
+    /** A voided order sends no invoice, so "Invoices still send" would be untrue. */
+    it('says nothing for a voided order', () => {
+        expect(NoExecutedAgreementWarning({ ...won, Contract: AWAITING, OrderVoided: true })).toBeNull();
+    });
+
+    it('moves the links key when the order becomes voided', () => {
+        const base = { ...won, Contract: null };
+        expect(OrderRelatedLinksKey('o', base)).not.toBe(OrderRelatedLinksKey('o', { ...base, OrderVoided: true }));
+    });
+
+    /** A refused or thrown contract read is not evidence that the contract is missing. */
+    it('says nothing when the contract lookup did not answer', () => {
+        expect(NoExecutedAgreementWarning({ DealID: DEAL, DealIsWon: true, Contract: null })).toBeNull();
+    });
+
+    it('replaces the muted awaiting note with the warning, keeping the contract chip', () => {
+        const view = OrderContractChips({ ...won, ContractID: CONTRACT, Contract: AWAITING });
+        expect(view.Chips.map((c) => c.Key)).toEqual(['contract']);
+        expect(view.AwaitingNote).toBeNull();
+        expect(view.Warning?.Label).toBe('No executed agreement');
+    });
+
+    it('keeps the muted note for an awaiting contract on a deal that is not won', () => {
+        const view = OrderContractChips({ DealID: DEAL, DealIsWon: false, ContractRead: true, Contract: AWAITING });
+        expect(view.AwaitingNote).toBe('Awaiting signed agreement');
+        expect(view.Warning).toBeNull();
+    });
+
+    it('warns with no contract chip when the won deal has no contract', () => {
+        const view = OrderContractChips({ ...won, Contract: null });
+        expect(view.Chips).toEqual([]);
+        expect(view.Warning?.Label).toBe('No executed agreement');
+    });
+
+    it('moves the links key when the deal is won or the contract read answers', () => {
+        const base = { DealID: DEAL, Contract: null };
+        expect(OrderRelatedLinksKey('o', base)).not.toBe(OrderRelatedLinksKey('o', { ...base, DealIsWon: true }));
+        expect(OrderRelatedLinksKey('o', { ...base, DealIsWon: true })).not.toBe(
+            OrderRelatedLinksKey('o', { ...base, DealIsWon: true, ContractRead: true }),
+        );
     });
 });

@@ -64,6 +64,8 @@ interface DealDraft {
     DealTypeID: string;
     DealStatusTypeID: string;
     AccountID: string;
+    /** Must be actively linked to `PipelineID`; the server refuses a deal whose company is not. */
+    CompanyID: string;
     TermMonths?: number;
     Amount?: number;
     Probability?: number;
@@ -93,6 +95,7 @@ async function save(ctx: Ctx, input: DealDraft): Promise<DealSaveResult> {
     deal.DealTypeID = input.DealTypeID;
     deal.DealStatusTypeID = input.DealStatusTypeID;
     deal.AccountID = input.AccountID;
+    deal.CompanyID = input.CompanyID;
     if (input.TermMonths != null) deal.TermMonths = input.TermMonths;
     if (input.Amount != null) deal.Amount = input.Amount;
     if (input.Probability != null) deal.Probability = input.Probability;
@@ -113,6 +116,7 @@ function draft(f: SalesFixture, name: string, overrides: Partial<DealDraft> = {}
         DealTypeID: f.DealTypeID,
         DealStatusTypeID: f.OpenStatusID,
         AccountID: f.AccountID,
+        CompanyID: f.CompanyID,
         TermMonths: 12,
         ...overrides,
     };

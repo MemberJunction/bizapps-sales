@@ -28,10 +28,9 @@
  *
  * ── WHAT IT DELIBERATELY DOES NOT ASSERT ────────────────────────────────────────────────────────
  *
- * Deactivating the owner row does NOT clear the deal's owner, and this spec does not claim it does.
- * `stampOwnerFromTeam()` matches on `DealRoleID` alone and never reads `IsActive`, as does
- * `DealEntity.SetOwner`. That is pre-existing in both and unchanged here — but this PR's summary
- * lists "deactivated" beside "role changed" as cases it catches, and only the second is true today.
+ * Deactivating the owner row. `stampOwnerFromTeam()` credits only an active owner row
+ * (`HoldsOwnerSeat`), and deactivating the LAST one on its own is refused (sales#568, save-deal.SD48),
+ * so there is no "deactivated, now unowned" state for this spec to drive.
  */
 import { randomUUID } from 'node:crypto';
 
@@ -86,9 +85,12 @@ test.describe('golive#291 — a team row saved on its own re-derives the deal ow
          * Every ingredient is resolved by QUERY. Hardcoded ids would make this a description of one
          * host, and the ids here are seeded values that a rebuild is free to change.
          */
+        // The company from the pipeline's active link: the deal's company must be one its pipeline serves.
         const pipeline = await QueryOne<{ ID: string; CompanyID: string }>(
-            `SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID, CAST(CompanyID AS nvarchar(50)) AS CompanyID
-               FROM __mj_BizAppsSales.Pipeline WHERE IsActive = 1 ORDER BY Name`,
+            `SELECT TOP 1 CAST(p.ID AS nvarchar(50)) AS ID, CAST(pc.CompanyID AS nvarchar(50)) AS CompanyID
+               FROM __mj_BizAppsSales.Pipeline p
+               JOIN __mj_BizAppsSales.PipelineCompany pc ON pc.PipelineID = p.ID AND pc.IsActive = 1
+              WHERE p.IsActive = 1 ORDER BY p.Name, pc.CompanyID`,
         );
         const ownerRole = await QueryOne<{ ID: string }>(
             `SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID FROM __mj_BizAppsSales.DealRole WHERE Code = 'OWNER'`,
@@ -98,7 +100,7 @@ test.describe('golive#291 — a team row saved on its own re-derives the deal ow
                FROM __mj_BizAppsSales.DealTeamMember WHERE EmployeeID IS NOT NULL`,
         );
 
-        expect(pipeline?.ID, 'the host needs an active pipeline with a company').toBeTruthy();
+        expect(pipeline?.ID, 'the host needs an active pipeline with an active company link').toBeTruthy();
         expect(ownerRole?.ID, 'the host needs the OWNER deal role').toBeTruthy();
         expect(employee?.EmployeeID, 'the host needs an employee to put on a deal team').toBeTruthy();
         employeeID = String(employee!.EmployeeID).toLowerCase();
@@ -190,9 +192,12 @@ test.describe('golive#291 — a team row saved on its own re-derives the deal ow
      * add failure modes without adding coverage of the fix.
      */
     test('a deal page left open catches up when the team grid reloads', async ({ page, context }) => {
+        // The company from the pipeline's active link: the deal's company must be one its pipeline serves.
         const pipeline = await QueryOne<{ ID: string; CompanyID: string }>(
-            `SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID, CAST(CompanyID AS nvarchar(50)) AS CompanyID
-               FROM __mj_BizAppsSales.Pipeline WHERE IsActive = 1 ORDER BY Name`,
+            `SELECT TOP 1 CAST(p.ID AS nvarchar(50)) AS ID, CAST(pc.CompanyID AS nvarchar(50)) AS CompanyID
+               FROM __mj_BizAppsSales.Pipeline p
+               JOIN __mj_BizAppsSales.PipelineCompany pc ON pc.PipelineID = p.ID AND pc.IsActive = 1
+              WHERE p.IsActive = 1 ORDER BY p.Name, pc.CompanyID`,
         );
         const ownerRole = await QueryOne<{ ID: string }>(
             `SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID FROM __mj_BizAppsSales.DealRole WHERE Code = 'OWNER'`,
@@ -201,7 +206,7 @@ test.describe('golive#291 — a team row saved on its own re-derives the deal ow
             `SELECT TOP 1 CAST(EmployeeID AS nvarchar(50)) AS EmployeeID
                FROM __mj_BizAppsSales.DealTeamMember WHERE EmployeeID IS NOT NULL`,
         );
-        expect(pipeline?.ID, 'the host needs an active pipeline with a company').toBeTruthy();
+        expect(pipeline?.ID, 'the host needs an active pipeline with an active company link').toBeTruthy();
         expect(ownerRole?.ID, 'the host needs the OWNER deal role').toBeTruthy();
         expect(employee?.EmployeeID, 'the host needs an employee to put on a deal team').toBeTruthy();
 

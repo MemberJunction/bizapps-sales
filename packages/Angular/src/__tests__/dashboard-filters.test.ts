@@ -73,6 +73,23 @@ describe('pipeline choices follow the selling companies', () => {
         expect(PipelinesWithinCompanies(['P1', 'P3'], PIPELINES, ['C1'])).toEqual(['P1']);
         expect(PipelinesWithinCompanies(['P1', 'P3'], PIPELINES, [])).toEqual(['P1', 'P3']);
     });
+
+    /** A pipeline linked to two companies is one row per company in the lookup, and one choice here. */
+    describe('a pipeline shared by two companies', () => {
+        const SHARED = [...PIPELINES, { ID: 'P4', CompanyID: 'C1' }, { ID: 'p4', CompanyID: 'C2' }];
+
+        it('is offered once, whichever companies are selected', () => {
+            expect(PipelineOptionsFor(SHARED, []).map((p) => p.ID)).toEqual(['P1', 'P2', 'P3', 'P4']);
+            expect(PipelineOptionsFor(SHARED, ['C1', 'C2']).map((p) => p.ID)).toEqual(['P1', 'P2', 'P3', 'P4']);
+            expect(PipelineOptionsFor(SHARED, ['C2']).map((p) => p.ID)).toEqual(['P3', 'p4']);
+        });
+
+        it('stays selected while any of its companies is', () => {
+            expect(PipelinesWithinCompanies(['P4'], SHARED, ['C2'])).toEqual(['P4']);
+            expect(PipelinesWithinCompanies(['P4'], SHARED, ['C1'])).toEqual(['P4']);
+            expect(PipelinesWithinCompanies(['P4'], SHARED, ['C3'])).toEqual([]);
+        });
+    });
 });
 
 describe('the lists a filtered dashboard draws from', () => {

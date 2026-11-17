@@ -31,6 +31,7 @@ import { mjBizAppsSalesForecastSnapshotFormComponent } from "./Entities/mjBizApp
 import { mjBizAppsSalesLeadSourceTypeFormComponent } from "./Entities/mjBizAppsSalesLeadSourceType/mjbizappssalesleadsourcetype.form.component";
 import { mjBizAppsSalesLifecycleStageTypeFormComponent } from "./Entities/mjBizAppsSalesLifecycleStageType/mjbizappssaleslifecyclestagetype.form.component";
 import { mjBizAppsSalesLossReasonFormComponent } from "./Entities/mjBizAppsSalesLossReason/mjbizappssaleslossreason.form.component";
+import { mjBizAppsSalesPipelineCompanyFormComponent } from "./Entities/mjBizAppsSalesPipelineCompany/mjbizappssalespipelinecompany.form.component";
 import { mjBizAppsSalesPipelineFormComponent } from "./Entities/mjBizAppsSalesPipeline/mjbizappssalespipeline.form.component";
 import { mjBizAppsSalesPipelineStageFormComponent } from "./Entities/mjBizAppsSalesPipelineStage/mjbizappssalespipelinestage.form.component";
 import { mjBizAppsSalesSalesAccountFormComponent } from "./Entities/mjBizAppsSalesSalesAccount/mjbizappssalessalesaccount.form.component";
@@ -258,7 +259,8 @@ export class GeneratedForms_SubModule_22 { }
 
 @NgModule({
 declarations: [
-    mjBizAppsSalesLeadSourceTypeFormComponent
+    mjBizAppsSalesLeadSourceTypeFormComponent,
+    mjBizAppsSalesPipelineCompanyFormComponent
 ],
 imports: [
     CommonModule,

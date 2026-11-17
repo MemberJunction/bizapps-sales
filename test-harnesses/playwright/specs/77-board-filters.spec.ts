@@ -81,10 +81,13 @@ test.describe('board — the shared filter bar (bc-aidp-next-golive#351)', () =>
         await expect(tab.or(one).first(), 'the Board names its pipeline').toBeVisible({ timeout: 60_000 });
         const shown = ((await tab.count()) ? await tab.textContent() : await one.textContent())?.trim() ?? '';
 
+        // A tab reads "Name (Company)" for a pipeline linked to one company, and the bare name for one
+        // linked to several, so every (pipeline, linked company) pair is a candidate label.
         const pipelines = await QueryAll<{ ID: string; Label: string; Name: string }>(`
             SELECT p.ID, p.Name, CONCAT(p.Name, ' (', c.Name, ')') AS Label
               FROM __mj_BizAppsSales.Pipeline p
-              LEFT JOIN __mj.Company c ON c.ID = p.CompanyID`);
+              LEFT JOIN __mj_BizAppsSales.PipelineCompany pc ON pc.PipelineID = p.ID
+              LEFT JOIN __mj.Company c ON c.ID = pc.CompanyID`);
         const pipeline = pipelines.find((p) => p.Label === shown) ?? pipelines.find((p) => p.Name === shown);
         expect(pipeline, `the tab "${shown}" names a pipeline`).toBeTruthy();
 

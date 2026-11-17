@@ -5,9 +5,11 @@
  *   Overview (exec briefing) · Pipeline · What's being sold · Payment schedule · Account · Commercial
  *   Close · Buying team · Internal team · Motion · Activity · Stage history
  *
- * `replacesSectionKey: 'details'` hides the generated field list. `contributionKey` equals each
- * panel's `SectionKey` so left-nav rail items attach. Overview is the only `inclusion: 'Primary'`
- * so it leads; the rest sort into the related band by `sortKey` (descending).
+ * The hero's `replacesSectionKey: 'details'` hides the generated field list. `contributionKey` equals
+ * each panel's `SectionKey` so left-nav rail items attach. Every panel declares `inclusion: 'Primary'`:
+ * MJ 6.2 files a panel at a field slot inside the Details rail item unless it declares an
+ * inclusion, and Primary panels lead the rail in `sortKey` order (descending), so the rail reads
+ * Overview, Pipeline, What's being sold, ... in the order it had before 6.2.
  *
  * @module @mj-biz-apps/sales-ng
  */
@@ -18,11 +20,14 @@ import { CompositeKey, Metadata, RunView, type EntityInfo, EntitySaveOptions, ty
 import { RegisterClassEx } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import { PartyFieldComponent, type PartyKind } from '@mj-biz-apps/common-ng';
+import { MJSPromotePartyDialog, type PromoteKind } from './promote-party-dialog.component';
+import { CanCreateEntity } from '../data/promote-party';
 import { BaseFormPanel, BaseFormsModule, type FormContext } from '@memberjunction/ng-base-forms';
 import {
     EntityViewerModule,
     type AfterDataLoadEventArgs,
     type RecordOpenedEvent,
+    type RecordSelectedEvent,
     type ViewRelatedRecordNavigation,
 } from '@memberjunction/ng-entity-viewer';
 import {
@@ -38,15 +43,22 @@ import {
     type SalesReopenDealOutput,
 } from '@mj-biz-apps/sales-entities';
 import { DealActivityTimelineComponent } from '../activities/deal-activity-timeline.component';
+import { LinkedParties, type ActivityLinkFields, type LinkedParty } from '../activities/deal-activity-parties';
 import { RelatedRecordTarget, SyntheticActivityView } from '../pages/deal-views';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import {
+    CHOOSE_PIPELINE_MESSAGE,
+    CompanyDefaultPipeline,
+    CompanyHasPipeline,
     CompanyLabel,
     InitialCompanyID,
+    NoPipelineMessage,
     OrderPipelinesByCompany,
     PipelineCompanies,
     PipelineLabel,
+    PipelineServesCompany,
     PipelinesForCompany,
+    PIPELINE_LINK_ORDER,
     type CompanyPipeline,
     type PipelineCompany,
 } from '../data/company-pipelines';
@@ -60,6 +72,7 @@ import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './de
 import { IsFieldReadable } from './field-readable';
 import { SelectableStages } from '../data/selectable-stages';
 import { BillComCustomerWarning, CheckBillComCustomer } from '../data/billcom-customer';
+import { SalesSettings } from '../data/sales-settings';
 
 const E = MJS_ENTITIES.Deal;
 
@@ -122,10 +135,11 @@ async function LoadEmployees(): Promise<EmployeeOption[] | null> {
 }
 
 /**
- * One pipeline the deal may sit in, with the company it sells as (#327), and whether it is active: an
- * inactive one is offered only to the deal already in it (bc-aidp-next-golive#423).
+ * One pipeline the deal may sit in, as served by one of its linked companies (#327), with whether the
+ * pipeline and that link are active: an inactive one is offered only to the deal already in it
+ * (bc-aidp-next-golive#423).
  */
-export type PipelineOption = CompanyPipeline & { IsActive: boolean };
+export type PipelineOption = CompanyPipeline & { IsActive: boolean; LinkIsActive: boolean };
 
 /**
  * One stage, carrying the pipeline that owns it — the whole point of the list — and the defaults a
@@ -160,14 +174,26 @@ export interface PipelineStageOption extends StageDefaults {
  * the board use too, so the three lists still agree.
  */
 async function LoadPipelines(): Promise<PipelineOption[]> {
-    const result = await new RunView().RunView<PipelineRow>({
-        EntityName: MJS_ENTITIES.Pipeline,
-        OrderBy: 'DisplayRank ASC, Name ASC',
-        ResultType: 'simple',
-        Fields: ['ID', 'Name', 'Code', 'CompanyID', 'Company', 'IsDefault', 'DisplayRank', 'IsActive'],
-    });
-    if (!result?.Success) return [];
-    return OrderPipelinesByCompany((result.Results ?? []).map(ToPipelineOption));
+    const [pipelines, links] = await new RunView().RunViews([
+        {
+            EntityName: MJS_ENTITIES.Pipeline,
+            OrderBy: 'DisplayRank ASC, Name ASC',
+            ResultType: 'simple',
+            Fields: ['ID', 'Name', 'Code', 'IsDefault', 'DisplayRank', 'IsActive'],
+        },
+        {
+            // Inactive links too, for the same reason as inactive pipelines: a deal on a retired link
+            // still has to show its company.
+            EntityName: MJS_ENTITIES.PipelineCompany,
+            // Oldest link first, so the default company stays the one the default pipeline was first
+            // linked to when it is later linked to every company (see `DefaultCompanyID`).
+            OrderBy: PIPELINE_LINK_ORDER,
+            ResultType: 'simple',
+            Fields: ['PipelineID', 'CompanyID', 'Company', 'IsActive'],
+        },
+    ]);
+    if (!pipelines?.Success || !links?.Success) return [];
+    return OrderPipelinesByCompany(ToPipelineOptions(pipelines.Results as PipelineRow[], links.Results as PipelineLinkRow[]));
 }
 
 /** A pipeline row as `ResultType: 'simple'` returns it. */
@@ -175,24 +201,39 @@ interface PipelineRow {
     ID: string;
     Name: string;
     Code: string;
-    CompanyID: string;
-    Company: string | null;
     IsDefault: boolean;
     DisplayRank: number;
     IsActive: boolean;
 }
 
-function ToPipelineOption(r: PipelineRow): PipelineOption {
-    return {
-        ID: String(r.ID),
-        Name: String(r.Name),
-        Code: String(r.Code ?? ''),
-        CompanyID: String(r.CompanyID),
-        CompanyName: r.Company ?? null,
-        IsDefault: !!r.IsDefault,
-        DisplayRank: Number(r.DisplayRank ?? 0),
-        IsActive: !!r.IsActive,
-    };
+/** A `PipelineCompany` row as `ResultType: 'simple'` returns it. */
+interface PipelineLinkRow {
+    PipelineID: string;
+    CompanyID: string;
+    Company: string | null;
+    IsActive: boolean;
+}
+
+/** One option per (pipeline, linked company). A pipeline with no link offers no company, so no option. */
+function ToPipelineOptions(pipelines: readonly PipelineRow[], links: readonly PipelineLinkRow[]): PipelineOption[] {
+    const options: PipelineOption[] = [];
+    for (const r of pipelines) {
+        const id = String(r.ID).toLowerCase();
+        for (const link of links.filter((l) => String(l.PipelineID).toLowerCase() === id)) {
+            options.push({
+                ID: String(r.ID),
+                Name: String(r.Name),
+                Code: String(r.Code ?? ''),
+                CompanyID: String(link.CompanyID),
+                CompanyName: link.Company ?? null,
+                IsDefault: !!r.IsDefault,
+                DisplayRank: Number(r.DisplayRank ?? 0),
+                IsActive: !!r.IsActive,
+                LinkIsActive: !!link.IsActive,
+            });
+        }
+    }
+    return options;
 }
 
 /**
@@ -712,7 +753,17 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
      * it is.
      */
     public FieldTrackKey(f: DealFieldSpec): string {
-        return CREATION_PARTY_CONTACT_FIELDS.includes(f.name) ? `${f.name}:${this.contactRenderKey()}` : f.name;
+        if (CREATION_PARTY_CONTACT_FIELDS.includes(f.name)) {
+            return `${f.name}:${this.contactRenderKey()}`;
+        }
+        // Keyed on its OWN signal, which only a promotion bumps. Choosing an account must NOT rebuild
+        // this field -- that would tear the picker down under the rep mid-pick, which is what
+        // `deal-account-default-contacts` pins. A promotion is the one case where it has to re-read,
+        // because the row it would have shown did not exist when it last rendered.
+        if (f.name === 'AccountID') {
+            return `AccountID:${this.accountRenderKey()}`;
+        }
+        return f.name;
     }
 
     /**
@@ -722,6 +773,86 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
     public readonly AccountDefaultsError = signal<string | null>(null);
     public readonly BillComCustomerWarning = signal<string | null>(null);
     private readonly contactRenderKey = signal(0);
+    /** `protected`: the party panel bumps it when a promotion adds the row the picker could not offer. */
+    protected readonly accountRenderKey = signal(0);
+
+    // ── Reaching a record the picker cannot offer (D-PR2 / D-PR3) ──────────────
+
+    /** Which promotion the dialog is doing; meaningless while `PromoteOpen` is false. */
+    public PromoteKind: PromoteKind = 'Account';
+    public PromoteOpen = false;
+    /** The field the dialog was opened from, so the promoted record lands in the right one. */
+    private promoteField: string | null = null;
+
+    /**
+     * `'account'` for the account field, `'contact'` for either contact field, null for anything
+     * else. Derived from the field's party Kind rather than its name, so a fourth party field added
+     * to the spec list gets the affordance without this method being touched.
+     */
+    public PromotableFieldKind(f: DealFieldSpec): 'account' | 'contact' | null {
+        if (!f.party) return null;
+        const kind = f.party.Kind === 'Organization' ? 'account' : 'contact';
+        // The dialog can promote or CREATE, so offering the route to someone who may do neither sends
+        // them to a server refusal. Same rule as the promote card (D-PR4): promotion rides on the
+        // create permission rather than carrying one of its own.
+        const child = kind === 'account' ? MJS_ENTITIES.SalesAccount : MJS_ENTITIES.SalesContact;
+        return this.CanCreateChild(child) ? kind : null;
+    }
+
+    /** Whether this user may create the child entity. Replaced in tests. */
+    public CanCreateChild: (entityName: string) => boolean = (entityName) => CanCreateEntity(entityName);
+
+    public PromoteLinkFor(f: DealFieldSpec): string {
+        // Names the FIELD the rep is looking at, then where to look and what they can add. The
+        // field's own label is Account, not Sales Account, so the link matching it reads as part of
+        // the field rather than as a sentence about the data model.
+        return this.PromotableFieldKind(f) === 'account'
+            ? "Can't find the Account? Search Organizations / Add Account."
+            : "Can't find the Contact? Search People / Add Contact.";
+    }
+
+    public OpenPromote(f: DealFieldSpec): void {
+        const kind = this.PromotableFieldKind(f);
+        if (!kind) return;
+        this.PromoteKind = kind === 'account' ? 'Account' : 'Contact';
+        this.promoteField = f.name;
+        this.PromoteOpen = true;
+    }
+
+    public ClosePromote(): void {
+        this.PromoteOpen = false;
+        this.promoteField = null;
+    }
+
+    /**
+     * The promoted record's ID IS its Organization's or Person's ID (IsA), so it can be stored
+     * straight into the field the rep opened the dialog from.
+     *
+     * It then runs the SAME field-change path a normal pick runs, rather than re-deriving what
+     * choosing an account means: filling the deal's empty contacts and the Bill.com check both live
+     * there (#254). The account field is re-keyed because the row it would now show did not exist
+     * when it last rendered.
+     */
+    public async OnPromoted(id: string): Promise<void> {
+        const field = this.promoteField;
+        this.PromoteOpen = false;
+        this.promoteField = null;
+        if (!field || !this.Record) return;
+        this.Record.Set(field, id);
+        // RE-KEY WHICHEVER FIELD IT WAS. The reason given for the account field applies just as much
+        // to a contact: the row the picker would now show did not exist when it last rendered, so
+        // without this a contact promoted or created from the dialog can sit blank in its own picker
+        // until the form reloads. `OnFieldValueChange` deliberately does NOT bump these — tearing a
+        // picker down mid-pick is what `deal-account-default-contacts` pins — so a promotion is the
+        // one caller that must.
+        if (field === 'AccountID') {
+            this.accountRenderKey.update((k) => k + 1);
+        } else if (CREATION_PARTY_CONTACT_FIELDS.includes(field)) {
+            this.contactRenderKey.update((k) => k + 1);
+        }
+        await this.OnFieldValueChange({ FieldName: field });
+    }
+
 
     public DrawsOwnMoney(f: DealFieldSpec): boolean {
         return f.currency === true && !(this.EditMode && this.FieldEditable(f.name));
@@ -774,12 +905,12 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         /**
          * SERVER-MAINTAINED STAMPS ARE NEVER EDITABLE, on an open deal or a closed one.
          *
-         * Checked BEFORE the lock, because the lock is not the reason: `stampCompanyFromPipeline()`
-         * overwrites a supplied CompanyID from the pipeline's company, and `ownerStampEditRefusal()`
+         * Checked BEFORE the lock, because the lock is not the reason: `ownerStampEditRefusal()`
          * REFUSES a supplied OwnerEmployeeID outright -- the owner comes from the deal team via
-         * `stampOwnerFromTeam()`. Offering either as an editable control invites a rep to choose a
-         * value the save then discards or rejects, which is the "accepts typing, refuses on save"
-         * behaviour golive#206 item 3 exists to delete.
+         * `stampOwnerFromTeam()`. CompanyID is chosen with Company on the Pipeline panel, which offers
+         * only companies linked to a pipeline; a free lookup here would offer any company and the save
+         * would refuse one the pipeline does not serve. Offering either as an editable control invites
+         * the "accepts typing, refuses on save" behaviour golive#206 item 3 exists to delete.
          *
          * They stay RENDERED and keep `link: 'Record'`, so the company and the owner are still
          * visible and still navigable. What goes away is the invitation to type into them.
@@ -910,7 +1041,7 @@ const CREATION_PIPELINE_FIELDS: readonly string[] = ['DealTypeID', 'ExpectedClos
  */
 const PARTY_FIELDS: readonly DealFieldSpec[] = [
     { name: 'AccountID', type: 'textbox', link: 'Record', party: { Kind: 'Organization', QueryName: 'Sales: Party Lookup Accounts' } },
-    // Derived by stampCompanyFromPipeline() / stampOwnerFromTeam(); see serverMaintained.
+    // CompanyID is set by the Pipeline panel's Company picker; OwnerEmployeeID by stampOwnerFromTeam(). See serverMaintained.
     { name: 'CompanyID', type: 'textbox', link: 'Record', serverMaintained: true },
     { name: 'OwnerEmployeeID', type: 'textbox', link: 'Record', serverMaintained: true },
     { name: 'PrimaryContactID', type: 'textbox', link: 'Record', party: { Kind: 'Person', QueryName: 'Sales: Party Lookup Contacts' } },
@@ -973,6 +1104,25 @@ interface DealFieldSpec {
 
 const EMPTY_STATE_STYLES =
     '.mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }';
+
+/**
+ * The link under a party field that opens the promote dialog. A button, not an anchor: it performs an
+ * action rather than going somewhere, which is also what keeps it reachable by keyboard for free.
+ */
+const PROMOTE_LINK_STYLES = `
+.mjs-promote-link {
+    display: block;
+    margin-top: var(--mj-space-1);
+    padding: 0;
+    background: none;
+    border: 0;
+    font-size: var(--mj-text-sm);
+    color: var(--mj-brand-primary);
+    cursor: pointer;
+    text-align: left;
+}
+.mjs-promote-link:hover { text-decoration: underline; }
+`;
 
 const FIELD_STYLES = `
     .mjs-fields {
@@ -1090,7 +1240,6 @@ const FIELD_STYLES = `
         sortKey: 200,
         contributionKey: 'overview',
         inclusion: 'Primary',
-        replacesSectionKey: 'details',
     },
 })
 @Component({
@@ -1165,7 +1314,11 @@ const FIELD_STYLES = `
                                 <div class="l">Account</div>
                                 <div class="v">
                                     @if (Record.AccountID && G('Account')) {
-                                        <button type="button" class="mjs-ov-link" (click)="OpenAccount($event)">{{ G('Account') }}</button>
+                                        <button type="button" class="mjs-ov-link"
+                                            [mjRecordLink]="Record"
+                                            FieldName="AccountID"
+                                            [HandleClick]="false"
+                                            (click)="OpenAccount($event)">{{ G('Account') }}</button>
                                     } @else { {{ G('Account') || '—' }} }
                                 </div>
                             </div>
@@ -1173,12 +1326,18 @@ const FIELD_STYLES = `
                                 <div class="l">Owner</div>
                                 <div class="v">
                                     @if (Record.OwnerEmployeeID && G('OwnerEmployee')) {
-                                        <button type="button" class="mjs-ov-link" (click)="OpenOwner($event)">{{ G('OwnerEmployee') }}</button>
+                                        <button type="button" class="mjs-ov-link"
+                                            [mjRecordLink]="Record"
+                                            FieldName="OwnerEmployeeID"
+                                            [HandleClick]="false"
+                                            (click)="OpenOwner($event)">{{ G('OwnerEmployee') }}</button>
                                     } @else { {{ G('OwnerEmployee') || 'No owner' }} }
                                 </div>
                             </div>
                             <div><div class="l">Stage</div><div class="v">{{ G('PipelineStage') || '—' }}</div></div>
-                            <div><div class="l">Pipeline</div><div class="v">{{ G('Pipeline') || '—' }}</div></div>
+                            @if (ShowPipelineRow) {
+                                <div><div class="l">Pipeline</div><div class="v">{{ G('Pipeline') || '—' }}</div></div>
+                            }
                             <div><div class="l">Type</div><div class="v">{{ G('DealType') || '—' }}</div></div>
                             <div><div class="l">Selling as</div><div class="v">{{ G('Company') || '—' }}</div></div>
                             <!-- WHY A DEAL WAS LOST is the single most useful thing on a lost deal, and
@@ -1326,6 +1485,14 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
      */
     private readonly businessZoneLoaded = signal(false);
 
+    /** The `HidePipelines` setting. */
+    public readonly HidePipelines = signal(SalesSettings.HidePipelinesIfLoaded);
+
+    /** Whether the overview names the pipeline. `?.()` for the `Object.create` reason given above. */
+    public get ShowPipelineRow(): boolean {
+        return !this.HidePipelines?.();
+    }
+
     /**
      * THE ZONE IS LOADED BEFORE THIS PANEL IS ASKED WHAT DAY IT IS (bc-aidp-next-golive#168).
      *
@@ -1344,8 +1511,12 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
      * BaseFormPanel declares no lifecycle hook, so there is nothing to chain to.
      */
     public async ngOnInit(): Promise<void> {
-        await BusinessTimeZoneEngine.Instance.Config(false);
+        const [, hidePipelines] = await Promise.all([
+            BusinessTimeZoneEngine.Instance.Config(false),
+            SalesSettings.LoadHidePipelines(),
+        ]);
         this.businessZoneLoaded.set(true);
+        this.HidePipelines.set(hidePipelines);
     }
 
     /**
@@ -1624,16 +1795,16 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     // Overview is an exec briefing and stays the lead for a SAVED deal, which is what it is for;
     // on a record with no data it is a page of blanks the user has to look past to find where
     // typing starts. This is the first panel that asks for anything.
-    metadata: { entity: E, slot: 'after-fields', sortKey: 90, contributionKey: 'pipeline', leadsWhenUnsaved: true },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 90, contributionKey: 'pipeline', leadsWhenUnsaved: true, inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-pipeline-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent],
-    styles: [FIELD_STYLES],
+    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent, MJSPromotePartyDialog],
+    styles: [FIELD_STYLES, PROMOTE_LINK_STYLES],
     template: `
-        <mj-collapsible-panel SectionKey="pipeline" SectionName="Pipeline" Icon="fa-solid fa-diagram-project"
+        <mj-collapsible-panel SectionKey="pipeline" [SectionName]="HidePipelines() ? 'Stage' : 'Pipeline'" Icon="fa-solid fa-diagram-project"
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
                 @for (f of Fields; track FieldTrackKey(f)) {
@@ -1641,7 +1812,20 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                         @if (f.party) {
                             <bizapps-party-field [Record]="Record" [FieldName]="f.name" [Kind]="f.party.Kind" [QueryName]="f.party.QueryName"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext"
+                                [AllowCreate]="false"
                                 (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></bizapps-party-field>
+                            @if (EditMode && FieldEditable(f.name) && PromotableFieldKind(f)) {
+                                <!-- The picker only offers organizations and people that ALREADY have a
+                                     sales row, because it cannot mark a row unselectable (PL1/PL3). This
+                                     is the way to the ones it leaves out, so the rep reaches the existing
+                                     record instead of creating a second one (golive#259). -->
+                                <!-- A STATIC testid, scoped by the enclosing data-field. Built as
+                                     'deal-promote-' + kind it was greppable by nobody and invisible to
+                                     assert-harness-selectors, which collects literal data-testid only. -->
+                                <button type="button" class="mjs-promote-link"
+                                        data-testid="deal-promote-party"
+                                        (click)="OpenPromote(f)">{{ PromoteLinkFor(f) }}</button>
+                            }
                         } @else {
                             <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
@@ -1673,25 +1857,43 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                      Pipeline is here too because choosing one chooses which stages exist; a plain
                      binding gives nowhere to clear a stage that has just become meaningless. The deal
                      workspace has always done both, which is why testers were told to use it. -->
-                <!-- COMPANY FIRST, then its pipelines (#327). Not a field of the deal: the deal's
-                     company is the pipeline's, so this only narrows the Pipeline list, and choosing a
-                     company picks that company's first pipeline. Hidden when one company owns every
-                     pipeline, where it would offer no choice. -->
-                @if (EditMode && FieldEditable('PipelineID') && CompanyOptions.length > 1) {
+                <!-- COMPANY FIRST, then its pipelines (#327). Writes Deal.CompanyID and narrows the
+                     Pipeline list to the pipelines linked to that company; a current pipeline the
+                     company does not use moves to its first one. Hidden when one company has every
+                     pipeline, where it would offer no choice and SetPipeline fills the company.
+                     With pipelines hidden (the HidePipelines setting) this is the only choice: the
+                     company's default pipeline follows it, and the Pipeline control below is gone. -->
+                @if (EditMode && FieldEditable('PipelineID') && ShowCompanyPicker) {
                     <div class="mjs-field" data-field="PipelineCompany">
                         <div class="mj-forms-field mj-forms-field--editing">
                             <label class="mj-forms-field-label" [attr.for]="FieldIdPrefix + '-company'">Company</label>
                             <select [id]="FieldIdPrefix + '-company'" [ngModel]="SelectedCompanyID" data-testid="deal-pipeline-company"
                                     (ngModelChange)="SetCompany($event)"
                                     [compareWith]="CompareID">
+                                @if (!CompanyIsListed) {
+                                    <option [ngValue]="Record.CompanyID" disabled>{{ DealCompanyName ?? 'Current company' }} (no pipeline)</option>
+                                }
                                 @for (c of CompanyOptions; track c.CompanyID) {
                                     <option [ngValue]="c.CompanyID">{{ CompanyText(c) }}</option>
                                 }
                             </select>
                         </div>
+                        <!-- A company with no pipeline is left out of the list, so say so: a rep
+                             looking for one learns why it is missing and whom to ask. -->
+                        <div class="mjs-hint" data-testid="deal-company-picker-note">
+                            Only companies with a pipeline are listed. Ask a Sales admin to link a pipeline to a missing company.
+                        </div>
+                    </div>
+                }
+                <!-- Says why the deal has no pipeline and what to do, before a save refuses it. The
+                     save's own refusal says the same, through DealFormComponentExtended. -->
+                @if (NoPipelineHint; as hint) {
+                    <div class="mjs-hint mjs-hint--warning" role="status" data-testid="deal-no-pipeline-hint">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ hint }}
                     </div>
                 }
 
+                @if (!HidePipelines()) {
                 <div class="mjs-field" data-field="PipelineID">
                     <!-- The editing modifier class is MJ's own marker for a field it is currently
                          letting you edit, and FieldIsEditable in the Explorer harness reads exactly
@@ -1721,6 +1923,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                         }
                     </div>
                 </div>
+                }
 
                 <div class="mjs-field" data-field="PipelineStageID">
                     <!-- The editing modifier class is MJ's own marker for a field it is currently
@@ -1740,11 +1943,11 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                     <option [ngValue]="st.ID">{{ st.Name }}</option>
                                 }
                             </select>
-                            @if (!StageIsEditable) {
+                            @if (!StageIsEditable && !NoPipelineHint) {
                                 <!-- Says which of the two it is. An empty disabled control otherwise
                                      reads as "broken" whether the pipeline is unset or has no stages. -->
                                 <div class="mjs-hint" data-testid="stage-hint">
-                                    {{ Record.PipelineID ? 'This pipeline has no active stages.' : 'Choose a pipeline first.' }}
+                                    {{ Record.PipelineID ? (HidePipelines() ? 'This company has no active stages.' : 'This pipeline has no active stages.') : (HidePipelines() ? 'Choose a company first.' : 'Choose a pipeline first.') }}
                                 </div>
                             }
                         } @else {
@@ -1899,6 +2102,12 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 </div>
             </div>
         </mj-collapsible-panel>
+        @if (PromoteOpen) {
+            <mjs-promote-party-dialog
+                [PromoteKind]="PromoteKind"
+                (PartyChosen)="OnPromoted($event)"
+                (Closed)="ClosePromote()"></mjs-promote-party-dialog>
+        }
     `,
 })
 export class MJSDealPipelinePanel extends MJSDealFieldPanel {
@@ -1918,6 +2127,16 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     private readonly pipelines = signal<PipelineOption[]>([]);
     private readonly stages = signal<PipelineStageOption[]>([]);
 
+    /** Whether the pipelines have loaded, so an empty list is not read as "no company has a pipeline". `?.` for the `Object.create` suites. */
+    private readonly pipelinesLoaded = signal(false);
+
+    /**
+     * The `HidePipelines` setting. A signal for the reason `statuses` is one. Starts from the engine when
+     * it is already loaded: the form's rail takes this panel's name when it is first built, so a name
+     * that changed only after `ngOnInit` read the setting stayed "Pipeline" there.
+     */
+    public readonly HidePipelines = signal(SalesSettings.HidePipelinesIfLoaded);
+
     public async ngOnInit(): Promise<void> {
         // BaseFormPanel declares no lifecycle hook, so there is nothing to chain to. Angular calls this
         // on the component regardless of whether the base class has one.
@@ -1926,6 +2145,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
             LoadLossReasons(),
             LoadPipelines(),
             LoadPipelineStages(),
+            SalesSettings.LoadHidePipelines(),
         ]);
         const valueOf = <T>(r: PromiseSettledResult<T>): T | null =>
             r.status === 'fulfilled' ? r.value : null; // vocabulary-grep-allow: PromiseSettledResult discriminant, not a domain status
@@ -1942,10 +2162,13 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         const loadedStages = valueOf(settled[3] as PromiseSettledResult<PipelineStageOption[]>);
         if (loadedPipelines) {
             this.pipelines.set(loadedPipelines);
+            this.pipelinesLoaded?.set(true);
         }
         if (loadedStages) {
             this.stages.set(loadedStages);
         }
+        this.HidePipelines.set(valueOf(settled[4] as PromiseSettledResult<boolean>) ?? false);
+        this.FillDefaultPipeline();
 
         if (!loadedStatuses || !loadedReasons || !loadedPipelines || !loadedStages) {
             this.ActionFailed = true;
@@ -1960,29 +2183,99 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         return PipelinesForCompany(this.offeredPipelines, this.SelectedCompanyID);
     }
 
-    /** Every company that owns a pipeline, default company first. */
+    /** Every company with a pipeline linked to it, default company first. */
     public get CompanyOptions(): PipelineCompany[] {
         return PipelineCompanies(this.offeredPipelines);
     }
 
-    /** The active pipelines, plus the deal's own when it is inactive (bc-aidp-next-golive#423). */
-    private get offeredPipelines(): PipelineOption[] {
-        const id = String(this.Record?.PipelineID ?? '').toLowerCase();
-        return this.pipelines().filter((p) => p.IsActive || (!!id && p.ID.toLowerCase() === id));
+    /** Whether the deal's company is in the Company list, which holds only companies with a pipeline. */
+    public get CompanyIsListed(): boolean {
+        const id = this.Record?.CompanyID;
+        return !id || CompanyHasPipeline(this.offeredPipelines, id);
     }
 
     /**
-     * The current pipeline's company, else the default company. Derived rather than stored: choosing a
-     * company also chooses its pipeline, so the pipeline always says which company is selected.
+     * The Company picker shows when there is a choice to make: several companies, or a deal whose company
+     * has no pipeline while another company has one. Without the second, a deal on a company with no
+     * pipeline could not be moved off it when only one other company has a pipeline.
      */
-    public get SelectedCompanyID(): string | null {
-        return InitialCompanyID(this.offeredPipelines, this.Record?.PipelineID ?? null);
+    public get ShowCompanyPicker(): boolean {
+        return this.CompanyOptions.length > 1 || (!this.CompanyIsListed && this.CompanyOptions.length > 0);
     }
 
-    /** Moves the deal to the company's first pipeline, which clears a stage the old one owned. */
+    /** The deal's company name, from the deal or the pipeline links; null when neither has it. */
+    public get DealCompanyName(): string | null {
+        const id = this.Record?.CompanyID ?? null;
+        const listed = this.CompanyOptions.find((c) => c.CompanyID.toLowerCase() === String(id ?? '').toLowerCase());
+        return this.Record?.Company || listed?.CompanyName || null;
+    }
+
+    /**
+     * Why the deal has no pipeline, when that is something other than an unmade choice in a visible
+     * Pipeline field: its company has none, no company has one, or pipelines are hidden. Null while the
+     * deal has a pipeline, outside edit mode, and until the pipelines load.
+     */
+    public get NoPipelineHint(): string | null {
+        if (!this.Record || this.Record.PipelineID || !this.EditMode || !this.pipelinesLoaded?.()) return null;
+        const companyID = this.Record.CompanyID || null;
+        const message = NoPipelineMessage({
+            HidePipelines: this.HidePipelines(),
+            CompanyID: companyID,
+            CompanyName: companyID ? this.DealCompanyName : null,
+            CompanyHasPipeline: CompanyHasPipeline(this.offeredPipelines, companyID),
+            OtherCompanyHasPipeline: this.CompanyOptions.some((c) => c.CompanyID.toLowerCase() !== String(companyID ?? '').toLowerCase()),
+        });
+        return message === CHOOSE_PIPELINE_MESSAGE ? null : message;
+    }
+
+    /**
+     * The active pipelines on active links, plus the deal's own pipeline and company when either is
+     * retired (bc-aidp-next-golive#423).
+     */
+    private get offeredPipelines(): PipelineOption[] {
+        const id = String(this.Record?.PipelineID ?? '').toLowerCase();
+        const company = String(this.Record?.CompanyID ?? '').toLowerCase();
+        const isDealsOwn = (p: PipelineOption): boolean =>
+            !!id && p.ID.toLowerCase() === id && p.CompanyID.toLowerCase() === company;
+        return this.pipelines().filter((p) => (p.IsActive && p.LinkIsActive) || isDealsOwn(p));
+    }
+
+    /**
+     * The deal's company, else the default company. The company is the rep's choice and is chosen
+     * first; a pipeline serves several companies, so it cannot say which one is selected.
+     */
+    public get SelectedCompanyID(): string | null {
+        return InitialCompanyID(this.offeredPipelines, this.Record?.CompanyID ?? null);
+    }
+
+    /**
+     * Puts a deal with no pipeline on the selected company's default pipeline, writing that company too.
+     *
+     * A new deal opened with the default company showing in the Company picker and an empty Pipeline, so
+     * the rep had to choose a pipeline the company already implied. Keyed on the absent pipeline rather
+     * than on newness, as `company-from-pipeline.ts` explains for the company.
+     */
+    public FillDefaultPipeline(): void {
+        if (!this.Record || this.Record.PipelineID || !this.EditMode || !this.FieldEditable('PipelineID')) return;
+        const company = this.SelectedCompanyID;
+        if (company) this.SetCompany(company);
+    }
+
+    /**
+     * Sets the deal's company, and moves the deal to the company's default pipeline when its current one
+     * does not serve that company (which clears a stage the old pipeline owned). With pipelines hidden the
+     * deal always moves to the default, since the rep has no other way to choose a pipeline.
+     */
     public SetCompany(companyID: string | null): void {
-        const first = PipelinesForCompany(this.offeredPipelines, companyID)[0];
-        if (first) this.SetPipeline(first.ID);
+        if (!this.Record || !companyID) return;
+        this.Record.CompanyID = companyID;
+        const fallback = CompanyDefaultPipeline(this.offeredPipelines, companyID);
+        const keep = !this.HidePipelines() && PipelineServesCompany(this.offeredPipelines, this.Record.PipelineID ?? null, companyID);
+        if (fallback && !keep && fallback.ID.toLowerCase() !== String(this.Record.PipelineID ?? '').toLowerCase()) {
+            this.SetPipeline(fallback.ID);
+        }
+        // The Bill.com customer is per company.
+        if (this.Record.AccountID) void this.CheckBillComCustomer();
     }
 
     public PipelineText(pipeline: PipelineOption): string {
@@ -2024,13 +2317,18 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     /**
      * Choosing a pipeline also chooses which stages exist, so it cannot be a plain field binding.
      *
-     * `CompanyID` is NOT set here. `DealEntityServer` forces it from the pipeline on every save,
-     * ignoring whatever a caller supplies, so writing it here would be stating something this form has
-     * no standing to know.
+     * The deal keeps its company. The picker offers only the selected company's pipelines, so they
+     * agree; the one case they do not is a deal with no company yet (a new deal, or the Company picker
+     * hidden because one company has every pipeline), which takes the selected company.
+     * `DealEntityServer` refuses a company the pipeline is not linked to.
      */
     public SetPipeline(pipelineID: string | null): void {
         if (!this.Record) return;
         this.Record.PipelineID = pipelineID as string;
+        const company = this.SelectedCompanyID;
+        if (!this.Record.CompanyID && company && PipelineServesCompany(this.offeredPipelines, pipelineID, company)) {
+            this.Record.CompanyID = company;
+        }
 
         // A stage from the previous pipeline is meaningless now. Cleared rather than remapped: there
         // is no honest translation from one pipeline's process to another's, which is the same
@@ -2039,7 +2337,7 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
         if (!stages.some((st) => st.ID.toLowerCase() === String(this.Record?.PipelineStageID ?? '').toLowerCase())) {
             this.Record.PipelineStageID = null as unknown as string;
         }
-        // A new pipeline can mean a new selling company, and the Bill.com customer is per company.
+        // The Bill.com check reads the deal's pipeline too.
         if (this.Record.AccountID) void this.CheckBillComCustomer();
     }
 
@@ -2091,7 +2389,9 @@ export class MJSDealPipelinePanel extends MJSDealFieldPanel {
     public get CurrentPipelineName(): string | null {
         const id = String(this.Record?.PipelineID ?? '').toLowerCase();
         if (!id) return null;
-        const pipeline = this.pipelines().find((p) => p.ID.toLowerCase() === id);
+        const company = String(this.Record?.CompanyID ?? '').toLowerCase();
+        const rows = this.pipelines().filter((p) => p.ID.toLowerCase() === id);
+        const pipeline = rows.find((p) => p.CompanyID.toLowerCase() === company) ?? rows[0];
         return pipeline ? PipelineLabel(pipeline) : null;
     }
 
@@ -2540,14 +2840,14 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-party',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 80, contributionKey: 'party' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 80, contributionKey: 'party', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-party-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent],
-    styles: [FIELD_STYLES],
+    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent, MJSPromotePartyDialog],
+    styles: [FIELD_STYLES, PROMOTE_LINK_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="party" SectionName="Account &amp; people" Icon="fa-solid fa-building"
             [Form]="FormComponent" [FormContext]="FormContext">
@@ -2577,13 +2877,26 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                         } @else if (f.party) {
                             <bizapps-party-field [Record]="Record" [FieldName]="f.name" [Kind]="f.party.Kind" [QueryName]="f.party.QueryName"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext"
+                                [AllowCreate]="false"
                                 (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></bizapps-party-field>
+                            @if (EditMode && FieldEditable(f.name) && PromotableFieldKind(f)) {
+                                <!-- The picker only offers organizations and people that ALREADY have a
+                                     sales row, because it cannot mark a row unselectable (PL1/PL3). This
+                                     is the way to the ones it leaves out, so the rep reaches the existing
+                                     record instead of creating a second one (golive#259). -->
+                                <!-- A STATIC testid, scoped by the enclosing data-field. Built as
+                                     'deal-promote-' + kind it was greppable by nobody and invisible to
+                                     assert-harness-selectors, which collects literal data-testid only. -->
+                                <button type="button" class="mjs-promote-link"
+                                        data-testid="deal-promote-party"
+                                        (click)="OpenPromote(f)">{{ PromoteLinkFor(f) }}</button>
+                            }
                         } @else {
                             <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                                 (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                             @if (EditMode && f.name === 'CompanyID') {
-                                <small class="mjs-field__hint" data-testid="deal-company-hint">Set by the pipeline. Change it with Company on the Pipeline panel.</small>
+                                <small class="mjs-field__hint" data-testid="deal-company-hint">Change it with Company on the Pipeline panel.</small>
                             }
                         }
                     </div>
@@ -2598,6 +2911,12 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                 }
             </div>
         </mj-collapsible-panel>
+        @if (PromoteOpen) {
+            <mjs-promote-party-dialog
+                [PromoteKind]="PromoteKind"
+                (PartyChosen)="OnPromoted($event)"
+                (Closed)="ClosePromote()"></mjs-promote-party-dialog>
+        }
     `,
 })
 export class MJSDealPartyPanel extends MJSDealFieldPanel {
@@ -2706,7 +3025,7 @@ const COMMERCIAL_FIELDS: DealFieldSpec[] = [
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-commercial',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 70, contributionKey: 'commercial' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 70, contributionKey: 'commercial', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-commercial-panel',
@@ -2748,7 +3067,7 @@ export class MJSDealCommercialPanel extends MJSDealFieldPanel {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-lines',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-related', sortKey: 89, contributionKey: 'lines' },
+    metadata: { entity: E, slot: 'after-related', sortKey: 89, contributionKey: 'lines', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-lines-panel',
@@ -2970,7 +3289,7 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-motion',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 48, contributionKey: 'motion' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 48, contributionKey: 'motion', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-motion-panel',
@@ -3039,7 +3358,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
 @RegisterClassEx(BaseFormPanel, {
     key: 'sales:deal-close',
     skipNullKeyWarning: true,
-    metadata: { entity: E, slot: 'after-fields', sortKey: 60, contributionKey: 'close' },
+    metadata: { entity: E, slot: 'after-fields', sortKey: 60, contributionKey: 'close', inclusion: 'Primary' },
 })
 @Component({
     selector: 'mjs-deal-close-panel',
@@ -3593,7 +3912,7 @@ export class MJSDealClosePanel extends MJSDealFieldPanel {
     key: 'sales:deal-related-internal-team',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 50, contributionKey: 'internal-team',
+        entity: E, slot: 'after-related', sortKey: 50, contributionKey: 'internal-team', inclusion: 'Primary',
         relatedEntity: MJS_ENTITIES.DealTeamMember, relatedJoinField: 'DealID',
     },
 })
@@ -3686,7 +4005,7 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-buying-team',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 52, contributionKey: 'buying-team',
+        entity: E, slot: 'after-related', sortKey: 52, contributionKey: 'buying-team', inclusion: 'Primary',
         relatedEntity: MJS_ENTITIES.DealContactRole, relatedJoinField: 'DealID',
     },
 })
@@ -3725,7 +4044,7 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-activity',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 46, contributionKey: 'activity',
+        entity: E, slot: 'after-related', sortKey: 46, contributionKey: 'activity', inclusion: 'Primary',
         relatedEntity: MJS_FOREIGN_ENTITIES.ActivityLink, relatedJoinField: 'RecordID',
     },
 })
@@ -3741,17 +4060,39 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
                 <div class="mjs-deal-activity">
                     <mjs-deal-activity-timeline #compose [DealID]="Record.ID" [ComposeOnly]="true"
                         (Logged)="OnLogged()"></mjs-deal-activity-timeline>
-                    @if (ActivityEntity) {
+                    <!-- Mounted only once the deal's view exists: with no view the viewer loads every
+                         activity, and a view bound during that load is dropped (golive#432). -->
+                    @if (ActivityEntity && ActivityView) {
                         <div class="mjs-deal-activity__viewer">
                             <!-- New goes to the compose form above: it is the only path that links the new
                                  activity to this deal. -->
                             <mj-entity-viewer
                                 [Entity]="ActivityEntity"
                                 [ViewEntity]="ActivityView"
+                                (RecordSelected)="OnActivitySelected($event)"
                                 (RecordOpened)="OnActivityOpened($event)"
                                 (OpenRelatedRecordRequested)="OnActivityRelatedRecord($event)"
                                 (CreateRecordRequested)="compose.FocusCompose()">
                             </mj-entity-viewer>
+                        </div>
+                        <!-- Who the selected activity is linked to (#408): the grid has no column for it. -->
+                        <div class="mjs-deal-activity__links">
+                            @if (!Linked) {
+                                <span class="mjs-deal-activity__hint">Select an activity to see who it is linked to.</span>
+                            } @else {
+                                <span class="mjs-deal-activity__hint">Linked to:</span>
+                                @for (party of Linked; track $index) {
+                                    <span class="mjs-deal-activity__party" [title]="party.Role">
+                                        <i class="fa-solid" aria-hidden="true"
+                                            [class.fa-user]="party.Icon === 'person'"
+                                            [class.fa-building]="party.Icon === 'organization'"
+                                            [class.fa-at]="party.Icon === 'other'"></i>
+                                        {{ party.Name }}
+                                    </span>
+                                } @empty {
+                                    <span>this deal only</span>
+                                }
+                            }
                         </div>
                     }
                 </div>
@@ -3766,6 +4107,12 @@ export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
             min-height: 420px; height: 480px;
             display: flex; flex-direction: column;
             border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-md); overflow: hidden;
+        }
+        .mjs-deal-activity__links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mj-space-2); font-size: 0.8125rem; color: var(--mj-text-primary); }
+        .mjs-deal-activity__hint { color: var(--mj-text-muted); }
+        .mjs-deal-activity__party {
+            display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+            border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-sm);
         }
         .mjs-deal-activity__viewer mj-entity-viewer {
             display: flex; flex-direction: column; flex: 1 1 auto; height: 100%; width: 100%;
@@ -3787,8 +4134,58 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
         void this.refreshView();
     }
 
+    /** The selected activity's links, or null when none is selected. */
+    public Linked: LinkedParty[] | null = null;
+    private selectedActivityID: string | null = null;
+
     public OnLogged(): void {
+        this.selectedActivityID = null;
+        this.Linked = null;
         void this.refreshView();
+    }
+
+    public async OnActivitySelected(event: RecordSelectedEvent): Promise<void> {
+        const id = String(event.compositeKey?.GetValueByFieldName('ID') ?? event.record?.['ID'] ?? '');
+        if (!id) return;
+        this.selectedActivityID = id;
+        const linked = await this.readLinkedParties(id);
+        if (this.selectedActivityID !== id) return; // a later click won
+        this.Linked = linked;
+        this.cdr.detectChanges();
+    }
+
+    /** One read of the activity's links, then one `RunViews` for the people's and organizations' names. */
+    private async readLinkedParties(activityID: string): Promise<LinkedParty[] | null> {
+        const md = new Metadata();
+        const idOf = (name: string): string => md.Entities.find((e) => e.Name === name)?.ID ?? '';
+        const ids = { Deal: idOf(MJS_ENTITIES.Deal), Person: idOf(MJS_FOREIGN_ENTITIES.Person), Organization: idOf(MJS_FOREIGN_ENTITIES.Organization) };
+        const rv = new RunView();
+        const links = await rv.RunView<ActivityLinkFields>({
+            EntityName: MJS_FOREIGN_ENTITIES.ActivityLink,
+            ExtraFilter: `ActivityID = '${activityID.replace(/'/g, "''")}'`,
+            Fields: ['Role', 'EntityID', 'RecordID', 'IdentityValue', 'Entity'],
+            OrderBy: 'Sequence',
+            ResultType: 'simple',
+        });
+        if (!links.Success) {
+            console.error('Deal activity: could not read the activity links', links.ErrorMessage);
+            return null;
+        }
+        const rows = links.Results ?? [];
+        const inList = (entityID: string): string =>
+            rows.filter((l) => l.EntityID?.toLowerCase() === entityID.toLowerCase() && l.RecordID)
+                .map((l) => `'${String(l.RecordID).replace(/'/g, "''")}'`).join(', ') || 'NULL';
+        const [people, orgs] = await rv.RunViews([
+            { EntityName: MJS_FOREIGN_ENTITIES.Person, ExtraFilter: `ID IN (${inList(ids.Person)})`, Fields: ['ID', 'DisplayName'], ResultType: 'simple' },
+            { EntityName: MJS_FOREIGN_ENTITIES.Organization, ExtraFilter: `ID IN (${inList(ids.Organization)})`, Fields: ['ID', 'Name'], ResultType: 'simple' },
+        ]);
+        for (const r of [people, orgs].filter((x) => !x?.Success)) {
+            console.error('Deal activity: could not read linked names; showing IDs', r?.ErrorMessage);
+        }
+        const names = new Map<string, string>();
+        for (const r of (people?.Results ?? []) as { ID: string; DisplayName: string }[]) names.set(r.ID.toLowerCase(), r.DisplayName);
+        for (const r of (orgs?.Results ?? []) as { ID: string; Name: string }[]) names.set(r.ID.toLowerCase(), r.Name);
+        return LinkedParties(rows, ids, String(this.Record.ID), names);
     }
 
     public OnActivityOpened(event: RecordOpenedEvent): void {
@@ -3843,7 +4240,7 @@ export class MJSDealActivityPanel extends BaseFormPanel<DealEntity> {
     key: 'sales:deal-related-stage-history',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 44, contributionKey: 'stage-history',
+        entity: E, slot: 'after-related', sortKey: 44, contributionKey: 'stage-history', inclusion: 'Primary',
         relatedEntity: MJS_ENTITIES.DealStageEvent, relatedJoinField: 'DealID',
     },
 })
@@ -3897,7 +4294,7 @@ export const SCHEDULE_DATE_ORDER = 'CASE WHEN PaymentDate IS NULL THEN 0 ELSE 1 
     key: 'sales:deal-related-payment-schedule',
     skipNullKeyWarning: true,
     metadata: {
-        entity: E, slot: 'after-related', sortKey: 88, contributionKey: 'payment-schedule',
+        entity: E, slot: 'after-related', sortKey: 88, contributionKey: 'payment-schedule', inclusion: 'Primary',
         relatedEntity: MJS_ENTITIES.DealPaymentSchedule, relatedJoinField: 'DealID',
     },
 })

@@ -4,8 +4,8 @@
  *
  * WHY THIS IS SQL AND NOT MORE UI CLICKING. The CRUD spec proves deletion through the UI — that is its
  * job and it asserts it. But a spec that fails PART WAY leaves residue, and the next run then trips
- * over `UQ_Pipeline_Company_Code` and fails for a reason that has nothing to do with the code under
- * test. A guaranteed teardown that does not depend on the UI being healthy is what makes the harness
+ * over its own leftover rows (a second PW-VERIFY pipeline or deal of the same name) and fails for a
+ * reason that has nothing to do with the code under test. A guaranteed teardown that does not depend on the UI being healthy is what makes the harness
  * genuinely re-runnable, which B4 asks for.
  *
  * It only touches rows named with one of the harness prefixes in PREFIXES below, spares the seeded
@@ -104,7 +104,7 @@ function readEnv() {
 
 /**
  * Child-first order. DealTeamMember / DealStageEvent / DealContactRole / DealPaymentSchedule all
- * reference Deal; Deal references Pipeline; PipelineStage references Pipeline. Deleting a parent first
+ * reference Deal; Deal references Pipeline; PipelineStage and PipelineCompany reference Pipeline. Deleting a parent first
  * would be refused by the very foreign keys the S1 baseline put there on purpose.
  *
  * ── THIS SCRIPT HAD NOT RUN AT ALL, AND SAID SO IN A LINE NOBODY READ ───────────────────────────────
@@ -394,6 +394,9 @@ INSERT INTO @pipeIds (ID)
   SELECT ID FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
 DELETE rc FROM [__mj].RecordChange rc
   JOIN @pipeIds x ON rc.RecordID IN (CAST(x.ID AS NVARCHAR(750)), 'ID|' + CAST(x.ID AS NVARCHAR(750)));
+
+-- The company links before the pipelines: FK_PipelineCompany_Pipeline does not cascade.
+DELETE pc FROM __mj_BizAppsSales.PipelineCompany pc JOIN @pipeIds x ON x.ID = pc.PipelineID;
 
 DELETE FROM __mj_BizAppsSales.Pipeline WHERE EXISTS (SELECT 1 FROM @inner WHERE Name LIKE P);
 

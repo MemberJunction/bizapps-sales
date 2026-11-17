@@ -106,7 +106,7 @@ import {
     MJOLinePricePickerComponent,
     type MJOExistingHolding,
 } from '@mj-biz-apps/orders-ng';
-import { RankDealProducts } from './deal-product-ranking';
+import { CountDraftMatches, RankDealProducts } from './deal-product-ranking';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountAmountToPercent,
@@ -125,6 +125,7 @@ import {
     RecordDiscountConcession,
     ShouldOfferTermStart,
     type DiscountReasonCategory,
+    type DraftProductLookup,
     type ProductLookup,
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
@@ -255,6 +256,13 @@ interface RemoteOperationRouter {
                                 @if (PickerHidden > 0) {
                                     <div class="mjs-le__pick-empty" data-testid="line-product-more">
                                         {{ PickerHidden }} more — keep typing to narrow the list.
+                                    </div>
+                                }
+                                <!-- golive#433: a new product starts as Draft and is not offered, so say when the
+                                     search matches some, whether or not any Active product matches too. -->
+                                @if (DraftMatchNote; as note) {
+                                    <div class="mjs-le__pick-empty" data-testid="line-product-drafts" role="status">
+                                        <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ note }}
                                     </div>
                                 }
                             </div>
@@ -427,15 +435,15 @@ interface RemoteOperationRouter {
                     }
 
                     <!-- The customer already holds this product (golive #318): the same question the
-                         order line asks. Unanswered, Close Won refuses the deal, except on a renewal
-                         deal, which adds the line as the next term. -->
+                         order line asks, in the same words (golive #480). Unanswered, Close Won
+                         refuses the deal, except on a renewal deal, which adds the line as the next term. -->
                     @if (Holding; as holding) {
                         <div class="mjs-le__field" role="group" data-testid="line-subscription-choice"
                              [attr.aria-label]="'Existing subscription ' + holding.SubscriptionNumber">
                             <span class="mjs-le__label">Existing subscription</span>
                             <span class="mjs-le__muted">
-                                The customer already holds {{ holding.SubscriptionNumber }} for this product
-                                @if (HoldingCoverageEnd) { (covered through {{ HoldingCoverageEnd | mjoDate }}) }.
+                                This customer already has this product on {{ holding.SubscriptionNumber }}@if (HoldingCoverageEnd) {, which runs through {{ HoldingCoverageEnd | mjoDate }}}.
+                                Is this line a renewal of that subscription, or a new one?
                             </span>
                             <div class="mjs-le__choices">
                                 <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-extend"
@@ -443,7 +451,7 @@ interface RemoteOperationRouter {
                                         [attr.aria-pressed]="Working.SubscriptionAction === 'ExtendExisting'"
                                         [disabled]="IsLocked" [title]="BlockedReason"
                                         (click)="SetSubscriptionAction('ExtendExisting')">
-                                    Add as next term
+                                    Renew {{ holding.SubscriptionNumber }}
                                     @if (HoldingContinuationStart) { (starts {{ HoldingContinuationStart | mjoDate }}) }
                                 </button>
                                 <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-new"
@@ -451,14 +459,17 @@ interface RemoteOperationRouter {
                                         [attr.aria-pressed]="Working.SubscriptionAction === 'CreateNew'"
                                         [disabled]="IsLocked" [title]="BlockedReason"
                                         (click)="SetSubscriptionAction('CreateNew')">
-                                    New subscription (keeps this line's dates)
+                                    Create new subscription
+                                    @if (HasExplicitTermStart) { (starts {{ TermStartInput | mjoDate }}) } @else { (keeps this line's dates) }
                                 </button>
                             </div>
                             <small class="mjs-le__hint" [class.mjs-le__error]="!Working.SubscriptionAction">
                                 @if (Working.SubscriptionAction === 'CreateNew') {
-                                    Starts a separate subscription on this line's term start.
+                                    Creates a new subscription for this customer, separate from
+                                    {{ holding.SubscriptionNumber }}, on this line's term start.
                                 } @else if (Working.SubscriptionAction === 'ExtendExisting') {
-                                    Adds a term to {{ holding.SubscriptionNumber }}, starting the day after its coverage ends.
+                                    Adds this line to {{ holding.SubscriptionNumber }} as its next term, starting the day
+                                    after its coverage ends.
                                 } @else {
                                     Not chosen. Close Won asks for this, unless the deal is a renewal, which adds it as the next term.
                                 }
@@ -705,6 +716,14 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     public PickerResults: ProductLookup[] = [];
     /** How many matches are past the list's cap — named so the rep knows to keep typing. */
     public PickerHidden = 0;
+    /** How many Draft products match the search; the picker hides them, and the note says so (golive#433). */
+    public DraftMatches = 0;
+    /** Orders' Draft products, matched against the search for {@link DraftMatches}; never offered. */
+    private draftProducts: DraftProductLookup[] = [];
+    /** The text the list was last ranked by, so Draft rows that arrive later are counted against it. */
+    private rankedQuery = '';
+    /** Set on destroy, so a read that returns after the dialog closed does not touch its view. */
+    private destroyed = false;
     /** Each product's catalog price, for the picker label — read from orders, keyed by product id. */
     private readonly productPriceLabels = new Map<string, string>();
     /** The signed-in rep's price-override grant; `'none'` hides the price picker. */
@@ -756,6 +775,8 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             const persisted = this.Deal?.GetFieldByName('DealStatusTypeID')?.OldValue as string | null | undefined;
             this.IsLocked = (await ResolveDealLockState(persisted)).IsLocked;
 
+            // Not awaited: the note is a hint, and the catalogue must not wait on it.
+            void this.loadDraftProducts();
             await this.loadProducts();
             await this.loadProductPriceLabels();
             this.OverrideKind = this.resolveOverrideKind();
@@ -870,6 +891,23 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
                 `${reason.replace(/\.?\s*$/, '.')} Reload the page and try again; if it persists, an administrator needs to check ` +
                 `access to Orders' products.`;
         }
+    }
+
+    /**
+     * Orders' Draft products, for the note under the list. Re-counts on arrival, since the rep may
+     * already be typing. Anything that goes wrong only leaves the note off.
+     */
+    private async loadDraftProducts(): Promise<void> {
+        try {
+            this.draftProducts = await this.service.LoadDraftProducts();
+        } catch {
+            this.draftProducts = [];
+        }
+        // A closed list is re-counted when it next opens, and a dialog closed before the read returned
+        // has no view to update.
+        if (!this.PickerOpen || this.destroyed) return;
+        this.DraftMatches = CountDraftMatches(this.draftProducts, this.rankedQuery);
+        this.cdr.detectChanges();
     }
 
     /** Focus the dialog itself while it loads, so the trap and Escape work from the first frame. */
@@ -1001,7 +1039,18 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         const ranked = RankDealProducts(this.Products, query, this.Deal?.CompanyID ?? null);
         this.PickerResults = ranked.slice(0, MJSDealLineEditorComponent.PickerLimit);
         this.PickerHidden = ranked.length - this.PickerResults.length;
+        this.rankedQuery = query;
+        this.DraftMatches = CountDraftMatches(this.draftProducts, query);
         this.PickerCursor = 0;
+    }
+
+    /** The note under the list when the search matches Draft products it does not offer, or null. */
+    public get DraftMatchNote(): string | null {
+        const n = this.DraftMatches;
+        if (n <= 0) return null;
+        const subject = n === 1 ? '1 Draft product matches' : `${n} Draft products match`;
+        const object = n === 1 ? 'it' : 'them';
+        return `${subject} but cannot be sold yet. Activate ${object} in Orders → Catalog to add ${object} here.`;
     }
 
     private chosenProductLabel(): string {
@@ -1375,7 +1424,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     }
 
     /**
-     * Whether Term start shows the continuation start instead of an input: "Add as next term" is
+     * Whether Term start shows the continuation start instead of an input: "Renew" is
      * chosen and the start is known. Orders' `SubscriptionBehavior.Decide` starts an extension at the
      * end of the existing coverage over any stated start, so an editable date here would be ignored.
      */
@@ -1443,6 +1492,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      * or `Save` owns its own `finally`.
      */
     public ngOnDestroy(): void {
+        this.destroyed = true;
         if (this.priceTimer) {
             clearTimeout(this.priceTimer);
             this.priceTimer = null;

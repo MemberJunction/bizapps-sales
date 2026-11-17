@@ -2,9 +2,9 @@
   "entity": "MJ: Companies",
   "filePattern": "**/.*.json",
   "_comment": [
-    "ONE ROW OF MJ CORE DATA, AND THE ONLY ONE THIS APP SEEDS. It exists because Pipeline.CompanyID is",
-    "NOT NULL (docs/DECISIONS.md D5) and pipelines are now seeded, so an install that creates no company",
-    "creates no pipeline either — and an app with no pipeline is one where nobody can create a deal.",
+    "ONE ROW OF MJ CORE DATA, AND THE ONLY ONE THIS APP SEEDS. It exists because a seeded pipeline needs",
+    "a company to link to (PipelineCompany), and a pipeline linked to no company is one no deal can use —",
+    "an app with no usable pipeline is one where nobody can create a deal.",
     "",
     "WHY A DIRECTORY RATHER THAN `?create` ON THE PIPELINE LOOKUP. That was tried first and it is the",
     "syntax MJ documents for exactly this. It failed inside the push's own layer — `Failed to auto-create",
@@ -14,8 +14,8 @@
     "repo takes, and fails legibly if it ever cannot.",
     "",
     "A DEPLOYMENT SHOULD RENAME OR REPLACE THIS. It is a placeholder that makes the app usable, not a",
-    "claim about anyone's business. scripts/seed-demo-data.sh repoints the seeded pipelines at the local",
-    "dev companies, so a development host never really uses it."
+    "claim about anyone's business. scripts/seed-demo-data.sh links the seeded pipelines to the local",
+    "dev companies and retires this company's links, so a development host never really uses it."
   ],
   "pull": {
     "createNewFileIfNotFound": false,

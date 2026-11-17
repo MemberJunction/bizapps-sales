@@ -9,8 +9,8 @@
       "Qualification say nothing about the order, and a stage that reset it to Draft on every backward",
       "move would fight the rep.",
       "",
-      "PipelineID LOOKS UP THE SEEDED PIPELINE BY ID, not by Code (#327). Code is unique per company, and",
-      "Sales.CopyDefaultPipelineToCompanies gives every company a pipeline with the same Code. MetadataSync",
+      "PipelineID LOOKS UP THE SEEDED PIPELINE BY ID, not by Code (#327). Code is not unique: deployments",
+      "that ran the old per-company copy action hold several pipelines with the same Code. MetadataSync",
       "resolves a lookup to the first matching row, so a Code lookup could hang these stages on another",
       "company's copy on the next push. The ID is the seeded pipeline's hardcoded primary key."
     ],

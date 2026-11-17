@@ -41,7 +41,9 @@ import { EntitySaveOptions, RunView } from '@memberjunction/core';
 import { mjBizAppsSalesDealFormComponent } from '../generated/Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component';
 import { MJS_ENTITIES } from '../data/entity-names';
 import { SameDealID, WatchDealSaves, type DealSave } from '../data/deal-saves';
-import { ShouldStampCompanyFromPipeline, type PipelineCompanyRow } from './company-from-pipeline';
+import { OnlyLinkedCompany, ShouldStampCompanyFromPipeline, type PipelineCompanyRow } from './company-from-pipeline';
+import { NoPipelineMessage } from '../data/company-pipelines';
+import { SalesSettings } from '../data/sales-settings';
 
 /** See `deal-stage-event-form.component.ts` for why the priority is explicit rather than import-order. */
 @RegisterClass(BaseFormComponent, 'MJ_BizApps_Sales: Deals', 2)
@@ -116,6 +118,30 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     }
 
     private stopWatchingSaves: (() => void) | null = null;
+
+    /**
+     * Shows WHY a delete was refused (golive#429). The server refuses a deal delete with a reason (who
+     * may delete it, closed, confirmed order) and the reason reaches this record's latest result, but
+     * the base form's handler shows only "Error deleting record". Successes and thrown errors keep the
+     * base behaviour.
+     */
+    public override async OnDeleteRequested(): Promise<void> {
+        const record = this.record;
+        if (!record || !record.IsSaved) return;
+        let errorMsg: string;
+        try {
+            if (await record.Delete()) {
+                this.Notification.emit({ Message: 'Record deleted successfully', Type: 'success', Duration: 2500 });
+                this.RecordDeleted.emit({ EntityName: record.EntityInfo.Name, RecordId: record.PrimaryKey.ToString() });
+                return;
+            }
+            errorMsg = record.LatestResult?.Message || 'Error deleting record';
+        } catch (e) {
+            errorMsg = 'Error deleting record: ' + e;
+        }
+        this.Notification.emit({ Message: errorMsg, Type: 'error', Duration: 8000 });
+        this.RecordDeleteFailed.emit({ EntityName: record.EntityInfo.Name, ErrorMessage: errorMsg });
+    }
 
     /**
      * Reloads this deal when another copy of it was saved (bc-aidp-next-golive#419).
@@ -194,7 +220,8 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
     }
 
     /**
-     * Fills the selling company from the pipeline before the save is validated.
+     * Fills the selling company from the pipeline before the save is validated, when the pipeline
+     * serves only one company.
      *
      * WHY IT IS HERE AND NOT IN `Validate()`. `SaveRecord` calls `Validate()` and returns early when it
      * fails, so a stamp applied inside validation would be racing the thing it exists to satisfy. This
@@ -210,7 +237,53 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      */
     public override async SaveRecord(StopEditModeAfterSave: boolean): Promise<boolean> {
         await this.stampCompanyFromPipeline();
+        this.NoPipelineMessage = await this.resolveNoPipelineMessage();
         return super.SaveRecord(StopEditModeAfterSave);
+    }
+
+    /**
+     * What `Validate()` says in place of the entity's "Choose a pipeline" when the deal has none, or null
+     * to leave that message alone. Worked out by `SaveRecord` just before validating, because it needs a
+     * read and `Validate()` is synchronous.
+     */
+    public NoPipelineMessage: string | null = null;
+
+    /**
+     * Why this deal has no pipeline: read only when it has none, so an ordinary save costs nothing.
+     *
+     * The entity refuses with "Choose a pipeline", which is wrong in two cases: the deal's company has no
+     * pipeline linked to it, so there is nothing to choose, and pipelines are hidden, so there is no
+     * Pipeline field to choose in. A failed read leaves the entity's message, which is no worse than before.
+     */
+    private async resolveNoPipelineMessage(): Promise<string | null> {
+        const record = this.record;
+        if (!record || record.Get('PipelineID')) return null;
+        const companyID = (record.Get('CompanyID') as string | null | undefined) ?? null;
+        const knownName = (record.Get('Company') as string | null | undefined) ?? null;
+        const [hide, results] = await Promise.all([
+            SalesSettings.LoadHidePipelines(),
+            new RunView().RunViews([
+                { EntityName: MJS_ENTITIES.Pipeline, ExtraFilter: 'IsActive = 1', ResultType: 'simple', Fields: ['ID'] },
+                { EntityName: MJS_ENTITIES.PipelineCompany, ExtraFilter: 'IsActive = 1', ResultType: 'simple', Fields: ['PipelineID', 'CompanyID'] },
+                ...(companyID && !knownName
+                    ? [{ EntityName: 'MJ: Companies', ExtraFilter: `ID = '${companyID.replace(/'/g, "''")}'`, ResultType: 'simple' as const, Fields: ['Name'] }]
+                    : []),
+            ]),
+        ]);
+        const [pipelines, links, company] = results ?? [];
+        if (!pipelines?.Success || !links?.Success) return null;
+
+        const same = (a: unknown, b: unknown): boolean => String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
+        const active = new Set((pipelines.Results as { ID: string }[]).map((p) => String(p.ID).toLowerCase()));
+        const served = (links.Results as { PipelineID: string; CompanyID: string }[]).filter((l) => active.has(String(l.PipelineID).toLowerCase()));
+        const companyName = knownName ?? ((company?.Results?.[0] as { Name?: string } | undefined)?.Name ?? null);
+        return NoPipelineMessage({
+            HidePipelines: hide,
+            CompanyID: companyID,
+            CompanyName: companyName,
+            CompanyHasPipeline: served.some((l) => same(l.CompanyID, companyID)),
+            OtherCompanyHasPipeline: served.some((l) => !same(l.CompanyID, companyID)),
+        });
     }
 
     /**
@@ -252,7 +325,7 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
         return freshness.IsStale;
     }
 
-    /** Reads the chosen pipeline's company and writes it to the deal. See `SaveRecord` for why. */
+    /** Writes the chosen pipeline's only linked company to the deal. See `SaveRecord` for why. */
     private async stampCompanyFromPipeline(): Promise<void> {
         const record = this.record;
         const should = ShouldStampCompanyFromPipeline({
@@ -264,14 +337,10 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             return;
         }
 
-        /**
-         * `ResultType: 'simple'` returns plain rows, which is what is wanted: CodeGen generates no
-         * `PipelineEntity` subclass, and nothing here mutates the pipeline — only reads one column off it.
-         */
         const rv = new RunView();
         const result = await rv.RunView<PipelineCompanyRow>({
-            EntityName: MJS_ENTITIES.Pipeline,
-            ExtraFilter: `ID='${String(record.Get('PipelineID')).replace(/'/g, "''")}'`,
+            EntityName: MJS_ENTITIES.PipelineCompany,
+            ExtraFilter: `PipelineID='${String(record.Get('PipelineID')).replace(/'/g, "''")}' AND IsActive=1`,
             ResultType: 'simple',
             Fields: ['CompanyID'],
         });
@@ -280,10 +349,28 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
             return;
         }
 
-        const companyID = result.Results?.[0]?.CompanyID ?? null;
+        const companyID = OnlyLinkedCompany(result.Results ?? []);
         if (companyID) {
             record.Set('CompanyID', companyID);
         }
+    }
+
+    /**
+     * Collapses the no-pipeline refusals into one error carrying `message`.
+     *
+     * Both MJ's required-field check and the entity's own rule flag `PipelineID`, and a deal with no
+     * pipeline usually has no company either, which MJ flags as "Company ID cannot be null". All three
+     * are the one problem `message` explains, so the toast listed it three times in two vocabularies.
+     * A CompanyID error is dropped only while the deal has no company: then the message covers it.
+     */
+    private replaceNoPipelineErrors(result: ValidationResult, message: string): void {
+        const first = result.Errors.find((e) => e.Source === 'PipelineID');
+        if (!first) return;
+        first.Message = message;
+        const noCompany = !this.record?.Get('CompanyID');
+        result.Errors = result.Errors.filter(
+            (e) => e === first || (e.Source !== 'PipelineID' && !(noCompany && e.Source === 'CompanyID')),
+        );
     }
 
     /**
@@ -291,9 +378,14 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent {
      *
      * The server would refuse anyway; the value here is that the user finds out while looking at the
      * field rather than after a save that reports a wall.
+     *
+     * Also swaps the entity's "Choose a pipeline" for {@link NoPipelineMessage} when the deal has none.
      */
     public override Validate(): ValidationResult {
         const result = super.Validate();
+        if (this.NoPipelineMessage && !this.record?.Get('PipelineID')) {
+            this.replaceNoPipelineErrors(result, this.NoPipelineMessage);
+        }
         if (!this.IsLocked || !this.record) {
             return result;
         }

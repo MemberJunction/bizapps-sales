@@ -129,7 +129,9 @@ export function SortedOptions(options: readonly FilterOption[]): FilterOption[] 
  * {@link PipelinesWithinCompanies} rather than kept as a filter the list no longer shows.
  */
 export function PipelineOptionsFor<T extends { ID: string; CompanyID: string }>(pipelines: readonly T[], companyIDs: readonly string[]): T[] {
-    return companyIDs.length ? pipelines.filter((p) => HasID(companyIDs, p.CompanyID)) : [...pipelines];
+    const inCompanies = companyIDs.length ? pipelines.filter((p) => HasID(companyIDs, p.CompanyID)) : pipelines;
+    // A pipeline appears once per linked company; offer it once.
+    return inCompanies.filter((p, i) => inCompanies.findIndex((q) => idKey(q.ID) === idKey(p.ID)) === i);
 }
 
 /** The selected pipelines that still belong to one of the selected companies. */

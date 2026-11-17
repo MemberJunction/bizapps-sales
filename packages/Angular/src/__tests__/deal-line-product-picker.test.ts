@@ -1,8 +1,8 @@
 import '@angular/compiler';
-import { describe, expect, it } from 'vitest';
-import type { ProductLookup } from '@mj-biz-apps/sales-entities';
+import { describe, expect, it, vi } from 'vitest';
+import type { DraftProductLookup, ProductLookup } from '@mj-biz-apps/sales-entities';
 import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.component';
-import { RankDealProducts } from '../lib/form-panels/deal-product-ranking';
+import { CountDraftMatches, RankDealProducts } from '../lib/form-panels/deal-product-ranking';
 
 /**
  * golive#360: the deal's Add a product was a plain list of every product in the catalogue, with no
@@ -68,5 +68,93 @@ describe('the warning for another company\'s product', () => {
 
     it('says nothing before a product is chosen', () => {
         expect(editor('').ForeignCompanyWarning).toBeNull();
+    });
+});
+
+/**
+ * golive#433: a product created in orders starts as Draft, and the picker offers only Active ones. A
+ * rep who searched for the product they had just made found nothing and could not tell why, so the
+ * list now says how many Draft products match and where to activate them.
+ */
+const DRAFTS: DraftProductLookup[] = [
+    { ID: 'd1', Name: 'Core Analytics Add-on', SKU: 'SP-ANALYTICS' },
+    { ID: 'd2', Name: 'Premium Support', SKU: 'SP-CORE-SUPPORT' },
+];
+
+describe('CountDraftMatches', () => {
+    it('counts by the list\'s own rule: a name or a SKU containing the text', () => {
+        expect(CountDraftMatches(DRAFTS, 'core')).toBe(2);
+        expect(CountDraftMatches(DRAFTS, 'premium')).toBe(1);
+        expect(CountDraftMatches(DRAFTS, 'betty')).toBe(0);
+    });
+
+    it('counts nothing when nothing is typed, since there is no search to match', () => {
+        expect(CountDraftMatches(DRAFTS, '')).toBe(0);
+        expect(CountDraftMatches(DRAFTS, '   ')).toBe(0);
+    });
+});
+
+/** An editor with the catalogue and the Draft rows in place, the list closed. */
+function searchingEditor(drafts: DraftProductLookup[]) {
+    const e = editor('');
+    Object.assign(e, { draftProducts: drafts, PickerOpen: false });
+    return e;
+}
+
+describe('the note for Draft products the search matches', () => {
+    it('shows beside Active matches, not only when none match', () => {
+        const e = searchingEditor(DRAFTS);
+        e.OnProductQuery('core');
+        expect(e.PickerResults.length).toBeGreaterThan(0);
+        expect(e.DraftMatchNote).toBe(
+            '2 Draft products match but cannot be sold yet. Activate them in Orders → Catalog to add them here.',
+        );
+    });
+
+    it('shows when no Active product matches, in the singular for one', () => {
+        const e = searchingEditor(DRAFTS);
+        e.OnProductQuery('premium');
+        expect(e.PickerResults).toEqual([]);
+        expect(e.DraftMatchNote).toBe(
+            '1 Draft product matches but cannot be sold yet. Activate it in Orders → Catalog to add it here.',
+        );
+    });
+
+    it('says nothing when no Draft product matches, or nothing is typed', () => {
+        const e = searchingEditor(DRAFTS);
+        e.OnProductQuery('betty');
+        expect(e.DraftMatchNote).toBeNull();
+        e.OnProductQuery('');
+        expect(e.DraftMatchNote).toBeNull();
+    });
+
+    it('counts Draft rows that arrive after the rep has started typing', async () => {
+        const e = searchingEditor([]);
+        const detectChanges = vi.fn();
+        Object.assign(e, {
+            service: { LoadDraftProducts: async () => DRAFTS },
+            cdr: { detectChanges },
+        });
+        e.OnProductQuery('core');
+        expect(e.DraftMatchNote).toBeNull();
+
+        await (e as unknown as { loadDraftProducts(): Promise<void> }).loadDraftProducts();
+
+        expect(e.DraftMatches).toBe(2);
+        expect(detectChanges).toHaveBeenCalled();
+    });
+
+    it('leaves the note off when the Draft read fails, and the list still works', async () => {
+        const e = searchingEditor([]);
+        Object.assign(e, {
+            service: { LoadDraftProducts: async () => { throw new Error('network down'); } },
+            cdr: { detectChanges: vi.fn() },
+        });
+        e.OnProductQuery('core');
+
+        await (e as unknown as { loadDraftProducts(): Promise<void> }).loadDraftProducts();
+
+        expect(e.DraftMatchNote).toBeNull();
+        expect(e.PickerResults.length).toBeGreaterThan(0);
     });
 });
