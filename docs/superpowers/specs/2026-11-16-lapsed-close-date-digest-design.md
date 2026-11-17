@@ -569,3 +569,25 @@ that neither was stated, so the two looked like one inconsistent decision. Here 
 scheduled job's `Timezone` governs when it fires, and `BizApps.BusinessTimeZone` governs every date
 comparison. Keeping the cron at 09:00 Eastern reproduces CDP's delivery habit, and the Central
 business zone reproduces its arithmetic exactly.
+
+## Sender resolved
+
+The From address is **`notifications@bluecypress.io`, display name "BC Notifications"** — the address
+CDP's plan proposed and never verified.
+
+`CompanySenderIdentity` rows are seeded by aidp-next
+[PR #307](https://github.com/BlueCypress/aidp-next/pull/307): one `Kind='Mailbox'`, `IsDefault` row
+per company for the eleven companies that either have a seeded digest leader or currently have open
+deals. `CompanyID` uses `@lookup` rather than a UUID there, because the rows push to the test server
+as well as production and a company's ID is not guaranteed to match across the two — a hardcoded ID
+would either fail to resolve or silently attach the identity to the wrong company.
+
+With those rows in place, step 1 of From-address resolution works and the `DigestFromAddress`
+Application Setting is needed only for portfolio-wide digests, which have no company to resolve
+against. It should be set to the same address.
+
+**What is still not done:** mail does not work yet. No MJ communication provider has a
+`DefaultCredentialID` and there is no mail credential at all, so Microsoft Graph must still be
+credentialed and authorized to send as this mailbox. A sender-identity row records an address; it
+does not grant the right to send from it. That work is Azure AD and secrets, outside both
+repositories, and it remains first on the critical path.
