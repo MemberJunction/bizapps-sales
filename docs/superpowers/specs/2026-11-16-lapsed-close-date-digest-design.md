@@ -487,3 +487,85 @@ no pin bump, and `sales-entities` is already installed there — and then port i
 properly without a deadline. That trades throwaway work for certainty about Monday.
 
 This is a sequencing call for the owner, recorded here as open.
+
+## Decisions taken 2026-11-16, and the roster they produce
+
+- **CFO** is Jeremy Hunnewell. Michael Lardieri's identical title is not seeded.
+- **Jared Loftus is left out** entirely; his inactive record is not to be reactivated for this.
+- **John Huisman leads both rasa.io and Sidecar.** Worth noting why this is expressible at all: his
+  only employee record sits at `BCHQ`, so `CompanyID` has to live on the recipient row rather than be
+  derived from the employee. This single requirement is what ruled out approach B, and it is now a
+  live case rather than a hypothetical one.
+- **Account Directors are not Company Leaders.** Molly Quast (rasa.io), Sofi Giglio (Elastik Teams)
+  and Elizabeth Crosby (rasa.io) are therefore not seeded as leaders, which drops two names CDP
+  carried.
+
+Seed roster, to be created as `DealDigestRecipient` rows by hand on the host — not shipped:
+
+| Audience | Company | Employee |
+|---|---|---|
+| `COMPANY_LEADER` | Betty Bot | Rob Barnes `rob@bettybot.ai`; Johanna Byrne `johanna.gundlach@meetbetty.ai` |
+| `COMPANY_LEADER` | Cimatri | Michael Keller `michael.keller@bluecypress.io` |
+| `COMPANY_LEADER` | rasa.io | John Huisman |
+| `COMPANY_LEADER` | Sidecar | John Huisman |
+| `COMPANY_LEADER` | Izzy | Ben Lee `ben@meetizzy.ai` |
+| `COMPANY_LEADER` | Skip | Mark Patterson `mark@askskip.ai` |
+| `COMPANY_LEADER` | Elastik Teams | Abhijeet Wadkar; Ben Lee `ben@elastikteams.com` |
+| `COMPANY_LEADER` | SoundPost | Andrew Schwartz Crane `andrew@soundpost.ai` |
+| `CEO` | — | Johanna Snider |
+| `CFO` | — | Jeremy Hunnewell |
+| `CTO` | — | Robert Kihm |
+
+**Still unseeded, and needing a decision:** Blue Cypress Consulting, which CDP called "Blue Cypress"
+and gave Johanna Snider and John Huisman, and where Michael Keller is now EVP Consulting Services. It
+holds 51 open deals and is one of only two companies with anything lapsed on the 23rd, so it cannot
+be left out. `MemberJunction` (2 open deals) and `BCHQ` (1) also have no leader in CDP's roster.
+
+## Production readiness, measured 2026-11-16
+
+**There is no version gap.** Production is current with the repository on every axis the digest
+touches, so nothing needs upgrading to make room for it:
+
+| | Deployed in prod | Repo / required |
+|---|---|---|
+| bizapps-sales schema | `v6.31.x` Metadata Sync, applied 13 Nov | aidp-next pins `6.31.0`; `next` is `6.31.0` |
+| bizapps-common schema | `v5.66.x`, applied 13 Nov | aidp-next pins `^5.66.0` |
+| MJ core | MJ Setup run 13–14 Nov | `@memberjunction/cli` `6.2.1`; `mjVersionRange >=6.2.1 <7.0.0` |
+| `Agent` scheduled-job type | present | required |
+| AI agents already running | 95 | — |
+| `BizApps.BusinessTimeZone` | `America/Chicago` / Central Standard Time | required by the day math |
+
+The only version difference is forward-looking: the digest needs a bizapps-sales release that does
+not exist yet (6.32.0). Nothing deployed is behind.
+
+**But there is no outbound mail path.** This is the real blocker, and it is bigger than the sender
+row it looks like:
+
+- All four communication providers — Microsoft Graph, SendGrid, Gmail, Twilio — are `Active` with
+  **`DefaultCredentialID` NULL**, and there is no mail credential of any kind in `MJ: Credentials`
+  (only HubSpot keys, Stripe, Teams webhooks and ad platforms).
+- `__mj_BizAppsCommon.CompanySenderIdentity` has **zero rows**.
+- CDP did not rely on any of this: it carried its own Azure app registration in
+  `NOTIFICATIONS_AZURE_*` and its own `SendEmailMS` action, neither of which exists here.
+
+Graph *may* still be configured through the box environment (`MJAPI_APP_ENV_PROD` or `operator.env`),
+which is not readable from a laptop. That needs confirming before anything is promised for a date.
+Either way the work is Azure AD and secrets, outside both repositories, and it sits on the critical
+path ahead of any code.
+
+**One more thing that shapes what the digest would report:** all twelve HubSpot integration syncs in
+production are `Paused` (eleven) or `Disabled` (one). Deal data is therefore static. The finding that
+every open deal's close date is still in the future may itself be an artifact of a sync that stopped,
+rather than a genuinely clean pipeline — and a digest built to nag about stale close dates reporting
+on a stalled feed is worth knowing about before it goes to the CEO.
+
+## Correction to the timezone note above
+
+The earlier framing — that CDP's Eastern cron and Central date arithmetic were a latent bug — is too
+strong, and the production setting clarifies it. Delivery time and business day are two legitimate,
+independent choices: firing at 09:00 `America/New_York` is about when the mail lands, while judging
+"lapsed" in `America/Chicago` is about which calendar day a date belongs to. CDP's actual fault was
+that neither was stated, so the two looked like one inconsistent decision. Here both are explicit: the
+scheduled job's `Timezone` governs when it fires, and `BizApps.BusinessTimeZone` governs every date
+comparison. Keeping the cron at 09:00 Eastern reproduces CDP's delivery habit, and the Central
+business zone reproduces its arithmetic exactly.
