@@ -3139,10 +3139,11 @@ export class DealEntityServer extends DealEntity {
      *
      * ── ONLY ONE OF THE TWO DELETE PATHS COMES THROUGH HERE ──────────────────────────────────────
      *
-     * A removal staged on this deal's `Team` is executed by MJ's graph save, which deletes the row
-     * through a private path that never reaches `DealTeamMemberEntityServer.Delete`. A team row deleted
-     * on its own (the Internal team grid, an API call) never reaches this save at all. Each path gets
-     * its own check, and both return the same sentence: {@link StandaloneTeamRemovalRefusal}.
+     * A removal staged on this deal's `Team` is executed by MJ's graph save, which does call
+     * `DealTeamMemberEntityServer.Delete` for the row, but with `GraphVisited` set; that override skips
+     * its own closed-deal check there (`PartOfGraphSave`), so this check is the one that rules. A team
+     * row deleted on its own (the Internal team grid, an API call) never reaches this save at all. Each
+     * path gets its own check, and both return the same sentence: {@link StandaloneTeamRemovalRefusal}.
      */
     private async closedTeamRemovalRefusal(reopening: boolean): Promise<string | null> {
         const removed = this.Team.Removed.filter((m) => m.IsSaved);
@@ -3174,8 +3175,8 @@ export class DealEntityServer extends DealEntity {
      * The refusal for a team row deleted ON ITS OWN while this deal is closed, or null when it is open.
      *
      * Called by `DealTeamMemberEntityServer.Delete` on a freshly loaded deal. A standalone delete is
-     * never half of an owner swap — `SetOwner` stages its removal on the deal's `Team`, which the graph
-     * save executes without calling `Delete` — so there is no exception to make here.
+     * never half of an owner swap — `SetOwner` stages its removal on the deal's `Team`, and the row's
+     * `Delete` skips this call inside a graph save — so there is no exception to make here.
      *
      * Locked means what {@link checkCloseLock} means: the persisted status locks the deal, cannot be
      * read, or names no row. All three refuse.
@@ -4078,7 +4079,58 @@ export class DealEntityServer extends DealEntity {
         }
 
         const ownerRoleID = await this.ResolveOwnerRoleID();
-        const owner = this.Team.Items.find((m) => m.DealRoleID === ownerRoleID);
+        const owner = this.Team.Items.find((m) => HoldsOwnerSeat(m, ownerRoleID));
         this.OwnerEmployeeID = owner?.EmployeeID ?? null;
     }
+
+    /**
+     * The refusal when taking team row `memberID` out of the owner seat would leave this deal with no
+     * owner, or null when another row still holds the seat (sales#568).
+     *
+     * `after` is what the row will be once the edit lands: null for a delete or a move to another deal,
+     * otherwise its new role and active flag. Asked of the deal, and answered with
+     * {@link HoldsOwnerSeat}, so this guard and `stampOwnerFromTeam` cannot disagree about who owns it.
+     *
+     * Only a row edited or deleted ON ITS OWN asks this (`DealTeamMemberEntityServer`). An owner swap
+     * through `SetOwner` is a graph save of the deal, which removes and adds in one save; the row's
+     * overrides skip the question there (`PartOfGraphSave`). Throws when the owner role or the team
+     * cannot be read; the caller refuses on that, because an unread team cannot show that another owner
+     * remains.
+     */
+    public async LastOwnerSeatRefusal(memberID: string, after: OwnerSeatCandidate | null): Promise<string | null> {
+        const ownerRoleID = await this.ResolveOwnerRoleID();
+        if (after && HoldsOwnerSeat(after, ownerRoleID)) {
+            return null;
+        }
+        await this.Team.Load();
+        const leaving = this.Team.Items.find((m) => UUIDsEqual(m.ID, memberID));
+        if (!leaving || !HoldsOwnerSeat(leaving, ownerRoleID)) {
+            return null;
+        }
+        const another = this.Team.Items.some((m) => !UUIDsEqual(m.ID, memberID) && HoldsOwnerSeat(m, ownerRoleID));
+        if (another) {
+            return null;
+        }
+        return (
+            `Deal ${this.DealNumber ?? this.Name ?? this.ID} would have no owner. Choose the new owner in the `
+            + 'Owner field instead; that replaces this row in one save.'
+        );
+    }
+}
+
+/** The team-row fields that decide whether a row holds the deal's owner seat. */
+export interface OwnerSeatCandidate {
+    DealRoleID: string | null;
+    IsActive: boolean | null;
+}
+
+/**
+ * Whether a team row is the deal's owner: an active row in the owner role. The ONE predicate for it,
+ * read by `stampOwnerFromTeam` to set `OwnerEmployeeID` and by `LastOwnerSeatRefusal` to refuse
+ * removing the last such row, so the stamp and the guard answer the same question.
+ *
+ * An inactive owner row no longer owns the deal; `IsActive` null (never set) counts as active.
+ */
+export function HoldsOwnerSeat(member: OwnerSeatCandidate, ownerRoleID: string): boolean {
+    return member.IsActive !== false && UUIDsEqual(member.DealRoleID, ownerRoleID);
 }
