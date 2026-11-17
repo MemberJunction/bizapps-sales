@@ -94,7 +94,7 @@ type FakeOrder = OrderFields & {
 type Scope = { Commits: number; Rollbacks: number };
 type SyncHarness = {
     planOrderBillTo(): object | null;
-    applyOrderBillTo(plan: object): Promise<void>;
+    applyOrderFollow(plan: object): Promise<void>;
     OrderStatusWarnings: readonly string[];
 };
 
@@ -175,7 +175,7 @@ function syncDeal(
 async function sync(deal: SyncHarness): Promise<void> {
     const plan = deal.planOrderBillTo();
     if (plan) {
-        await deal.applyOrderBillTo(plan);
+        await deal.applyOrderFollow(plan);
     }
 }
 
@@ -324,7 +324,7 @@ describe('the order work on a deal save', () => {
         const instance = Object.create(DealEntityServer.prototype) as OrderWorkHarness;
         for (const [k, v] of Object.entries({
             _orderStatusWarnings: [],
-            applyOrderBillTo: async () => { calls.push('bill-to'); },
+            applyOrderFollow: async () => { calls.push('bill-to'); },
             applyStageOrderStatus: async () => { calls.push('status'); },
             recoverOrderOnReopen: async () => { calls.push('recover'); },
         })) {

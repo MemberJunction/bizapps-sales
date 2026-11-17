@@ -83,6 +83,7 @@ import { KeptOnDealNote, SendDealScheduleToOrder, StatusIsWon } from './deal-sch
 import { OrdersIsInstalled } from './orders-availability.js';
 import { VetoReader } from './veto-reader.js';
 import { PipelineDefaultTermMonths, PlanCommercialDefaults } from './deal-commercial-defaults.js';
+import { OrderCurrencyFor, SameOrderCurrency } from './deal-order-currency.js';
 import {
     DealDeleteRefusal,
     DeleteDealChildRows,
@@ -185,6 +186,11 @@ interface CurrencyIDRow {
     ID: string;
 }
 
+/** The one column the currency-code lookup selects. */
+interface CurrencyCodeRow {
+    Code: string | null;
+}
+
 /** The one column the pipeline-company link lookup selects; only whether a row exists matters. */
 interface PipelineCompanyLinkRow {
     ID: string;
@@ -270,16 +276,25 @@ interface StageOrderPlan {
 }
 
 /**
- * What this save's party edits ask of an existing order's bill-to (#319) — resolved before the
- * transaction from the deal's persisted values, applied inside it.
+ * What this save's edits ask of an existing order — its bill-to (#319) and its currency (golive #492) —
+ * resolved before the transaction from the deal's persisted values, applied inside it.
  *
- * `Previous` is what the deal billed before this save: the order is only moved when it still bills
- * that, so a bill-to finance set by hand is left alone. A side whose value did not change is `null`
- * and is never written.
+ * `Previous` is what the deal asked of the order before this save: the order is only moved when it
+ * still holds that, so a value finance set on the order by hand is left alone. A side whose value did
+ * not change is `null` and is never written. `Currency` holds order currency codes, already resolved
+ * from the deal's currency (null meaning the company's functional currency).
  */
-interface OrderBillToPlan {
+interface OrderFollowPlan {
     Person: { Previous: string | null; Next: string | null } | null;
     Organization: { Previous: string | null; Next: string | null } | null;
+    Currency?: OrderCurrencyPlan | null;
+}
+
+/** The currency side of an {@link OrderFollowPlan}. `Functional` is what NULL means on this order. */
+interface OrderCurrencyPlan {
+    Previous: string | null;
+    Next: string | null;
+    Functional: string | null;
 }
 
 /**
@@ -303,15 +318,24 @@ function keepBillToOrganization(order: mjBizAppsOrdersOrderHeaderEntity): void {
     }
 }
 
-/** Names the parties a bill-to warning is about, in the deal's own terms. */
+/** Names the sides an order-follow warning is about, in the deal's own terms. */
 function describeBillToSides(
-    person: OrderBillToPlan['Person'],
-    organization: OrderBillToPlan['Organization'],
+    person: OrderFollowPlan['Person'],
+    organization: OrderFollowPlan['Organization'],
+    currency: OrderFollowPlan['Currency'] = null,
 ): string {
-    if (person && organization) {
-        return 'bill-to contact and account';
+    const sides = [person && 'bill-to contact', organization && 'account', currency && 'currency'].filter(
+        (side): side is string => Boolean(side),
+    );
+    return sides.length > 1 ? `${sides.slice(0, -1).join(', ')} and ${sides[sides.length - 1]}` : sides[0] ?? '';
+}
+
+/** Adds a currency side to a bill-to plan; null when neither side has anything to move. */
+function withCurrency(plan: OrderFollowPlan | null, currency: OrderCurrencyPlan | null): OrderFollowPlan | null {
+    if (!currency) {
+        return plan;
     }
-    return person ? 'bill-to contact' : 'account';
+    return { Person: plan?.Person ?? null, Organization: plan?.Organization ?? null, Currency: currency };
 }
 
 /**
@@ -676,6 +700,7 @@ export class DealEntityServer extends DealEntity {
          */
         if (!this._lockedAtSave && !(await this.isBornClosedWithoutOrder())) {
             this.provisionEmbeddedOrder();
+            await this.stampProvisionedOrderCurrency();
         }
 
         /**
@@ -700,13 +725,14 @@ export class DealEntityServer extends DealEntity {
         const stageOrder = this._lockedAtSave ? null : await this.planStageOrderStatus();
 
         /**
-         * AND WHAT A CHANGED CONTACT OR ACCOUNT ASKS OF THE ORDER'S BILL-TO (#319).
+         * AND WHAT A CHANGED CONTACT, ACCOUNT OR CURRENCY ASKS OF THE ORDER (#319, golive #492).
          *
-         * Provisioning stamps the bill-to once, so without this a deal whose billing contact changed
-         * after its order existed kept billing the old person. Not on a locked deal: a closed deal's
-         * order is the record of what was sold, and the close lock already refuses these fields there.
+         * Provisioning stamps the bill-to and the currency once, so without this a deal whose billing
+         * contact or currency changed after its order existed kept the old one on the order. Not on a
+         * locked deal: a closed deal's order is the record of what was sold, and the close lock already
+         * refuses these fields there.
          */
-        const orderBillTo = this.planOrderBillTo();
+        const orderFollow = withCurrency(this.planOrderBillTo(), await this.planOrderCurrency());
 
         /**
          * AND WHAT IT OWES THE APPEND-ONLY LOG — snapshotted here, for the same reason.
@@ -847,11 +873,11 @@ export class DealEntityServer extends DealEntity {
 
         const saved = this.IsSaved || this.DealNumber
             ? await this.saveWithinScope(options, {
-                  stageOrder, orderBillTo, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: false,
+                  stageOrder, orderFollow, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: false,
                   needsStatusDefault, scheduleOrderID,
               })
             : await this.saveWithinScope(options, {
-                  stageOrder, orderBillTo, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: true,
+                  stageOrder, orderFollow, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: true,
                   needsStatusDefault, scheduleOrderID,
               });
 
@@ -1150,7 +1176,7 @@ export class DealEntityServer extends DealEntity {
         options: EntitySaveOptions | undefined,
         work: {
             stageOrder: StageOrderPlan | null;
-            orderBillTo: OrderBillToPlan | null;
+            orderFollow: OrderFollowPlan | null;
             stageMove: StageMoveSnapshot | null;
             stageDefaults: StageDefaultsPlan | null;
             amountMayHaveMoved: boolean;
@@ -1163,7 +1189,7 @@ export class DealEntityServer extends DealEntity {
         if (
             !work.assignNumber &&
             !work.stageOrder &&
-            !work.orderBillTo &&
+            !work.orderFollow &&
             !work.stageMove &&
             !work.stageDefaults &&
             !work.amountMayHaveMoved &&
@@ -1215,7 +1241,7 @@ export class DealEntityServer extends DealEntity {
             if (work.needsStatusDefault && !this.DealStatusTypeID) {
                 this.DealStatusTypeID = await this.defaultOpeningStatusID();
             }
-            await this.applyOrderWork(work.orderBillTo, work.stageOrder);
+            await this.applyOrderWork(work.orderFollow, work.stageOrder);
 
             snapshot = this.captureSavedState();
             const saved = await super.Save(options);
@@ -2111,9 +2137,9 @@ export class DealEntityServer extends DealEntity {
      * booked order refuses a bill-to change, so the party has to be in place first or the order books
      * against the person the deal just stopped billing (#319).
      */
-    private async applyOrderWork(orderBillTo: OrderBillToPlan | null, stageOrder: StageOrderPlan | null): Promise<void> {
-        if (orderBillTo) {
-            await this.applyOrderBillTo(orderBillTo);
+    private async applyOrderWork(orderFollow: OrderFollowPlan | null, stageOrder: StageOrderPlan | null): Promise<void> {
+        if (orderFollow) {
+            await this.applyOrderFollow(orderFollow);
         }
         /**
          * The delta, not the total: a refusal RECORDED BY THIS SAVE is what tells the recovery to stand
@@ -2283,7 +2309,7 @@ export class DealEntityServer extends DealEntity {
      * Only an existing deal with an order: a new deal's order is provisioned from the current values.
      * Never on a locked deal: a closed deal's order is the record of what was sold.
      */
-    private planOrderBillTo(): OrderBillToPlan | null {
+    private planOrderBillTo(): OrderFollowPlan | null {
         if (this._lockedAtSave || !this.IsSaved || !this.OrderID) {
             return null;
         }
@@ -2301,21 +2327,24 @@ export class DealEntityServer extends DealEntity {
     }
 
     /**
-     * Moves the order's bill-to with the deal, and NEVER lets that fail the deal's save.
+     * Moves the order's bill-to and currency with the deal, and NEVER lets that fail the deal's save.
      *
-     * ── ONLY WHAT STILL BILLS THE DEAL'S PREVIOUS PARTY ──
+     * ── ONLY WHAT STILL HOLDS THE DEAL'S PREVIOUS VALUE ──
      *
      * Each side is moved only when the order still holds what the deal held before this save. A
      * different value there was put on the order by someone else — finance correcting who is billed —
      * and the deal does not get to overwrite it. Person and organization are judged separately, so a
-     * corrected organization survives a contact change and the reverse.
+     * corrected organization survives a contact change and the reverse. A currency set on the order
+     * itself stays too, but says so: the deal and its order then disagree about what the customer pays in.
      *
      * ── ONLY WHILE ORDERS SAYS THE ORDER IS EDITABLE ──
      *
      * `IsEditable` is orders' own predicate (Draft and Quoted today). A booked order refuses a bill-to
-     * change in its trigger, so asking first costs no write and leaves a warning that says why.
+     * change in its trigger, so asking first costs no write and leaves a warning that says why. The
+     * currency also stays once the order has been confirmed, even when it is back in Draft: orders'
+     * own rule, because a confirmed order booked at its currency's exchange rate (golive #492).
      */
-    private async applyOrderBillTo(plan: OrderBillToPlan): Promise<void> {
+    private async applyOrderFollow(plan: OrderFollowPlan): Promise<void> {
         try {
             const order = await this.orderForBillTo();
             if (!order) {
@@ -2326,25 +2355,57 @@ export class DealEntityServer extends DealEntity {
                 plan.Organization && UUIDsEqual(order.BillToOrganizationID, plan.Organization.Previous)
                     ? plan.Organization
                     : null;
-            if (!person && !organization) {
-                return;   // the order's bill-to was set by someone else; it stays theirs
+            let currency = this.currencyStillFollows(order, plan.Currency ?? null);
+            if (!person && !organization && !currency) {
+                return;   // the order's values were set by someone else; they stay theirs
             }
             if (!IsEditable(order.Status)) {
                 this._orderStatusWarnings.push(
-                    `The deal's ${describeBillToSides(person, organization)} changed, but its order is ` +
-                    `${order.Status}, so the order still bills the previous one. Change the order's bill-to ` +
+                    `The deal's ${describeBillToSides(person, organization, currency)} changed, but its order is ` +
+                    `${order.Status}, so the order keeps the previous one. Change the order ` +
                     'through orders if it should follow.',
                 );
                 return;
             }
-            await this.writeOrderBillTo(order, person, organization);
+            if (currency && order.ConfirmedAt) {
+                this._orderStatusWarnings.push(
+                    "The deal's currency changed, but its order has been confirmed, so it keeps its currency: " +
+                    'it booked at that currency\'s exchange rate.',
+                );
+                currency = null;
+            }
+            if (person || organization || currency) {
+                await this.writeOrderFollow(order, person, organization, currency);
+            }
         } catch (err) {
             this._orderStatusWarnings.push(
-                `The deal was saved, but its order's bill-to could not be updated ` +
+                `The deal was saved, but its order could not be updated to match it ` +
                 `(${err instanceof Error ? err.message : String(err)}).`,
             );
-            LogError(`DealEntityServer: syncing the order bill-to for deal ${this.ID} failed: ${err}`);
+            LogError(`DealEntityServer: syncing the order with deal ${this.ID} failed: ${err}`);
         }
+    }
+
+    /**
+     * The currency side when the order still holds the deal's previous currency; otherwise null, with a
+     * warning, because an order in a currency the deal no longer names bills the customer in it.
+     */
+    private currencyStillFollows(
+        order: mjBizAppsOrdersOrderHeaderEntity,
+        currency: OrderCurrencyPlan | null,
+    ): OrderCurrencyPlan | null {
+        if (!currency) {
+            return null;
+        }
+        if (SameOrderCurrency(order.CurrencyCode, currency.Previous, currency.Functional, FALLBACK_CURRENCY_CODE)) {
+            return currency;
+        }
+        this._orderStatusWarnings.push(
+            `The deal's currency changed, but its order's currency (${order.CurrencyCode ?? 'the company currency'}) ` +
+            'was set on the order itself, so the order keeps it. Change the order\'s currency through orders ' +
+            'if it should follow.',
+        );
+        return null;
     }
 
     /**
@@ -2376,20 +2437,23 @@ export class DealEntityServer extends DealEntity {
     }
 
     /**
-     * Writes the bill-to in its own savepoint, as `applyStageOrderStatus` writes the status: a refusal
-     * rolls back the order write alone and becomes a warning, and the deal's save carries on.
+     * Writes the bill-to and currency in their own savepoint, as `applyStageOrderStatus` writes the
+     * status: a refusal rolls back the order write alone and becomes a warning, and the deal's save
+     * carries on.
      *
-     * On a refusal every party field goes back to what it held, not only the two written here: orders'
-     * own save may have filled the ship-to or an employer on the way, and the embedded order is part
-     * of the deal's save graph, which would otherwise write those leftovers a moment later.
+     * On a refusal every party field and the currency go back to what they held, not only the ones
+     * written here: orders' own save may have filled the ship-to or an employer on the way, and the
+     * embedded order is part of the deal's save graph, which would otherwise write those leftovers a
+     * moment later.
      */
-    private async writeOrderBillTo(
+    private async writeOrderFollow(
         order: mjBizAppsOrdersOrderHeaderEntity,
-        person: OrderBillToPlan['Person'],
-        organization: OrderBillToPlan['Organization'],
+        person: OrderFollowPlan['Person'],
+        organization: OrderFollowPlan['Organization'],
+        currency: OrderCurrencyPlan | null,
     ): Promise<void> {
-        const partyFields = ['BillToPersonID', 'BillToOrganizationID', 'ShipToPersonID', 'ShipToOrganizationID'];
-        const before = partyFields.map((field) => [field, order.Get(field)] as const);
+        const restoredFields = ['BillToPersonID', 'BillToOrganizationID', 'ShipToPersonID', 'ShipToOrganizationID', 'CurrencyCode'];
+        const before = restoredFields.map((field) => [field, order.Get(field)] as const);
         const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
         const scope = await provider.BeginEntityTransaction();
         try {
@@ -2399,6 +2463,9 @@ export class DealEntityServer extends DealEntity {
             if (person) {
                 order.BillToPersonID = person.Next;
                 keepBillToOrganization(order);
+            }
+            if (currency) {
+                order.CurrencyCode = currency.Next;
             }
             if (await order.Save()) {
                 await scope.Commit();
@@ -2415,12 +2482,101 @@ export class DealEntityServer extends DealEntity {
                 order.Set(field, value);
             }
             this._orderStatusWarnings.push(
-                `The deal was saved, but its order still bills the previous ` +
-                `${describeBillToSides(person, organization)}: orders refused the change ` +
+                `The deal was saved, but its order keeps the previous ` +
+                `${describeBillToSides(person, organization, currency)}: orders refused the change ` +
                 `(${err instanceof Error ? err.message : String(err)}).`,
             );
-            LogError(`DealEntityServer: the order bill-to update for order ${order.ID} failed: ${err}`);
+            LogError(`DealEntityServer: the order update for order ${order.ID} failed: ${err}`);
         }
+    }
+
+    /* ── The deal's currency → the order's currency (golive #492) ─────────────────────── */
+
+    /**
+     * What a changed `CurrencyID` asks of the order, with both currencies resolved to the codes orders
+     * stores. Reads, before any transaction; opens nothing.
+     *
+     * Only an existing deal with an order, never on a locked deal: the same conditions as the bill-to.
+     * A read that fails plans nothing and leaves a warning, because the deal's save must not fail for it.
+     */
+    private async planOrderCurrency(): Promise<OrderCurrencyPlan | null> {
+        if (this._lockedAtSave || !this.IsSaved || !this.OrderID) {
+            return null;
+        }
+        const previousID = (this.GetFieldByName('CurrencyID')?.OldValue as string | null | undefined) || null;
+        const nextID = this.CurrencyID || null;
+        if (UUIDsEqual(previousID, nextID)) {
+            return null;
+        }
+        try {
+            const functional = await this.companyFunctionalCurrencyCode();
+            const previous = OrderCurrencyFor(await this.currencyCodeForID(previousID), functional, FALLBACK_CURRENCY_CODE);
+            const next = OrderCurrencyFor(await this.currencyCodeForID(nextID), functional, FALLBACK_CURRENCY_CODE);
+            return previous === next ? null : { Previous: previous, Next: next, Functional: functional };
+        } catch (err) {
+            this.warnCurrencyNotCopied(err);
+            return null;
+        }
+    }
+
+    /**
+     * Gives the order this save provisioned the deal's currency. A deal in its company's functional
+     * currency, or with none, leaves the order's currency as it is: NULL on a new order, or what a
+     * caller that built the order set on it. Never refuses the save.
+     */
+    private async stampProvisionedOrderCurrency(): Promise<void> {
+        const order = this.OrderID_Object;
+        if (!this._orderJustProvisioned || !order || !this.CurrencyID) {
+            return;
+        }
+        try {
+            const code = OrderCurrencyFor(
+                await this.currencyCodeForID(this.CurrencyID),
+                await this.companyFunctionalCurrencyCode(),
+                FALLBACK_CURRENCY_CODE,
+            );
+            if (code) {
+                order.CurrencyCode = code;
+            }
+        } catch (err) {
+            this.warnCurrencyNotCopied(err);
+        }
+    }
+
+    private warnCurrencyNotCopied(err: unknown): void {
+        this._orderStatusWarnings.push(
+            `The deal was saved, but its currency could not be read, so its order's currency was not ` +
+            `updated (${err instanceof Error ? err.message : String(err)}).`,
+        );
+        LogError(`DealEntityServer: reading the currency of deal ${this.ID} failed: ${err}`);
+    }
+
+    /**
+     * The code of the currency row `currencyID` names, or null for no currency. Throws when the row
+     * cannot be read or does not exist, so a caller cannot take an unreadable currency for "none".
+     */
+    private async currencyCodeForID(currencyID: string | null): Promise<string | null> {
+        if (!currencyID) {
+            return null;
+        }
+        const provider = this.ProviderToUse as unknown as IMetadataProvider;
+        if (!provider.Entities.find((e) => e.Name === CURRENCY_ENTITY) || !GUID_SHAPE.test(currencyID)) {
+            throw new Error(`currency ${currencyID} cannot be looked up on this host`);
+        }
+        const result = await (this.ProviderToUse as unknown as IRunViewProvider).RunView<CurrencyCodeRow>(
+            {
+                EntityName: CURRENCY_ENTITY,
+                ExtraFilter: `ID='${currencyID}'`,
+                ResultType: 'simple',
+                Fields: ['Code'],
+            },
+            this.ContextCurrentUser,
+        );
+        const code = result.Success ? (result.Results ?? [])[0]?.Code : undefined;
+        if (!code) {
+            throw new Error(result.Success ? `currency ${currencyID} does not exist` : result.ErrorMessage ?? 'read failed');
+        }
+        return code;
     }
 
 
