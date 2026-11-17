@@ -15,11 +15,11 @@ paths. The round-by-round narratives behind these results are in this file's his
 
 | | |
 |---|---|
-| Checks registered | **202** in 15 bundles (`scripts/expected-check-counts.json`) |
+| Checks registered | **214** in 16 bundles (`scripts/expected-check-counts.json`) |
 | Mutants registered | **113** |
 | Last full campaign | 2026-08-21/22: 68 mutants against a 121-check suite. It recorded totals, not per-mutant results, and its commit (`6d3add4`) is not in this repository |
 | Since then | single mutants only, recorded below |
-| Checks no mutant declares | **79** of 202, listed below the table |
+| Checks no mutant declares | **83** of 214, listed below the table |
 
 ## Per mutant
 
@@ -129,10 +129,10 @@ with nothing mutated: AC6, AC8, AC12, AC13, AC16, AC19, CT1, CT5, CT6, SD6, WT10
 | `M-FS4` | `ForecastSnapshotJob.ts` | FS6 | OK — fell FS6 · 2026-08-21, no SHA |
 | `M-FS5` | `ForecastSnapshotJob.ts` | FS7 | OK — fell FS7 · 2026-08-21, no SHA |
 | `M-SD40` | `DealEntityServer.ts` | SD40 | — |
-| `M-SD48` | `DealEntityServer.ts` | SD48 | — |
+| `M-SD49` | `DealEntityServer.ts` | SD49 | — |
 | `M-CD39` | `PipelineStageEntityServer.ts` | CD39 | — |
 | `M-CD40` | `DealLockOrderLineVeto.ts` | CD40 | — |
-| `M-CD43` | `DealEntityServer.ts` | CD43 | — |
+| `M-CD44` | `DealEntityServer.ts` | CD44 | — |
 | `M-BD7` | `DealStageEventEntityServer.ts` | BD7 | — |
 | `M-SCH1` | `deal-schedule-to-order.ts` | CS1, CS2, CS4, CS5 | — |
 | `M-SCH2` | `deal-schedule-to-order.ts` | CS3 | — |
@@ -151,8 +151,8 @@ reached the running code.
 
 | Bundle | Checks |
 |---|---|
-| `save-deal` | SD1, SD6, SD7, SD13, SD14, SD17, SD19, SD20, SD28, SD38, SD39, SD42, SD43, SD44, SD45, SD46, SD47 |
-| `close-deal` | CD3, CD12, CD19, CD25, CD31, CD32, CD33, CD34, CD35, CD36, CD37, CD38, CD41, CD42 |
+| `save-deal` | SD1, SD6, SD7, SD13, SD14, SD17, SD19, SD20, SD28, SD38, SD39, SD42, SD43, SD44, SD45, SD46, SD47, SD48 |
+| `close-deal` | CD3, CD12, CD19, CD25, CD31, CD32, CD33, CD34, CD35, CD36, CD37, CD38, CD41, CD42, CD43 |
 | `product-picker` | PP5 |
 | `close-won-order` | CO2, CO4 |
 | `close-won-contract` | CT1, CT7 |
@@ -160,7 +160,7 @@ reached the running code.
 | `close-won-tasks` | WT17, WT18, WT9, WT10 |
 | `activities` | AC1, AC2, AC4, AC5, AC6, AC7, AC9, AC10, AC11, AC12, AC14, AC16, AC18, AC19, AC20, AC21, AC22, AC23, AC24 |
 | `forecast` | FS1, FS2, FS4, FS5, FS9, FS10, FS13, FS14, FS15 |
-| `party-lookup` | PL1, PL2, PL3, PL4, PL6, PL5 |
+| `party-lookup` | PL1, PL2, PL3, PL4, PL6, PL7, PL8, PL5 |
 | `term-start` | TS5, TS6 |
 
 Some of these have fallen under a mutant aimed elsewhere — BD1 and BD4 under `M-ST1`, SD28 under
@@ -197,6 +197,6 @@ none: a figure without one describes no tree in particular.
 
 That the suite is adequate. An `OK` here shows that the checks a mutant declares fail for the reason
 they claim, against that one mutation, on the commit it ran against. Most recorded runs predate the
-current tree, and 79 of the 202 checks have no declared mutant. And no mutation run says anything about
+current tree, and 83 of the 214 checks have no declared mutant. And no mutation run says anything about
 behaviour no check covers — for that, see the Explorer specs under `test-harnesses/playwright/specs/`
 (`COVERAGE-MAP.md`).
