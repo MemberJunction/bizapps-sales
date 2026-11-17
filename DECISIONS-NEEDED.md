@@ -19,7 +19,7 @@ first; [Status of every entry](#status-of-every-entry) gives the state of the re
   this file's own D-3, D-4 and D-6 were renumbered or retired. Their rulings are `docs/DECISIONS.md`
   D2, D5 and "Master plan D-6".
 - **The other series are in `docs/DECISIONS.md`:** `D1`–`D7` (no hyphen), `I1`–`I10`, and the
-  prefixed `D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL` and `D-FY`. A bare `Dn` cited as orders'
+  prefixed `D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL`, `D-FY` and `D-PR`. A bare `Dn` cited as orders'
   (`D8`, `D53`) is orders' own log.
 - **New entries** take the next free number: `DN-29`, `D-35`.
 

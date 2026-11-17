@@ -1,0 +1,28 @@
+[
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deals",
+      "RoleID": "@lookup:MJ: Roles.Name=Sales User",
+      "CanCreate": false,
+      "CanRead": true,
+      "CanUpdate": false,
+      "CanDelete": true
+    },
+    "primaryKey": {
+      "ID": "80F6EDD9-449B-4967-828B-3460CAF2909E"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deals",
+      "RoleID": "@lookup:MJ: Roles.Name=Sales Admin",
+      "CanCreate": false,
+      "CanRead": true,
+      "CanUpdate": false,
+      "CanDelete": true
+    },
+    "primaryKey": {
+      "ID": "01FE6F87-FFF2-4F7C-B78B-4CF89C43DECE"
+    }
+  }
+]
