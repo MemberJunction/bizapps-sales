@@ -22,6 +22,9 @@ type Ctx = Parameters<NamedCheck['Fn']>[0];
 const COMMON_SCHEMA = '__mj_BizAppsCommon';
 const Q_CONTACTS = 'Sales: Party Lookup Contacts';
 const Q_ACCOUNTS = 'Sales: Party Lookup Accounts';
+/** The promote dialog's queries: the EXACT complement of the two above (D-PR3). */
+const Q_PROMOTABLE_CONTACTS = 'Sales: Party Lookup Promotable Contacts';
+const Q_PROMOTABLE_ACCOUNTS = 'Sales: Party Lookup Promotable Accounts';
 
 interface Fixture {
     Token: string;
@@ -143,6 +146,47 @@ export const PartyLookupChecks: NamedCheck[] = [
      * Each wildcard sits MID-term: sqlLikeBegins strips a TRAILING '%' before escaping, so `token%`
      * is a plain prefix search and could never show whether '%' is escaped.
      */
+    /**
+     * PL7/PL8 assert a PARTITION, not merely that the promote queries return something. The pair's
+     * whole contract is that one offers exactly what the other withholds: if somebody relaxes the
+     * picker's `EXISTS` so it starts offering unpromoted rows, "the promote query found the
+     * unpromoted org" stays true while the guarantee PL1/PL3 protect is gone. Disjoint AND covering
+     * is the statement that fails in that case.
+     */
+    seedCheck('PL7', 'the promotable accounts query is the exact complement of the account picker', async (ctx, f) => {
+        const promotable = await lookup(ctx, Q_PROMOTABLE_ACCOUNTS, f.Token);
+        const pickable = await lookup(ctx, Q_ACCOUNTS, f.Token);
+
+        Assert(promotable.includes(f.OrgOnly), 'the organization with no SalesAccount row is not offered for promotion');
+        Assert(!promotable.includes(f.Account), 'an organization that is ALREADY a sales account was offered for promotion');
+        Assert(
+            !promotable.some((id) => pickable.includes(id)),
+            'a row is in BOTH the picker and the promote list — they must partition, not overlap',
+        );
+        for (const id of [f.Account, f.OrgOnly]) {
+            Assert(
+                promotable.includes(id) || pickable.includes(id),
+                'a seeded organization matching the term is in NEITHER list — the pair no longer covers the set',
+            );
+        }
+    }),
+    seedCheck('PL8', 'the promotable contacts query is the exact complement of the contact picker', async (ctx, f) => {
+        const promotable = await lookup(ctx, Q_PROMOTABLE_CONTACTS, f.Token);
+        const pickable = await lookup(ctx, Q_CONTACTS, f.Token);
+
+        Assert(promotable.includes(f.PersonOnly), 'the person with no SalesContact row is not offered for promotion');
+        Assert(!promotable.includes(f.Contact), 'a person who is ALREADY a sales contact was offered for promotion');
+        Assert(
+            !promotable.some((id) => pickable.includes(id)),
+            'a row is in BOTH the picker and the promote list — they must partition, not overlap',
+        );
+        for (const id of [f.Contact, f.PersonOnly]) {
+            Assert(
+                promotable.includes(id) || pickable.includes(id),
+                'a seeded person matching the term is in NEITHER list — the pair no longer covers the set',
+            );
+        }
+    }),
     seedCheck('PL5', "%, _, [ and ' in a term match literally and never error", async (ctx, f) => {
         for (const term of [`${f.Token}a%b`, `${f.Token}a_b`, `${f.Token}[a]xb`]) {
             const ids = await lookup(ctx, Q_CONTACTS, term);

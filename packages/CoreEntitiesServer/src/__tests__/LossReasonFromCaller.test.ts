@@ -99,7 +99,7 @@ describe('a lost close on a deal that already carries a loss reason', () => {
             { ID: 'u1' },
         );
         expect(Issues).toEqual([
-            expect.objectContaining({ Field: 'LossReasonID', Message: `Loss reason ${CHOSEN_REASON} was not found.` }),
+            expect.objectContaining({ Field: 'LossReasonID', Message: `The chosen loss reason (ID ${CHOSEN_REASON}) was not found. Refresh the page and pick the loss reason again.` }),
         ]);
     });
 

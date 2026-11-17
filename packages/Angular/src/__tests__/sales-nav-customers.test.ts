@@ -28,11 +28,27 @@ describe('the Customers rail group', () => {
         expect(PrimaryActionFor('dashboard')).toMatchObject({ Label: 'New deal', Creates: 'deal' });
     });
 
-    it('offers New account beside New deal on the dashboard only', () => {
+    it('offers New account beside New deal on the dashboard', () => {
         expect(SecondaryActionFor('dashboard')).toMatchObject({ Label: 'New account', Creates: 'account' });
-        for (const page of ['list', 'board', 'accounts', 'contacts']) {
+    });
+
+    it('offers ADD EXISTING beside New on the party pages, and no party action on a deal page', () => {
+        // A Sales Account is the sales half of an Organization Common may already hold, so the party
+        // pages carry both verbs (D-PR3). A deal page carries neither: "New account" on a board is
+        // the noise the original version of this check was written to keep out.
+        expect(SecondaryActionFor('accounts')).toMatchObject({ Label: 'Add existing', Creates: 'promote-account' });
+        expect(SecondaryActionFor('contacts')).toMatchObject({ Label: 'Add existing', Creates: 'promote-contact' });
+        for (const page of ['list', 'board', 'settings']) {
             expect(SecondaryActionFor(page)).toBeNull();
         }
+    });
+
+    it('routes the promote actions to the dialog rather than to a new record', () => {
+        // The record already exists; only its sales half is missing. Opening a create tab would be
+        // the duplicate this feature removes.
+        expect(component).toContain("action.Creates === 'promote-account'");
+        expect(component).toContain('this.PromoteOpen = true;');
+        expect(template).toContain('<mjs-promote-party-dialog');
     });
 
     it('maps each action to the Sales entity it creates', () => {
