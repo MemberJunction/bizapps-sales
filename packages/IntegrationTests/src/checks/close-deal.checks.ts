@@ -3640,6 +3640,7 @@ async function memberCount(ctx: Ctx, memberID: string): Promise<number> {
         ctx, `SELECT COUNT(*) AS n FROM ${SALES_SCHEMA}.DealTeamMember WHERE ID = '${memberID}'`,
     );
     return Number(row.n);
+}
 
 /** An open deal on the order-only pipeline with one line for `productID`, saved; its ID and the line's. */
 async function dealWithLine(
