@@ -110,7 +110,7 @@ WHERE NOT EXISTS (SELECT 1 FROM __mj_BizAppsOrders.Product x WHERE x.ID = s.ID);
 
     Orders asks the rep for a line's service period when its recognition type requires one and nothing
     else dates it: not a subscription (the term dates it) and not an event (the event dates it). That is
-    the line the deal line editor shows Service start and end on, and close-deal.CD43 needs one. Chosen
+    the line the deal line editor shows Service start and end on, and close-deal.CD44 needs one. Chosen
     by the RequiresServicePeriod flag, never by a recognition type's code.
 
     Named to sort after the two Platform seats, so fixtures that take the first sellable products by

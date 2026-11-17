@@ -435,15 +435,15 @@ interface RemoteOperationRouter {
                     }
 
                     <!-- The customer already holds this product (golive #318): the same question the
-                         order line asks. Unanswered, Close Won refuses the deal, except on a renewal
-                         deal, which adds the line as the next term. -->
+                         order line asks, in the same words (golive #480). Unanswered, Close Won
+                         refuses the deal, except on a renewal deal, which adds the line as the next term. -->
                     @if (Holding; as holding) {
                         <div class="mjs-le__field" role="group" data-testid="line-subscription-choice"
                              [attr.aria-label]="'Existing subscription ' + holding.SubscriptionNumber">
                             <span class="mjs-le__label">Existing subscription</span>
                             <span class="mjs-le__muted">
-                                The customer already holds {{ holding.SubscriptionNumber }} for this product
-                                @if (HoldingCoverageEnd) { (covered through {{ HoldingCoverageEnd | mjoDate }}) }.
+                                This customer already has this product on {{ holding.SubscriptionNumber }}@if (HoldingCoverageEnd) {, which runs through {{ HoldingCoverageEnd | mjoDate }}}.
+                                Is this line a renewal of that subscription, or a new one?
                             </span>
                             <div class="mjs-le__choices">
                                 <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-extend"
@@ -451,7 +451,7 @@ interface RemoteOperationRouter {
                                         [attr.aria-pressed]="Working.SubscriptionAction === 'ExtendExisting'"
                                         [disabled]="IsLocked" [title]="BlockedReason"
                                         (click)="SetSubscriptionAction('ExtendExisting')">
-                                    Add as next term
+                                    Renew {{ holding.SubscriptionNumber }}
                                     @if (HoldingContinuationStart) { (starts {{ HoldingContinuationStart | mjoDate }}) }
                                 </button>
                                 <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-new"
@@ -459,14 +459,17 @@ interface RemoteOperationRouter {
                                         [attr.aria-pressed]="Working.SubscriptionAction === 'CreateNew'"
                                         [disabled]="IsLocked" [title]="BlockedReason"
                                         (click)="SetSubscriptionAction('CreateNew')">
-                                    New subscription (keeps this line's dates)
+                                    Create new subscription
+                                    @if (HasExplicitTermStart) { (starts {{ TermStartInput | mjoDate }}) } @else { (keeps this line's dates) }
                                 </button>
                             </div>
                             <small class="mjs-le__hint" [class.mjs-le__error]="!Working.SubscriptionAction">
                                 @if (Working.SubscriptionAction === 'CreateNew') {
-                                    Starts a separate subscription on this line's term start.
+                                    Creates a new subscription for this customer, separate from
+                                    {{ holding.SubscriptionNumber }}, on this line's term start.
                                 } @else if (Working.SubscriptionAction === 'ExtendExisting') {
-                                    Adds a term to {{ holding.SubscriptionNumber }}, starting the day after its coverage ends.
+                                    Adds this line to {{ holding.SubscriptionNumber }} as its next term, starting the day
+                                    after its coverage ends.
                                 } @else {
                                     Not chosen. Close Won asks for this, unless the deal is a renewal, which adds it as the next term.
                                 }
@@ -1421,7 +1424,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     }
 
     /**
-     * Whether Term start shows the continuation start instead of an input: "Add as next term" is
+     * Whether Term start shows the continuation start instead of an input: "Renew" is
      * chosen and the start is known. Orders' `SubscriptionBehavior.Decide` starts an extension at the
      * end of the existing coverage over any stated start, so an editable date here would be ignored.
      */

@@ -60,3 +60,27 @@ export function ContactAccountsWhere(
         `ID IN (SELECT FromOrganizationID FROM ${view} WHERE ToPersonID = ${id} AND FromOrganizationID IS NOT NULL AND Status = 'Active'))`
     );
 }
+
+/**
+ * The filter on the Relationships view that finds an ACTIVE link between one person and one account,
+ * in either direction (#443). The Contacts panel reads it before linking a person, so the same person
+ * is not linked twice: both directions, because {@link AccountContactsWhere} lists a person stored
+ * either way round, and active only, because an ended link is history and does not list the person.
+ */
+export function ExistingAccountLinkWhere(personId: string, accountId: string): string {
+    const person = sqlString(personId);
+    const account = sqlString(accountId);
+    return (
+        `Status = 'Active' AND (` +
+        `(FromPersonID = ${person} AND ToOrganizationID = ${account})` +
+        ` OR ` +
+        `(FromOrganizationID = ${account} AND ToPersonID = ${person}))`
+    );
+}
+
+/**
+ * The relationship types offered when linking a person to an account: active person-to-organization
+ * types. `Category` is a fixed set held by a CHECK constraint on Common's table, like `Status`, so this
+ * names a structural category, not a type by name; which types exist is still data.
+ */
+export const PERSON_TO_ORGANIZATION_TYPES_WHERE = "Category = 'PersonToOrganization' AND IsActive = 1";
