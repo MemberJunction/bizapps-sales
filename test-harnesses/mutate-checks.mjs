@@ -672,7 +672,7 @@ const MUTATIONS = [
          * WT2.
          */
         { id: 'M-WT7S', file: CWT, expect: ['WT7'],
-          from: '            result.Issues.push(\n                `The ${kind} task was created but NOT routed: no finance assignee is configured. Set the `\n                    + "pipeline\'s Close Won Assignee (or CloseWonTasks.AssigneeRecordID in its CloseWonPolicy).",\n            );',
+          from: '            result.Issues.push(\n                `The ${kind} task was created but NOT routed: no finance assignee is configured. Set the `\n                    + "pipeline\'s Close Won Assignee or Close Won Assignee Role (or CloseWonTasks.AssigneeRecordID "\n                    + \'in its CloseWonPolicy).\',\n            );',
           to: '',
           note: 'the unrouted task no longer SAYS it is unrouted -- it just quietly has no assignee' },
 
