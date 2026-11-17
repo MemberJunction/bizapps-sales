@@ -1,5 +1,63 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.31.1
+
+### Patch Changes
+
+- b8bc9c4: The deal line prompt for a product the customer already has uses the order line's new wording (golive #480): it asks "Is this line a renewal of that subscription, or a new one?" and the choices read "Renew <subscription>" and "Create new subscription". The Close Won and stage-change messages that send a rep to the prompt use the same words. Wording only: what each answer does is unchanged.
+- 05f18b5: A deal team row saved or deleted on its own can no longer leave an open deal with no owner: deleting, deactivating or re-roling the last active Owner row is refused with a message pointing at the Owner field (#568). The owner stamp now credits only an active owner row. The Sales Account's Contacts panel gains "Link person", which links an existing Sales Contact to the account (#443). Adds an integration check that Close Won refuses an unanswered line whose product inherits its subscription type (#504).
+  - @mj-biz-apps/sales-entities@6.31.1
+
+## 6.31.0
+
+### Patch Changes
+
+- Updated dependencies [99e202b]
+- Updated dependencies [4cb29a0]
+- Updated dependencies [37983bb]
+  - @mj-biz-apps/sales-entities@6.31.0
+
+## 6.30.0
+
+### Patch Changes
+
+- Updated dependencies [11e699f]
+  - @mj-biz-apps/sales-entities@6.30.0
+
+## 6.29.0
+
+### Patch Changes
+
+- Updated dependencies [00c22d3]
+  - @mj-biz-apps/sales-entities@6.29.0
+
+## 6.28.0
+
+### Patch Changes
+
+- Updated dependencies [8be0442]
+- Updated dependencies [acb1c0a]
+  - @mj-biz-apps/sales-entities@6.28.0
+
+## 6.27.0
+
+### Patch Changes
+
+- Updated dependencies [edf5a94]
+  - @mj-biz-apps/sales-entities@6.27.0
+
+## 6.26.0
+
+### Minor Changes
+
+- a7aff3d: Deleting a deal works, under rules. A deal can be deleted only while it is open and has never been closed, and only when its order is not Confirmed. Holders of `MJ.BizApps.Sales.Deal.Delete` (new Sales Admin role, and Developer) can delete any such deal; holders of `MJ.BizApps.Sales.Deal.DeleteOwn` (new Sales User role) only deals they own. The deal's team, contacts, payment schedule and stage history are removed with it, and its order is deleted through orders as the system user, all in one transaction. A refused delete now says why instead of failing on a foreign key, and the Deal form shows that reason instead of "Error deleting record". New metadata: the two roles, the two authorizations, their grants, and read and delete permissions for both roles on Deals only. Neither role holds delete on any order entity, so neither can delete order rows directly.
+
+### Patch Changes
+
+- Updated dependencies [ede0517]
+- Updated dependencies [24c0b46]
+  - @mj-biz-apps/sales-entities@6.26.0
+
 ## 6.25.0
 
 ### Patch Changes

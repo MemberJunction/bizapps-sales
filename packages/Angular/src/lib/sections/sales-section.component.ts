@@ -43,17 +43,24 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey, LogError, Metadata, type EntityInfo } from '@memberjunction/core';
+import {
+    MJSPromotePartyDialog,
+    type PromoteKind,
+} from '../form-panels/promote-party-dialog.component';
+import { CanCreateEntity } from '../data/promote-party';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseResourceComponent, NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
 import { EntityViewerModule, type RecordOpenedEvent, type ViewRelatedRecordNavigation } from '@memberjunction/ng-entity-viewer';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import {
+    DealFiltersWhere,
     DealInListWhere,
     DealPipelineViewWith,
     InspectCriteriaWhere,
     LoadDealPipelineViewTemplate,
     RelatedRecordTarget,
+    WithoutPipelineColumn,
     type InspectTables,
 } from '../pages/deal-views';
 import {
@@ -82,6 +89,7 @@ import {
     PrimaryActionFor,
     SecondaryActionFor,
     SubPagesFor,
+    type SalesNavAudience,
     type SalesNavBadges,
     type SalesPrimaryAction,
 } from '../nav/sales-nav.model';
@@ -141,9 +149,11 @@ import {
     type DashboardFilters,
     type FilterOption,
 } from '../pages/dashboard-filters';
-import { PipelineCompanies, PipelineLabel } from '../data/company-pipelines';
+import { PipelineCompanies, PipelineCompanyNames, PipelineLabel } from '../data/company-pipelines';
+import { SalesSettings } from '../data/sales-settings';
 import { WatchDealSaves } from '../data/deal-saves';
 import { MJSSalesFilterBarComponent, type FilterKind, type SalesFilterBarState } from './sales-filter-bar.component';
+import { MJSSalesSettingsPageComponent } from './sales-settings-page.component';
 
 /**
  * The account entity, for opening a customer as its own Explorer tab.
@@ -156,7 +166,8 @@ const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 /** The entity each header action creates. */
-const CREATES: Record<SalesPrimaryAction['Creates'], string> = { deal: E_DEAL, account: E_ACCOUNT, contact: E_CONTACT };
+/** Only the CREATING actions map to an entity; the promote kinds open a dialog instead. */
+const CREATES: Record<'deal' | 'account' | 'contact', string> = { deal: E_DEAL, account: E_ACCOUNT, contact: E_CONTACT };
 const E_DEAL_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_FORECAST_CATEGORY_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
@@ -219,7 +230,9 @@ interface AttentionRow {
         MJLeftNavComponent,
         MJLeftNavContentComponent,
         MJButtonDirective,
+        MJSPromotePartyDialog,
         MJSSalesFilterBarComponent,
+        MJSSalesSettingsPageComponent,
         DealBoardComponent,
         EntityViewerModule,
     ],
@@ -376,6 +389,8 @@ export class MJSSalesSectionComponent implements OnInit {
     public ContactEntityInfo: EntityInfo | null = null;
     public InspectView: MJUserViewEntityExtended | null = null;
     public AllDealsView: MJUserViewEntityExtended | null = null;
+    /** Identifies the newest All Deals view, so a slower superseded one cannot apply late. */
+    private allDealsToken = 0;
     /**
      * The shared pipeline view, read once per `Refresh()`. Both grids, and every deal list click, take a
      * copy of it instead of reading it again (bizapps-sales#261). Null when the Deals entity is not in
@@ -406,6 +421,12 @@ export class MJSSalesSectionComponent implements OnInit {
      * on every reload and page switch. Which pipelines it may be is the filter bar's (#351).
      */
     public BoardPipelineID: string | null = null;
+
+    /**
+     * The `HidePipelines` setting, read at the start of each load. While on, the Pipeline filter and grid
+     * column are gone, and the board and stage card name pipelines by their companies.
+     */
+    public HidePipelines = false;
 
     public async ngOnInit(): Promise<void> {
         // The URL's state is in place BEFORE the first load, so the period and filters it names are read.
@@ -484,7 +505,7 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private pageOrDefault(page: string | null): string {
-        return page && SubPagesFor(this.Section).some((p) => p.Id === page) ? page : DefaultPageFor(this.Section);
+        return page && SubPagesFor(this.Section, this.navAudience).some((p) => p.Id === page) ? page : DefaultPageFor(this.Section);
     }
 
     /** Applies a URL (back/forward, or a link opened into a mounted tab). Writes nothing back. */
@@ -506,6 +527,9 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Period = period;
         this.CustomStart = url.PeriodStart;
         this.CustomEnd = url.PeriodEnd;
+        if (filtersChanged) {
+            this.reloadAllDeals();
+        }
         if (filtersChanged || periodChanged) {
             // The figures re-read also re-reads the Board's deals and re-filters the deal list.
             void this.reloadFigures();
@@ -540,7 +564,7 @@ export class MJSSalesSectionComponent implements OnInit {
     // ── Chrome ─────────────────────────────────────────────────────────────────
 
     public get NavSections(): MJLeftNavSection[] {
-        return BuildLeftNavSections(SubPagesFor(this.Section), this.Badges);
+        return BuildLeftNavSections(SubPagesFor(this.Section, this.navAudience), this.Badges);
     }
 
     public get PrimaryAction(): SalesPrimaryAction | null {
@@ -548,7 +572,15 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     public get SecondaryAction(): SalesPrimaryAction | null {
-        return SecondaryActionFor(this.Page);
+        const action = SecondaryActionFor(this.Page);
+        if (!action) return null;
+        // "Add existing" opens the promote dialog, which promotes or creates. Hide it from a user who
+        // may do neither, rather than sending them to a server refusal (D-PR4: promotion rides on the
+        // create permission instead of carrying one of its own). The CREATING actions are left alone —
+        // MJ's own New affordances already answer for those.
+        if (action.Creates === 'promote-account' && !CanCreateEntity(E_ACCOUNT)) return null;
+        if (action.Creates === 'promote-contact' && !CanCreateEntity(E_CONTACT)) return null;
+        return action;
     }
 
     public get Title(): string {
@@ -571,9 +603,38 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Start(this.PrimaryAction ?? { Label: '', Icon: '', Creates: 'deal' });
     }
 
-    /** Opens a new record of what the action creates, as an Explorer tab. */
+    /**
+     * Opens a new record of what the action creates, as an Explorer tab — or, for the promote kinds,
+     * the promote dialog, because that record already exists and only its sales half is missing.
+     */
     public Start(action: SalesPrimaryAction): void {
+        if (action.Creates === 'promote-account' || action.Creates === 'promote-contact') {
+            this.PromoteKind = action.Creates === 'promote-account' ? 'Account' : 'Contact';
+            this.PromoteOpen = true;
+            return;
+        }
         this.nav.OpenNewEntityRecord(CREATES[action.Creates]);
+    }
+
+    // ── Promoting an existing Organization or Person (D-PR3) ───────────────────
+
+    /** Which promotion the dialog is doing. Meaningless while `PromoteOpen` is false. */
+    public PromoteKind: PromoteKind = 'Account';
+    public PromoteOpen = false;
+
+    public ClosePromote(): void {
+        this.PromoteOpen = false;
+    }
+
+    /**
+     * The promoted record's ID IS its Organization's or Person's ID (IsA), so this opens the record
+     * the rep just created rather than hunting for it. D-PR1 leaves everything but the account type
+     * blank, so landing on the form is where the work continues.
+     */
+    public OnPromoted(id: string): void {
+        const entity = this.PromoteKind === 'Account' ? E_ACCOUNT : E_CONTACT;
+        this.PromoteOpen = false;
+        this.nav.OpenEntityRecord(entity, CompositeKey.FromID(id));
     }
 
     /** A row on the Accounts or Contacts page: opens that record as an Explorer tab. */
@@ -660,6 +721,7 @@ export class MJSSalesSectionComponent implements OnInit {
         // The business zone is loaded before anything asks what day it is (bc-aidp-next-golive#168):
         // the engine fails open to UTC when it has not been configured, silently the old behaviour.
         await BusinessTimeZoneEngine.Instance.Config(false);
+        this.applyHidePipelines(await SalesSettings.LoadHidePipelines());
 
         // The fiscal start is read BEFORE the windowed queries: it is what the window is computed from.
         this.FiscalStart = await this.service.LoadFiscalYearStart();
@@ -711,6 +773,29 @@ export class MJSSalesSectionComponent implements OnInit {
         return { Detail: this.loadDetail(detail, figures, token) };
     }
 
+    /**
+     * Takes the `HidePipelines` setting. Turning it on drops a Pipeline filter carried in from the URL,
+     * which the bar would no longer show and so could not be cleared.
+     */
+    /** Who the rail is for, read once: the Settings page is listed only for those who may change it. */
+    private get navAudience(): SalesNavAudience {
+        this.audience ??= { CanChangeSettings: SalesSettings.CanChange };
+        return this.audience;
+    }
+    private audience: SalesNavAudience | null = null;
+
+    /** The Settings page saved Hide pipelines: re-read everything with the new value. */
+    public async OnHidePipelinesChanged(): Promise<void> {
+        await this.Refresh(true);
+    }
+
+    private applyHidePipelines(hide: boolean): void {
+        this.HidePipelines = hide;
+        if (hide && this.Filters.PipelineIDs.length) {
+            this.Filters = { ...this.Filters, PipelineIDs: [] };
+        }
+    }
+
     /** The pipelines, stages, statuses and companies the board's columns and the filter lists are built from. */
     private applyLookups(lookups: Settled<DealWorkspaceLookups>): void {
         this.LookupsError = lookups.Error;
@@ -737,7 +822,7 @@ export class MJSSalesSectionComponent implements OnInit {
         this.ViewError = pipelineView.Error;
         // Without the history no deal is flagged idle; the failure is logged below rather than shown.
         this.StageEnteredOn = entries.Value ?? new Map();
-        this.pipelineView = pipelineView.Value;
+        this.pipelineView = this.HidePipelines && pipelineView.Value ? await WithoutPipelineColumn(pipelineView.Value) : pipelineView.Value;
         this.cdr.detectChanges();
         await Promise.all([this.refreshInspectView(), this.refreshAllDealsView()]);
         for (const failed of [winRate.Error, pipelineView.Error, entries.Error]) {
@@ -1018,8 +1103,11 @@ export class MJSSalesSectionComponent implements OnInit {
                 PipelineIDs: this.PipelineOptions,
                 OwnerEmployeeIDs: this.OwnerOptions,
             },
+            // All Deals lists every deal, so it has no period, and the summary's no-lines count is the period's.
+            HidePeriod: this.Page === 'list',
+            HiddenKinds: this.HidePipelines ? ['PipelineIDs'] : [],
             MyEmployeeID: this.MyEmployeeID,
-            NoLinesLeftOut: this.NoLinesLeftOut,
+            NoLinesLeftOut: this.Page === 'list' ? 0 : this.NoLinesLeftOut,
         };
     }
 
@@ -1050,6 +1138,7 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Filters = filters;
         this.emitUrlState();
         void this.reloadFigures();
+        this.reloadAllDeals();
     }
 
     /**
@@ -1277,14 +1366,28 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /**
      * All deals takes the saved view's sort: open deals first (no ClosedAt), then soonest expected close
-     * (bizapps-sales#371).
+     * (bizapps-sales#371), narrowed by the filter bar's lists and never by the period
+     * (bc-aidp-next-golive#453). With no list set it keeps the saved view's own filter.
      */
     private async refreshAllDealsView(): Promise<void> {
+        const token = ++this.allDealsToken;
         try {
-            this.AllDealsView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView) : null;
+            const where = DealFiltersWhere(this.Filters, tableOf(E_ORDER_LINE)) || undefined;
+            const view = this.pipelineView ? await DealPipelineViewWith(this.pipelineView, where) : null;
+            // Two filter changes in quick succession: only the latest one's view is shown.
+            if (token === this.allDealsToken) {
+                this.AllDealsView = view;
+            }
         } catch (e) {
-            this.ViewError = reasonOf(e);
+            if (token === this.allDealsToken) {
+                this.ViewError = reasonOf(e);
+            }
         }
+    }
+
+    /** Re-derives All Deals for a filter change, then re-renders. */
+    private reloadAllDeals(): void {
+        void this.refreshAllDealsView().then(() => this.cdr.detectChanges());
     }
 
     public OnAllDealsOpened(event: RecordOpenedEvent): void {
@@ -1356,6 +1459,11 @@ export class MJSSalesSectionComponent implements OnInit {
         const options = this.FunnelPipelineOptions;
         const picked = options.find((p) => HasID([p.ID], this.FunnelPipelineID));
         return (picked ?? options[0])?.ID ?? null;
+    }
+
+    /** A stage card tab's text: the pipeline, or with pipelines hidden the companies it serves. */
+    public FunnelTabLabel(pipeline: FunnelPipeline): string {
+        return this.HidePipelines ? PipelineCompanyNames(this.Pipelines, pipeline) : pipeline.Name;
     }
 
     public SelectFunnelPipeline(id: string): void {
@@ -1595,7 +1703,8 @@ export class SalesDealsSectionResource extends BaseResourceComponent implements 
     }
 
     private parseUrl(params: Record<string, string>): SalesUrlState {
-        return ParseSalesUrlState(params, SubPagesFor('deals').map((p) => p.Id));
+        // Every page the URL may name; the section falls back to the dashboard for one the user cannot see.
+        return ParseSalesUrlState(params, SubPagesFor('deals', { CanChangeSettings: true }).map((p) => p.Id));
     }
 
     public override async GetResourceDisplayName(_d: ResourceData): Promise<string> {

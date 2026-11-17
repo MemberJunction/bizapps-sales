@@ -62,6 +62,7 @@ import {
     ProductFilterFor,
     type DealEntity,
     type mjBizAppsSalesDealPaymentScheduleEntity,
+    type mjBizAppsSalesDealTeamMemberEntity,
 } from '@mj-biz-apps/sales-entities';
 
 import {
@@ -2768,6 +2769,67 @@ export const SaveDealChecks: NamedCheck[] = [
                 Assert(await reopened.Load(existing.ID), 'the existing deal reloads');
                 reopened.NextStep = 'SD47 an ordinary edit after the retirement';
                 await saveOk(reopened, 'an ordinary edit to a deal whose link was retired');
+            }),
+    },
+    {
+        Id: 'save-deal.SD48',
+        Name: 'SD48: the last owner row on a deal cannot be deleted or deactivated on its own, and the deal keeps its owner (#568)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * The Internal team grid deletes a `DealTeamMember` row on its own, which re-derives the
+                 * owner stamp from the team that is left. Deleting the only owner row blanked the deal's
+                 * owner with no warning. The row's own `Delete()` and `Save()` now refuse and name the
+                 * Owner field, whose owner swap is a graph save that never reaches them.
+                 *
+                 * The owner row is FOUND by the deal's stamped owner and the owner-role flag, not taken
+                 * as the first team row, so a deal seeded with more than one row still tests the right one.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const deal = await newDeal(ctx, f, (d) => { d.Name = 'SD48 last owner row'; });
+                await saveOk(deal, 'a create that seeds an owner');
+                const before = await TxOne<{ OwnerEmployeeID: string | null }>(
+                    ctx, `SELECT OwnerEmployeeID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${deal.ID}'`,
+                );
+                Assert(!!before.OwnerEmployeeID, 'setup: the new deal is given an owner, or this check proves nothing');
+
+                const ownerRow = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT m.ID FROM ${SALES_SCHEMA}.DealTeamMember m
+                       JOIN ${SALES_SCHEMA}.DealRole r ON r.ID = m.DealRoleID
+                      WHERE m.DealID = '${deal.ID}' AND r.IsOwnerRole = 1 AND m.IsActive = 1
+                        AND m.EmployeeID = '${before.OwnerEmployeeID}'`,
+                );
+
+                const provider = ProviderOf(ctx);
+                const row = await provider.GetEntityObject<mjBizAppsSalesDealTeamMemberEntity>(E_TEAM, ctx.User);
+                Assert(await row.Load(ownerRow.ID), 'the owner row loads');
+                AssertEqual(await row.Delete(), false, 'deleting the last owner row on its own must be refused');
+                Assert(
+                    (row.LatestResult?.Message ?? '').includes('would have no owner')
+                        && (row.LatestResult?.Message ?? '').includes('Owner field'),
+                    `the refusal names the Owner field; it reads '${row.LatestResult?.Message ?? ''}'`,
+                );
+
+                const again = await provider.GetEntityObject<mjBizAppsSalesDealTeamMemberEntity>(E_TEAM, ctx.User);
+                Assert(await again.Load(ownerRow.ID), 'the owner row is still there');
+                again.IsActive = false;
+                AssertEqual(await again.Save(), false, 'deactivating the last owner row on its own must be refused');
+
+                const after = await TxOne<{ OwnerEmployeeID: string | null; Rows: number }>(
+                    ctx,
+                    `SELECT d.OwnerEmployeeID,
+                            (SELECT COUNT(*) FROM ${SALES_SCHEMA}.DealTeamMember m
+                              WHERE m.ID = '${ownerRow.ID}' AND m.IsActive = 1) AS Rows
+                       FROM ${SALES_SCHEMA}.Deal d WHERE d.ID = '${deal.ID}'`,
+                );
+                AssertEqual(
+                    String(after.OwnerEmployeeID ?? '').toLowerCase(),
+                    String(before.OwnerEmployeeID).toLowerCase(),
+                    'the deal keeps its owner',
+                );
+                AssertEqual(Number(after.Rows), 1, 'and the owner row is still there and active');
             }),
     },
 ];

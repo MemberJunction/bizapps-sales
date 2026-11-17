@@ -1,0 +1,22 @@
+[
+  {
+    "fields": {
+      "Name": "Sales User",
+      "Description": "Works deals. May delete an open, never-closed deal they own (MJ.BizApps.Sales.Deal.DeleteOwn).",
+      "SQLName": null
+    },
+    "primaryKey": {
+      "ID": "BC7528F7-73AB-4270-AECE-BD29B3490253"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Sales Admin",
+      "Description": "Administers deals. May delete any open, never-closed deal (MJ.BizApps.Sales.Deal.Delete).",
+      "SQLName": null
+    },
+    "primaryKey": {
+      "ID": "995DE449-0AA9-4AD2-9B87-CE6295AC3FC4"
+    }
+  }
+]

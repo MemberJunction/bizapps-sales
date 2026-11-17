@@ -3440,7 +3440,110 @@ export const CloseDealChecks: NamedCheck[] = [
                 Assert(row.ClosedAt !== null, 'and ran the close, rather than reporting success on an open deal');
             }),
     },
+    {
+        Id: 'close-deal.CD43',
+        Name: 'CD43: Close Won refuses an unanswered line whose product INHERITS its subscription type from its product type (#504)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * A product with no subscription type of its own takes its product type's default, and
+                 * confirm treats it as a subscription. The close's extend-or-new refusal reads orders'
+                 * `FindUnansweredHeldLines`, which before orders 5.40.0 read only the product's own column,
+                 * so an inheriting line closed Won unanswered and confirm moved it to the next term.
+                 *
+                 * The seeds hold no inheriting product, so the check makes one inside its transaction: a
+                 * sellable product moved onto a product type found by its `DefaultSubscriptionTypeID` flag
+                 * (never by name), with its own type cleared. The customer's existing subscription is made
+                 * the same way, from a first deal's line, for the holder the second deal's order names.
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const companyID = f.OrderOnlyPolicyCompanyID;
+                const inheritingType = await TxOne<{ ID: string; DefaultSubscriptionTypeID: string }>(
+                    ctx,
+                    `SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID,
+                            CAST(DefaultSubscriptionTypeID AS nvarchar(50)) AS DefaultSubscriptionTypeID
+                       FROM ${ORDERS_SCHEMA}.ProductType
+                      WHERE IsActive = 1 AND DefaultSubscriptionTypeID IS NOT NULL ORDER BY ID`,
+                );
+                const product = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID FROM ${ORDERS_SCHEMA}.Product
+                      WHERE CompanyID = '${companyID}' AND Status = 'Active'
+                        AND (AvailableFrom IS NULL OR AvailableFrom <= CAST(GETUTCDATE() AS date))
+                        AND (AvailableTo IS NULL OR AvailableTo >= CAST(GETUTCDATE() AS date))
+                      ORDER BY Name`,
+                );
+                await TxExec(
+                    ctx,
+                    `UPDATE ${ORDERS_SCHEMA}.Product SET ProductTypeID = '${inheritingType.ID}', SubscriptionTypeID = NULL
+                      WHERE ID = '${product.ID}'`,
+                    'CD43: make a product inherit its subscription type',
+                );
+
+                const prior = await dealWithLine(ctx, f, 'CD43 earlier purchase', product.ID);
+                const current = await dealWithLine(ctx, f, 'CD43 unanswered inheriting line', product.ID);
+                const holder = await TxOne<{ HolderID: string | null }>(
+                    ctx,
+                    `SELECT CAST(COALESCE(l.ShipToOrganizationID, o.ShipToOrganizationID, o.BillToOrganizationID)
+                                 AS nvarchar(50)) AS HolderID
+                       FROM ${ORDERS_SCHEMA}.OrderLine l JOIN ${ORDERS_SCHEMA}.OrderHeader o ON o.ID = l.OrderHeaderID
+                      WHERE l.ID = '${current.LineID}'`,
+                );
+                Assert(!!holder.HolderID, 'setup: the deal\'s order names an organization the line is for');
+                await TxExec(
+                    ctx,
+                    `INSERT INTO ${ORDERS_SCHEMA}.Subscription
+                        (SubscriptionNumber, CompanyID, OrderLineID, SubscriptionTypeID, ProductID,
+                         HolderOrganizationID, Status, StartDate)
+                     VALUES ('CD43-${Date.now()}', '${companyID}', '${prior.LineID}',
+                             '${inheritingType.DefaultSubscriptionTypeID}', '${product.ID}',
+                             '${holder.HolderID}', 'Active', CAST(GETUTCDATE() AS date))`,
+                    'CD43: the customer already holds the product',
+                );
+
+                const out = await close(ctx, { DealID: current.DealID, DealStatusTypeID: f.WonStatusID });
+                Assert(!out.Success, 'Close Won must refuse a line that has not answered extend-or-new');
+                Assert(
+                    (out.Issues ?? []).some((i) => i.Field === 'SubscriptionAction' && i.Severity === 'error'),
+                    `the refusal names the line's choice: ${JSON.stringify(out.Issues)}`,
+                );
+                const row = await TxOne<{ DealStatusTypeID: string | null; ClosedAt: Date | null }>(
+                    ctx,
+                    `SELECT DealStatusTypeID, ClosedAt FROM ${SALES_SCHEMA}.Deal WHERE ID = '${current.DealID}'`,
+                );
+                Assert(row.ClosedAt === null, 'and the deal stays open');
+                Assert(
+                    String(row.DealStatusTypeID ?? '').toLowerCase() !== String(f.WonStatusID).toLowerCase(),
+                    'with its status unchanged',
+                );
+            }),
+    },
 ];
+
+/** An open deal on the order-only pipeline with one line for `productID`, saved; its ID and the line's. */
+async function dealWithLine(
+    ctx: Ctx,
+    f: SalesFixture,
+    name: string,
+    productID: string,
+): Promise<{ DealID: string; LineID: string }> {
+    const dealID = await openDeal(ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, name);
+    const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
+    Assert(await deal.Load(dealID), `setup: ${name} reloads`);
+    const order = deal.OrderID_Object;
+    Assert(!!order, `setup: ${name} has an order`);
+    const line = await order.Lines.Create();
+    line.ProductID = productID;
+    line.Quantity = 1;
+    Assert(await deal.Save(), `setup: ${name}'s line could not be saved — ${deal.LatestResult?.CompleteMessage ?? ''}`);
+    const saved = await TxOne<{ ID: string }>(
+        ctx,
+        `SELECT CAST(ID AS nvarchar(50)) AS ID FROM ${ORDERS_SCHEMA}.OrderLine
+          WHERE OrderHeaderID = '${deal.OrderID}' AND ProductID = '${productID}'`,
+    );
+    return { DealID: dealID, LineID: saved.ID };
+}
 
 /** Orders' line entity, named here for the same reason as `ORDERS_SCHEMA`. */
 const E_ORDER_LINE = 'MJ_BizApps_Orders: Order Lines';
