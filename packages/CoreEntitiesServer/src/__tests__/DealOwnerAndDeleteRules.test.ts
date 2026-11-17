@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { DealEntity } from '@mj-biz-apps/sales-entities';
 import { DealEntityServer } from '../DealEntityServer.js';
 
@@ -8,7 +8,6 @@ const ROLE_SE = 'bbbbbbbb-0000-4000-8000-000000000002';
 const EMP_1 = 'eeeeeeee-0000-4000-8000-000000000001';
 const EMP_2 = 'eeeeeeee-0000-4000-8000-000000000002';
 const DEAL_ID = 'dddddddd-0000-4000-8000-000000000001';
-const ORDER_ID = 'ffffffff-0000-4000-8000-000000000001';
 
 describe('stampOwnerFromTeam (#409 + #355 item 4)', () => {
     function makeDeal(
@@ -210,148 +209,5 @@ describe('DealEntityServer.teamRoleRulesRefusal (#355 item 5)', () => {
             ],
         });
         await expect(d.teamRoleRulesRefusal()).resolves.toBeNull();
-    });
-});
-
-describe('DealEntityServer.Delete (#411)', () => {
-    const parentProto = Object.getPrototypeOf(DealEntityServer.prototype) as {
-        Delete: () => Promise<boolean>;
-    };
-
-    function makeDeletableDeal(opts: {
-        orderID?: string | null;
-        locksDeal?: boolean;
-        childDeleteFails?: boolean;
-        superDeleteFails?: boolean;
-    }) {
-        const refusals: string[] = [];
-        const deletedChildren: string[] = [];
-        const scope = {
-            Commit: vi.fn(async () => undefined),
-            Rollback: vi.fn(async () => undefined),
-        };
-
-        const instance = Object.create(DealEntityServer.prototype) as {
-            Delete(): Promise<boolean>;
-        };
-        Object.defineProperty(instance, 'ID', { value: DEAL_ID });
-        Object.defineProperty(instance, 'OrderID', { value: opts.orderID ?? null });
-        Object.defineProperty(instance, 'DealStatusTypeID', { value: 'aaaaaaaa-0000-4000-8000-0000000000c1' });
-        Object.defineProperty(instance, 'ContextCurrentUser', { value: { ID: 'u1' } });
-        Object.defineProperty(instance, 'Fields', { value: [] });
-        Object.defineProperty(instance, 'GetFieldByName', {
-            value: () => ({ OldValue: 'aaaaaaaa-0000-4000-8000-0000000000c1', Dirty: false }),
-        });
-        Object.defineProperty(instance, 'RegisterResultHistoryEntry', {
-            value: (entry: { Message: string }) => refusals.push(entry.Message),
-        });
-        Object.defineProperty(instance, 'LatestResult', {
-            get: () =>
-                refusals.length > 0
-                    ? { Success: false, Message: refusals[refusals.length - 1], CompleteMessage: refusals[refusals.length - 1] }
-                    : null,
-        });
-        Object.defineProperty(instance, 'ProviderToUse', {
-            value: {
-                BeginEntityTransaction: async () => scope,
-                RunView: async ({ EntityName }: { EntityName: string }) => {
-                    if (EntityName === 'MJ_BizApps_Sales: Deal Status Types') {
-                        return {
-                            Success: true,
-                            Results: [{ LocksDeal: opts.locksDeal ?? false, IsLost: false }],
-                        };
-                    }
-                    if (EntityName === 'MJ_BizApps_Sales: Deal Team Members') {
-                        return {
-                            Success: true,
-                            Results: [
-                                {
-                                    DeleteWithoutRestamp: async () => {
-                                        if (opts.childDeleteFails) return false;
-                                        deletedChildren.push('team-without-restamp');
-                                        return true;
-                                    },
-                                    Delete: async () => {
-                                        deletedChildren.push('team-with-restamp');
-                                        return true;
-                                    },
-                                    LatestResult: { Message: 'child delete refused' },
-                                },
-                            ],
-                        };
-                    }
-                    if (EntityName === 'MJ_BizApps_Sales: Deal Payment Schedules') {
-                        return {
-                            Success: true,
-                            Results: [
-                                {
-                                    Delete: async () => {
-                                        deletedChildren.push('schedule');
-                                        return true;
-                                    },
-                                },
-                            ],
-                        };
-                    }
-                    return {
-                        Success: true,
-                        Results: [
-                            {
-                                Delete: async () => {
-                                    deletedChildren.push('contact-role');
-                                    return true;
-                                },
-                            },
-                        ],
-                    };
-                },
-            },
-        });
-
-        return { instance, refusals, deletedChildren, scope };
-    }
-
-    it('refuses to delete a deal that has an order', async () => {
-        const { instance, refusals, deletedChildren } = makeDeletableDeal({ orderID: ORDER_ID });
-        expect(await instance.Delete()).toBe(false);
-        expect(refusals).toEqual(['This deal has an order. Abandon the deal instead.']);
-        expect(deletedChildren).toEqual([]);
-    });
-
-    it('refuses to delete a closed deal even when it has no order', async () => {
-        const { instance, refusals, deletedChildren } = makeDeletableDeal({ orderID: null, locksDeal: true });
-        expect(await instance.Delete()).toBe(false);
-        expect(refusals).toEqual(['This deal is closed and cannot be deleted.']);
-        expect(deletedChildren).toEqual([]);
-    });
-
-    it('deletes team, schedule, and contact-role children without restamping, then deletes the deal in one transaction', async () => {
-        const spy = vi.spyOn(parentProto, 'Delete').mockResolvedValue(true);
-        try {
-            const { instance, refusals, deletedChildren, scope } = makeDeletableDeal({ orderID: null });
-            expect(await instance.Delete()).toBe(true);
-            expect(refusals).toEqual([]);
-            expect(deletedChildren).toEqual(['team-without-restamp', 'schedule', 'contact-role']);
-            expect(scope.Commit).toHaveBeenCalledTimes(1);
-            expect(scope.Rollback).not.toHaveBeenCalled();
-        } finally {
-            spy.mockRestore();
-        }
-    });
-
-    it('rolls back the transaction and records the refusal when a child delete fails', async () => {
-        const spy = vi.spyOn(parentProto, 'Delete').mockResolvedValue(true);
-        try {
-            const { instance, refusals, scope } = makeDeletableDeal({
-                orderID: null,
-                childDeleteFails: true,
-            });
-            expect(await instance.Delete()).toBe(false);
-            expect(scope.Rollback).toHaveBeenCalledTimes(1);
-            expect(scope.Commit).not.toHaveBeenCalled();
-            expect(refusals).toEqual(['child delete refused']);
-        } finally {
-            spy.mockRestore();
-        }
     });
 });

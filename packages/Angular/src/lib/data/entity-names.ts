@@ -18,6 +18,8 @@ export const MJS_ENTITIES = {
     DealStatusType: 'MJ_BizApps_Sales: Deal Status Types',
     SalesAccount: 'MJ_BizApps_Sales: Sales Accounts',
     SalesContact: 'MJ_BizApps_Sales: Sales Contacts',
+    /** Read for `IsProspect`, so a promotion defaults the account's type by flag and never by name (D-PR1). */
+    AccountType: 'MJ_BizApps_Sales: Account Types',
 } as const;
 
 /** Common (and MJ core) entities this app contributes onto — we do not own these forms. */
@@ -50,4 +52,6 @@ export const MJS_FOREIGN_ENTITIES = {
     ActivityLink: 'MJ_BizApps_Common: Activity Links',
     /** Common's person/organization link. The only record of who works at an account (#301). */
     Relationship: 'MJ_BizApps_Common: Relationships',
+    /** Offered when linking a person to an account (#443): person-to-organization types only. */
+    RelationshipType: 'MJ_BizApps_Common: Relationship Types',
 } as const;
