@@ -54,6 +54,12 @@ Open defects are GitHub issues, not documents: [bizapps-sales issues](https://gi
 | [`metadata/entity-relationships/README.md`](../metadata/entity-relationships/README.md) | The child collections on `Deal`, and where relationships appear on forms | Current |
 | [`metadata/queries/README.md`](../metadata/queries/README.md) | The read-model queries and the rules they follow | Current |
 
+## Designs in progress
+
+| Document | What it is for | Status |
+|---|---|---|
+| [`docs/superpowers/specs/2026-11-16-lapsed-close-date-digest-design.md`](superpowers/specs/2026-11-16-lapsed-close-date-digest-design.md) | The weekly lapsed-close-date digest: configurable audiences, and the CDP agent it ports | Proposed; not built |
+
 ## History
 
 | Document | What it is for | Status |

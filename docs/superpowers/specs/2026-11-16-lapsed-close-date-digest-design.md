@@ -1,0 +1,416 @@
+# Lapsed Close Date Digest — design
+
+Status: proposed. Branch `feat/lapsed-close-date-digest` off `next`.
+
+## Intent and why
+
+A weekly pipeline-hygiene nudge. Open deals whose expected close date has passed — or was never
+entered — are surfaced to the people who can push on them: each company's leaders get their own
+company's list, and portfolio-wide executives get a rolled-up view.
+
+The reason it exists: deal owners let close dates slip, which cascades into stale stages, stale
+amounts and a forecast nobody trusts. A low-friction Monday email is the cheapest intervention.
+
+This is a **migration, not a new idea**. It ran on CDP as `LapsedCloseDateAgent` and worked. It was
+paused because the business moved to aidp-next, and CDP's version cannot follow: every address,
+company and pipeline rule in it is a TypeScript constant, and its query is shaped around CDP's
+HubSpot-flavoured `Deals` entity, which this app does not have.
+
+Source material, for the behaviour this must reproduce:
+`CDP/plans/Lapsed_Close_Date_Agent_Brief.md` and `CDP/packages/CustomAgents/src/LapsedCloseDateAgent.ts`.
+
+## Goals
+
+1. Reproduce CDP's behaviour: per-company leader digests that are skipped when a company has
+   nothing lapsed; portfolio-wide executive digests that always send, where an empty digest is
+   itself the all-clear.
+2. **Audiences are data.** Adding a CTO digest, or changing the CEO's 14-day threshold, is rows in
+   a type table — not a code change and not a deploy.
+3. **Ships inert.** Installing or upgrading sales changes nothing for any host: no recipients are
+   seeded and the scheduled job ships `Disabled`, matching the precedent set by
+   `.sales-finance-exception-scheduled-jobs.json`.
+4. Every send is independently auditable, as CDP's was.
+
+## Non-goals
+
+- No LLM reasoning, no per-deal commentary or recommendations. This is a nudge, not analysis.
+- No CC/BCC of deal owners — the brief's premise is that the leader pushes owners directly.
+- No attachments or CSV exports.
+- No reply-to threading; each week's digest stands alone.
+- Not a forecast tool. `ForecastSnapshot` already exists and is a different job.
+
+## Anti-goals
+
+These would make the work a failure even if it ran correctly.
+
+- **Any host's names, addresses, companies or pipeline rules in code or in shipped metadata.** This
+  app is published to npm and installed by `mj app install`. CDP's `DEFAULT_COMPANY_LEADERS`,
+  `PORTFOLIO_COMPANIES` and `EXCLUDED_PIPELINES_BY_COMPANY` have no equivalent here and must not
+  acquire one.
+- **Any comparison of a stage or status name.** `pnpm run test:vocabulary-gate` would catch it, and
+  it is the exact mistake CDP made (`DealStage NOT IN ('Closed Won','Closed Lost')`).
+- **Any arithmetic on money.** The digest displays `Deal.Amount` per row and nothing else — no
+  per-company subtotals, no portfolio total, no "pipeline at risk" figure, however much an executive
+  digest invites one. Rule 1, and `test:money-gate` watches for it. CDP's digests carried deal
+  *counts* only; that stays true.
+- **Double-counting through `DealTeamMember`.** Owner comes from `Deal.OwnerEmployeeID`, which the
+  server already maintains from the owner-role team member. The digest never joins the team table.
+
+## Constraints
+
+- Metadata PRs are declarative JSON only — fields, `@lookup`, a `uuidgen` primary key, no `sync`
+  block, no `*__Metadata_Sync.sql`. The build engineer generates one consolidated Metadata_Sync per
+  release (`docs/PUBLISHING.md`).
+- New vocabulary is a metadata row with a hardcoded UUID, never a SQL `INSERT` in a migration.
+- CHECK constraints are for structural invariants only, never domain vocabulary.
+- Order of work for the schema change: migration → apply → `mj sync push` → `mj codegen` → write
+  code against the generated typed properties.
+- Tests are Vitest (`vitest.config.ts` at the root), not `node:test`.
+
+## Approaches considered
+
+**A. Two new entities — a digest audience type table plus recipient rows. (Chosen.)**
+Audience behaviour lives as flags on a type table; who receives what lives as rows joining an
+audience to a company and an employee. Adding the CTO is one vocabulary row and one recipient row.
+Costs a migration, CodeGen, metadata and forms — the largest build of the three.
+
+**B. MJ Roles plus Employee Roles.** New roles as distribution lists, per-company leaders derived
+from `Employee.CompanyID`. **Rejected on the data.** The real roster has one person leading a
+company they are not employed by (a Sidecar leader on a `@bluecypress.io` address) and one person
+leading two companies. `Employee.CompanyID` holds a single value and can express neither. It also
+makes a permission grant double as a mail subscription, which invites a later accident.
+
+**C. One Application Settings row holding the roster as JSON.** Cheapest by a wide margin — no
+migration, no CodeGen, editable in Explorer today, and it matches the existing `HidePipelines`
+pattern. Rejected for the product repo because a mistyped address fails silently, there is no
+per-recipient Record Changes history, and it duplicates addresses that already exist on
+`MJ: Employees`. It remains the sensible fallback if the schedule for getting Monday's email
+flowing again turns out to matter more than the data model; its JSON maps one-to-one onto A's seed
+rows, so nothing is wasted by starting there.
+
+Chosen: **A**, because the stated requirement was that the audiences be definable, and A is the only
+option where defining one is data.
+
+## What the new schema looks like
+
+Two tables in `__mj_BizAppsSales`.
+
+### `DealDigestAudienceType` — vocabulary, with the behaviour flags
+
+| Column | Type | Meaning |
+|---|---|---|
+| `ID` | uniqueidentifier, PK | |
+| `Code` | nvarchar(50), NOT NULL, UNIQUE | stable key, e.g. `COMPANY_LEADER` |
+| `Name` | nvarchar(100), NOT NULL | display |
+| `Description` | nvarchar(MAX), NULL | |
+| `IsPortfolioWide` | bit, NOT NULL, default 0 | 0 = the recipient's own company only; 1 = every company |
+| `MinDaysLapsed` | int, NULL | NULL = everything lapsed; 14 = only deals more than 14 days past |
+| `IncludeMissingCloseDate` | bit, NOT NULL, default 1 | whether deals with no close date qualify |
+| `SendWhenEmpty` | bit, NOT NULL, default 0 | 0 = skip the send; 1 = send the all-clear |
+| `GroupByCompany` | bit, NOT NULL, default 1 | render per-company section headers |
+| `SubjectTemplate` | nvarchar(255), NULL | subject copy, with placeholders |
+| `IntroTemplate` | nvarchar(MAX), NULL | the opening paragraph |
+| `EmptyMessage` | nvarchar(500), NULL | copy used when `SendWhenEmpty` and there is nothing |
+| `DisplayRank` | int, NOT NULL, default 0 | send order |
+| `IsActive` | bit, NOT NULL, default 1 | |
+
+The flags are what make this configurable rather than three hard-coded branches. CDP's three digests
+become three rows:
+
+| Code | PortfolioWide | MinDaysLapsed | SendWhenEmpty | GroupByCompany |
+|---|---|---|---|---|
+| `COMPANY_LEADER` | 0 | NULL | 0 | 0 |
+| `CEO` | 1 | 14 | 1 | 1 |
+| `CFO` | 1 | NULL | 1 | 1 |
+| `CTO` | — **open question, see below** — | | | |
+
+`SubjectTemplate` and `IntroTemplate` are columns rather than code because CDP's copy had host
+specifics welded into it — its leader intro names a particular person to contact when deals vanish
+from the CRM. Shipping that text from an npm package would be wrong. Code supplies neutral defaults
+when either is NULL, so a host that sets nothing still gets sensible subjects and intros.
+
+**Placeholders**, rendered by a small typed substitution in this package rather than a templating
+dependency (CDP used nunjucks; nothing here depends on a template engine and one class of digest does
+not justify adding one): `{Company}`, `{Count}`, `{Today}`, `{RecipientFirstName}`. Unknown
+placeholders render literally rather than throwing. Every value interpolated into the HTML body is
+escaped; the intro and subject are host-authored and treated as trusted, deal and employee data never
+is.
+
+**Editing a shipped row is a host's choice with a known cost.** The four audience rows ship with
+fixed UUIDs, and a release's generated seed emits an update for any shipped record whose `metadata/`
+copy changed, so if a later sales release edits one of these rows it will overwrite a host's edits to
+it. This is the same exposure `HidePipelines` already carries and accepts. Two things follow, and both
+belong in the host documentation: sales must not casually edit these four rows after release, and a
+host wanting different behaviour should **add its own audience row rather than edit a shipped one** —
+which is the mechanism this design exists to provide, and which is immune to the problem.
+
+### `DealDigestRecipient` — who gets what
+
+| Column | Type | Meaning |
+|---|---|---|
+| `ID` | uniqueidentifier, PK | |
+| `DealDigestAudienceTypeID` | uniqueidentifier, NOT NULL, FK | |
+| `CompanyID` | uniqueidentifier, NULL, FK → `MJ: Companies` | required when the audience is not portfolio-wide; ignored when it is |
+| `EmployeeID` | uniqueidentifier, NOT NULL, FK → `MJ: Employees` | name and address come from here |
+| `IsActive` | bit, NOT NULL, default 1 | |
+
+One `UNIQUE (DealDigestAudienceTypeID, CompanyID, EmployeeID)`. Note deliberately: SQL Server treats
+NULLs as **equal** in a UNIQUE constraint, so portfolio-wide rows (`CompanyID IS NULL`) get exactly
+one row per person per audience — which is the intent here, not a trap to work around.
+
+Nothing ties `CompanyID`-is-required to the audience's `IsPortfolioWide` as a CHECK: that is a
+cross-table rule, and CHECKs here are for structural invariants only. It is enforced in a
+`DealDigestRecipientEntityServer.Save()` override, alongside a refusal when the chosen employee has
+no email address — a silent empty `To` is the failure mode most likely to go unnoticed for weeks.
+
+Taking the address from `MJ: Employees` rather than storing it is what buys FK integrity, Record
+Changes history, and an employee who leaves being `Active = 0` in one place.
+
+### What ships, and what does not
+
+Ships: the four audience-type rows (vocabulary — `CEO`, `CFO`, `CTO` and `COMPANY_LEADER` are
+universal enough to be app vocabulary), the agent record, the scheduled job as `Disabled`, the
+`ExplorerBaseUrl` Application Setting with an empty value, and entity and permission metadata.
+
+Does not ship: **a single recipient row**. Recipients are host data. A fresh install sends nothing to
+nobody until someone seeds them and enables the job.
+
+## How a run works
+
+One deterministic pass, no LLM. For each active audience type in `DisplayRank` order, for each of its
+active recipients, render and send.
+
+**The business day.** CDP fired its cron in Eastern and did its date arithmetic in Central — a
+latent off-by-one for any deal sitting on the boundary. Here there is one zone:
+`BusinessTimeZoneEngine` from bizapps-common, the instance-wide setting that already governs every
+other business-day judgement in the stack, failing open to UTC. `TodayIn(zone)` and `IsBeforeDay`
+from `business-day.ts` do the comparison; no new date helpers.
+
+**Which deals are not yet closed.** Not a name comparison, and **not `IsOpen = 1`**. In this app
+`IsOpen` and `IsClosed` are deliberately not inverses: the shipped `ONHOLD` status type is
+`IsOpen = 0, IsClosed = 0`. Filtering on `IsOpen = 1` would silently drop every On Hold deal, and
+CDP's `DealStage NOT IN ('Closed Won','Closed Lost')` included them. So: one small RunView over
+`MJ_BizApps_Sales: Deal Status Types` where `IsClosed = 0` collects the IDs, and the deal filter
+reads `(DealStatusTypeID IS NULL OR DealStatusTypeID IN (…))`. A NULL status counts as not-closed,
+defensively, as CDP treated a NULL stage — better to over-report a broken deal than to drop one.
+
+My call, open to correction: a deal parked On Hold with a close date three months gone is exactly the
+hygiene problem this exists to surface, so it belongs in the digest.
+
+**This is deliberately broader than the app's existing `IsPastExpectedClose`.** The shipped
+`deal-roster.sql` computes that flag as `ISNULL(st.IsOpen,0) = 1 AND ExpectedCloseDate IS NOT NULL
+AND ExpectedCloseDate < bt.Today` — it excludes On Hold deals *and* deals with no close date at all.
+The digest must include never-set close dates; surfacing them as "Not set" rows is one of its stated
+features, and CDP flagged them as a distinct category of broken. So the two definitions cannot be
+made identical without changing the roster. The divergence is recorded here on purpose: a leader who
+opens the Deals dashboard after reading the digest will see a smaller "past expected close" count
+than the email showed, and that needs to be explainable rather than discovered. Aligning the roster
+is a separate change and not in this scope.
+
+**Which pipelines count.** `Pipeline.IncludeInForecast = 0` is excluded, replacing CDP's universal
+`EXCLUDED_PIPELINES`. A host that keeps a pipeline out of the forecast almost certainly does not want
+hygiene nagging about it either, and a second flag that hosts must remember to set would be a worse
+default than reusing the one they already set.
+
+**The limitation this leaves, stated honestly.** CDP also had a *per-company* exclusion list, because
+Sidecar's "Sales Pipeline" was a legacy non-revenue lane while the same name meant real revenue
+elsewhere. That cannot be expressed here: `V202611062300__v6.25.x__Pipeline_Company_Link.sql` dropped
+`Pipeline.CompanyID` so that one pipeline row is shared by every company linked to it through
+`PipelineCompany`, while `IncludeInForecast` stayed on `Pipeline`. Excluding a shared pipeline
+excludes it for everyone. Whether this bites depends on the host's data — aidp-next's HubSpot
+onboarding derives the pipeline and stage table per connection, which suggests each portal has its
+own pipeline rows and the shared-row case does not arise. **To check against the data before
+building:** whether any pipeline row is linked to more than one company. If per-company exclusion is
+genuinely needed, the right home is a flag on `PipelineCompany`, not another column on `Pipeline` —
+a later change, not this one.
+
+**The deal query.** One RunView over `MJ_BizApps_Sales: Deals`, `ResultType: 'simple'`:
+
+```
+(DealStatusTypeID IS NULL OR DealStatusTypeID IN (<status types with IsClosed = 0>))
+AND PipelineID NOT IN (<pipelines with IncludeInForecast = 0>)
+AND (ExpectedCloseDate IS NULL OR ExpectedCloseDate < <today in the business zone>)
+```
+
+`MaxRows` is set explicitly **and checked**: a bare RunView is silently capped at the entity's
+`UserViewMaxRows` (1000 by default), and a truncated sweep reports success while dropping deals from
+the bottom of the CFO's digest. If the result count equals the cap, the run records a warning in its
+result payload and in the email footer rather than pretending it saw everything. CDP set a cap and
+never checked it.
+
+**Audience slicing.** One query feeds every digest. Each audience filters the same enriched set by
+its own flags: `MinDaysLapsed` (NULL means no floor), `IncludeMissingCloseDate`, and
+`IsPortfolioWide` (otherwise, the recipient's `CompanyID`). An audience with no qualifying deals is
+skipped unless `SendWhenEmpty`.
+
+**Per-row contents.** Deal name, owner, amount as currency, expected close date or "Not set", days
+lapsed or "No close date", and stage. Owner names come from one batched RunView over
+`MJ: Employees` for the distinct `OwnerEmployeeID` values.
+
+**The link back.** CDP linked each row to the deal in HubSpot, built from a portal ID and an
+external record ID stored on the deal row. Neither column exists here — `ExternalSystemRecordID`
+appears nowhere in this app — so there is nothing to port. Each row instead links to the deal in MJ
+Explorer:
+
+```
+{ExplorerBaseUrl}/resource/record/{encodeURIComponent('MJ_BizApps_Sales: Deals')}/{dealID}
+```
+
+That is Explorer's own route (`resource/record/:entityName/:recordId`), so the link lands on the
+Deal form the recipient would otherwise navigate to by hand, and it needs no CRM, no integration
+mapping and no per-host URL template. It also means the digest sends people into the system of
+record rather than out to a third party, which is the right default for an app that does not assume
+any particular CRM is present.
+
+The server has no way to know where Explorer is hosted, so `ExplorerBaseUrl` is an Application
+Setting, read through `ApplicationSettingEngine` exactly as `HidePipelines` already is. Precedent
+for the shape: orders' `RenewalPaymentLinkBaseUrl`, which declines the feature with a named reason
+when the setting is blank. Here the consequence is softer — when `ExplorerBaseUrl` is unset the deal
+name renders as plain text and the run records one warning, because a digest without hyperlinks is
+still worth sending. The existing Sales Settings page in Explorer is where an administrator sets it.
+
+One consequence to be aware of rather than design around: an Explorer link is only useful to a
+recipient who can sign in to Explorer. A leader who works deals in a CRM and has an employee record
+but no MJ login will get a link that asks them to log in. That was not true of CDP's HubSpot links.
+It is the right trade for a shipped app, and it is also an argument for giving digest recipients
+logins — but it is a change in who the email serves, not just how it is built.
+
+**Sending.** Sales has no email capability today. The run uses MJ's core `Send Single Message`
+action through `ActionEngineServer.RunAction` — params `To`, `From`, `Subject`, `Body`, `Provider`,
+`MessageType`. Going through the registered Action rather than calling the communication engine
+directly buys a row in `MJ: Action Execution Logs` per send, which is load-bearing for a tool whose
+value depends on people believing the digests actually went out. The action is looked up once per
+run, not once per send.
+
+One recipient per send, each with their own first-name greeting — CDP settled this after a live
+review, and the action takes a single `To` anyway. A company with two leaders gets two emails.
+
+**The From address.** Resolution order, with no address anywhere in code or shipped metadata:
+
+1. `DefaultSenderForCompany` from bizapps-common — the company's `CompanySenderIdentity` row with
+   `Kind = 'Mailbox'` and `IsDefault`. Used for a company-scoped digest.
+2. The `DigestFromAddress` Application Setting, which ships **empty**. Used for portfolio-wide
+   digests, and as the fallback when a company has no default mailbox.
+3. Nothing resolves → that send **fails with a recorded error and the run reports failure.**
+
+Step 3 is deliberate and matches the refusal for an employee with no email address: the failure mode
+worth engineering against is a Monday where nothing arrives and nobody notices. A run that reports
+failure gets looked at. This also answers, as data, the one question CDP's plan never closed — its
+§8 #1 shipped a placeholder address with a note that the mailbox was unverified.
+
+Because the sender depends on bizapps-common host data, a first install has nothing to send *from*
+until someone sets either a company mailbox identity or `DigestFromAddress`. That is consistent with
+the job shipping `Disabled`: both have to be deliberately turned on.
+
+**Failure isolation.** One failed send records an error against that recipient and the run continues.
+A run reports success only when every attempted send succeeded.
+
+## Validating a run before it reaches executives
+
+CDP carried `dryRun`, `captureRenderedEmails`, three per-audience recipient overrides and a
+`fromEmailOverride`, plus a local harness script — all so that a test send could not leak to the real
+list. That need does not go away here, and without it the only way to check a digest is to seed
+yourself as the recipient, run, then re-seed the real roster, which is exactly the sequence that ends
+with a half-reverted roster mailing executives.
+
+The scheduled job's `StartingPayload` accepts:
+
+| Field | Effect |
+|---|---|
+| `dryRun` | Render everything, send nothing. Skips loading the send action, so it works where that action is not registered. |
+| `captureRenderedEmails` | Return each rendered digest — recipient, From, subject, HTML — in the run payload. Always on under `dryRun`; off by default otherwise, so a normal Monday does not write megabytes of HTML into the agent-run audit record. |
+| `recipientOverride` | One `{ name, email }` that **every** send is rerouted to for this run. |
+
+`recipientOverride` is where this gets simpler than CDP. Because recipients are rows rather than
+constants, there is no need for per-audience override maps: one address catches every digest the run
+would produce, with the real audience and company still named in each subject, so one test run shows
+you the whole Monday in your own inbox.
+
+The render path is therefore kept separable from the send path — a structural requirement, not a
+convenience, since retrofitting a dry run after the two are entangled means restructuring both.
+
+## Where the code goes
+
+The agent is a `@RegisterClass(BaseAgent, …)` driver class with `MaxIterationsPerRun: 1`, mirroring
+CDP's shape, plus its metadata: an `MJ: AI Agents` row of type Loop, and an `MJ: Scheduled Jobs` row
+of type Agent pointing at it, cron `0 0 9 * * 1`, shipped `Disabled`, `ConcurrencyMode` Skip,
+`MissedRunPolicy` RunOnce.
+
+It lands in `packages/Server` (`@mj-biz-apps/sales-server`) — my call. That package is already
+server-only and already in the bootstrap path, so registration needs no new tree-shaking guard and
+the host installs nothing extra. The alternative, a new published `@mj-biz-apps/sales-agents`
+package, adds a seventh release artefact and a new entry in `mj-app.json` for a single class.
+
+**One factor worth stating plainly, then proceeding:** an agent brings `@memberjunction/ai-agents`
+and `ai-core-plus` into this app for the first time — no package here depends on them today, and the
+repo's own precedent for scheduled work is an Action (`Sales.DetectWonDealsWithUnconfirmedOrders`),
+which would need no new dependency at all. An agent was asked for explicitly, so that is what this
+designs; the note exists so the cost is visible, not to reopen the choice.
+
+## Tests
+
+Vitest, porting the intent of CDP's suite and adding what the new model makes testable:
+
+- Context user missing, and the send action unregistered, both terminate before any send.
+- **On Hold deals appear** — the regression guard for the `IsOpen` / `IsClosed` trap above.
+- `dryRun` renders every digest and calls the send action zero times; `recipientOverride` reroutes
+  every send to one address while subjects still name the real audience and company.
+- From-address resolution: company mailbox wins; `DigestFromAddress` covers portfolio digests; with
+  neither, the send errors and the run reports failure.
+- Filter construction: the open-status and excluded-pipeline ID lists are built from data; a
+  snapshot pins the `ExtraFilter` shape.
+- **Row-cap truncation is detected** and surfaced, not swallowed.
+- Empty company → no leader send; empty portfolio audience with `SendWhenEmpty = 0` → no send, with
+  `SendWhenEmpty = 1` → the all-clear copy.
+- `MinDaysLapsed` honoured; `IncludeMissingCloseDate = 0` excludes never-set deals while
+  `= 1` includes them.
+- **A new audience row with `MinDaysLapsed = 30` produces a 30-day digest with no code change** —
+  the test that proves the configurability claim.
+- Recipient validation refusals: non-portfolio audience with no `CompanyID`; employee with no email.
+- One failed send does not abort the remaining sends.
+- Every `RunAction` call carries a complete, non-empty param set.
+- The send action is loaded exactly once per run.
+- Days-lapsed arithmetic across a DST boundary in a non-UTC business zone.
+- Greeting construction from an employee's first name.
+
+## Left to the builder
+
+- The HTML markup, within the usual constraints: table-based, inline CSS, no remote images, every
+  user-originated value escaped.
+- Whether `Send Single Message` needs a particular `MessageType` to render an HTML body, and which
+  `Provider` value to pass — to be read off the action at implementation time.
+- Column ordering, index choices, and the exact shape of the two migrations.
+- Whether the Explorer forms for the new entities are generated-only or warrant a custom form.
+
+## Open questions
+
+Migrations here are additive-only and immutable once applied, and metadata reaches a host through one
+consolidated Metadata_Sync per release — so a schema answer that arrives late costs a second
+migration *and* a second release cycle. Questions 1 and 3 are the ones that can move the schema.
+
+1. **What does the CTO digest slice on, and does its row ship?** The CEO sees deals more than 14 days
+   past; the CFO sees everything. The CTO has no equivalent in CDP — it is new. If it is expressible
+   as the flags already present (portfolio-wide or not, a day threshold, whether it sends when empty)
+   it is purely a seed value and nothing here changes. If it slices by amount, deal type or pipeline,
+   `DealDigestAudienceType` needs another column. And shipping a row whose flags nobody has chosen is
+   worse than shipping none, so if the answer is unsettled, ship `COMPANY_LEADER`/`CEO`/`CFO` only and
+   document the CTO as a host-added row.
+
+2. **Is there a date by which Monday's email has to be flowing again?** Approach A reaches aidp-next
+   only through a sales release, an aidp-next pin bump, a database upgrade, recipients seeded by hand,
+   the job enabled, and an MJAPI restart — the scheduler does not pick up job rows written out of
+   process. With a near deadline the plan is "C now, A next release", sequenced so the JSON becomes
+   A's seed rows and nothing is thrown away. With no deadline it is A only. That is a different plan,
+   not a different detail.
+
+3. **Is the host's data shaped for A?** Two facts I cannot check without database access, and neither
+   is safe to assume:
+   - **Does every intended leader exist as an `MJ: Employees` row with a current address?** CDP's
+     roster is ~15 people across 9 companies, several on non-`@bluecypress.io` domains, and one
+     leading a company they are not employed by. `DealDigestRecipient.EmployeeID` is NOT NULL and the
+     address comes from the employee. If some leaders are not employees, the choice is host data work
+     or a nullable override-address column on the recipient — a schema decision, hence this question's
+     place here.
+   - **Is `Deal.CompanyID` populated per portfolio company across the synced portals?** It is NOT NULL
+     and holds the selling company. If in practice it resolves to one company, `COMPANY_LEADER` is
+     dead on arrival and only the portfolio-wide digests work.
