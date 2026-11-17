@@ -369,6 +369,9 @@ Vitest, porting the intent of CDP's suite and adding what the new model makes te
 - **A new audience row with `MinDaysLapsed = 30` produces a 30-day digest with no code change** —
   the test that proves the configurability claim.
 - Recipient validation refusals: non-portfolio audience with no `CompanyID`; employee with no email.
+- **Two employee records sharing one email, under the same audience and company, produce one send** —
+  and a person on two *different* audiences still gets both.
+- An inactive employee is not a recipient.
 - One failed send does not abort the remaining sends.
 - Every `RunAction` call carries a complete, non-empty param set.
 - The send action is loaded exactly once per run.
@@ -398,17 +401,47 @@ Read-only queries against aidp-next production on 2026-11-16, with the owner's e
 - `Employee.CompanyID` confirms why approach B had to be rejected: the CEO, the CFO and one company
   leader are all employed by `BCHQ`, not by the companies they lead.
 
-**Three host-data prerequisites, all of which must be done before a first real send:**
+**Every leader has an employee record. CDP's address list is what was stale** — which is the
+clearest possible argument for taking addresses from `MJ: Employees` rather than from a constant:
 
-1. **Three leaders have no employee record:** Rob Barnes (Betty Bot), Michael Keller (Cimatri) and
-   Molly Quast (rasa.io). Betty Bot matters most — it is one of only two companies with anything to
-   report on the 23rd, and its other leader does have a record, so the digest would go to one of two.
-2. **One leader is inactive:** Jared Loftus (rasa.io) has `Active = 0`. Recipients filter on an active
-   employee, so rasa.io would have no leader. Moot for the 23rd — rasa.io has nothing lapsed.
-3. **There are zero `CompanySenderIdentity` rows in production.** Step 1 of From-address resolution
-   therefore resolves nothing today, and by this design's own rule every send would fail. The
+| CDP's constant | The actual employee record |
+|---|---|
+| `rob@meetbetty.ai` | `rob@bettybot.ai` |
+| `michael.keller@cimatri.com` (Cimatri) | `michael.keller@bluecypress.io`, EVP Consulting Services at Blue Cypress Consulting — and he covers Cimatri *and* Blue Cypress Consulting |
+| `molly.phayer@rasa.io` | `molly.quast@bluecypress.io`, Account Director, rasa.io |
+
+Had this shipped as code, three of fifteen weekly emails would have been bouncing into a void with
+nobody the wiser. Rows in a table that an administrator can see and fix are the point.
+
+**One person legitimately has several employee records, one per company.** Sofi Giglio has three
+active rows (`sofi@sidecar.ai` at Sidecar, `sofi.giglio@bluecypress.io` at Elastik Teams,
+`sofi@askskip.ai` at BCHQ); Andrew Schwartz Crane has two (SoundPost and Brightfind). The recipient
+model handles this naturally — Sidecar's leader row points at the Sidecar employee row — and it is
+also what made approach B look briefly plausible. **Design consequence:** a single rendered digest
+must be deduplicated by email address before sending, because two employee records for one human
+under the same audience and company would otherwise mail them twice. Deduplication is *within* one
+digest only — Johanna Snider receiving both the Blue Cypress leader digest and the CEO digest is
+deliberate, as it was at CDP.
+
+**Still outstanding, and host data rather than code:**
+
+1. **There are zero `CompanySenderIdentity` rows in production.** Step 1 of From-address resolution
+   resolves nothing today, so by this design's own rule every send would fail. The
    `DigestFromAddress` Application Setting must be set, or mailbox identities created, before the job
    is enabled. This is the single most likely cause of a silent-but-for-the-error-log first Monday.
+2. **Jared Loftus (rasa.io, `Title = CEO`) has `Active = 0`.** Recipients filter on an active
+   employee, so rasa.io has no leader until that is resolved. Moot for the 23rd — rasa.io has nothing
+   lapsed.
+3. **Two active employees hold `Chief Financial Officer`:** Jeremy Hunnewell (`jeremy@bluecypress.io`,
+   CDP's CFO) and Michael Lardieri (`michael@bluecypress.io`). The `CFO` audience needs to know which,
+   or both.
+4. **Two test logins carry leadership titles** — `jeremy.hunnewell+ceo@bluecypress.io` ("CEO Test")
+   and `jeremy.hunnewell+ad@bluecypress.io`. Seeding recipients by title would mail them. Seed by
+   named employee, never by a title query.
+
+For reference, the CTO audience the owner asked for resolves to Robert Kihm, `Chief Technology
+Officer`. CDP achieved roughly this by CC'ing him on the CFO digest from a hardcoded constant; a
+`CTO` audience row is the same outcome as data.
 
 **What Monday 23 November would actually contain**, run against the live filter:
 
