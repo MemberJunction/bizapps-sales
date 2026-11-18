@@ -439,7 +439,7 @@ function runWorld(over: Partial<World> = {}): World {
     });
 }
 
-const PORTFOLIO = { DigestFromAddress: 'portfolio@example.invalid' };
+const PORTFOLIO = { DigestFromAddress: 'portfolio@example.invalid', DigestProvider: 'Test Mail Provider' };
 const toOf = (p: RunActionParams): string => String(p.Params.find((x) => x.Name === 'To').Value);
 const paramOf = (p: RunActionParams, name: string): unknown => p.Params.find((x) => x.Name === name).Value;
 
@@ -459,7 +459,7 @@ describe('RunLapsedCloseDateDigest', () => {
     });
 
     it('sends nothing and reports failure when no sender resolves, naming the recipient', async () => {
-        const { runAction } = setup(runWorld({ identities: [] }), { DigestFromAddress: '' });
+        const { runAction } = setup(runWorld({ identities: [] }), { ...PORTFOLIO, DigestFromAddress: '' });
         const out = await RunLapsedCloseDateDigest(user);
         expect(runAction).not.toHaveBeenCalled();
         expect(out.Success).toBe(false);
@@ -469,7 +469,7 @@ describe('RunLapsedCloseDateDigest', () => {
     });
 
     it('treats a blank-after-trim DigestFromAddress as unset: the portfolio digests fail, the company ones still send', async () => {
-        const { runAction } = setup(runWorld(), { DigestFromAddress: '   ' });
+        const { runAction } = setup(runWorld(), { ...PORTFOLIO, DigestFromAddress: '   ' });
         const out = await RunLapsedCloseDateDigest(user);
         expect(out.Success).toBe(false);
         // Leaders have a company mailbox; the CEO and CTO have deals but nothing to send from.
@@ -558,7 +558,43 @@ describe('RunLapsedCloseDateDigest', () => {
                 expect(String(x.Value).trim()).not.toBe('');
             }
             expect(paramOf(p, 'MessageType')).toBe('Email');
+            expect(paramOf(p, 'Provider')).toBe('Test Mail Provider');
         }
+    });
+
+    it.each([['an empty string (what the row ships with)', ''], ['whitespace', '  '], ['undefined', undefined]])(
+        'fails once up front, naming DigestProvider, and sends nothing when it is %s',
+        async (_label, value) => {
+            const { runAction, calls } = setup(runWorld(), { ...PORTFOLIO, DigestProvider: value });
+            const out = await RunLapsedCloseDateDigest(user);
+            expect(out.Success).toBe(false);
+            expect(out.Sent).toBe(0);
+            expect(runAction).not.toHaveBeenCalled();
+            expect(out.Errors).toHaveLength(1);
+            expect(out.Errors[0]).toContain('DigestProvider');
+            expect(callsOn(calls, 'MJ: Actions')).toHaveLength(0);
+        });
+
+    it('does not need DigestProvider for a dry run, which sends nothing', async () => {
+        setup(runWorld(), { DigestFromAddress: 'portfolio@example.invalid' });
+        const out = await RunLapsedCloseDateDigest(user, { dryRun: true });
+        expect(out.Success).toBe(true);
+        expect(out.RenderedEmails).toHaveLength(4);
+    });
+
+    it('trims the DigestProvider value it passes on', async () => {
+        const { runAction } = setup(runWorld(), { ...PORTFOLIO, DigestProvider: '  Test Mail Provider  ' });
+        await RunLapsedCloseDateDigest(user);
+        expect(paramOf(runAction.mock.calls[0][0], 'Provider')).toBe('Test Mail Provider');
+    });
+
+    it('puts the incomplete-list notice in every email of a truncated run', async () => {
+        const { runAction } = setup(runWorld({ dealsTotalRowCount: 9999 }));
+        const out = await RunLapsedCloseDateDigest(user, { captureRenderedEmails: true });
+        expect(out.Truncated).toBe(true);
+        expect(out.RenderedEmails.length).toBeGreaterThan(0);
+        for (const e of out.RenderedEmails) expect(e.BodyHtml).toContain('This list is incomplete');
+        expect(runAction).toHaveBeenCalled();
     });
 
     it('sends From the mapped, non-empty address: the company mailbox for a leader, the setting for the CEO', async () => {
@@ -589,7 +625,7 @@ describe('RunLapsedCloseDateDigest', () => {
     });
 
     it('dryRun still reports a missing From, so a setup problem shows before anything is sent', async () => {
-        setup(runWorld({ identities: [] }), { DigestFromAddress: '' });
+        setup(runWorld({ identities: [] }), { ...PORTFOLIO, DigestFromAddress: '' });
         const out = await RunLapsedCloseDateDigest(user, { dryRun: true });
         expect(out.Success).toBe(false);
         expect(out.RenderedEmails).toHaveLength(0);

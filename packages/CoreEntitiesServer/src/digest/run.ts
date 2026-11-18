@@ -14,7 +14,11 @@ const AUDIENCE_ENTITY = 'MJ_BizApps_Sales: Deal Digest Audience Types';
 const ACTION_ENTITY = 'MJ: Actions';
 /** The send action is found by the class that implements it, not by a display name an admin can edit. */
 const SEND_ACTION_DRIVER_CLASS = '__SendSingleMessage';
-const SEND_PROVIDER = 'Microsoft Graph';
+/**
+ * The provider is a host's choice (Microsoft Graph, Gmail, SendGrid... any may be the active one), so it
+ * is the `DigestProvider` Application Setting. The message type is not: `Email` is one of MJ's base
+ * message types, and the one that carries an HTML body, so it is fixed.
+ */
 const SEND_MESSAGE_TYPE = 'Email';
 
 export interface DigestRunOptions {
@@ -81,14 +85,14 @@ function actionParam(Name: string, Value: string): ActionParam {
  * unset on purpose: that log is how anyone later answers "did Monday's run actually send". `Filters` is
  * declared non-optional on RunActionParams although its comment says optional, so it is passed as [].
  */
-async function sendOne(action: MJActionEntity, contextUser: UserInfo, email: RenderedEmail): Promise<string | null> {
+async function sendOne(action: MJActionEntity, contextUser: UserInfo, provider: string, email: RenderedEmail): Promise<string | null> {
     const params = new RunActionParams();
     params.Action = action;
     params.ContextUser = contextUser;
     params.Filters = [];
     params.Params = [
         actionParam('To', email.To), actionParam('From', email.From), actionParam('Subject', email.Subject),
-        actionParam('Body', email.BodyHtml), actionParam('Provider', SEND_PROVIDER), actionParam('MessageType', SEND_MESSAGE_TYPE),
+        actionParam('Body', email.BodyHtml), actionParam('Provider', provider), actionParam('MessageType', SEND_MESSAGE_TYPE),
     ];
     const result = await ActionEngineServer.Instance.RunAction(params);
     return result.Success ? null : (result.Message || 'the send action reported failure with no message');
@@ -96,7 +100,7 @@ async function sendOne(action: MJActionEntity, contextUser: UserInfo, email: Ren
 
 interface RunState {
     contextUser: UserInfo; options: DigestRunOptions; today: CalendarDay; deals: LapsedDealsResult;
-    explorerBaseUrl: string | null; sendAction: SendActionLoader; result: DigestRunResult;
+    explorerBaseUrl: string | null; provider: string | null; sendAction: SendActionLoader; result: DigestRunResult;
 }
 
 const countDeals = (groups: readonly CompanyGroup[]): number => groups.reduce((n, g) => n + g.Deals.length, 0);
@@ -133,7 +137,7 @@ async function deliverOne(state: RunState, audience: DigestAudience, recipient: 
         if (options.dryRun || options.captureRenderedEmails) result.RenderedEmails.push(email);
         if (options.dryRun) return;
 
-        const failure = await sendOne(await state.sendAction.get(), state.contextUser, email);
+        const failure = await sendOne(await state.sendAction.get(), state.contextUser, state.provider, email);
         if (failure) result.Errors.push(`${label} failed to send: ${failure}`);
         else result.Sent++;
     } catch (err) {
@@ -165,7 +169,14 @@ export async function RunLapsedCloseDateDigest(contextUser: UserInfo, options: D
         const state: RunState = {
             contextUser, options, today, deals, result, sendAction: new SendActionLoader(contextUser),
             explorerBaseUrl: await ReadSalesSetting('ExplorerBaseUrl', contextUser),
+            provider: await ReadSalesSetting('DigestProvider', contextUser),
         };
+        if (!options.dryRun && state.provider === null) {
+            // Once, up front: otherwise every send fails separately with the provider's own "not found".
+            result.Errors.push('Nothing was sent: the DigestProvider setting is empty. Set it to the name of the active '
+                + 'communication provider (for example the one named in MJ: Communication Providers) and run again.');
+            return finish(result);
+        }
         for (const audience of audiences) {
             for (const recipient of recipients.filter((r) => lower(r.AudienceTypeID) === lower(audience.ID))) {
                 await deliverOne(state, audience, recipient);
@@ -174,6 +185,10 @@ export async function RunLapsedCloseDateDigest(contextUser: UserInfo, options: D
     } catch (err) {
         result.Errors.push(`The digest run stopped: ${messageOf(err)}`);
     }
+    return finish(result);
+}
+
+function finish(result: DigestRunResult): DigestRunResult {
     result.Success = result.Errors.length === 0;
     return result;
 }

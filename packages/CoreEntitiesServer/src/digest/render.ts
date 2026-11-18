@@ -134,7 +134,7 @@ export function RenderDigest(ctx: RenderContext): RenderedDigest {
 
     const shown = countShown(groups);
     const footer = ctx.truncated
-        ? `<p style="margin:0;font-size:12px;color:#475467;">Showing ${shown} of ${ctx.totalDeals} deals. Open the deals list in the app for the rest.</p>`
+        ? `<p style="margin:0;font-size:12px;color:#475467;">This list is incomplete: there were too many lapsed deals to read in one run, so only ${plural(shown, 'deal')} could be included here. Open the deals list in the app for the full picture.</p>`
         : '';
 
     const BodyHtml = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#101828;line-height:1.5;">'

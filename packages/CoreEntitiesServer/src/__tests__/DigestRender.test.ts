@@ -313,12 +313,16 @@ describe('RenderDigest: structure and copy', () => {
         expect(BodyHtml).toContain('Widget renewal');
     });
 
-    it('names the truncation in the footer when truncated is true', () => {
-        const { BodyHtml } = RenderDigest(ctx({ truncated: true, totalDeals: 5 }));
-        expect(BodyHtml).toContain('Showing 1 of 5');
+    it('says the list is incomplete when truncated, and never claims a complete count', () => {
+        // The old footer read "Showing N of N" because the true total is unknowable once the read is
+        // capped; that sat beside a truncation notice and said nothing was cut.
+        const { BodyHtml } = RenderDigest(ctx({ truncated: true, totalDeals: 1 }));
+        expect(BodyHtml).toContain('This list is incomplete');
+        expect(BodyHtml).toContain('only 1 deal could be included');
+        expect(BodyHtml).not.toMatch(/Showing \d+ of \d+/);
     });
 
     it('says nothing about truncation when truncated is false', () => {
-        expect(RenderDigest(ctx({ truncated: false })).BodyHtml).not.toContain('Showing');
+        expect(RenderDigest(ctx({ truncated: false })).BodyHtml).not.toContain('incomplete');
     });
 });
