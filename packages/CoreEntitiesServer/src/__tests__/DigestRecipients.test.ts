@@ -17,10 +17,10 @@
  * a failed result, it does not throw: Explorer, GraphQL, Actions and agents all read `LatestResult`.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BaseEntityResult } from '@memberjunction/core';
+import { BaseEntityResult, RunView, type RunViewParams, type UserInfo } from '@memberjunction/core';
 import { mjBizAppsSalesDealDigestRecipientEntity } from '@mj-biz-apps/sales-entities';
 
-import { DedupeByEmail, type DigestRecipient } from '../digest/recipients.js';
+import { DedupeByEmail, LoadDigestRecipients, type DigestRecipient } from '../digest/recipients.js';
 import { DealDigestRecipientEntityServer } from '../DealDigestRecipientEntityServer.js';
 
 function recipient(over: Partial<DigestRecipient>): DigestRecipient {
@@ -152,5 +152,84 @@ describe('DealDigestRecipientEntityServer.Save', () => {
         expect(await r.Save()).toBe(true);
         expect(save).toHaveBeenCalledOnce();
         expect(reads).toHaveLength(0);
+    });
+});
+
+/**
+ * LoadDigestRecipients is the only place a row that was valid when saved and has since gone bad can be
+ * caught: nobody re-saves the row, so Save() never runs. An employee deactivated, or whose address was
+ * blanked, after being seeded must stop receiving the digest without anyone editing recipient rows.
+ * A stub cannot run SQL, so the employee read's ExtraFilter is asserted too: without that, a filter that
+ * lost `Active = 1` would still pass the in-memory-drop test.
+ */
+describe('LoadDigestRecipients', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    const user = {} as UserInfo;
+    const recRow = (employee: string, audience = 'aud-leader') =>
+        ({ DealDigestAudienceTypeID: audience, CompanyID: 'co-1', EmployeeID: employee });
+    const empRow = (id: string, over: Record<string, unknown> = {}) =>
+        ({ ID: id, Email: `${id}@example.invalid`, FirstName: 'Pat', LastName: id, ...over });
+
+    /** Stubs RunView: the first read answers `recipients`, the second `employees`. */
+    function stub(recipients: unknown, employees?: unknown) {
+        const calls: RunViewParams[] = [];
+        vi.spyOn(RunView.prototype, 'RunView').mockImplementation((async (p: RunViewParams) => {
+            calls.push(p);
+            return calls.length === 1 ? recipients : employees;
+        }) as never);
+        return calls;
+    }
+
+    it('drops a recipient whose employee read no longer returns them, and pins the Active filter', async () => {
+        const calls = stub(
+            { Success: true, Results: [recRow('emp-1'), recRow('emp-2')] },
+            { Success: true, Results: [empRow('emp-2')] },
+        );
+        const out = await LoadDigestRecipients(user);
+        expect(out.map((r) => r.EmployeeID)).toEqual(['emp-2']);
+        expect(calls).toHaveLength(2);
+        expect(calls[0].EntityName).toBe('MJ_BizApps_Sales: Deal Digest Recipients');
+        expect(calls[0].ExtraFilter).toContain('IsActive = 1');
+        expect(calls[1].EntityName).toBe('MJ: Employees');
+        expect(calls[1].ExtraFilter).toContain('Active = 1');
+        expect(calls[1].ExtraFilter).toContain("IN ('emp-1', 'emp-2')");
+    });
+
+    it('drops a recipient whose employee address has since been blanked', async () => {
+        stub(
+            { Success: true, Results: [recRow('emp-1'), recRow('emp-2')] },
+            { Success: true, Results: [empRow('emp-1', { Email: '  ' }), empRow('emp-2')] },
+        );
+        const out = await LoadDigestRecipients(user);
+        expect(out.map((r) => r.EmployeeID)).toEqual(['emp-2']);
+    });
+
+    it('joins in memory regardless of ID case, and shapes the recipient', async () => {
+        stub(
+            { Success: true, Results: [recRow('EMP-1')] },
+            { Success: true, Results: [empRow('emp-1', { Email: ' pat@example.invalid ', FirstName: 'Pat', LastName: 'Example' })] },
+        );
+        const out = await LoadDigestRecipients(user);
+        expect(out).toEqual([{
+            AudienceTypeID: 'aud-leader', CompanyID: 'co-1', EmployeeID: 'EMP-1',
+            Email: 'pat@example.invalid', FirstName: 'Pat', FullName: 'Pat Example',
+        }]);
+    });
+
+    it('returns an empty list without a second read when there are no recipient rows', async () => {
+        const calls = stub({ Success: true, Results: [] });
+        expect(await LoadDigestRecipients(user)).toEqual([]);
+        expect(calls).toHaveLength(1);
+    });
+
+    it('throws when the recipient read fails, so a broken read is not "nobody to mail"', async () => {
+        stub({ Success: false, ErrorMessage: 'boom', Results: [] });
+        await expect(LoadDigestRecipients(user)).rejects.toThrow('boom');
+    });
+
+    it('throws when the employee read fails', async () => {
+        stub({ Success: true, Results: [recRow('emp-1')] }, { Success: false, ErrorMessage: 'bang', Results: [] });
+        await expect(LoadDigestRecipients(user)).rejects.toThrow('bang');
     });
 });

@@ -32,7 +32,7 @@ interface EmployeeRow { ID: string; Email: string; FirstName: string; LastName: 
 
 /**
  * Active recipients joined to their active employees: two reads, joined in memory. A recipient whose
- * employee has been deactivated since the row was saved is dropped here, so mail stops without anyone
+ * employee has been deactivated, or had their address blanked, since the row was saved is dropped here, so mail stops without anyone
  * editing recipient rows. Throws when a read fails, so a broken read cannot pass for "nobody to mail".
  */
 export async function LoadDigestRecipients(contextUser: UserInfo): Promise<DigestRecipient[]> {
@@ -62,6 +62,9 @@ export async function LoadDigestRecipients(contextUser: UserInfo): Promise<Diges
     for (const r of recipientRows) {
         const e = byId.get(lower(String(r.EmployeeID)));
         if (!e) continue;
+        // Email is NOT NULL, so a blanked address is blank rather than null; Save() checked it once,
+        // at creation, and does not re-run for a row nobody edits.
+        if (!e.Email || e.Email.trim() === '') continue;
         out.push({
             AudienceTypeID: String(r.DealDigestAudienceTypeID),
             CompanyID: r.CompanyID ?? null,
