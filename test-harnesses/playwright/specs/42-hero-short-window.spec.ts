@@ -66,5 +66,19 @@ test.describe('deal header card — short window', () => {
             await expectHeroNotClipped(page, 'in edit mode');
             await shot(page, '42-02-edit-mode');
         });
+
+        await test.step('at narrow width (<= 1024px), the Pipeline panel never covers the hero Name box (#397)', async () => {
+            await page.setViewportSize({ width: 900, height: 617 });
+            await expectHeroNotClipped(page, 'at narrow width in edit mode');
+            const nameInput = DealForm(page).locator('.mjs-deal-hero__field[data-field="Name"] input').first();
+            await expect(nameInput).toBeVisible();
+            const hitHero = await nameInput.evaluate((el) => {
+                const rect = el.getBoundingClientRect();
+                const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+                return !!hit && (hit === el || el.closest('.mjs-deal-hero')?.contains(hit) === true);
+            });
+            expect(hitHero, 'clicking the centre of the hero Name box must reach the hero, not the panel below').toBe(true);
+            await shot(page, '42-03-narrow-width');
+        });
     });
 });

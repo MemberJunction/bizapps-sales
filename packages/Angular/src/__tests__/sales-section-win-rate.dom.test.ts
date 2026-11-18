@@ -74,4 +74,16 @@ describe('the Win rate tile', () => {
         expect(fixture.componentInstance.WinRateUnavailable).toBe(false);
         expect(winRateCard(fixture)).toContain('3 won / 4 closed');
     });
+
+    it('reports mixed currencies and uses count win rate when rows span more than one currency', async () => {
+        service.LoadWinRate.mockResolvedValue([
+            { CurrencyCode: 'USD', ClosedCount: 2, WonCount: 1, WonAmount: 100, LostAmount: 100 },
+            { CurrencyCode: 'EUR', ClosedCount: 2, WonCount: 2, WonAmount: 500, LostAmount: 0 },
+        ]);
+        const fixture = await mount();
+        expect(fixture.componentInstance.WinRateMixedCurrencies).toBe(true);
+        expect(fixture.componentInstance.WinRateByValue).toBeNull();
+        expect(winRateCard(fixture)).toContain('75%');
+        expect(winRateCard(fixture)).toContain('3 won / 4 closed · mixed currencies');
+    });
 });

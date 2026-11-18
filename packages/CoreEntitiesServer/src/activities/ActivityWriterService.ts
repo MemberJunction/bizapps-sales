@@ -21,6 +21,7 @@ import {
     RunView,
     type DatabaseProviderBase,
     type IMetadataProvider,
+    type IRunViewProvider,
     type UserInfo,
 } from '@memberjunction/core';
 import type {
@@ -177,7 +178,13 @@ export class ActivityWriterService {
             return result;
         }
 
-        const links = await this.planLinks(input, provider, contextUser, result);
+        const parties = await this.dealParties(input.DealID, provider, contextUser);
+        if (!parties.Found) {
+            result.Issues.push(parties.Error ?? `Deal ${input.DealID} was not found.`);
+            return result;
+        }
+
+        const links = this.planLinks(input, parties, result);
 
         const db = provider as unknown as DatabaseProviderBase;
         if (!db?.BeginEntityTransaction) {
@@ -263,18 +270,16 @@ export class ActivityWriterService {
      * The deal is always first and always `Regarding` — it is the anchor every read starts from, so an
      * activity without it is invisible on the only surface that shows activities.
      */
-    private async planLinks(
+    private planLinks(
         input: LogActivityInput,
-        provider: IMetadataProvider,
-        contextUser: UserInfo,
+        parties: { AccountID: string | null; ContactID: string | null },
         result: LogActivityResult,
-    ): Promise<PendingLink[]> {
+    ): PendingLink[] {
         const links: PendingLink[] = [
             { Role: 'Regarding', EntityName: E_DEAL, RecordID: input.DealID },
         ];
 
         if (input.IncludeDealParties !== false) {
-            const parties = await this.dealParties(input.DealID, contextUser);
             /**
              * `Deal.AccountID` IS the Organization ID and `Deal.PrimaryContactID` IS the Person ID —
              * shared-PK IsA, so these values cross straight over with no translation. See the convention
@@ -369,12 +374,22 @@ export class ActivityWriterService {
         return false;
     }
 
-    /** The deal's account and primary contact, as the IDs they share with common's parents. */
+    /**
+     * Reads the deal's account and primary contact, and verifies the deal exists (#355 item 6).
+     *
+     * A failed read or an empty result refuses the write rather than treating the deal as having no
+     * parties and committing an Activity linked to a nonexistent record.
+     */
     private async dealParties(
         dealID: string,
+        provider: IMetadataProvider,
         contextUser: UserInfo,
-    ): Promise<{ AccountID: string | null; ContactID: string | null }> {
-        const r = await new RunView().RunView<{ AccountID: string | null; PrimaryContactID: string | null }>(
+    ): Promise<{ Found: boolean; Error: string | null; AccountID: string | null; ContactID: string | null }> {
+        const candidate = provider as unknown as Partial<IRunViewProvider>;
+        const rv = typeof candidate?.RunView === 'function'
+            ? new RunView(candidate as IRunViewProvider)
+            : new RunView();
+        const r = await rv.RunView<{ AccountID: string | null; PrimaryContactID: string | null }>(
             {
                 EntityName: E_DEAL,
                 ExtraFilter: `ID = '${escapeSql(dealID)}'`,
@@ -383,10 +398,28 @@ export class ActivityWriterService {
             },
             contextUser,
         );
+        if (!r.Success) {
+            return {
+                Found: false,
+                Error: `Deal ${dealID} could not be read: ${r.ErrorMessage ?? 'unknown error'}.`,
+                AccountID: null,
+                ContactID: null,
+            };
+        }
         const row = (r.Results ?? [])[0];
+        if (!row) {
+            return {
+                Found: false,
+                Error: `Deal ${dealID} was not found.`,
+                AccountID: null,
+                ContactID: null,
+            };
+        }
         return {
-            AccountID: r.Success ? (row?.AccountID ?? null) : null,
-            ContactID: r.Success ? (row?.PrimaryContactID ?? null) : null,
+            Found: true,
+            Error: null,
+            AccountID: row.AccountID ?? null,
+            ContactID: row.PrimaryContactID ?? null,
         };
     }
 
@@ -431,7 +464,7 @@ export class ActivityWriterService {
     }
 
     private commonIsInstalled(provider: IMetadataProvider): boolean {
-        return provider.Entities.some((e) => e.Name === E_ACTIVITY);
+        return Array.isArray(provider?.Entities) && provider.Entities.some((e) => e.Name === E_ACTIVITY);
     }
 }
 

@@ -128,6 +128,13 @@ describe('grid columns (bizapps-sales#371)', () => {
         expect(columns.find((c) => c.Name === 'Probability')?.format).toMatchObject({ type: 'percent', decimals: 0 });
     });
 
+    it('drops hardcoded USD on Amount and shows the deal currency column (#300)', () => {
+        const amount = columns.find((c) => c.Name === 'Amount');
+        expect(amount?.format).toEqual({ type: 'number', decimals: 0, align: 'right' });
+        expect(amount?.format).not.toHaveProperty('currencyCode');
+        expect(columns.find((c) => c.Name === 'CurrencyID')).toMatchObject({ DisplayName: 'Currency', orderIndex: 7 });
+    });
+
     it('labels the forecast and the close day as two columns', () => {
         expect(columns.find((c) => c.Name === 'ExpectedCloseDate')?.DisplayName).toBe('Expected close');
         expect(columns.find((c) => c.Name === 'ActualCloseDate')?.DisplayName).toBe('Closed on');

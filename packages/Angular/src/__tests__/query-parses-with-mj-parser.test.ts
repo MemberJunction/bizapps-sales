@@ -56,7 +56,7 @@ const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
     'won-deals-order-not-confirmed.sql': { tables: ['vwDeals', 'DealStatusType', 'vwOrderHeaders'], columns: 18 },
     // MJ 6.2's parser leaves CTE names (closed, ranked, won, scoped, slips, moves) out of the table refs,
     // and reads the order-line EXISTS inside the summary CTE's CASE, so OrderLine is listed here.
-    'dashboard-summary.sql': { tables: ['Deal', 'DealStatusType', 'Pipeline', 'ForecastCategoryType', 'OrderLine'], columns: 19 },
+    'dashboard-summary.sql': { tables: ['Deal', 'DealStatusType', 'Pipeline', 'ForecastCategoryType', 'Currency', 'OrderLine'], columns: 20 },
     'deal-roster.sql': {
         tables: ['vwDeals', 'DealStatusType', 'Pipeline', 'PipelineStage', 'ForecastCategoryType', 'OrderLine', 'Company'],
         columns: 42,
@@ -64,7 +64,7 @@ const EXPECTED: Record<string, { tables: string[]; columns: number }> = {
     'slippage.sql': { tables: ['RecordChange', 'Entity', 'vwDeals', 'DealStatusType'], columns: 17 },
     'stage-conversion-and-dwell.sql': { tables: ['DealStageEvent', 'Deal', 'Pipeline', 'PipelineStage'], columns: 16 },
     'forecast-history.sql': { tables: ['ForecastSnapshot', 'Company', 'Pipeline', 'Employee'], columns: 15 },
-    'win-rate.sql': { tables: ['vwDeals', 'DealStatusType', 'OrderLine'], columns: 13 },
+    'win-rate.sql': { tables: ['vwDeals', 'DealStatusType', 'Currency', 'OrderLine'], columns: 14 },
     // #438: the list of owner rows held by a Person, new and not a business-day query, held to the same bar.
     'owner-rows-held-by-a-person.sql': {
         tables: ['vwDealTeamMembers', 'DealRole', 'vwDeals', 'DealStatusType', 'vwPeople', 'Employee'],

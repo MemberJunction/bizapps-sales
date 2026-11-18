@@ -58,8 +58,11 @@ import {
 import {
     E_DEAL,
     InRolledBackTransaction,
+    NewDeal,
     ProviderOf,
     ResolveSalesFixture,
+    SaveOk,
+    SellableProduct,
     TxOne,
     businessToday,
     type SalesFixture,
@@ -87,53 +90,15 @@ function shown(value: Date | string | null | undefined): string | null {
 }
 
 /** A deal shaped like every other bundle's, so a failure here is about the term start and nothing else. */
-async function newDeal(ctx: Ctx, f: SalesFixture): Promise<DealEntity> {
-    const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
-    deal.NewRecord();
-    deal.Name = 'IT term start';
-    deal.PipelineID = f.PipelineID;
-    deal.PipelineStageID = f.StageID;
-    deal.DealTypeID = f.DealTypeID;
-    deal.DealStatusTypeID = f.OpenStatusID;
-    deal.AccountID = f.AccountID;
-    deal.CompanyID = f.CompanyID;
-    deal.TermMonths = 12;
-    return deal;
-}
+const newDeal = (ctx: Ctx, f: SalesFixture): Promise<DealEntity> =>
+    NewDeal(ctx, f, (d) => {
+        d.Name = 'IT term start';
+    });
 
-/** One sellable product id, DISCOVERED through the picker's own filter rather than named. */
+/** One sellable subscription product id, DISCOVERED through the picker's own filter rather than named. */
 async function sellableProduct(ctx: Ctx, companyID: string): Promise<string> {
-    const r = await new RunView().RunView<{ ID: string }>(
-        {
-            EntityName: E_ORDERS_PRODUCT,
-            /**
-             * A SUBSCRIPTION product, not merely a sellable one.
-             *
-             * This used to take the first row by `Name ASC`, which is subscription-blind — measured on
-             * the seeded host, that is "Platform — Premium Seat" with a NULL `SubscriptionTypeID`, and
-             * the one subscription product sorts second and was never used. So the only check that
-             * exercises the database write path made its persistence claim about a line that would not
-             * render the control at all.
-             */
-            // The company clause is explicit since #29 removed it from the shared rule: this fixture
-            // wants a subscription product belonging to the company under test, which the picker's
-            // filter no longer expresses on its own.
-            ExtraFilter: `CompanyID = '${companyID.replace(/'/g, "''")}' `
-                + `AND (${ProductFilterFor(await businessToday(ctx))}) AND SubscriptionTypeID IS NOT NULL`,
-            OrderBy: 'Name ASC',
-            ResultType: 'simple',
-            Fields: ['ID'],
-        },
-        ctx.User,
-    );
-    Assert(r.Success, `reading the catalogue failed — ${r.ErrorMessage}`);
-    const id = (r.Results ?? [])[0]?.ID;
-    Assert(
-        !!id,
-        'the catalogue offered no SUBSCRIPTION product for this company, so the persistence check would '
-            + 'be made about a line that never shows a term start. Seed one — see scripts/dev/seed-orders-catalog.sql.',
-    );
-    return id;
+    const p = await SellableProduct(ctx, companyID, 'SubscriptionTypeID IS NOT NULL');
+    return p.ID;
 }
 
 /** The lines of a deal's embedded order. Two hops: `Lines` is declared on `OrderHeader`, not on `Deal`. */
@@ -145,10 +110,7 @@ async function orderLines(deal: DealEntity): Promise<readonly BaseEntity[]> {
     return order.Lines.Items;
 }
 
-async function saveOk(deal: DealEntity, what: string): Promise<void> {
-    const ok = await deal.Save();
-    Assert(ok, `${what} failed: ${deal.LatestResult?.CompleteMessage ?? 'unknown error'}`);
-}
+const saveOk = SaveOk;
 
 export const TermStartChecks: NamedCheck[] = [
     {
