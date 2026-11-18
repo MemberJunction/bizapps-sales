@@ -197,7 +197,12 @@ export async function RunLapsedCloseDateDigest(contextUser: UserInfo, options: D
 }
 
 function finish(result: DigestRunResult): DigestRunResult {
-    // A truncated run cannot claim "these are your lapsed deals", so it never reports success.
+    // A truncated run cannot claim "these are your lapsed deals", so it never reports success. The
+    // truncation error pushed in RunLapsedCloseDateDigest and the `!Truncated` clause below are two
+    // halves of one guarantee: today the error alone already makes Errors non-empty, so the clause looks
+    // dead, but if the notice ever moves out of Errors (say, into a warnings field) this clause is what
+    // still holds Success false. That error and this clause are two halves of one decision; change
+    // neither alone.
     result.Success = result.Errors.length === 0 && !result.Truncated;
     return result;
 }
