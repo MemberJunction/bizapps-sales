@@ -51,7 +51,12 @@
 -- DATE DIMENSION: ActualCloseDate.
 SELECT
     tm.EmployeeID,
-    emp.FirstName + ' ' + emp.LastName          AS RepName,
+    tm.PersonID,
+    COALESCE(tm.EmployeeID, tm.PersonID)        AS RepID,
+    CASE WHEN tm.EmployeeID IS NOT NULL THEN N'Employee'
+         WHEN tm.PersonID IS NOT NULL THEN N'Person'
+    END                                         AS RepKind,
+    COALESCE(emp.FirstName + ' ' + emp.LastName, per.DisplayName) AS RepName,
     tm.DealRoleID,
     r.Name                                      AS RoleName,
     r.IsOwnerRole,
@@ -89,6 +94,8 @@ INNER JOIN [__mj_BizAppsSales].DealRole r
         ON r.ID = tm.DealRoleID
 LEFT OUTER JOIN [__mj].Employee emp
         ON emp.ID = tm.EmployeeID
+LEFT OUTER JOIN [__mj_BizAppsCommon].Person per
+        ON per.ID = tm.PersonID
 WHERE d.ActualCloseDate IS NOT NULL
   {% if CompanyID %}
   AND d.CompanyID = {{ CompanyID | sqlString }}
@@ -103,7 +110,8 @@ WHERE d.ActualCloseDate IS NOT NULL
   AND d.ActualCloseDate <= {{ PeriodEnd | sqlString }}
   {% endif %}
 GROUP BY
-    tm.EmployeeID, emp.FirstName, emp.LastName, tm.DealRoleID, r.Name, r.IsOwnerRole,
+    tm.EmployeeID, tm.PersonID, emp.FirstName, emp.LastName, per.DisplayName,
+    tm.DealRoleID, r.Name, r.IsOwnerRole,
     d.CompanyID, d.Company
 ORDER BY
     WeightedWonAmount DESC;
