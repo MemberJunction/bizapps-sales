@@ -44,7 +44,6 @@
 **Files:**
 - Create: `migrations/V202611170900__v6.32.x__Deal_Digest_Audiences.sql`
 - Create: `migrations-pg/V202611170900__v6.32.x__Deal_Digest_Audiences.pg.sql`
-- Modify: `migrations-teardown/V001__Retire_Sales_Core_Rows.sql`
 - Create: `.changeset/lapsed-close-date-digest.md`
 
 **Interfaces:**
@@ -66,23 +65,24 @@ Header comment must record: why the UNIQUE constraint treating NULLs as equal is
 
 Same objects in `migrations-pg/`, following the translation conventions in the neighbouring `.pg.sql` files (`uniqueidentifier`→`uuid`, `bit`→`boolean`, `nvarchar(n)`→`varchar(n)`, `nvarchar(MAX)`→`text`, extended properties→`COMMENT ON`). No CI gate parses this file; a reviewer is the only check.
 
-- [ ] **Step 3: Add the teardown rows**
+**No teardown entry is needed for this task.** Both tables live in `__mj_BizAppsSales`, which
+`mj app remove` drops wholesale (`DropAppSchema`) after running the teardown file, taking Task 2's
+seeded rows with them. `migrations-teardown/V001` retires only rows seeded into *shared* schemas;
+this PR's are seeded in Task 9, which owns that edit.
 
-Append `DROP TABLE` statements for both tables to `migrations-teardown/V001__Retire_Sales_Core_Rows.sql`, recipient first (it holds the FK).
-
-- [ ] **Step 4: Apply to the local development database**
+- [ ] **Step 3: Apply to the local development database**
 
 Run: `npx mj migrate`
 Expected: both migrations report success; `flyway_schema_history` shows the new version.
 
-- [ ] **Step 5: Write the changeset**
+- [ ] **Step 4: Write the changeset**
 
 `.changeset/lapsed-close-date-digest.md`, bump level `minor` for every published package this PR touches (`@mj-biz-apps/sales-entities`, `-core-entities-server`, `-server`), with a user-facing description of the digest.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add migrations/ migrations-pg/ migrations-teardown/ .changeset/
+git add migrations/ migrations-pg/ .changeset/
 git commit -m "feat(sales): digest audience and recipient tables"
 ```
 
@@ -524,6 +524,7 @@ git commit -m "feat(sales): the lapsed close date digest agent"
 - Create: `metadata/application-settings/.digest-settings.json`
 - Create: `metadata/entity-permissions/.deal-digest.json`
 - Modify: `metadata/.mj-sync.json` if it enumerates directories
+- Modify: `migrations-teardown/V001__Retire_Sales_Core_Rows.sql`
 
 **Interfaces:**
 - Consumes: Task 8's `DriverClass`.
@@ -551,20 +552,39 @@ update and delete on `MJ_BizApps_Sales: Deal Digest Recipients` and read on
 `MJ_BizApps_Sales: Deal Digest Audience Types`; **Sales User** gets read on both. Neither gets
 delete on the audience types — those are shipped vocabulary.
 
-- [ ] **Step 5: Push and verify**
+- [ ] **Step 5: Add the teardown roots**
+
+Steps 1 and 2 seed two rows into `${mjSchema}` with fixed UUIDs. `mj app remove` does not reach
+them, so without this they survive an uninstall and the next install fails on a primary-key
+collision — the exact failure `migrations-teardown/V001__Retire_Sales_Core_Rows.sql` exists to
+prevent. Append both to that file's `#SalesDoomed` INSERT list at `Depth 0`, in the existing style
+(`${mjSchema}` placeholder, trailing comment naming the row), using the UUIDs minted above:
+
+```sql
+('${mjSchema}', 'AIAgent',      '<Step 1 primaryKey>', 0),  -- Sales -- Lapsed Close Date Digest
+('${mjSchema}', 'ScheduledJob', '<Step 2 primaryKey>', 0),  -- Sales -- Lapsed Close Date Digest (weekly)
+```
+
+Add a comment recording what is deliberately **not** listed and why: the two Application Settings
+from Step 3 (`ApplicationSetting.ApplicationID` is NOT NULL and the Sales `Application` row is
+already a root, so they follow automatically) and the Step 4 entity permissions (`mj app remove`
+walks those out from this app's `__mj.Entity` rows). `AIAgentRun` rows follow the agent on the
+NOT NULL branch, which is the intended loss of run history.
+
+- [ ] **Step 6: Push and verify**
 
 Run: `npx mj sync push --dir metadata`
 Expected: rows created; a re-run reports no changes.
 
-- [ ] **Step 6: Verify the permissions took**
+- [ ] **Step 7: Verify the permissions took**
 
 Run: `npx vitest run` and confirm the suite is still green, then check in Explorer that a Sales Admin
 sees the Deal Digest Recipients entity and a Sales User cannot edit it.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add metadata/
+git add metadata/ migrations-teardown/
 git commit -m "feat(sales): digest agent, scheduled job, settings and permissions metadata"
 ```
 
