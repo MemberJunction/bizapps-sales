@@ -124,6 +124,9 @@ INSERT INTO #SalesDoomed (SchemaName, TableName, RowID, Depth) VALUES
     -- GLOBAL setting -- three orphaned rows would stay behind as global defaults carrying whatever the
     -- host typed, and a reinstall would find them by ID and skip them. Deliberately NOT listed: the
     -- Deal Digest entity permissions (`mj app remove` walks those out from this app's __mj.Entity rows).
+    -- The pre-existing HidePipelines setting (39E2F5E0-6FA2-44AC-BCCA-568C062C27CB) has the same exposure and
+    -- is deliberately NOT addressed here: it predates this work, and retiring it would change uninstall
+    -- behaviour for an unrelated feature.
     ('${mjSchema}', 'AIAgent',                 'D5306AEA-0736-47C8-8B69-480389857481', 0),  -- Sales -- Lapsed Close Date Digest
     ('${mjSchema}', 'ScheduledJob',            '67069328-7126-4A91-8647-E58FA49A062B', 0),  -- Sales -- Lapsed Close Date Digest (weekly)
     ('${mjSchema}', 'ApplicationSetting',      '1B6FDB10-DB2F-41FE-8376-5A24DA469E46', 0),  -- ExplorerBaseUrl
