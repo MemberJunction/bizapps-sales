@@ -42,9 +42,11 @@ const SECTION = 'companies';
     selector: 'mjs-deal-companies-panel',
     standalone: true,
     imports: [CommonModule, FormsModule, BaseFormsModule],
+    // Variant "default", not "related-entity": the form container hides related-entity panels in edit
+    // mode, and edit mode is the only time this list can change.
     template: `
         <mj-collapsible-panel SectionKey="companies" SectionName="Companies" Icon="fa-solid fa-building"
-            Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="true"
+            Variant="default" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="true"
             [BadgeCount]="Rows.length">
             <div class="mjs-deal-companies" data-testid="deal-companies">
                 @if (LoadError) {
