@@ -80,8 +80,17 @@ export class LapsedCloseDateDigestAgent extends BaseAgent {
             renderedEmails: outcome.RenderedEmails,
         };
 
+        // `|| Errors.length > 0` guards against a drifted `Success` computation: any recorded error fails the step.
         if (!outcome.Success || outcome.Errors.length > 0) {
-            const message = `The lapsed close date digest reported ${outcome.Errors.length} error(s): ${outcome.Errors.join('; ')}`;
+            // A truncated run fails loudly and must say why in the log alone, even if the truncation notice
+            // ever moves out of `Errors` and `Truncated` is the only thing holding `Success` false.
+            const reasons = [
+                ...(outcome.Truncated ? ['the lapsed-deal list was truncated'] : []),
+                ...outcome.Errors,
+            ];
+            const message = reasons.length > 0
+                ? `The lapsed close date digest failed: ${reasons.join('; ')}`
+                : 'The lapsed close date digest failed without reporting a cause.';
             return {
                 finalStep: { terminate: true, step: 'Failed', message, errorMessage: message, newPayload: payload as P },
                 stepCount: 1,

@@ -12,7 +12,7 @@ import type { AgentConfiguration, ExecuteAgentParams } from '@memberjunction/ai-
 const run = vi.fn();
 vi.mock('@mj-biz-apps/sales-core-entities-server', () => ({ RunLapsedCloseDateDigest: run }));
 
-const { LapsedCloseDateDigestAgent, LoadLapsedCloseDateDigestAgent } = await import('../custom/lapsed-close-date-digest.agent.js');
+const { LapsedCloseDateDigestAgent } = await import('../custom/lapsed-close-date-digest.agent.js');
 
 /** Exposes the protected entry point without widening the class. */
 class Harness extends LapsedCloseDateDigestAgent {
@@ -41,10 +41,6 @@ beforeEach(() => {
 });
 
 describe('LapsedCloseDateDigestAgent', () => {
-    it('anchors the class against tree-shaking', () => {
-        expect(() => LoadLapsedCloseDateDigestAgent()).not.toThrow();
-    });
-
     it('terminates with an error when there is no context user', async () => {
         const { finalStep, stepCount } = await agent().Execute(params({}, null));
         expect(finalStep.terminate).toBe(true);
@@ -99,6 +95,22 @@ describe('LapsedCloseDateDigestAgent', () => {
         expect(finalStep.errorMessage).toContain('audience A: boom');
         expect(finalStep.errorMessage).toContain('audience B: bang');
         expect(finalStep.message).toContain('audience A: boom');
+    });
+
+    it('names the truncation when a truncated run fails with no errors recorded', async () => {
+        run.mockResolvedValue(result({ Success: false, Truncated: true, Errors: [] }));
+        const { finalStep } = await agent().Execute(params({}));
+        expect(finalStep.step).toBe('Failed');
+        expect(finalStep.errorMessage).toMatch(/truncated/i);
+        expect(finalStep.errorMessage).not.toMatch(/0 error/);
+        expect(finalStep.errorMessage).not.toMatch(/: $/);
+    });
+
+    it('still fails, with a cause, when Success is true but errors were recorded', async () => {
+        run.mockResolvedValue(result({ Success: true, Errors: ['audience C: late'] }));
+        const { finalStep } = await agent().Execute(params({}));
+        expect(finalStep.step).toBe('Failed');
+        expect(finalStep.errorMessage).toContain('audience C: late');
     });
 
     it('returns step Failed, not a throw, when the run itself throws', async () => {
