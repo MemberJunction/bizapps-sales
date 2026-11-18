@@ -1,5 +1,6 @@
 import '@angular/compiler';
-import { describe, it, expect } from 'vitest';
+import { RunView } from '@memberjunction/core';
+import { describe, it, expect, vi } from 'vitest';
 import {
     ExplainDealScheduleGap,
     ReadDealScheduleTotal,
@@ -94,7 +95,7 @@ describe('ExplainDealScheduleGap', () => {
 describe('MJSDealSchedulePanel total', () => {
     function panel(amount: number | null, rows: DealScheduleRowFigures[] | null): MJSDealSchedulePanel {
         const p = Object.create(MJSDealSchedulePanel.prototype) as MJSDealSchedulePanel;
-        Object.defineProperty(p, 'Record', { value: { Amount: amount, CurrencyID: null } });
+        Object.defineProperty(p, 'Record', { value: { ID: 'deal-1', Amount: amount, CurrencyID: null }, configurable: true });
         p.Rows = rows;
         return p;
     }
@@ -113,5 +114,44 @@ describe('MJSDealSchedulePanel total', () => {
         const p = panel(24000, [row(12000)]);
         expect(p.Total?.Remainder).toBe(12000);
         expect(p.GapSentence).toContain('of the deal amount is not scheduled');
+    });
+
+    it('drops stale replies when overlapping readRows calls finish out of order (#505)', async () => {
+        const p = panel(24000, null);
+        Object.defineProperty(p, 'Record', { value: { ID: 'deal-1', Amount: 24000, CurrencyID: null } });
+        Object.defineProperty(p, 'Entity', { value: 'MJ_BizApps_Sales: Deal Payment Schedules' });
+        Object.defineProperty(p, 'cdr', { value: { detectChanges: vi.fn() } });
+        Object.defineProperty(p, 'FormComponent', { value: { SetSectionRowCount: vi.fn() } });
+        Object.defineProperty(p, '_readRowsRequestId', { value: 0, writable: true });
+
+        let resolveFirst!: (val: { Success: boolean; Results: DealScheduleRowFigures[] }) => void;
+        let resolveSecond!: (val: { Success: boolean; Results: DealScheduleRowFigures[] }) => void;
+        const firstPromise = new Promise<{ Success: boolean; Results: DealScheduleRowFigures[] }>((r) => {
+            resolveFirst = r;
+        });
+        const secondPromise = new Promise<{ Success: boolean; Results: DealScheduleRowFigures[] }>((r) => {
+            resolveSecond = r;
+        });
+
+        const spy = vi.spyOn(RunView.prototype, 'RunView')
+            .mockImplementationOnce(() => firstPromise as ReturnType<RunView['RunView']>)
+            .mockImplementationOnce(() => secondPromise as ReturnType<RunView['RunView']>);
+
+        try {
+            p.OnDataLoad({ totalRowCount: 1 } as Parameters<MJSDealSchedulePanel['OnDataLoad']>[0]);
+            p.OnDataLoad({ totalRowCount: 2 } as Parameters<MJSDealSchedulePanel['OnDataLoad']>[0]);
+
+            resolveSecond({ Success: true, Results: [row(12000), row(12000)] });
+            await secondPromise;
+            await Promise.resolve();
+            expect(p.Total?.Scheduled).toBe(24000);
+
+            resolveFirst({ Success: true, Results: [row(12000)] });
+            await firstPromise;
+            await Promise.resolve();
+            expect(p.Total?.Scheduled).toBe(24000);
+        } finally {
+            spy.mockRestore();
+        }
     });
 });

@@ -231,12 +231,20 @@ describe('raising one exception per deal', () => {
                 Amount: 1250.5,
                 ExceptionDate: BUSINESS_TODAY,
                 Summary: expect.stringMatching(/^Deal D-A closed Won on 2026-09-10 \(17 days ago\) and has an order that is Draft/),
-                DedupeKey: DEAL_A,
+                DedupeKey: `${DEAL_A}:2026-09`,
                 SourceCreatedByUserID: LOGIN_1,
                 CreatorUnresolved: false,
             },
         ]);
         expect(result).toMatchObject({ Success: true, Outcome: 'RAISED', Found: 1, Created: 1, CreatorUnresolved: 0 });
+    });
+
+    it('keys the dedupe key by deal and month so a dismissed deal is raised again in a new month', async () => {
+        activeType();
+        queryReturns([row(DEAL_A, null)]);
+        vi.spyOn(BusinessTimeZoneEngine.prototype, 'Today').mockReturnValue('2026-10-01');
+        await DetectWonDealsWithUnconfirmedOrders(PROVIDER, USER);
+        expect(accounting.RaiseCalls[0].Exceptions[0].DedupeKey).toBe(`${DEAL_A}:2026-10`);
     });
 
     it('judges the exception date by the deal company’s business day', async () => {

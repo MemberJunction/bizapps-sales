@@ -18,10 +18,8 @@
       "moment of a won close. OneTimeLinesTo is still here and is DEAD -- close-won creates no order",
       "now, so nothing routes lines. See DECISIONS-NEEDED.md DN-11.",
       "",
-      "ContractTypeCode is 'Order Form', which is a type contracts actually ships. It said 'Standard'",
-      "first and nothing on any host is called that -- v2's ContractType carries no Code column, so the",
-      "seam resolves on NAME, and an unresolvable name means close-won plans a contract it can never",
-      "create. Found by close-won-contract.CT1 the moment contracts became readable.",
+      "ContractTypeCode is 'ORDER_FORM', the stable code on contracts' ContractType (LiveContractsSeam",
+      "matches Code first and falls back to Name for user-created pipelines or older contracts installs).",
       "",
       "Former description, kept as the design note: The main motion: catalogue products, a proposal, a negotiation and a signed agreement. The winning stage is called Signed — the app reads the status type's IsWon flag, never the stage name."
     ],
@@ -32,7 +30,7 @@
       "DealTypeID": "@lookup:MJ_BizApps_Sales: Deal Types.Code=NEW",
       "DefaultForecastCategoryTypeID": "@lookup:MJ_BizApps_Sales: Forecast Category Types.Code=PIPELINE",
       "RequiresDealLines": true,
-      "CloseWonPolicy": "{\"CreateContract\":true,\"ContractTypeCode\":\"Order Form\",\"TermMonths\":12,\"SubscriptionLinesTo\":\"Contract\",\"OneTimeLinesTo\":\"Order\",\"RequireApprovalTaskTypeCode\":null,\"CloseWonTasks\":{\"AssigneeEntityName\": \"MJ_BizApps_Common: People\", \"AssigneeRecordID\": null, \"DueInDays\": 5}}",
+      "CloseWonPolicy": "{\"CreateContract\":true,\"ContractTypeCode\":\"ORDER_FORM\",\"TermMonths\":12,\"SubscriptionLinesTo\":\"Contract\",\"OneTimeLinesTo\":\"Order\",\"RequireApprovalTaskTypeCode\":null,\"CloseWonTasks\":{\"AssigneeEntityName\": \"MJ_BizApps_Common: People\", \"AssigneeRecordID\": null, \"DueInDays\": 5}}",
       "IsDefault": true,
       "DisplayRank": 10,
       "IsActive": true
@@ -52,10 +50,6 @@
           }
         }
       ]
-    },
-    "sync": {
-      "lastModified": "2026-08-26T00:25:08.213Z",
-      "checksum": "c0e7016ff3242992f56c7d5f80e8fb9e9dbd377cf849f89c0b3466601ad54bce"
     }
   },
   {
