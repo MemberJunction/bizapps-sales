@@ -87,6 +87,7 @@
     "queries",
     "action-categories",
     "actions",
+    "agents",
     "scheduled-jobs",
     "activity-sync-extensions",
     "authorizations",

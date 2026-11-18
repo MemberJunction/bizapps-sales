@@ -1,0 +1,51 @@
+[
+  {
+    "_comments": [
+      "WEEKLY LAPSED CLOSE DATE DIGEST. Fires the agent in `agents/.sales-agents.json`. Own file, as",
+      "with the other jobs.",
+      "",
+      "SEEDED Disabled. A host has to fill in three Application Settings first (DigestProvider,",
+      "DigestFromAddress and, for links, ExplorerBaseUrl) and add its own Deal Digest Recipients rows;",
+      "enabled before that, every run stops on the missing provider. Enable it once those are in place,",
+      "after a run with {\"dryRun\": true} as StartingPayload has shown what would be sent.",
+      "",
+      "TWO TIME ZONES, DELIBERATELY. The cron Timezone below governs WHEN the email is delivered (Monday",
+      "09:00 here). BizApps.BusinessTimeZone governs which calendar day a deal's close date is judged",
+      "against. They are separate settings with separate jobs, not one inconsistency: a host delivering",
+      "in one zone can judge deals in another.",
+      "",
+      "The scheduler does not pick up job rows written out of process. After a metadata push, restart",
+      "MJAPI or this job will not be scheduled, whatever its Status says.",
+      "",
+      "  · ConcurrencyMode `Skip` — two overlapping runs would send each recipient two emails.",
+      "  · MissedRunPolicy `RunOnce` — a missed week is not worth several catch-up emails; one covers it.",
+      "  · RunImmediatelyIfNeverRun `false` — the first run waits for the schedule.",
+      "",
+      "JobTypeID resolves by name rather than a raw UUID: self-documenting, and it cannot break on a",
+      "host whose Agent job type has a different ID.",
+      "",
+      "Configuration is the Agent job shape: a JSON string holding the AgentID, optionally with a",
+      "StartingPayload."
+    ],
+    "fields": {
+      "Name": "Sales — Lapsed Close Date Digest (weekly)",
+      "Description": "Emails each digest recipient the deals whose expected close date has lapsed. Ships Disabled until a host has set the digest Application Settings and added recipients.",
+      "JobTypeID": "@lookup:MJ: Scheduled Job Types.Name=Agent",
+      "CronExpression": "0 0 9 * * 1",
+      "Timezone": "America/New_York",
+      "Status": "Disabled",
+      "ConcurrencyMode": "Skip",
+      "MissedRunPolicy": "RunOnce",
+      "RunImmediatelyIfNeverRun": false,
+      "MaxRuntimeMinutes": 15,
+      "NotifyOnSuccess": false,
+      "NotifyOnFailure": false,
+      "NotifyViaEmail": false,
+      "NotifyViaInApp": false,
+      "Configuration": "{\"AgentID\":\"D5306AEA-0736-47C8-8B69-480389857481\"}"
+    },
+    "primaryKey": {
+      "ID": "67069328-7126-4A91-8647-E58FA49A062B"
+    }
+  }
+]

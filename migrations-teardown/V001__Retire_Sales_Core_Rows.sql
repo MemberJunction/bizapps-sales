@@ -117,6 +117,13 @@ INSERT INTO #SalesDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'ScheduledJob',            '5A1E5000-0000-4000-8000-000000000202', 0),  -- Sales -- Forecast Snapshot (daily)
     ('${mjSchema}', 'ScheduledJob',            'FEB6F8D5-17B0-4AE6-BD8A-F0495F7CE36F', 0),  -- Sales -- Won Deals With Unconfirmed Orders (nightly)
     ('${mjSchema}', 'ScheduledJob',            'B1E51D67-B681-40F7-A2AD-FF84D2C2A6EC', 0),  -- Sales -- Relink Won Deal Orders To Contracts (daily)
+    -- Lapsed Close Date Digest: the agent and its weekly job. AIAgentRun follows the agent on the NOT
+    -- NULL branch (and ScheduledJobRun the job), which is an intended loss of run history. Deliberately
+    -- NOT listed: the three digest Application Settings (ApplicationSetting.ApplicationID is NOT NULL
+    -- and the Sales Application row is already a root, so they follow automatically) and the Deal
+    -- Digest entity permissions (`mj app remove` walks those out from this app's __mj.Entity rows).
+    ('${mjSchema}', 'AIAgent',                 'D5306AEA-0736-47C8-8B69-480389857481', 0),  -- Sales -- Lapsed Close Date Digest
+    ('${mjSchema}', 'ScheduledJob',            '67069328-7126-4A91-8647-E58FA49A062B', 0),  -- Sales -- Lapsed Close Date Digest (weekly)
     -- bizapps-tasks task types. NOT in our schema and not in core -- the seed reaches into a
     -- SIBLING app's schema, which is why that schema appears in the walk below. See the
     -- consequence noted in the header: `Task.TypeID` is NOT NULL.

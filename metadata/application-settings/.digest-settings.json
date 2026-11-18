@@ -1,0 +1,42 @@
+[
+  {
+    "_comments": [
+      "The three settings the Lapsed Close Date Digest reads. All ship with an EMPTY Value, on purpose:",
+      "each is a host's own choice (its URL, its sender, its provider) and none has a default that is",
+      "right for every host. The rows exist so a host sees them in Application Settings and fills them",
+      "in. Each is read as blank-after-trim meaning unset. Primary keys are fixed so a host's edit",
+      "updates THIS row rather than creating a second one."
+    ],
+    "fields": {
+      "ApplicationID": "@lookup:MJ: Applications.Name=Sales",
+      "Name": "ExplorerBaseUrl",
+      "Value": "",
+      "Comments": "The base URL of this host's MJ Explorer, for example https://explorer.example.com, used to turn each deal name in the digest into a link. Blank means deal names are rendered as plain text instead of links; nothing fails."
+    },
+    "primaryKey": {
+      "ID": "1B6FDB10-DB2F-41FE-8376-5A24DA469E46"
+    }
+  },
+  {
+    "fields": {
+      "ApplicationID": "@lookup:MJ: Applications.Name=Sales",
+      "Name": "DigestFromAddress",
+      "Value": "",
+      "Comments": "The fallback sender address for the digest, used for a recipient whose company has no CompanySenderIdentity. Blank means a send to such a recipient fails: the run records the error for that recipient and carries on with the others."
+    },
+    "primaryKey": {
+      "ID": "274BFCF7-FFBD-4901-9960-80B8906B1611"
+    }
+  },
+  {
+    "fields": {
+      "ApplicationID": "@lookup:MJ: Applications.Name=Sales",
+      "Name": "DigestProvider",
+      "Value": "",
+      "Comments": "The name of the communication provider that sends the digest, exactly as it appears in MJ: Communication Providers (for example the Microsoft Graph or SendGrid provider this host has configured). Blank means a real run stops up front with one error naming this setting. A dry run does not need it."
+    },
+    "primaryKey": {
+      "ID": "E001A9EB-E1EB-40C8-9629-E9E19C7A5159"
+    }
+  }
+]
