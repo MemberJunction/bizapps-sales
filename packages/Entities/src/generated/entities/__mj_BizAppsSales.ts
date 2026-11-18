@@ -183,6 +183,159 @@ export const mjBizAppsSalesDealContactRoleSchema = z.object({
 export type mjBizAppsSalesDealContactRoleEntityType = z.infer<typeof mjBizAppsSalesDealContactRoleSchema>;
 
 /**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Digest Audience Types
+ */
+export const mjBizAppsSalesDealDigestAudienceTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(50)
+        * * Description: Stable identifier the seeds and the digest builder key on. Renaming Name is cosmetic; renaming Code changes an identifier.`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(100)
+        * * Description: Display name of the audience, as shown to the people who administer recipients.`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: What this audience is for and who belongs in it.`),
+    IsPortfolioWide: z.boolean().describe(`
+        * * Field Name: IsPortfolioWide
+        * * Display Name: Is Portfolio Wide
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: When 1, recipients of this audience receive one digest covering every company, and their recipient rows carry no Company. When 0, each recipient row names the company the digest covers. Enforced in the recipient's Save(), not by a CHECK, because it ties a column on this table to one on another.`),
+    MinDaysLapsed: z.number().nullable().describe(`
+        * * Field Name: MinDaysLapsed
+        * * Display Name: Minimum Days Lapsed
+        * * SQL Data Type: int
+        * * Description: A deal appears only once its expected close date is at least this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.`),
+    IncludeMissingCloseDate: z.boolean().describe(`
+        * * Field Name: IncludeMissingCloseDate
+        * * Display Name: Include Missing Close Date
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: When 1, open deals that never had an expected close date are listed too, after the lapsed ones. When 0 only deals whose date has passed appear.`),
+    SendWhenEmpty: z.boolean().describe(`
+        * * Field Name: SendWhenEmpty
+        * * Display Name: Send When Empty
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: When 1, a recipient with nothing lapsed still gets the email, carrying the Empty Message, so silence cannot be mistaken for a missed send. When 0 the email is skipped.`),
+    GroupByCompany: z.boolean().describe(`
+        * * Field Name: GroupByCompany
+        * * Display Name: Group By Company
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: When 1, the digest lists deals under a heading per company. When 0 it is one flat list.`),
+    SubjectTemplate: z.string().nullable().describe(`
+        * * Field Name: SubjectTemplate
+        * * Display Name: Subject Template
+        * * SQL Data Type: nvarchar(255)
+        * * Description: Subject line of the email. Empty means the digest builder's built-in subject.`),
+    IntroTemplate: z.string().nullable().describe(`
+        * * Field Name: IntroTemplate
+        * * Display Name: Intro Template
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Opening text of the email, above the deal list. Empty means the digest builder's built-in introduction.`),
+    EmptyMessage: z.string().nullable().describe(`
+        * * Field Name: EmptyMessage
+        * * Display Name: Empty Message
+        * * SQL Data Type: nvarchar(500)
+        * * Description: Text sent in place of the deal list when nothing is lapsed and Send When Empty is on.`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0
+        * * Description: Order in which audiences are listed and processed; lowest first.`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Whether this audience is sent at all. Clearing it pauses the audience without deleting its recipients.`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesDealDigestAudienceTypeEntityType = z.infer<typeof mjBizAppsSalesDealDigestAudienceTypeSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Digest Recipients
+ */
+export const mjBizAppsSalesDealDigestRecipientSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    DealDigestAudienceTypeID: z.string().describe(`
+        * * Field Name: DealDigestAudienceTypeID
+        * * Display Name: Deal Digest Audience Type
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Digest Audience Types (vwDealDigestAudienceTypes.ID)
+        * * Description: The audience this person receives.`),
+    CompanyID: z.string().nullable().describe(`
+        * * Field Name: CompanyID
+        * * Display Name: Company
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
+        * * Description: The company the digest covers for this person. Empty on a portfolio-wide audience, and required on any other; the recipient's Save() enforces that pairing.`),
+    EmployeeID: z.string().describe(`
+        * * Field Name: EmployeeID
+        * * Display Name: Employee
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)
+        * * Description: The employee who receives the digest, at their work email.`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Whether this person is sent the digest. Clearing it stops the email without deleting the row.`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    DealDigestAudienceType: z.string().describe(`
+        * * Field Name: DealDigestAudienceType
+        * * Display Name: Deal Digest Audience Type
+        * * SQL Data Type: nvarchar(100)`),
+    Company: z.string().nullable().describe(`
+        * * Field Name: Company
+        * * Display Name: Company Name
+        * * SQL Data Type: nvarchar(50)`),
+    Employee: z.string().nullable().describe(`
+        * * Field Name: Employee
+        * * Display Name: Employee Name
+        * * SQL Data Type: nvarchar(81)`),
+});
+
+export type mjBizAppsSalesDealDigestRecipientEntityType = z.infer<typeof mjBizAppsSalesDealDigestRecipientSchema>;
+
+/**
  * zod schema definition for the entity MJ_BizApps_Sales: Deal Payment Schedules
  */
 export const mjBizAppsSalesDealPaymentScheduleSchema = z.object({
@@ -2446,6 +2599,426 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
     */
     get BuyingRoleType(): string | null {
         return this.Get('BuyingRoleType');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Sales: Deal Digest Audience Types - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsSales
+ * * Base Table: DealDigestAudienceType
+ * * Base View: vwDealDigestAudienceTypes
+ * * @description One kind of audience for the Lapsed Close Date Digest (Company Leader, CEO, CFO, CTO). Behaviour comes from the flags on this row, never from the Code or Name: the digest builder reads IsPortfolioWide, MinDaysLapsed, IncludeMissingCloseDate, SendWhenEmpty and GroupByCompany, so adding an audience is a data change with no code impact.
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Digest Audience Types')
+export class mjBizAppsSalesDealDigestAudienceTypeEntity extends BaseEntity<mjBizAppsSalesDealDigestAudienceTypeEntityType> {
+    /**
+    * Loads the MJ_BizApps_Sales: Deal Digest Audience Types record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Deal Digest Audience Types record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsSalesDealDigestAudienceTypeEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * Validate() method override for MJ_BizApps_Sales: Deal Digest Audience Types entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
+    * * MinDaysLapsed: Minimum days lapsed must be zero or a positive number when specified.
+    * @public
+    * @method
+    * @override
+    */
+    public override Validate(): ValidationResult {
+        const result = super.Validate();
+        this.ValidateMinDaysLapsedNonNegative(result);
+        result.Success = result.Success && (result.Errors.length === 0);
+
+        return result;
+    }
+
+    /**
+    * Minimum days lapsed must be zero or a positive number when specified.
+    * @param result - the ValidationResult object to add any errors or warnings to
+    * @public
+    * @method
+    */
+    public ValidateMinDaysLapsedNonNegative(result: ValidationResult): void {
+    	if (this.MinDaysLapsed != null && this.MinDaysLapsed < 0) {
+    		result.Errors.push(new ValidationErrorInfo(
+    			"MinDaysLapsed",
+    			"Minimum days lapsed cannot be negative.",
+    			this.MinDaysLapsed,
+    			ValidationErrorType.Failure
+    		));
+    	}
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: Code
+    * * Display Name: Code
+    * * SQL Data Type: nvarchar(50)
+    * * Description: Stable identifier the seeds and the digest builder key on. Renaming Name is cosmetic; renaming Code changes an identifier.
+    */
+    get Code(): string {
+        return this.Get('Code');
+    }
+    set Code(value: string) {
+        this.Set('Code', value);
+    }
+
+    /**
+    * * Field Name: Name
+    * * Display Name: Name
+    * * SQL Data Type: nvarchar(100)
+    * * Description: Display name of the audience, as shown to the people who administer recipients.
+    */
+    get Name(): string {
+        return this.Get('Name');
+    }
+    set Name(value: string) {
+        this.Set('Name', value);
+    }
+
+    /**
+    * * Field Name: Description
+    * * Display Name: Description
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: What this audience is for and who belongs in it.
+    */
+    get Description(): string | null {
+        return this.Get('Description');
+    }
+    set Description(value: string | null) {
+        this.Set('Description', value);
+    }
+
+    /**
+    * * Field Name: IsPortfolioWide
+    * * Display Name: Is Portfolio Wide
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: When 1, recipients of this audience receive one digest covering every company, and their recipient rows carry no Company. When 0, each recipient row names the company the digest covers. Enforced in the recipient's Save(), not by a CHECK, because it ties a column on this table to one on another.
+    */
+    get IsPortfolioWide(): boolean {
+        return this.Get('IsPortfolioWide');
+    }
+    set IsPortfolioWide(value: boolean) {
+        this.Set('IsPortfolioWide', value);
+    }
+
+    /**
+    * * Field Name: MinDaysLapsed
+    * * Display Name: Minimum Days Lapsed
+    * * SQL Data Type: int
+    * * Description: A deal appears only once its expected close date is at least this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.
+    */
+    get MinDaysLapsed(): number | null {
+        return this.Get('MinDaysLapsed');
+    }
+    set MinDaysLapsed(value: number | null) {
+        this.Set('MinDaysLapsed', value);
+    }
+
+    /**
+    * * Field Name: IncludeMissingCloseDate
+    * * Display Name: Include Missing Close Date
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    * * Description: When 1, open deals that never had an expected close date are listed too, after the lapsed ones. When 0 only deals whose date has passed appear.
+    */
+    get IncludeMissingCloseDate(): boolean {
+        return this.Get('IncludeMissingCloseDate');
+    }
+    set IncludeMissingCloseDate(value: boolean) {
+        this.Set('IncludeMissingCloseDate', value);
+    }
+
+    /**
+    * * Field Name: SendWhenEmpty
+    * * Display Name: Send When Empty
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: When 1, a recipient with nothing lapsed still gets the email, carrying the Empty Message, so silence cannot be mistaken for a missed send. When 0 the email is skipped.
+    */
+    get SendWhenEmpty(): boolean {
+        return this.Get('SendWhenEmpty');
+    }
+    set SendWhenEmpty(value: boolean) {
+        this.Set('SendWhenEmpty', value);
+    }
+
+    /**
+    * * Field Name: GroupByCompany
+    * * Display Name: Group By Company
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    * * Description: When 1, the digest lists deals under a heading per company. When 0 it is one flat list.
+    */
+    get GroupByCompany(): boolean {
+        return this.Get('GroupByCompany');
+    }
+    set GroupByCompany(value: boolean) {
+        this.Set('GroupByCompany', value);
+    }
+
+    /**
+    * * Field Name: SubjectTemplate
+    * * Display Name: Subject Template
+    * * SQL Data Type: nvarchar(255)
+    * * Description: Subject line of the email. Empty means the digest builder's built-in subject.
+    */
+    get SubjectTemplate(): string | null {
+        return this.Get('SubjectTemplate');
+    }
+    set SubjectTemplate(value: string | null) {
+        this.Set('SubjectTemplate', value);
+    }
+
+    /**
+    * * Field Name: IntroTemplate
+    * * Display Name: Intro Template
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: Opening text of the email, above the deal list. Empty means the digest builder's built-in introduction.
+    */
+    get IntroTemplate(): string | null {
+        return this.Get('IntroTemplate');
+    }
+    set IntroTemplate(value: string | null) {
+        this.Set('IntroTemplate', value);
+    }
+
+    /**
+    * * Field Name: EmptyMessage
+    * * Display Name: Empty Message
+    * * SQL Data Type: nvarchar(500)
+    * * Description: Text sent in place of the deal list when nothing is lapsed and Send When Empty is on.
+    */
+    get EmptyMessage(): string | null {
+        return this.Get('EmptyMessage');
+    }
+    set EmptyMessage(value: string | null) {
+        this.Set('EmptyMessage', value);
+    }
+
+    /**
+    * * Field Name: DisplayRank
+    * * Display Name: Display Rank
+    * * SQL Data Type: int
+    * * Default Value: 0
+    * * Description: Order in which audiences are listed and processed; lowest first.
+    */
+    get DisplayRank(): number {
+        return this.Get('DisplayRank');
+    }
+    set DisplayRank(value: number) {
+        this.Set('DisplayRank', value);
+    }
+
+    /**
+    * * Field Name: IsActive
+    * * Display Name: Is Active
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    * * Description: Whether this audience is sent at all. Clearing it pauses the audience without deleting its recipients.
+    */
+    get IsActive(): boolean {
+        return this.Get('IsActive');
+    }
+    set IsActive(value: boolean) {
+        this.Set('IsActive', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Sales: Deal Digest Recipients - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsSales
+ * * Base Table: DealDigestRecipient
+ * * Base View: vwDealDigestRecipients
+ * * @description One person receiving one audience's Lapsed Close Date Digest, for one company or, on a portfolio-wide audience, for all of them. The audience decides what the email contains; this row decides who gets it.
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Digest Recipients')
+export class mjBizAppsSalesDealDigestRecipientEntity extends BaseEntity<mjBizAppsSalesDealDigestRecipientEntityType> {
+    /**
+    * Loads the MJ_BizApps_Sales: Deal Digest Recipients record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Deal Digest Recipients record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsSalesDealDigestRecipientEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: DealDigestAudienceTypeID
+    * * Display Name: Deal Digest Audience Type
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Digest Audience Types (vwDealDigestAudienceTypes.ID)
+    * * Description: The audience this person receives.
+    */
+    get DealDigestAudienceTypeID(): string {
+        return this.Get('DealDigestAudienceTypeID');
+    }
+    set DealDigestAudienceTypeID(value: string) {
+        this.Set('DealDigestAudienceTypeID', value);
+    }
+
+    /**
+    * * Field Name: CompanyID
+    * * Display Name: Company
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
+    * * Description: The company the digest covers for this person. Empty on a portfolio-wide audience, and required on any other; the recipient's Save() enforces that pairing.
+    */
+    get CompanyID(): string | null {
+        return this.Get('CompanyID');
+    }
+    set CompanyID(value: string | null) {
+        this.Set('CompanyID', value);
+    }
+
+    /**
+    * * Field Name: EmployeeID
+    * * Display Name: Employee
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)
+    * * Description: The employee who receives the digest, at their work email.
+    */
+    get EmployeeID(): string {
+        return this.Get('EmployeeID');
+    }
+    set EmployeeID(value: string) {
+        this.Set('EmployeeID', value);
+    }
+
+    /**
+    * * Field Name: IsActive
+    * * Display Name: Is Active
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    * * Description: Whether this person is sent the digest. Clearing it stops the email without deleting the row.
+    */
+    get IsActive(): boolean {
+        return this.Get('IsActive');
+    }
+    set IsActive(value: boolean) {
+        this.Set('IsActive', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: DealDigestAudienceType
+    * * Display Name: Deal Digest Audience Type
+    * * SQL Data Type: nvarchar(100)
+    */
+    get DealDigestAudienceType(): string {
+        return this.Get('DealDigestAudienceType');
+    }
+
+    /**
+    * * Field Name: Company
+    * * Display Name: Company Name
+    * * SQL Data Type: nvarchar(50)
+    */
+    get Company(): string | null {
+        return this.Get('Company');
+    }
+
+    /**
+    * * Field Name: Employee
+    * * Display Name: Employee Name
+    * * SQL Data Type: nvarchar(81)
+    */
+    get Employee(): string | null {
+        return this.Get('Employee');
     }
 }
 
