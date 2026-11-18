@@ -40,7 +40,6 @@ INNER JOIN [__mj_BizAppsSales].Pipeline p
         ON p.ID = d.PipelineID
 LEFT OUTER JOIN [__mj_BizAppsSales].ForecastCategoryType fc
         ON fc.ID = d.ForecastCategoryTypeID
-       AND fc.IsActive = 1
 WHERE 1 = 1
   {% if CompanyID %}
   AND d.CompanyID = {{ CompanyID | sqlString }}
