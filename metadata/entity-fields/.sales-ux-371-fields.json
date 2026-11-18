@@ -197,5 +197,37 @@
     "primaryKey": {
       "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Sales Contacts&Name=Seniority"
     }
+  },
+  {
+    "_comments": [
+      "#420 (DECISIONS.md D5): PredictedWinProbability, PredictedWinRiskBand and PredictedWinScoredAt leave",
+      "the generated Deal form and default views because the Predictive Studio records that scored them were",
+      "removed. The columns stay so existing data is preserved and a later scoring pipeline can populate them."
+    ],
+    "fields": {
+      "IncludeInGeneratedForm": false,
+      "DefaultInView": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=PredictedWinProbability"
+    }
+  },
+  {
+    "fields": {
+      "IncludeInGeneratedForm": false,
+      "DefaultInView": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=PredictedWinRiskBand"
+    }
+  },
+  {
+    "fields": {
+      "IncludeInGeneratedForm": false,
+      "DefaultInView": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=PredictedWinScoredAt"
+    }
   }
 ]
