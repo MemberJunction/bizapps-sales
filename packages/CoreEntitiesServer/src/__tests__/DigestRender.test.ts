@@ -121,6 +121,17 @@ describe('RenderDigest: escaping', () => {
         expect(BodyHtml).not.toContain('<b>bold');
     });
 
+    it.each([['an empty string', ''], ['null', null]])(
+        'escapes a deal name on the plain-text path too, when explorerBaseUrl is %s', (_l, base) => {
+            const { BodyHtml } = RenderDigest(ctx({
+                explorerBaseUrl: base as string | null, groups: [group([deal({ Name: HOSTILE })])],
+            }));
+            expect(BodyHtml).toContain('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &quot;Q&quot; &#39;r&#39;');
+            expect(BodyHtml).not.toContain('<script');
+            expect(BodyHtml).not.toContain('</script>');
+            expect(BodyHtml).not.toContain('href=');
+        });
+
     it('escapes the company, owner and stage names', () => {
         const { BodyHtml } = RenderDigest(ctx({
             audience: audience({ GroupByCompany: false }),
@@ -158,6 +169,7 @@ describe('RenderDigest: escaping', () => {
             recipient: recipient({ FirstName: 'Pat\r\nBcc: x@example.test' }),
         }));
         expect(Subject).not.toMatch(/[\r\n]/);
+        expect(Subject).toBe('Hi Pat Bcc: x@example.test');
     });
 });
 
@@ -214,6 +226,7 @@ describe('RenderDigest: row content', () => {
         const withAmount = RenderDigest(ctx({ groups: [group([deal({ Amount: 12500 })])] })).BodyHtml;
         expect(withAmount).toContain('$12,500');
         const noAmount = RenderDigest(ctx({ groups: [group([deal({ Amount: null })])] })).BodyHtml;
+        expect(noAmount).toContain('&mdash;');
         expect(noAmount).not.toContain('$');
         expect(noAmount).not.toContain('null');
         expect(noAmount).not.toContain('NaN');
@@ -246,7 +259,27 @@ describe('RenderDigest: structure and copy', () => {
     it('falls back to neutral copy for an empty digest with no EmptyMessage', () => {
         const out = RenderDigest(ctx({ groups: [], totalDeals: 0 }));
         expect(out.BodyHtml).toContain('No open deals');
+        expect(out.BodyHtml).not.toContain('Pat');
+        expect(out.BodyHtml).not.toContain('Hi ');
     });
+
+    it('resolves {Company} to the single group\'s name, and to "your companies" for several', () => {
+        const a = audience({ SubjectTemplate: 'For {Company}' });
+        expect(RenderDigest(ctx({ audience: a })).Subject).toBe('For Acme Test Co');
+        const other = deal({ ID: 'dddddddd-0000-4000-8000-000000000002', CompanyID: 'cccccccc-0000-4000-8000-000000000002', CompanyName: 'Beta Test Co' });
+        expect(RenderDigest(ctx({ audience: a, groups: [group([deal()]), group([other])] })).Subject).toBe('For your companies');
+    });
+
+    it.each([['an empty string', ''], ['whitespace', '  \n ']])(
+        'falls back to the defaults when the template columns hold %s rather than NULL', (_l, blank) => {
+            const out = RenderDigest(ctx({
+                audience: audience({ SubjectTemplate: blank, IntroTemplate: blank }),
+            }));
+            expect(out.Subject).toBe('Lapsed close dates: 1 deal as of 2026-11-23');
+            expect(out.BodyHtml).toContain('Hi Pat');
+            const empty = RenderDigest(ctx({ audience: audience({ EmptyMessage: blank }), groups: [], totalDeals: 0 }));
+            expect(empty.BodyHtml).toContain('No open deals');
+        });
 
     it('falls back to neutral default copy when SubjectTemplate and IntroTemplate are null', () => {
         const out = RenderDigest(ctx({
@@ -269,8 +302,9 @@ describe('RenderDigest: structure and copy', () => {
     it('renders a company section header per group when GroupByCompany is true', () => {
         const other = deal({ ID: 'dddddddd-0000-4000-8000-000000000002', CompanyID: 'cccccccc-0000-4000-8000-000000000002', CompanyName: 'Beta Test Co' });
         const { BodyHtml } = RenderDigest(ctx({ groups: [group([deal()]), group([other])] }));
-        expect(BodyHtml).toContain('Acme Test Co');
-        expect(BodyHtml).toContain('Beta Test Co');
+        expect(BodyHtml).toContain('>Acme Test Co</h2>');
+        expect(BodyHtml).toContain('>Beta Test Co</h2>');
+        expect(BodyHtml.match(/<h2/g)).toHaveLength(2);
     });
 
     it('omits company section headers when GroupByCompany is false', () => {

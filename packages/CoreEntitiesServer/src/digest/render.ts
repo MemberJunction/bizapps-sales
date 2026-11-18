@@ -41,6 +41,10 @@ export function DealRecordUrl(baseUrl: string, dealID: string): string {
     return `${base}/resource/record/${encodeURIComponent(DEAL_ENTITY)}/${encodeURIComponent(dealID)}`;
 }
 
+/** A template column holds NULL or "" when unset (a host adding a row in Explorer produces "" readily); both mean the default. */
+const orDefault = (template: string | null | undefined, fallback: string): string =>
+    template !== null && template !== undefined && template.trim() !== '' ? template : fallback;
+
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const TH = 'style="text-align:left;padding:6px 8px;border-bottom:2px solid #d0d5dd;font-size:12px;color:#475467;"';
@@ -108,15 +112,16 @@ export function RenderDigest(ctx: RenderContext): RenderedDigest {
         Object.entries(values).map(([k, v]) => [k, escapeHtml(v)])) as Record<string, string>;
 
     const defaultSubject = `Lapsed close dates: ${plural(ctx.totalDeals, 'deal')} as of ${today}`;
-    const subject = FillTemplate(audience.SubjectTemplate ?? defaultSubject, values).replace(/[\r\n]+/g, ' ').trim();
+    const subject = FillTemplate(orDefault(audience.SubjectTemplate, defaultSubject), values).replace(/[\r\n]+/g, ' ').trim();
 
     const defaultIntro = '<p style="margin:0 0 16px 0;">Hi {RecipientFirstName},</p>'
         + '<p style="margin:0 0 16px 0;">These open deals have an expected close date that has passed, or never had one set.</p>';
-    const intro = FillTemplate(audience.IntroTemplate ?? defaultIntro, escapedValues);
+    const intro = FillTemplate(orDefault(audience.IntroTemplate, defaultIntro), escapedValues);
 
     let content: string;
     if (groups.length === 0) {
-        const empty = audience.EmptyMessage ?? '<p style="margin:0 0 16px 0;">No open deals have a lapsed close date as of {Today}.</p>';
+        const empty = orDefault(audience.EmptyMessage,
+            '<p style="margin:0 0 16px 0;">No open deals have a lapsed close date as of {Today}.</p>');
         content = FillTemplate(empty, escapedValues);
     } else {
         const tables = audience.GroupByCompany
