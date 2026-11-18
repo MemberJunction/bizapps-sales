@@ -38,6 +38,7 @@ Statuses checked on 2026-10-11 against `next` here and in the sibling repos.
 | KI-26 | `mj sync push` after seeding empties every product picker | Resolved: pipelines link to companies, and a push no longer re-activates a retired link, [below](#ki-26--mj-sync-push-after-seeding-empties-every-product-picker) | sales | — |
 | KI-27 | Orders' lifecycle collapse would break CD24's `Posted` step | Resolved: CD24 asserts the collapse instead (`cf89281`) | sales | — |
 | KI-28 | A fresh install registered 10 fewer orders fields than the views expose, so saves failed on a column-count mismatch | Resolved: orders folded the missing rows into migrations (bizapps-orders `2daf9b9`, `a389782`), and the drift query returned nothing on fresh hosts in October (#161). Metadata that CodeGen still adds on a first run: bizapps-orders#491 | bizapps-orders | bizapps-orders#491 |
+| KI-29 | A very large lapsed-deal list is cut off, and the digest reports failure instead of mailing it | By design, [below](#ki-29--a-lapsed-deal-list-past-the-row-cap-fails-the-run-instead-of-being-mailed) | sales | — |
 | — | Contracts' minimum bootstrap | Obsolete: written for contracts v1 (`ContractTerm`, `ContractLine`), which v2 removed; `scripts/seed-demo-data.sh` seeds the contract template. Its remote-operation rule is [below](#remote-operations-report-success-twice) | — | — |
 
 ---
@@ -95,6 +96,27 @@ Any common entity can hit it, because nothing loads common's entity subclasses i
 opens correctly (`RequiresSubclass` is false), and the harness does not trip on it: it is a warning, and
 `captureConsoleErrors` reads only errors. The fix belongs in the host's client bootstrap. Recorded in
 2026-08 and not re-checked since.
+
+### KI-29 — A lapsed-deal list past the row cap fails the run instead of being mailed
+
+The digest reads every open lapsed deal in one query, capped at `MAX_DEALS_PER_RUN` (5,000). Beneath that,
+MJ also caps any view at the entity's `UserViewMaxRows`, which CodeGen sets to 1,000, so the effective
+ceiling is the lower of the two unless a host raises the entity's value. The read is ordered by company, so
+when it is cut, the companies later in the alphabet drop out **entirely**. Their company leaders then match
+no deals and fall into the "nothing lapsed" skip (counted in `SkippedEmpty`) instead of being mailed, which
+looks exactly like a company that really has nothing lapsed. Nothing in the emails that did go out would
+show it.
+
+So a truncated run reports **failure**: it records one error naming the cap, the ordering and the
+skipped-leader consequence, and the scheduled job's run ends `Failed` with that message. Executive emails
+that were sent still say, in their footer, that the list is incomplete. A failed Monday run is the signal;
+treat the emails it did send as partial.
+
+Pagination was considered and not built. When this was decided, the one production host measured held
+about 157 open deals against a 1,000-row cap, roughly an order of magnitude short, and paging adds an ordering and a failure mode of its own for a
+case that has not happened. If this error ever appears, that is the time to build pagination; raising
+`UserViewMaxRows` on Deals only moves the ceiling to 5,000. Do not "fix" the failure by suppressing the
+error: the cut companies would go back to being invisible.
 
 ## Standing rules
 

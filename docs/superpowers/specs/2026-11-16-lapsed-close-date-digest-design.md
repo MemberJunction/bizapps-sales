@@ -1,6 +1,6 @@
 # Lapsed Close Date Digest — design
 
-Status: proposed. Branch `feat/lapsed-close-date-digest` off `next`.
+Status: built. Branch `feat/lapsed-close-date-digest` off `next`.
 
 ## Intent and why
 
@@ -174,7 +174,7 @@ Changes history, and an employee who leaves being `Active = 0` in one place.
 
 Ships: the four audience-type rows (vocabulary — `CEO`, `CFO`, `CTO` and `COMPANY_LEADER` are
 universal enough to be app vocabulary), the agent record, the scheduled job as `Disabled`, the
-`ExplorerBaseUrl` Application Setting with an empty value, and entity and permission metadata.
+`ExplorerBaseUrl`, `DigestFromAddress` and `DigestProvider` Application Settings with empty values, and entity and permission metadata.
 
 Does not ship: **a single recipient row**. Recipients are host data. A fresh install sends nothing to
 nobody until someone seeds them and enables the job.
@@ -295,13 +295,21 @@ review, and the action takes a single `To` anyway. A company with two leaders ge
    digests, and as the fallback when a company has no default mailbox.
 3. Nothing resolves → that send **fails with a recorded error and the run reports failure.**
 
+The provider is a host's choice too, so it is not in code either. `Send Single Message` takes a
+`Provider` by name, and which provider is configured (Microsoft Graph, SendGrid, Gmail) differs by host,
+so the name comes from a third Application Setting, `DigestProvider`, shipped empty like the other two.
+A real run with it empty stops up front with one error naming the setting, rather than failing every
+send separately with the provider's own "not found"; a dry run sends nothing and does not need it. The
+message type is not a setting: `Email` is MJ's base HTML-carrying type, the same on every host.
+
 Step 3 is deliberate and matches the refusal for an employee with no email address: the failure mode
 worth engineering against is a Monday where nothing arrives and nobody notices. A run that reports
 failure gets looked at. This also answers, as data, the one question CDP's plan never closed — its
 §8 #1 shipped a placeholder address with a note that the mailbox was unverified.
 
 Because the sender depends on bizapps-common host data, a first install has nothing to send *from*
-until someone sets either a company mailbox identity or `DigestFromAddress`. That is consistent with
+until someone sets either a company mailbox identity or `DigestFromAddress`, and has no provider to send
+*through* until `DigestProvider` is set. That is consistent with
 the job shipping `Disabled`: both have to be deliberately turned on.
 
 **Failure isolation.** One failed send records an error against that recipient and the run continues.
