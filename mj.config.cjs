@@ -88,23 +88,27 @@ module.exports = {
   /**
    * Build commands to run after code generation. Left EMPTY for the initial
    * scaffold: the first CodeGen run only needs to generate + persist entity
-   * metadata. Package builds are run explicitly via `npm run build` once the
+   * metadata. Package builds are run explicitly via `pnpm run build` once the
    * generated code exists.
    */
   commands: [],
 
-  /**
-   * Open App installer layout. This distribution puts its server/client apps
-   * under apps/ (not the MJ-repo default of packages/MJAPI + packages/MJExplorer).
-   */
-  openApps: {
-    serverPackagePath: 'apps/MJAPI',
-    clientPackagePath: 'apps/MJExplorer',
-  },
-
   // ============================================================================
   // CodeGen Overrides
   // ============================================================================
+
+  /**
+   * Canonical CodeGen mode (#436): AI advanced generation is OFF so generated
+   * output is deterministic across machines without an LLM API key. Both the
+   * master switch and the feature allow-list are emptied so a local `.mjrc.cjs`
+   * overlay that sets `enableAdvancedGeneration: true` still runs zero AI steps.
+   * Any check-constraint validators or custom form groupings are authored
+   * explicitly in entity subclasses and `metadata/entity-fields/`.
+   */
+  advancedGeneration: {
+    enableAdvancedGeneration: false,
+    features: [],
+  },
 
   newEntityDefaults: {
     NameRulesBySchema: [

@@ -1,9 +1,14 @@
 import '@angular/compiler';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import { WeightedAmount } from '../lib/form-panels/deal-weighted-amount';
 import { MJSDealOverviewPanel } from '../lib/form-panels/deal-form.panels';
 import { MJSDealHeroPanel } from '../lib/form-panels/deal-hero.panel';
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 /**
  * A deal with no amount, or no probability, showed Weighted "$0" next to Amount "—".
@@ -29,6 +34,25 @@ describe('WeightedAmount', () => {
 
     it('treats a probability of 0 as a real value', () => {
         expect(WeightedAmount(1000, 0)).toBe(0);
+    });
+
+    it('pins null handling and formula to metadata/queries/SQL/deal-roster.sql (#459)', () => {
+        const sql = readFileSync(resolve(REPO_ROOT, 'metadata/queries/SQL/deal-roster.sql'), 'utf8');
+        expect(sql).toContain('ISNULL(d.Amount, 0) * ISNULL(d.Probability, 0) / 100.0 AS WeightedAmount');
+
+        const sqlWeighted = (amount: number | null, probability: number | null): number =>
+            (amount ?? 0) * (probability ?? 0) / 100.0;
+
+        for (const [amount, probability] of [
+            [null, null],
+            [null, 50],
+            [1000, null],
+            [1000, 0],
+            [1000, 25],
+            [250000, 80],
+        ] as const) {
+            expect(WeightedAmount(amount, probability) ?? 0).toBe(sqlWeighted(amount, probability));
+        }
     });
 });
 

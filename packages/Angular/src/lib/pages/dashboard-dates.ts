@@ -62,8 +62,8 @@ export function UtcDatePart(value: string | Date): string {
  * the behaviour this replaced, never a throw inside a template getter. `SalesSectionComponent`
  * awaits `Config(false)` at the top of its refresh anyway, because it can.
  */
-export function BusinessToday(): string {
-    return BusinessTimeZoneEngine.Instance.Today();
+export function BusinessToday(companyID?: string | null): string {
+    return BusinessTimeZoneEngine.Instance.Today(companyID ?? undefined);
 }
 
 const MONTH_ABBREVIATIONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

@@ -1,5 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
 import { FromDateInput, IsUnparseableDate, ToDateInput } from '../lib/workspace/deal-workspace.dates';
+
+function restoreTZ(original: string | undefined): void {
+    if (original === undefined) {
+        delete process.env.TZ;
+    } else {
+        process.env.TZ = original;
+    }
+}
 
 /**
  * bc-aidp-next-golive#185: a stored date the input cannot render showed as an EMPTY BOX, identical to
@@ -123,4 +131,22 @@ describe('FromDateInput still guards its own direction', () => {
         const back = FromDateInput('2026-11-20');
         expect(ToDateInput(back)).toBe('2026-11-20');
     });
+});
+
+describe('ToDateInput and FromDateInput across UTC, America/Los_Angeles and Pacific/Auckland (#405)', () => {
+    const originalTZ = process.env.TZ;
+    afterAll(() => {
+        restoreTZ(originalTZ);
+    });
+
+    for (const zone of ['UTC', 'America/Los_Angeles', 'Pacific/Auckland'] as const) {
+        it(`keeps 2026-11-20 stable at UTC midnight and late evening under TZ=${zone}`, () => {
+            process.env.TZ = zone;
+            expect(ToDateInput(new Date('2026-11-20T00:00:00.000Z'))).toBe('2026-11-20');
+            expect(ToDateInput(new Date('2026-11-20T23:30:00.000Z'))).toBe('2026-11-20');
+            const parsed = FromDateInput('2026-11-20');
+            expect(parsed?.toISOString()).toBe('2026-11-20T00:00:00.000Z');
+            expect(ToDateInput(parsed)).toBe('2026-11-20');
+        });
+    }
 });
