@@ -84,6 +84,46 @@ const E_SALES_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_SALES_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 
+/** The role that supplies the entity rights a reassign's saves need (g297.8). It never authorizes a move. */
+export const SALES_OFFBOARDING_ROLE = 'Sales Offboarding';
+
+export interface EntityRights { CanCreate: boolean; CanRead: boolean; CanUpdate: boolean; CanDelete: boolean }
+
+/**
+ * The rights each move needs, by entity. The Sales Offboarding role's entity permissions grant exactly
+ * these (pinned against metadata by a test). Deal Team Members also need create and delete because a
+ * deal's owner moves through `SetOwner`, which removes the owner row and adds a new one.
+ */
+export const SALES_OFFBOARDING_RIGHTS: Readonly<Record<string, EntityRights>> = {
+    [E_DEAL]: { CanCreate: false, CanRead: true, CanUpdate: true, CanDelete: false },
+    [E_DEAL_TEAM_MEMBER]: { CanCreate: true, CanRead: true, CanUpdate: true, CanDelete: true },
+    [E_SALES_ACCOUNT]: { CanCreate: false, CanRead: true, CanUpdate: true, CanDelete: false },
+    [E_SALES_CONTACT]: { CanCreate: false, CanRead: true, CanUpdate: true, CanDelete: false },
+    [E_PIPELINE]: { CanCreate: false, CanRead: true, CanUpdate: true, CanDelete: false },
+};
+
+/** The entities whose rights moving one kind needs: a deal owner swap saves the deal and its team rows. */
+const KIND_ENTITIES: Record<SalesHoldingKind, string[]> = {
+    DEAL_OWNER: [E_DEAL, E_DEAL_TEAM_MEMBER],
+    DEAL_TEAM_MEMBER: [E_DEAL_TEAM_MEMBER, E_DEAL],
+    ACCOUNT_OWNER: [E_SALES_ACCOUNT],
+    CONTACT_OWNER: [E_SALES_CONTACT],
+    PIPELINE_CLOSE_WON_ASSIGNEE: [E_PIPELINE],
+};
+
+/**
+ * A note for a caller who may move this kind but lacks the entity rights to save it, or null. Reads the
+ * caller's effective permissions per entity; `rightsOf` returns null when the entity is unknown.
+ */
+export function MissingRightsNote(kind: SalesHoldingKind, rightsOf: (entityName: string) => EntityRights | null): string | null {
+    const lacking = KIND_ENTITIES[kind].some((entity) => {
+        const need = SALES_OFFBOARDING_RIGHTS[entity];
+        const have = rightsOf(entity);
+        return !have || (['CanCreate', 'CanUpdate', 'CanDelete'] as const).some((k) => need[k] && !have[k]);
+    });
+    return lacking ? `You may reassign this, but you lack the rights to save it. Needs the ${SALES_OFFBOARDING_ROLE} role.` : null;
+}
+
 const GUID_SHAPE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /* ── The shared contract ─────────────────────────────────────────────────────────────────────── */
@@ -430,12 +470,41 @@ async function holdingsFor(leaver: OffboardingParty, caller: UserInfo): Promise<
     return BuildSalesHoldings(facts, { CanReassign: canReassign, Note: PermissionNote(canReassign, leaver.Name) });
 }
 
+/**
+ * The caller's effective rights on an entity, from the provider's metadata, or null when the entity is
+ * not known there.
+ */
+function rightsReader(provider: IMetadataProvider | null | undefined, caller: UserInfo): (entityName: string) => EntityRights | null {
+    return (entityName) => {
+        const entity = provider?.Entities?.find((e) => e.Name === entityName);
+        return entity ? entity.GetUserPermisions(caller) : null;
+    };
+}
+
+/** Add the missing-rights note to rows the caller may move but could not save. */
+export function NoteMissingRights(
+    holdings: OffboardingHolding[],
+    rightsOf: (entityName: string) => EntityRights | null,
+): OffboardingHolding[] {
+    return holdings.map((h) => {
+        if (!h.CanReassign) return h;
+        const note = MissingRightsNote(h.Kind, rightsOf);
+        return note ? { ...h, Note: note } : h;
+    });
+}
+
 /** `Sales.ListOffboardingHoldings`. Never throws. */
-export async function ListSalesOffboardingHoldings(input: OffboardingLeaverInput, caller: UserInfo): Promise<OffboardingListResult> {
+export async function ListSalesOffboardingHoldings(
+    input: OffboardingLeaverInput,
+    caller: UserInfo,
+    provider?: IMetadataProvider | null,
+): Promise<OffboardingListResult> {
     try {
         const leaver = await ResolveOffboardingParty({ UserID: input.LeaverUserID, EmployeeID: input.LeaverEmployeeID }, caller);
         if (!leaver) return { Outcome: 'INVALID_INPUT', Holdings: [], Message: NO_LEAVER };
-        const holdings = await holdingsFor(leaver, caller);
+        const holdings = provider
+            ? NoteMissingRights(await holdingsFor(leaver, caller), rightsReader(provider, caller))
+            : await holdingsFor(leaver, caller);
         return { Outcome: 'SUCCESS', Holdings: holdings, Message: `${holdings.length} sales item(s) held.` };
     } catch (err) {
         return { Outcome: 'ERROR', Holdings: [], Message: `Listing sales holdings failed: ${err instanceof Error ? err.message : String(err)}` };

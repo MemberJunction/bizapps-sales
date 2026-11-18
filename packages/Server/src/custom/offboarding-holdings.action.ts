@@ -60,6 +60,7 @@ export class ListOffboardingHoldingsAction extends BaseAction {
             const result = await ListSalesOffboardingHoldings(
                 { LeaverUserID: inputString(params, 'LeaverUserID'), LeaverEmployeeID: inputString(params, 'LeaverEmployeeID') },
                 params.ContextUser,
+                Metadata.Provider,
             );
             setOutput(params, 'Holdings', JSON.stringify(result.Holdings));
             return { Success: result.Outcome === 'SUCCESS', ResultCode: result.Outcome, Message: result.Message };

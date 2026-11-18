@@ -53,7 +53,7 @@ describe('Sales.ListOffboardingHoldings', () => {
         list.mockResolvedValue({ Outcome: 'SUCCESS', Holdings: [{ Kind: 'DEAL_OWNER' }], Message: '1 sales item(s) held.' });
         const p = params({ LeaverUserID: ' u-1 ', LeaverEmployeeID: '' });
         const result = await new ListHarness().Run(p);
-        expect(list).toHaveBeenCalledWith({ LeaverUserID: 'u-1', LeaverEmployeeID: null }, p.ContextUser);
+        expect(list).toHaveBeenCalledWith({ LeaverUserID: 'u-1', LeaverEmployeeID: null }, p.ContextUser, {});
         expect(result).toMatchObject({ Success: true, ResultCode: 'SUCCESS' });
         expect(JSON.parse(String(output(p, 'Holdings')))).toEqual([{ Kind: 'DEAL_OWNER' }]);
     });
