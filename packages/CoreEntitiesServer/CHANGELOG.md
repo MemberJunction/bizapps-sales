@@ -1,5 +1,13 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.31.1
+
+### Patch Changes
+
+- b8bc9c4: The deal line prompt for a product the customer already has uses the order line's new wording (golive #480): it asks "Is this line a renewal of that subscription, or a new one?" and the choices read "Renew <subscription>" and "Create new subscription". The Close Won and stage-change messages that send a rep to the prompt use the same words. Wording only: what each answer does is unchanged.
+- 05f18b5: A deal team row saved or deleted on its own can no longer leave an open deal with no owner: deleting, deactivating or re-roling the last active Owner row is refused with a message pointing at the Owner field (#568). The owner stamp now credits only an active owner row. The Sales Account's Contacts panel gains "Link person", which links an existing Sales Contact to the account (#443). Adds an integration check that Close Won refuses an unanswered line whose product inherits its subscription type (#504).
+  - @mj-biz-apps/sales-entities@6.31.1
+
 ## 6.31.0
 
 ### Patch Changes

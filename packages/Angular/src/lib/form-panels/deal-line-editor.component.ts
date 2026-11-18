@@ -106,7 +106,7 @@ import {
     MJOLinePricePickerComponent,
     type MJOExistingHolding,
 } from '@mj-biz-apps/orders-ng';
-import { CountDraftMatches, RankDealProducts } from './deal-product-ranking';
+import { CountDraftMatches, KeepDealCompanyProducts, RankDealProducts } from './deal-product-ranking';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountAmountToPercent,
@@ -210,7 +210,20 @@ interface RemoteOperationRouter {
             } @else {
                 <div class="mjs-le__body">
                     <div class="mjs-le__field">
-                        <label class="mjs-le__label" for="mjs-le-product">Product</label>
+                        <div class="mjs-le__label-row">
+                            <label class="mjs-le__label" for="mjs-le-product">Product</label>
+                            <!-- mousedown is cancelled so the product box keeps focus and an open list
+                                 re-filters in place instead of closing. -->
+                            <label class="mjs-le__company-only" data-testid="line-product-company-only"
+                                   [class.is-disabled]="!Deal?.CompanyID"
+                                   [attr.title]="Deal?.CompanyID ? null : 'Set the deal\\'s company to narrow the list to its products'"
+                                   (mousedown)="$event.preventDefault()">
+                                <input type="checkbox" [ngModel]="SellingCompanyOnly"
+                                       (ngModelChange)="OnSellingCompanyOnlyChange($event)"
+                                       [disabled]="!Deal?.CompanyID || IsLocked || ProductLockedByPrice" />
+                                Only selling company products
+                            </label>
+                        </div>
                         <!-- A type-ahead over the catalogue, ranked by orders' RankCatalogMatches: a name that
                              starts with the text, then a SKU that does, then either containing it, with the
                              DEAL's company first within each (golive#360). Filtered by ProductFilterFor to
@@ -250,7 +263,15 @@ interface RemoteOperationRouter {
                                     </button>
                                 } @empty {
                                     <div class="mjs-le__pick-empty">
-                                        {{ Products.length ? 'No product matches that.' : 'No products to offer.' }}
+                                        {{ !Products.length ? 'No products to offer.'
+                                            : PickerHiddenByCompany ? 'No product from this deal\\'s company matches that.'
+                                            : 'No product matches that.' }}
+                                    </div>
+                                }
+                                @if (PickerHiddenByCompany > 0) {
+                                    <div class="mjs-le__pick-empty" data-testid="line-product-other-companies" role="status">
+                                        <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                                        {{ PickerHiddenByCompany }} more from other companies. Uncheck "Only selling company products" to see them.
                                     </div>
                                 }
                                 @if (PickerHidden > 0) {
@@ -435,15 +456,15 @@ interface RemoteOperationRouter {
                     }
 
                     <!-- The customer already holds this product (golive #318): the same question the
-                         order line asks. Unanswered, Close Won refuses the deal, except on a renewal
-                         deal, which adds the line as the next term. -->
+                         order line asks, in the same words (golive #480). Unanswered, Close Won
+                         refuses the deal, except on a renewal deal, which adds the line as the next term. -->
                     @if (Holding; as holding) {
                         <div class="mjs-le__field" role="group" data-testid="line-subscription-choice"
                              [attr.aria-label]="'Existing subscription ' + holding.SubscriptionNumber">
                             <span class="mjs-le__label">Existing subscription</span>
                             <span class="mjs-le__muted">
-                                The customer already holds {{ holding.SubscriptionNumber }} for this product
-                                @if (HoldingCoverageEnd) { (covered through {{ HoldingCoverageEnd | mjoDate }}) }.
+                                This customer already has this product on {{ holding.SubscriptionNumber }}@if (HoldingCoverageEnd) {, which runs through {{ HoldingCoverageEnd | mjoDate }}}.
+                                Is this line a renewal of that subscription, or a new one?
                             </span>
                             <div class="mjs-le__choices">
                                 <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-extend"
@@ -451,7 +472,7 @@ interface RemoteOperationRouter {
                                         [attr.aria-pressed]="Working.SubscriptionAction === 'ExtendExisting'"
                                         [disabled]="IsLocked" [title]="BlockedReason"
                                         (click)="SetSubscriptionAction('ExtendExisting')">
-                                    Add as next term
+                                    Renew {{ holding.SubscriptionNumber }}
                                     @if (HoldingContinuationStart) { (starts {{ HoldingContinuationStart | mjoDate }}) }
                                 </button>
                                 <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-new"
@@ -459,14 +480,17 @@ interface RemoteOperationRouter {
                                         [attr.aria-pressed]="Working.SubscriptionAction === 'CreateNew'"
                                         [disabled]="IsLocked" [title]="BlockedReason"
                                         (click)="SetSubscriptionAction('CreateNew')">
-                                    New subscription (keeps this line's dates)
+                                    Create new subscription
+                                    @if (HasExplicitTermStart) { (starts {{ TermStartInput | mjoDate }}) } @else { (keeps this line's dates) }
                                 </button>
                             </div>
                             <small class="mjs-le__hint" [class.mjs-le__error]="!Working.SubscriptionAction">
                                 @if (Working.SubscriptionAction === 'CreateNew') {
-                                    Starts a separate subscription on this line's term start.
+                                    Creates a new subscription for this customer, separate from
+                                    {{ holding.SubscriptionNumber }}, on this line's term start.
                                 } @else if (Working.SubscriptionAction === 'ExtendExisting') {
-                                    Adds a term to {{ holding.SubscriptionNumber }}, starting the day after its coverage ends.
+                                    Adds this line to {{ holding.SubscriptionNumber }} as its next term, starting the day
+                                    after its coverage ends.
                                 } @else {
                                     Not chosen. Close Won asks for this, unless the deal is a renewal, which adds it as the next term.
                                 }
@@ -643,6 +667,12 @@ interface RemoteOperationRouter {
         }
         .mjs-le__confirm { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
         .mjs-le__label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .mjs-le__company-only {
+            display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+            font-size: var(--mj-text-xs); color: var(--mj-text-secondary); cursor: pointer; user-select: none;
+        }
+        .mjs-le__field .mjs-le__company-only input { padding: 0; margin: 0; width: auto; cursor: inherit; }
+        .mjs-le__company-only.is-disabled { color: var(--mj-text-muted); cursor: not-allowed; }
         .mjs-le__unit {
             display: inline-flex; border: 1px solid var(--mj-border-default);
             border-radius: var(--mj-radius-md, 8px); overflow: hidden;
@@ -713,6 +743,13 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     public PickerResults: ProductLookup[] = [];
     /** How many matches are past the list's cap — named so the rep knows to keep typing. */
     public PickerHidden = 0;
+    /**
+     * "Only selling company products". Checked on open, so a rep sees the deal's company's catalogue
+     * first; unchecking it offers every company's products for a multi-company deal.
+     */
+    public SellingCompanyOnly = true;
+    /** Search matches the checkbox hides, so the list can say they exist. Zero with nothing typed. */
+    public PickerHiddenByCompany = 0;
     /** How many Draft products match the search; the picker hides them, and the note says so (golive#433). */
     public DraftMatches = 0;
     /** Orders' Draft products, matched against the search for {@link DraftMatches}; never offered. */
@@ -1036,8 +1073,21 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.cdr.detectChanges();
     }
 
+    public OnSellingCompanyOnlyChange(checked: boolean): void {
+        this.SellingCompanyOnly = checked;
+        if (this.PickerOpen) this.rankPicker(this.rankedQuery);
+    }
+
     private rankPicker(query: string): void {
-        const ranked = RankDealProducts(this.Products, query, this.Deal?.CompanyID ?? null);
+        const dealCompanyID = this.Deal?.CompanyID ?? null;
+        const offered = this.SellingCompanyOnly ? KeepDealCompanyProducts(this.Products, dealCompanyID) : this.Products;
+        const ranked = RankDealProducts(offered, query, dealCompanyID);
+        // Counted only for a typed search: with nothing typed, "N other products" says nothing about
+        // what the rep is looking for.
+        this.PickerHiddenByCompany =
+            query.trim() && offered.length < this.Products.length
+                ? RankDealProducts(this.Products, query, null).length - ranked.length
+                : 0;
         this.PickerResults = ranked.slice(0, MJSDealLineEditorComponent.PickerLimit);
         this.PickerHidden = ranked.length - this.PickerResults.length;
         this.rankedQuery = query;
@@ -1425,7 +1475,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     }
 
     /**
-     * Whether Term start shows the continuation start instead of an input: "Add as next term" is
+     * Whether Term start shows the continuation start instead of an input: "Renew" is
      * chosen and the start is known. Orders' `SubscriptionBehavior.Decide` starts an extension at the
      * end of the existing coverage over any stated start, so an editable date here would be ignored.
      */
