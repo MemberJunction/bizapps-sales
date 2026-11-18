@@ -5,7 +5,7 @@ import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
 import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
 
 import { SelectForAudience, type CompanyGroup, type DigestAudience } from './audience.js';
-import { LoadLapsedDeals, type LapsedDealsResult } from './lapsed-deals.js';
+import { LoadLapsedDeals, MAX_DEALS_PER_RUN, type LapsedDealsResult } from './lapsed-deals.js';
 import { LoadDigestRecipients, type DigestRecipient } from './recipients.js';
 import { RenderDigest } from './render.js';
 import { ReadSalesSetting, ResolveSender } from './sender.js';
@@ -163,6 +163,14 @@ export async function RunLapsedCloseDateDigest(contextUser: UserInfo, options: D
         const deals = await LoadLapsedDeals(contextUser, today);
         result.TotalLapsedDeals = deals.Deals.length;
         result.Truncated = deals.Truncated;
+        if (deals.Truncated) {
+            // Loud on purpose. The read is ordered by company, so a cut drops later companies WHOLESALE, and
+            // their leaders then look exactly like a company with nothing lapsed (counted in SkippedEmpty).
+            result.Errors.push(`The lapsed-deal read hit its cap (${MAX_DEALS_PER_RUN} deals requested, or fewer returned because the `
+                + 'entity caps its views), so the list is incomplete. It is ordered by company, so companies later in the '
+                + 'alphabet may be missing entirely, and their company-leader recipients will have been skipped as '
+                + 'having nothing lapsed rather than mailed. Treat this run as unreliable.');
+        }
 
         const audiences = await loadAudiences(contextUser);
         const recipients = await LoadDigestRecipients(contextUser);
@@ -189,6 +197,7 @@ export async function RunLapsedCloseDateDigest(contextUser: UserInfo, options: D
 }
 
 function finish(result: DigestRunResult): DigestRunResult {
-    result.Success = result.Errors.length === 0;
+    // A truncated run cannot claim "these are your lapsed deals", so it never reports success.
+    result.Success = result.Errors.length === 0 && !result.Truncated;
     return result;
 }

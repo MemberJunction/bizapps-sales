@@ -694,6 +694,34 @@ describe('RunLapsedCloseDateDigest', () => {
         expect(callsOn(calls, 'MJ_BizApps_Sales: Deals')).toHaveLength(1);
     });
 
+    it('reports Success false on a truncated run even when every send succeeded', async () => {
+        // The point of the combination: zero send failures, yet the run must still alert someone.
+        const { runAction } = setup(runWorld({ dealsTotalRowCount: 9999 }));
+        const out = await RunLapsedCloseDateDigest(user);
+        expect(runAction).toHaveBeenCalledTimes(4);
+        expect(out.Sent).toBe(4);
+        expect(out.Truncated).toBe(true);
+        expect(out.Success).toBe(false);
+    });
+
+    it('adds one error on a truncated run, naming the cap, the company ordering and the skipped leaders', async () => {
+        setup(runWorld({ dealsTotalRowCount: 9999 }));
+        const out = await RunLapsedCloseDateDigest(user);
+        const truncation = out.Errors.filter((e) => e.includes('hit its cap'));
+        expect(truncation).toHaveLength(1);
+        expect(truncation[0]).toContain(String(MAX_DEALS_PER_RUN));
+        expect(truncation[0]).toContain('ordered by company');
+        expect(truncation[0]).toContain('company-leader');
+        expect(out.Errors).toHaveLength(1);
+    });
+
+    it('adds no truncation error and stays successful when the read was complete', async () => {
+        setup();
+        const out = await RunLapsedCloseDateDigest(user);
+        expect(out.Errors).toEqual([]);
+        expect(out.Success).toBe(true);
+    });
+
     it('reports failure and sends nothing when the deal read fails, naming the reason', async () => {
         const { runAction } = setup(runWorld({ dealsFail: true }));
         const out = await RunLapsedCloseDateDigest(user);
