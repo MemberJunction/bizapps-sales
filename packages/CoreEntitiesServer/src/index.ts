@@ -140,6 +140,12 @@ export * from './finance-exceptions/WonDealOrderDetector.js';
  */
 export * from './pipelines/LinkDefaultPipeline.js';
 
+/**
+ * OFFBOARDING (golive #297). What a departed user holds in sales and moving it to a successor; the
+ * `Sales.ListOffboardingHoldings` and `Sales.ReassignOffboardingHoldings` Actions call these.
+ */
+export * from './offboarding/OffboardingHoldings.js';
+
 import { LoadActivitySyncEngine } from '@mj-biz-apps/common-activity-sync';
 import { DealEntityServer } from './DealEntityServer.js';
 import { DealTeamMemberEntityServer } from './DealTeamMemberEntityServer.js';

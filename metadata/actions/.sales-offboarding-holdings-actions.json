@@ -1,0 +1,196 @@
+[
+  {
+    "_comments": [
+      "OFFBOARDING (golive #297). Its own file for the same coordination reason as `.sales-forecast-actions.json`:",
+      "MetadataSync reads every dot-json here, so separate files do not conflict.",
+      "",
+      "Both Actions sit in common's \"Offboarding Holdings\" category; common's Offboarding screen runs every active",
+      "Action in it, so this app needs no compile-time link to common's screen. The category lookup resolves only",
+      "once a common release carrying that category is installed."
+    ],
+    "fields": {
+      "Name": "Sales: List Offboarding Holdings",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Offboarding Holdings",
+      "Description": "List the open sales responsibility a departed user holds: open deals they own, their seats on open deal teams, the sales accounts and contacts they own, and pipelines whose close-won tasks go to them. Closed deals and history are not listed. Each row says whether the caller (the leaver's supervisor or a Sales Admin) may reassign it.",
+      "Type": "Custom",
+      "DriverClass": "Sales.ListOffboardingHoldings",
+      "IconClass": "fa-solid fa-user-minus",
+      "UserPrompt": "List the sales items a departed user still holds.",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "9F2303B5-8F9E-45B8-9C23-B854CB3B1784"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "LeaverUserID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "The departed user's MJ User ID. Give this, LeaverEmployeeID, or both; the other is resolved through MJ: Users.EmployeeID."
+          },
+          "primaryKey": {
+            "ID": "DCF9B18D-A274-4153-9625-3DFD0C3081C6"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "LeaverEmployeeID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "The departed user's MJ Employee ID. Give this, LeaverUserID, or both."
+          },
+          "primaryKey": {
+            "ID": "39F18DA0-BBA7-4DC9-A972-D2667DCC6A80"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Holdings",
+            "Type": "Output",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "JSON array of holdings: App, Domain, Kind, KindLabel, EntityName, RecordID, Label, CanReassign, Note."
+          },
+          "primaryKey": {
+            "ID": "2F1DEABF-0B4F-4C16-9D38-B3745BF87FF7"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "_comments": [
+      "OFFBOARDING (golive #297). See the List action above for the category note.",
+      "",
+      "Saves run as the caller, one record at a time, through each entity's own Save, so the deal's owner stamp,",
+      "team-role rules and entity permissions apply. A refused save is reported in Skipped, never bypassed."
+    ],
+    "fields": {
+      "Name": "Sales: Reassign Offboarding Holdings",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Offboarding Holdings",
+      "Description": "Move a departed user's open sales responsibility to a successor: deal ownership, deal team seats, sales account and contact ownership, and pipeline close-won assignee. Only the leaver's supervisor or a Sales Admin may move them; the server re-checks this per item. History is never rewritten. Refusals are reported in Skipped.",
+      "Type": "Custom",
+      "DriverClass": "Sales.ReassignOffboardingHoldings",
+      "IconClass": "fa-solid fa-people-arrows",
+      "UserPrompt": "Move a departed user's sales items to their successor.",
+      "CodeApprovalStatus": "Approved",
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "E5FF58E5-0AD7-4D6E-8A7D-AE3A6745C1D6"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "LeaverUserID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "The departed user's MJ User ID. Give this, LeaverEmployeeID, or both; the other is resolved through MJ: Users.EmployeeID."
+          },
+          "primaryKey": {
+            "ID": "CEDFFF42-C777-4BC8-B5DE-33B57A90D9D6"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "LeaverEmployeeID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "The departed user's MJ Employee ID. Give this, LeaverUserID, or both."
+          },
+          "primaryKey": {
+            "ID": "679CA3E8-3981-409A-8923-B518D7D663BA"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "SuccessorUserID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "The MJ User ID of the successor. Must be active and not the leaver; deal, account and contact items need the successor to have an Employee."
+          },
+          "primaryKey": {
+            "ID": "716DAAB3-FE89-4EA9-A14B-BC4FDDE85D15"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Kinds",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Optional JSON array of Kind codes to move (DEAL_OWNER, DEAL_TEAM_MEMBER, ACCOUNT_OWNER, CONTACT_OWNER, PIPELINE_CLOSE_WON_ASSIGNEE). Empty means all."
+          },
+          "primaryKey": {
+            "ID": "CE237A9C-16EE-42D4-B4BA-0FE4AF151B36"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "RecordIDs",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Optional JSON array of record IDs to move. Empty means all."
+          },
+          "primaryKey": {
+            "ID": "E276375E-A3F2-4000-BA04-F20C3A84B957"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Moved",
+            "Type": "Output",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "How many records moved."
+          },
+          "primaryKey": {
+            "ID": "C33F326E-40C6-4563-BF36-7B8F74273ACC"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Skipped",
+            "Type": "Output",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "JSON array of items not moved: Kind, EntityName, RecordID, Reason."
+          },
+          "primaryKey": {
+            "ID": "4C2CE0D4-2559-4664-B6DF-306846091139"
+          }
+        }
+      ]
+    }
+  }
+]

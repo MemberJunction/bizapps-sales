@@ -27,6 +27,7 @@ import { LoadLogActivityAction } from './custom/log-activity.action.js';
 import { LoadDetectWonDealsWithUnconfirmedOrdersAction } from './custom/won-deal-order-detector.action.js';
 import { LoadRelinkWonDealOrdersToContractsAction } from './custom/contract-order-relink.action.js';
 import { LoadLinkDefaultPipelineToCompaniesAction } from './custom/link-default-pipeline.action.js';
+import { LoadOffboardingHoldingsActions } from './custom/offboarding-holdings.action.js';
 
 // Import generated GraphQL resolvers
 import './generated/generated.js';
@@ -102,6 +103,7 @@ export function LoadBizAppsSalesServer(): void {
     LoadDetectWonDealsWithUnconfirmedOrdersAction();
     LoadRelinkWonDealOrdersToContractsAction();
     LoadLinkDefaultPipelineToCompaniesAction();
+    LoadOffboardingHoldingsActions();
 
     // Referenced so the manifest import is not elided; MJ reads it during registration.
     void CLASS_REGISTRATIONS;
@@ -124,3 +126,8 @@ export {
     LinkDefaultPipelineToCompaniesAction,
     LoadLinkDefaultPipelineToCompaniesAction,
 } from './custom/link-default-pipeline.action.js';
+export {
+    ListOffboardingHoldingsAction,
+    ReassignOffboardingHoldingsAction,
+    LoadOffboardingHoldingsActions,
+} from './custom/offboarding-holdings.action.js';
