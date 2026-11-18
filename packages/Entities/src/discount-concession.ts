@@ -147,10 +147,12 @@ export function LargestStandingConcessionValue(rows: readonly LineConcessionRow[
 export type LineConcessionState =
     /** No discount, or one orders does not value: nothing to say. */
     | 'NotNeeded'
-    /** An Approved concession is the line's latest decision. */
+    /** An Approved concession is the line's latest decision, and covers the line's current discount. */
     | 'Approved'
     | 'Pending'
     | 'Rejected'
+    /** An earlier Pending or Approved concession covers less than orders' current priced discount (#510). */
+    | 'NotCovered'
     /** Discounted, orders values it, and no concession was ever recorded (or orders refused it). */
     | 'NotRecorded'
     /** Discounted with no concession, and whether orders values the line is not known. */
@@ -159,20 +161,33 @@ export type LineConcessionState =
 /**
  * The state of a line's concession, from the rows orders stored for it.
  *
- * A Pending one wins: it is the newest request (recording a new one withdraws a Pending earlier one).
- * Otherwise the latest decision decides, so a raise an approver rejected shows as Rejected even when an
- * earlier, smaller one was approved. A recording orders refused leaves no row, so it reads as Not
- * recorded.
+ * A Pending one wins when its covered value meets or exceeds orders' current priced discount: it is the
+ * newest request (recording a new one withdraws a Pending earlier one). Otherwise the latest decision
+ * decides, so a raise an approver rejected shows as Rejected even when an earlier, smaller one was
+ * approved. When a raised discount's new concession was refused by orders (leaving no new row) and an
+ * earlier Approved or Pending concession covers less than orders' current priced discount (`DiscountValue`),
+ * the line reports `'NotCovered'` (#510). A recording orders refused with no earlier row leaves no row,
+ * so it reads as Not recorded.
  */
 export function ResolveLineConcessionState(input: {
     DiscountPct: number | null | undefined;
     Rows: readonly LineConcessionRow[];
     OrdersValuesLine: boolean | null;
+    /** Orders' priced discount for the line as it now stands; null/undefined when not known (#510). */
+    DiscountValue?: number | null;
 }): LineConcessionState {
     if (!(Number(input.DiscountPct ?? 0) > FRACTION_TOLERANCE)) return 'NotNeeded';
-    if (input.Rows.some(ConcessionIsPending)) return 'Pending';
+    const covered = LargestStandingConcessionValue(input.Rows);
+    const shortOfCurrentDiscount =
+        input.DiscountValue !== null && input.DiscountValue !== undefined && input.DiscountValue > covered;
+    if (input.Rows.some(ConcessionIsPending)) {
+        return shortOfCurrentDiscount ? 'NotCovered' : 'Pending';
+    }
     const latest = [...input.Rows].sort((a, b) => createdAt(b) - createdAt(a))[0];
-    if (latest) return ConcessionWasRejected(latest) ? 'Rejected' : 'Approved';
+    if (latest) {
+        if (ConcessionWasRejected(latest)) return 'Rejected';
+        return shortOfCurrentDiscount ? 'NotCovered' : 'Approved';
+    }
     if (input.OrdersValuesLine === false) return 'NotNeeded';
     return input.OrdersValuesLine === null ? 'Unknown' : 'NotRecorded';
 }

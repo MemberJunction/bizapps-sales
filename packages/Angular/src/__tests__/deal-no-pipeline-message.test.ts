@@ -29,13 +29,13 @@ function state(overrides: Partial<NoPipelineState> = {}): NoPipelineState {
 describe('the no-pipeline message', () => {
     it('names a company with no pipeline and offers another company or an admin', () => {
         expect(NoPipelineMessage(state())).toBe(
-            'Bare Co has no pipeline, so this deal can\'t be saved. Choose another company, or ask a Sales admin to link a pipeline to Bare Co.',
+            'Bare Co has no pipeline, so this deal can\'t be saved. Choose another company, or please ask a Sales admin to link a pipeline to Bare Co.',
         );
     });
 
     it('offers only the admin when no other company has a pipeline', () => {
         expect(NoPipelineMessage(state({ OtherCompanyHasPipeline: false }))).toBe(
-            'Bare Co has no pipeline, so this deal can\'t be saved. Ask a Sales admin to link a pipeline to Bare Co.',
+            'Bare Co has no pipeline, so this deal can\'t be saved. Please ask a Sales admin to link a pipeline to Bare Co.',
         );
     });
 

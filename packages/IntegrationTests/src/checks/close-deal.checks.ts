@@ -3523,7 +3523,93 @@ export const CloseDealChecks: NamedCheck[] = [
     },
     {
         Id: 'close-deal.CD44',
-        Name: 'CD44: no one is removed from a closed deal\'s team, by either delete path, until it is reopened',
+        Name: 'CD44: direct saves writing close stamps are refused, status-driven closes stamp them, and deactivating the locking status does not prevent reopen (#439, #461)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                const f = await ResolveSalesFixture(ctx);
+                const dealID = await openDeal(
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD44 close-stamp guard',
+                );
+                const md = new Metadata();
+
+                for (const [field, value] of [
+                    ['ClosedAt', new Date('2026-08-01T12:00:00Z')],
+                    ['ActualCloseDate', new Date('2026-08-01T00:00:00Z')],
+                    ['ClosedByUserID', ctx.User.ID],
+                ] as const) {
+                    const attempt = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                    Assert(await attempt.Load(dealID), `the open deal loads before setting ${field}`);
+                    attempt.Set(field, value);
+                    Assert(
+                        !(await attempt.Save()),
+                        `a direct save setting ${field} outside Sales.CloseDeal must be refused`,
+                    );
+                }
+
+                const viaStatus = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await viaStatus.Load(dealID), 'the open deal loads for a status-driven close');
+                viaStatus.DealStatusTypeID = f.WonStatusID;
+                Assert(
+                    await viaStatus.Save(),
+                    `a status-driven close must succeed: ${viaStatus.LatestResult?.CompleteMessage ?? ''}`,
+                );
+
+                const stamped = await TxOne<{
+                    ClosedAt: Date | null;
+                    ActualCloseDate: Date | null;
+                    ClosedByUserID: string | null;
+                }>(
+                    ctx,
+                    `SELECT ClosedAt, ActualCloseDate, ClosedByUserID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(stamped.ClosedAt !== null, 'status-driven close stamped ClosedAt');
+                Assert(stamped.ActualCloseDate !== null, 'status-driven close stamped ActualCloseDate');
+                AssertEqual(
+                    String(stamped.ClosedByUserID ?? '').toLowerCase(),
+                    String(ctx.User.ID).toLowerCase(),
+                    'status-driven close stamped ClosedByUserID',
+                );
+
+                // Deactivate the locking status and verify ReopenDeal still unlocks and clears close stamps (#461).
+                const db = ctx.Provider as unknown as {
+                    ExecuteSQL: (
+                        sql: string,
+                        params: Record<string, unknown>,
+                        options: { isMutation: boolean; description: string },
+                        user: unknown,
+                    ) => Promise<unknown>;
+                };
+                await db.ExecuteSQL(
+                    `UPDATE ${SALES_SCHEMA}.DealStatusType SET IsActive = 0 WHERE ID = '${f.WonStatusID}'`,
+                    {},
+                    { isMutation: true, description: 'CD44 deactivate won status' },
+                    ctx.User,
+                );
+
+                const out = await reopen(ctx, {
+                    DealID: dealID,
+                    Reason: 'CD44: reopen while locking status is inactive (#461).',
+                });
+                Assert(out.Success, `reopen with inactive locking status failed — ${JSON.stringify(out.Issues)}`);
+                Assert(out.Unlocked, 'reopen reports Unlocked');
+
+                const reopened = await TxOne<{
+                    ClosedAt: Date | null;
+                    ActualCloseDate: Date | null;
+                    ClosedByUserID: string | null;
+                }>(
+                    ctx,
+                    `SELECT ClosedAt, ActualCloseDate, ClosedByUserID FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                Assert(reopened.ClosedAt === null, 'reopen cleared ClosedAt');
+                Assert(reopened.ActualCloseDate === null, 'reopen cleared ActualCloseDate');
+                Assert(reopened.ClosedByUserID === null, 'reopen cleared ClosedByUserID');
+            }),
+    },
+    {
+        Id: 'close-deal.CD45',
+        Name: 'CD45: no one is removed from a closed deal\'s team, by either delete path, until it is reopened',
         RequiresMutation: true,
         Fn: async (ctx) =>
             InRolledBackTransaction(ctx, async () => {
@@ -3538,7 +3624,7 @@ export const CloseDealChecks: NamedCheck[] = [
                  */
                 const f = await ResolveSalesFixture(ctx);
                 const dealID = await openDeal(
-                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD44 team removal under lock',
+                    ctx, f, f.OrderOnlyPolicyPipelineID, f.OrderOnlyPolicyStageID, 'CD45 team removal under lock',
                 );
                 const memberID = await addSupportingMember(ctx, f, dealID);
                 const rosterBeforeClose = await teamCount(ctx, dealID);
@@ -3572,7 +3658,7 @@ export const CloseDealChecks: NamedCheck[] = [
                 AssertEqual(await memberCount(ctx, memberID), 1, 'and the row is still there');
 
                 // ── THE CONTROL: reopened, the same delete goes through ────────────────────────
-                const reopened = await reopen(ctx, { DealID: dealID, Reason: 'CD44: reopening to correct the team.' });
+                const reopened = await reopen(ctx, { DealID: dealID, Reason: 'CD45: reopening to correct the team.' });
                 Assert(reopened.Success, `the reopen failed — ${JSON.stringify(reopened.Issues)}`);
                 // golive#465's first requirement: the reopen itself deletes no team row. The reported
                 // failure was a team-row delete during a reopen, so a reopen that passed by removing

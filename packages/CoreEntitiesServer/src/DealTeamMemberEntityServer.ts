@@ -64,13 +64,15 @@ import {
 import { RegisterClass, UUIDsEqual } from '@memberjunction/global';
 import { DealTeamMemberEntity } from '@mj-biz-apps/sales-entities';
 import { DealEntityServer, type OwnerSeatCandidate } from './DealEntityServer.js';
+import {
+    type DealRoleRules,
+    OwnerWithoutEmployeeRefusal,
+    PersistedDuplicateRoleRefusal,
+    ReadDealRoleRules,
+} from './team-role-rules.js';
 
 const DEAL_TEAM_MEMBER_ENTITY = 'MJ_BizApps_Sales: Deal Team Members';
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
-const DEAL_ROLE_ENTITY = 'MJ_BizApps_Sales: Deal Roles';
-
-/** The `DealRole` columns the save checks read. */
-type DealRoleRules = { Name: string | null; AllowsMultiplePerDeal: boolean | null; IsOwnerRole: boolean | null };
 
 @RegisterClass(BaseEntity, DEAL_TEAM_MEMBER_ENTITY)
 export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
@@ -195,28 +197,20 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
     }
 
     /**
+     * Deletes this team row without re-saving the parent deal to refresh its owner stamp. Used by
+     * `DealEntityServer.Delete()` when the deal itself is being deleted in the same transaction.
+     */
+    public async DeleteWithoutRestamp(options?: EntityDeleteOptions): Promise<boolean> {
+        return super.Delete(options);
+    }
+
+    /**
      * The role this row names, read once for both role checks. NULL when the row names no role or the
      * role row cannot be found; a failed READ throws, and `Save` turns that into a refusal.
      */
     private async readRole(): Promise<DealRoleRules | null> {
-        const roleID = this.DealRoleID;
-        if (!roleID) {
-            return null;
-        }
         const view = this.ProviderToUse as unknown as IRunViewProvider;
-        const roleRead = await view.RunView<DealRoleRules>(
-            {
-                EntityName: DEAL_ROLE_ENTITY,
-                ExtraFilter: `ID = '${roleID}'`,
-                ResultType: 'simple',
-                Fields: ['Name', 'AllowsMultiplePerDeal', 'IsOwnerRole'],
-            },
-            this.ContextCurrentUser,
-        );
-        if (!roleRead.Success) {
-            throw new Error(`could not read the deal role: ${roleRead.ErrorMessage}`);
-        }
-        return (roleRead.Results ?? [])[0] ?? null;
+        return ReadDealRoleRules(this.DealRoleID, view, this.ContextCurrentUser);
     }
 
     /**
@@ -231,14 +225,7 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
      * Read from `DealRole.IsOwnerRole`, the same flag the stamp resolves the owner role by.
      */
     private ownerWithoutEmployeeRefusal(role: DealRoleRules | null): string | null {
-        if (!role?.IsOwnerRole || this.EmployeeID) {
-            return null;
-        }
-        const roleName = role.Name ?? 'owner';
-        return (
-            `The ${roleName} must be an employee, because the deal's owner is read from the Employee field. `
-            + `Choose them in Employee and leave Person empty.`
-        );
+        return OwnerWithoutEmployeeRefusal(role, this.EmployeeID);
     }
 
     /**
@@ -254,45 +241,15 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
      * throws instead, and `Save` turns that into a refusal that names the lookup.
      */
     private async duplicateRoleRefusal(role: DealRoleRules | null): Promise<string | null> {
-        const dealID = this.DealID;
-        const roleID = this.DealRoleID;
-        // Truthy means the role admits several, which is the default for everything but Owner / AE.
-        if (!dealID || !roleID || !role || role.AllowsMultiplePerDeal) {
-            return null;
-        }
-
         const view = this.ProviderToUse as unknown as IRunViewProvider;
-
-        /**
-         * EXCLUDE SELF, or every later edit to the owner row refuses itself. `IsSaved` is the test
-         * rather than `ID`, because an unsaved row has no id to exclude and no row to collide with.
-         */
-        const notSelf = this.IsSaved && this.ID ? ` AND ID <> '${this.ID}'` : '';
-        const held = await view.RunView<{ Employee: string | null }>(
-            {
-                EntityName: DEAL_TEAM_MEMBER_ENTITY,
-                ExtraFilter: `DealID = '${dealID}' AND DealRoleID = '${roleID}'${notSelf}`,
-                ResultType: 'simple',
-                Fields: ['Employee'],
-            },
-            this.ContextCurrentUser,
-        );
-        if (!held.Success) {
-            throw new Error(`could not check the deal's existing ${role.Name ?? 'role'} rows: ${held.ErrorMessage}`);
-        }
-        const existing = (held.Results ?? [])[0];
-        if (!existing) {
-            return null;
-        }
-
-        // "someone in the X role" rather than "a X": the article would depend on the role name's first
-        // letter, and the seeded name reads "a Owner / AE".
-        const inRole = role.Name ? `the ${role.Name} role` : 'that role';
-        const who = existing.Employee ? ` (${existing.Employee})` : '';
-        return (
-            `This deal already has someone in ${inRole}${who}. Change that row's employee instead `
-            + `of adding a second one.`
-        );
+        return PersistedDuplicateRoleRefusal({
+            dealID: this.DealID,
+            roleID: this.DealRoleID,
+            role,
+            excludeMemberID: this.IsSaved && this.ID ? this.ID : null,
+            view,
+            user: this.ContextCurrentUser,
+        });
     }
 
     /**
