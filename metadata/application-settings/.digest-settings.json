@@ -5,7 +5,8 @@
       "each is a host's own choice (its URL, its sender, its provider) and none has a default that is",
       "right for every host. The rows exist so a host sees them in Application Settings and fills them",
       "in. Each is read as blank-after-trim meaning unset. Primary keys are fixed so a host's edit",
-      "updates THIS row rather than creating a second one."
+      "updates THIS row rather than creating a second one.",
+      "A metadata push or release upgrade does not overwrite a Value a host has filled in: the consolidated Metadata_Sync inserts rows only when absent. That is the current release pattern, not a guarantee for all time."
     ],
     "fields": {
       "ApplicationID": "@lookup:MJ: Applications.Name=Sales",
@@ -22,7 +23,7 @@
       "ApplicationID": "@lookup:MJ: Applications.Name=Sales",
       "Name": "DigestFromAddress",
       "Value": "",
-      "Comments": "The fallback sender address for the digest, used for a recipient whose company has no CompanySenderIdentity. Blank means a send to such a recipient fails: the run records the error for that recipient and carries on with the others."
+      "Comments": "The fallback sender address for the digest, used for a recipient whose company has no CompanySenderIdentity. Blank means a send to such a recipient fails: the run records the error for that recipient and carries on with the others. The address must be one the configured provider is permitted to send as; a rejected sender fails the send."
     },
     "primaryKey": {
       "ID": "274BFCF7-FFBD-4901-9960-80B8906B1611"

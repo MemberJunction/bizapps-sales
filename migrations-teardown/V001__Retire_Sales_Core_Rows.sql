@@ -9,7 +9,7 @@
 -- schema. Without this file they survive a remove, and the next install re-INSERTs the same fixed
 -- UUIDs and fails on a primary-key collision. That is the whole reason the file exists.
 --
--- WHAT IS LISTED BELOW IS ONLY THE ROOTS -- 38 rows, the ones the seed creates that nothing else
+-- WHAT IS LISTED BELOW IS ONLY THE ROOTS -- the ones the seed creates that nothing else
 -- creates. Their children are NOT listed, because listing them is what breaks: a static delete
 -- list only orders rows the SEED made, while a real installation also holds runtime children
 -- (action execution logs, scheduled-job runs, query permissions, tasks) that a pristine canary
@@ -117,13 +117,18 @@ INSERT INTO #SalesDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'ScheduledJob',            '5A1E5000-0000-4000-8000-000000000202', 0),  -- Sales -- Forecast Snapshot (daily)
     ('${mjSchema}', 'ScheduledJob',            'FEB6F8D5-17B0-4AE6-BD8A-F0495F7CE36F', 0),  -- Sales -- Won Deals With Unconfirmed Orders (nightly)
     ('${mjSchema}', 'ScheduledJob',            'B1E51D67-B681-40F7-A2AD-FF84D2C2A6EC', 0),  -- Sales -- Relink Won Deal Orders To Contracts (daily)
-    -- Lapsed Close Date Digest: the agent and its weekly job. AIAgentRun follows the agent on the NOT
-    -- NULL branch (and ScheduledJobRun the job), which is an intended loss of run history. Deliberately
-    -- NOT listed: the three digest Application Settings (ApplicationSetting.ApplicationID is NOT NULL
-    -- and the Sales Application row is already a root, so they follow automatically) and the Deal
-    -- Digest entity permissions (`mj app remove` walks those out from this app's __mj.Entity rows).
+    -- Lapsed Close Date Digest: the agent, its weekly job and its three Application Settings.
+    -- AIAgentRun follows the agent on the NOT NULL branch (and ScheduledJobRun the job), which is an
+    -- intended loss of run history. The settings MUST be listed: ApplicationSetting.ApplicationID is
+    -- NULLABLE, so the engine would null it rather than delete the row, and a NULL ApplicationID is a
+    -- GLOBAL setting -- three orphaned rows would stay behind as global defaults carrying whatever the
+    -- host typed, and a reinstall would find them by ID and skip them. Deliberately NOT listed: the
+    -- Deal Digest entity permissions (`mj app remove` walks those out from this app's __mj.Entity rows).
     ('${mjSchema}', 'AIAgent',                 'D5306AEA-0736-47C8-8B69-480389857481', 0),  -- Sales -- Lapsed Close Date Digest
     ('${mjSchema}', 'ScheduledJob',            '67069328-7126-4A91-8647-E58FA49A062B', 0),  -- Sales -- Lapsed Close Date Digest (weekly)
+    ('${mjSchema}', 'ApplicationSetting',      '1B6FDB10-DB2F-41FE-8376-5A24DA469E46', 0),  -- ExplorerBaseUrl
+    ('${mjSchema}', 'ApplicationSetting',      '274BFCF7-FFBD-4901-9960-80B8906B1611', 0),  -- DigestFromAddress
+    ('${mjSchema}', 'ApplicationSetting',      'E001A9EB-E1EB-40C8-9629-E9E19C7A5159', 0),  -- DigestProvider
     -- bizapps-tasks task types. NOT in our schema and not in core -- the seed reaches into a
     -- SIBLING app's schema, which is why that schema appears in the walk below. See the
     -- consequence noted in the header: `Task.TypeID` is NOT NULL.
