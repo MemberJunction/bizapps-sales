@@ -107,7 +107,7 @@ export function DealDeleteRefusal(facts: DealDeleteFacts, dealName: string): str
         return `${deal} was not deleted: deleting a deal needs the Sales User or Sales Admin role.`;
     }
     if (facts.Scope === 'own' && !ownsDeal(facts)) {
-        return `${deal} was not deleted: the Sales User role can delete only deals you own. Ask a Sales Admin to delete it.`;
+        return `${deal} was not deleted: the Sales User role can delete only deals you own. Please request this from a Sales Admin.`;
     }
     if (facts.ClosedNow) {
         return `${deal} was not deleted: it is closed. A closed deal cannot be deleted.`;
