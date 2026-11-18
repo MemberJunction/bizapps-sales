@@ -265,6 +265,12 @@ importers:
         specifier: ^6.31.0
         version: link:../Entities
     devDependencies:
+      '@memberjunction/actions':
+        specifier: 6.2.1
+        version: 6.2.1
+      '@memberjunction/actions-base':
+        specifier: 6.2.1
+        version: 6.2.1
       '@memberjunction/core':
         specifier: ^6.2.1
         version: 6.2.1

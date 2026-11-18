@@ -54,6 +54,8 @@ export * from './PipelineEntityServer.js';
 export * from './DealStageEventEntityServer.js';
 export * from './DealDigestRecipientEntityServer.js';
 export * from './digest/recipients.js';
+/** The digest's public surface: the run and its option and result types. The query, sender and render modules stay internal. */
+export { RunLapsedCloseDateDigest, type DigestRunOptions, type DigestRunResult, type RenderedEmail } from './digest/run.js';
 export * from './CloseDealOperation.js';
 
 /** `Sales.RecordDiscountConcession`: a deal line's raised discount, recorded where orders' rules run (golive#340). */
