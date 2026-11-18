@@ -19,12 +19,18 @@
     }
   },
   {
+    "_comments": [
+      "Sales Admin can ADD an audience row (CanCreate) and change one (CanUpdate): a new audience or a",
+      "different threshold is a row, not a deploy, and MJ has no owner bypass, so without these only",
+      "CodeGen's Developer and Integration defaults could do it. Sales Admin still cannot delete one:",
+      "the four shipped rows are vocabulary. Do not edit those four; add your own audience row instead."
+    ],
     "fields": {
       "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Digest Audience Types",
       "RoleID": "@lookup:MJ: Roles.Name=Sales Admin",
-      "CanCreate": false,
+      "CanCreate": true,
       "CanRead": true,
-      "CanUpdate": false,
+      "CanUpdate": true,
       "CanDelete": false
     },
     "primaryKey": {
