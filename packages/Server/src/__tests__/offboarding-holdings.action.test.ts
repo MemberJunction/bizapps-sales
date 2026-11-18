@@ -40,6 +40,14 @@ afterEach(() => {
     reassign.mockReset();
 });
 
+describe('MJ run authorization', () => {
+    it('both classes declare AuthorizesCaller as their own static property, which is what MJ reads', () => {
+        for (const cls of [ListOffboardingHoldingsAction, ReassignOffboardingHoldingsAction]) {
+            expect(Object.getOwnPropertyDescriptor(cls, 'AuthorizesCaller')?.value).toBe(true);
+        }
+    });
+});
+
 describe('Sales.ListOffboardingHoldings', () => {
     it('passes the leaver ids and writes Holdings as a JSON string', async () => {
         list.mockResolvedValue({ Outcome: 'SUCCESS', Holdings: [{ Kind: 'DEAL_OWNER' }], Message: '1 sales item(s) held.' });

@@ -48,6 +48,13 @@ function failure(error: unknown, what: string): ActionResultSimple {
 
 @RegisterClass(BaseAction, 'Sales.ListOffboardingHoldings')
 export class ListOffboardingHoldingsAction extends BaseAction {
+    /**
+     * This class checks its caller itself: every read runs as the caller, so their entity permissions
+     * decide what is listed, and `CanReassign` reflects the supervisor / Sales Admin rule. MJ reads this
+     * as an OWN static property, so each class declares it.
+     */
+    public static override readonly AuthorizesCaller = true;
+
     protected async InternalRunAction(params: RunActionParams): Promise<ActionResultSimple> {
         try {
             const result = await ListSalesOffboardingHoldings(
@@ -64,6 +71,13 @@ export class ListOffboardingHoldingsAction extends BaseAction {
 
 @RegisterClass(BaseAction, 'Sales.ReassignOffboardingHoldings')
 export class ReassignOffboardingHoldingsAction extends BaseAction {
+    /**
+     * This class checks its caller itself: each item is re-checked on the server against the
+     * supervisor / Sales Admin rule, and saves run as the caller so entity permissions apply. MJ reads
+     * this as an OWN static property, so each class declares it.
+     */
+    public static override readonly AuthorizesCaller = true;
+
     protected async InternalRunAction(params: RunActionParams): Promise<ActionResultSimple> {
         try {
             const kinds = ParseStringList(inputValue(params, 'Kinds'));
