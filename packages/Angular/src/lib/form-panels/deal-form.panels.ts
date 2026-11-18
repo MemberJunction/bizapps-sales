@@ -1881,7 +1881,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                         <!-- A company with no pipeline is left out of the list, so say so: a rep
                              looking for one learns why it is missing and whom to ask. -->
                         <div class="mjs-hint" data-testid="deal-company-picker-note">
-                            Only companies with a pipeline are listed. Ask a Sales admin to link a pipeline to a missing company.
+                            Only companies with a pipeline are listed. Please ask a Sales admin to link a pipeline to a missing company.
                         </div>
                     </div>
                 }
