@@ -44,7 +44,13 @@ const TEMPLATE = {
 const ENTITIES = [
     { ID: 'deal-entity', Name: 'MJ_BizApps_Sales: Deals', SchemaName: '__mj_BizAppsSales', BaseTable: 'Deal', BaseView: 'vwDeals' },
     { ID: 'line-entity', Name: 'MJ_BizApps_Orders: Order Lines', SchemaName: '__mj_BizAppsOrders', BaseTable: 'OrderLine', BaseView: 'vwOrderLines' },
+    { ID: 'deal-company-entity', Name: 'MJ_BizApps_Sales: Deal Companies', SchemaName: '__mj_BizAppsSales', BaseTable: 'DealCompany', BaseView: 'vwDealCompanies' },
 ] as unknown as EntityInfo[];
+
+/** The Company filter for company-1 (golive #484): selling company, a listed company, or a line's company. */
+const COMPANY_1 =
+    "(CompanyID IN ('company-1') OR ID IN (SELECT DealID FROM [__mj_BizAppsSales].[vwDealCompanies] WHERE CompanyID IN ('company-1'))" +
+    " OR OrderID IN (SELECT OrderHeaderID FROM [__mj_BizAppsOrders].[vwOrderLines] WHERE CompanyID IN ('company-1')))";
 
 type BarElement = HTMLElement & { State?: SalesFilterBarState };
 
@@ -102,11 +108,11 @@ describe('All Deals and the filter bar', () => {
         const first = section.AllDealsView;
 
         section.ToggleFilter('CompanyIDs', 'company-1');
-        await vi.waitFor(() => expect(section.AllDealsView?.WhereClause).toBe("CompanyID IN ('company-1')"));
+        await vi.waitFor(() => expect(section.AllDealsView?.WhereClause).toBe(COMPANY_1));
         expect(section.AllDealsView, 'a new view, so the grid re-runs').not.toBe(first);
 
         section.ToggleFilter('OwnerEmployeeIDs', 'E1');
-        await vi.waitFor(() => expect(section.AllDealsView?.WhereClause).toBe("CompanyID IN ('company-1') AND OwnerEmployeeID IN ('E1')"));
+        await vi.waitFor(() => expect(section.AllDealsView?.WhereClause).toBe(`${COMPANY_1} AND OwnerEmployeeID IN ('E1')`));
 
         section.ClearFilter('CompanyIDs');
         section.ClearFilter('OwnerEmployeeIDs');
@@ -137,7 +143,7 @@ describe('All Deals and the filter bar', () => {
         const section = fixture.componentInstance;
 
         section.ToggleFilter('CompanyIDs', 'company-1');
-        await vi.waitFor(() => expect(section.AllDealsView?.WhereClause).toBe("CompanyID IN ('company-1')"));
+        await vi.waitFor(() => expect(section.AllDealsView?.WhereClause).toBe(COMPANY_1));
 
         const columns = (JSON.parse(section.AllDealsView?.GridState ?? '{}') as ReturnType<typeof DealPipelineGridState>).columnSettings;
         expect(columns.find((c) => c.Name === 'Pipeline')?.hidden).toBe(true);

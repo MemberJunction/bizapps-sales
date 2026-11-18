@@ -27,7 +27,10 @@
  */
 
 export interface DashboardFilters {
-    /** Selling companies, `Deal.CompanyID`. Empty is every company. */
+    /**
+     * Companies (golive #484): a deal matches when its selling company (`Deal.CompanyID`), one of its
+     * listed companies (`DealCompany`) or one of its lines' companies is selected. Empty is every company.
+     */
     CompanyIDs: readonly string[];
     /** Companies that own a product on the deal's lines, `OrderLine.CompanyID`. Empty is every deal. */
     ProductCompanyIDs: readonly string[];

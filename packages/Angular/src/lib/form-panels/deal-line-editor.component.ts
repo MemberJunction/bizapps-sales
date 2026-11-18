@@ -79,7 +79,7 @@
 import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, EventEmitter, Input, OnDestroy, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { A11yModule } from '@angular/cdk/a11y';
-import { Metadata } from '@memberjunction/core';
+import { Metadata, RunView } from '@memberjunction/core';
 import { UUIDsEqual } from '@memberjunction/global';
 import { FormsModule } from '@angular/forms';
 import {
@@ -106,8 +106,8 @@ import {
     MJOLinePricePickerComponent,
     type MJOExistingHolding,
 } from '@mj-biz-apps/orders-ng';
-import { CountDraftMatches, KeepDealCompanyProducts, RankDealProducts } from './deal-product-ranking';
-import type { DealEntity } from '@mj-biz-apps/sales-entities';
+import { CountDraftMatches, OtherCompanyMatchNote, RankDealProducts, SplitByDealCompanies } from './deal-product-ranking';
+import { RequiredDealCompanyIDs, type DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountAmountToPercent,
     DiscountFractionToPercent,
@@ -210,26 +210,15 @@ interface RemoteOperationRouter {
             } @else {
                 <div class="mjs-le__body">
                     <div class="mjs-le__field">
-                        <div class="mjs-le__label-row">
-                            <label class="mjs-le__label" for="mjs-le-product">Product</label>
-                            <!-- mousedown is cancelled so the product box keeps focus and an open list
-                                 re-filters in place instead of closing. -->
-                            <label class="mjs-le__company-only" data-testid="line-product-company-only"
-                                   [class.is-disabled]="!Deal?.CompanyID"
-                                   [attr.title]="Deal?.CompanyID ? null : 'Set the deal\\'s company to narrow the list to its products'"
-                                   (mousedown)="$event.preventDefault()">
-                                <input type="checkbox" [ngModel]="SellingCompanyOnly"
-                                       (ngModelChange)="OnSellingCompanyOnlyChange($event)"
-                                       [disabled]="!Deal?.CompanyID || IsLocked || ProductLockedByPrice" />
-                                Only selling company products
-                            </label>
-                        </div>
+                        <label class="mjs-le__label" for="mjs-le-product">Product</label>
                         <!-- A type-ahead over the catalogue, ranked by orders' RankCatalogMatches: a name that
                              starts with the text, then a SKU that does, then either containing it, with the
                              DEAL's company first within each (golive#360). Filtered by ProductFilterFor to
                              Active and to the availability window as of today IN THE BUSINESS TIME ZONE
-                             (#168), and NOT filtered by company: a deal may sell any company's product, and
-                             the LINE takes its company from whichever is chosen. Each row names its owner
+                             (#168), and narrowed to the deal's companies (golive #484): the companies on the
+                             deal form's Companies list, which always holds the billing company and every
+                             line's company. A search that matches other companies' products says how many.
+                             The LINE takes its company from the product chosen. Each row names its owner
                              because two companies can both sell an "Onboarding Fee". -->
                         <!-- Locked while the price is off its default: a pick belongs to one product's
                              rules, and carrying it onto another product would pin a price nobody chose. -->
@@ -263,15 +252,7 @@ interface RemoteOperationRouter {
                                     </button>
                                 } @empty {
                                     <div class="mjs-le__pick-empty">
-                                        {{ !Products.length ? 'No products to offer.'
-                                            : PickerHiddenByCompany ? 'No product from this deal\\'s company matches that.'
-                                            : 'No product matches that.' }}
-                                    </div>
-                                }
-                                @if (PickerHiddenByCompany > 0) {
-                                    <div class="mjs-le__pick-empty" data-testid="line-product-other-companies" role="status">
-                                        <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-                                        {{ PickerHiddenByCompany }} more from other companies. Uncheck "Only selling company products" to see them.
+                                        {{ Products.length ? 'No product matches that.' : 'No products to offer.' }}
                                     </div>
                                 }
                                 @if (PickerHidden > 0) {
@@ -281,6 +262,11 @@ interface RemoteOperationRouter {
                                 }
                                 <!-- golive#433: a new product starts as Draft and is not offered, so say when the
                                      search matches some, whether or not any Active product matches too. -->
+                                @if (OtherCompanyNote; as note) {
+                                    <div class="mjs-le__pick-empty" data-testid="line-product-other-companies" role="status">
+                                        <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ note }}
+                                    </div>
+                                }
                                 @if (DraftMatchNote; as note) {
                                     <div class="mjs-le__pick-empty" data-testid="line-product-drafts" role="status">
                                         <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ note }}
@@ -667,12 +653,6 @@ interface RemoteOperationRouter {
         }
         .mjs-le__confirm { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
         .mjs-le__label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-        .mjs-le__company-only {
-            display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
-            font-size: var(--mj-text-xs); color: var(--mj-text-secondary); cursor: pointer; user-select: none;
-        }
-        .mjs-le__field .mjs-le__company-only input { padding: 0; margin: 0; width: auto; cursor: inherit; }
-        .mjs-le__company-only.is-disabled { color: var(--mj-text-muted); cursor: not-allowed; }
         .mjs-le__unit {
             display: inline-flex; border: 1px solid var(--mj-border-default);
             border-radius: var(--mj-radius-md, 8px); overflow: hidden;
@@ -743,17 +723,14 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     public PickerResults: ProductLookup[] = [];
     /** How many matches are past the list's cap — named so the rep knows to keep typing. */
     public PickerHidden = 0;
-    /**
-     * "Only selling company products". Checked on open, so a rep sees the deal's company's catalogue
-     * first; unchecking it offers every company's products for a multi-company deal.
-     */
-    public SellingCompanyOnly = true;
-    /** Search matches the checkbox hides, so the list can say they exist. Zero with nothing typed. */
-    public PickerHiddenByCompany = 0;
     /** How many Draft products match the search; the picker hides them, and the note says so (golive#433). */
     public DraftMatches = 0;
     /** Orders' Draft products, matched against the search for {@link DraftMatches}; never offered. */
     private draftProducts: DraftProductLookup[] = [];
+    /** How many products of companies not on the deal match the search; the picker hides them (golive #484). */
+    public OtherCompanyMatches = 0;
+    /** The deal's companies: its list, its billing company and its lines' companies. Empty narrows nothing. */
+    private dealCompanyIDs: string[] = [];
     /** The text the list was last ranked by, so Draft rows that arrive later are counted against it. */
     private rankedQuery = '';
     /** Set on destroy, so a read that returns after the dialog closed does not touch its view. */
@@ -811,7 +788,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
 
             // Not awaited: the note is a hint, and the catalogue must not wait on it.
             void this.loadDraftProducts();
-            await this.loadProducts();
+            await Promise.all([this.loadProducts(), this.loadDealCompanies()]);
             await this.loadProductPriceLabels();
             this.OverrideKind = this.resolveOverrideKind();
 
@@ -1073,26 +1050,48 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.cdr.detectChanges();
     }
 
-    public OnSellingCompanyOnlyChange(checked: boolean): void {
-        this.SellingCompanyOnly = checked;
-        if (this.PickerOpen) this.rankPicker(this.rankedQuery);
-    }
-
     private rankPicker(query: string): void {
-        const dealCompanyID = this.Deal?.CompanyID ?? null;
-        const offered = this.SellingCompanyOnly ? KeepDealCompanyProducts(this.Products, dealCompanyID) : this.Products;
-        const ranked = RankDealProducts(offered, query, dealCompanyID);
-        // Counted only for a typed search: with nothing typed, "N other products" says nothing about
-        // what the rep is looking for.
-        this.PickerHiddenByCompany =
-            query.trim() && offered.length < this.Products.length
-                ? RankDealProducts(this.Products, query, null).length - ranked.length
-                : 0;
-        this.PickerResults = ranked.slice(0, MJSDealLineEditorComponent.PickerLimit);
-        this.PickerHidden = ranked.length - this.PickerResults.length;
+        const ranked = RankDealProducts(this.Products, query, this.Deal?.CompanyID ?? null);
+        const { InDeal, OtherCount } = SplitByDealCompanies(ranked, this.dealCompanyIDs ?? []);
+        this.PickerResults = InDeal.slice(0, MJSDealLineEditorComponent.PickerLimit);
+        this.PickerHidden = InDeal.length - this.PickerResults.length;
+        this.OtherCompanyMatches = OtherCount;
         this.rankedQuery = query;
         this.DraftMatches = CountDraftMatches(this.draftProducts, query);
         this.PickerCursor = 0;
+    }
+
+    /** The note under the list when the search matches other companies' products, or null (golive #484). */
+    public get OtherCompanyNote(): string | null {
+        return OtherCompanyMatchNote(this.OtherCompanyMatches, this.rankedQuery);
+    }
+
+    /**
+     * The deal's companies, for narrowing the picker (golive #484): the deal's `DealCompany` rows, plus
+     * its billing company and the companies already on its order, which the server keeps in that list
+     * anyway. A failed read narrows nothing, so the picker offers every product rather than none.
+     */
+    private async loadDealCompanies(): Promise<void> {
+        const deal = this.Deal;
+        if (!deal?.IsSaved || !deal.ID) {
+            this.dealCompanyIDs = [];
+            return;
+        }
+        const listed = await new RunView().RunView<{ CompanyID: string }>({
+            EntityName: 'MJ_BizApps_Sales: Deal Companies',
+            ExtraFilter: `DealID = '${deal.ID}'`,
+            ResultType: 'simple',
+            Fields: ['CompanyID'],
+        });
+        if (!listed.Success) {
+            this.dealCompanyIDs = [];
+            return;
+        }
+        const lineCompanies = (deal.OrderID_Object?.Lines?.Items ?? []).map((l) => String(l.CompanyID ?? ''));
+        this.dealCompanyIDs = RequiredDealCompanyIDs(deal.CompanyID, [
+            ...lineCompanies,
+            ...(listed.Results ?? []).map((r) => String(r.CompanyID ?? '')),
+        ]);
     }
 
     /** The note under the list when the search matches Draft products it does not offer, or null. */

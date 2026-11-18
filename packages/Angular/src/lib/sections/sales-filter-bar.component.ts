@@ -64,8 +64,9 @@ interface FilterList {
 }
 
 const FILTER_LISTS: readonly FilterList[] = [
-    { Kind: 'CompanyIDs', Label: 'Selling company', TestID: 'sales-filter-company' },
-    { Kind: 'ProductCompanyIDs', Label: 'Product company', TestID: 'sales-filter-product-company' },
+    // One Company list (golive #484): it matches the selling company, the deal's listed companies or a
+    // line's company, so it replaces the separate Selling company and Product company lists.
+    { Kind: 'CompanyIDs', Label: 'Company', TestID: 'sales-filter-company' },
     { Kind: 'PipelineIDs', Label: 'Pipeline', TestID: 'sales-filter-pipeline' },
     { Kind: 'OwnerEmployeeIDs', Label: 'Deal owner', TestID: 'sales-filter-owner' },
 ];
@@ -115,7 +116,7 @@ export class MJSSalesFilterBarComponent {
         return HasID(this.State.Filters[kind], id);
     }
 
-    /** "Selling company: Acme +2": the list's button. */
+    /** "Company: Acme +2": the list's button. */
     public ButtonLabel(list: FilterList): string {
         return `${list.Label}: ${SelectionLabel(this.State.Filters[list.Kind], this.State.Options[list.Kind])}`;
     }

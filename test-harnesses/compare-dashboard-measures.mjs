@@ -14,7 +14,7 @@
  * the control in the experiment.
  *
  * It runs the summary under several periods and filter-bar choices (bc-aidp-next-golive#350): All
- * time, the current calendar quarter, and one selling company, owner, pipeline and product company
+ * time, the current calendar quarter, and one company (selling, listed or a line's), owner, pipeline and product company
  * each, taken from the data. Each period-bound figure is checked on its own date: open figures on
  * ExpectedCloseDate, Won on ActualCloseDate.
  *
@@ -79,6 +79,7 @@ const rv = await new RunView().RunViews(
         },
         { EntityName: 'MJ_BizApps_Sales: Pipelines', ResultType: 'simple', Fields: ['ID', 'IncludeInForecast'] },
         { EntityName: 'MJ_BizApps_Orders: Order Lines', ResultType: 'simple', Fields: ['OrderHeaderID', 'CompanyID'] },
+        { EntityName: 'MJ_BizApps_Sales: Deal Companies', ResultType: 'simple', Fields: ['DealID', 'CompanyID'] },
     ],
     user,
 );
@@ -87,6 +88,7 @@ const statuses = rv?.[1]?.Results ?? [];
 const categories = rv?.[2]?.Results ?? [];
 const pipelines = rv?.[3]?.Results ?? [];
 const lines = rv?.[4]?.Results ?? [];
+const dealCompanies = rv?.[5]?.Results ?? [];
 const id = (v) => String(v ?? '').toLowerCase();
 
 const category = (row) => categories.find((x) => id(x.ID) === id(row.ForecastCategoryTypeID));
@@ -103,6 +105,12 @@ const hasFlag = (row, flag) => {
 };
 const pipelineInForecast = (row) => pipelines.find((p) => id(p.ID) === id(row.PipelineID))?.IncludeInForecast !== false;
 const productCompanies = (row) => new Set(lines.filter((l) => row.OrderID && id(l.OrderHeaderID) === id(row.OrderID)).map((l) => id(l.CompanyID)));
+// The Company filter (golive #484): the selling company, a listed company (DealCompany) or a line's company.
+const anyCompany = (row) => new Set([
+    id(row.CompanyID),
+    ...productCompanies(row),
+    ...dealCompanies.filter((c) => id(c.DealID) === id(row.ID)).map((c) => id(c.CompanyID)),
+]);
 
 /**
  * TODAY IS THE BUSINESS DAY (golive#168). The component takes it from BusinessTimeZoneEngine and the
@@ -124,7 +132,7 @@ const within = (day, window) => !!day && (!window.Start || utcDatePart(day) >= w
 function clientFigures(window, filters) {
     const unbounded = !window.Start && !window.End;
     const scoped = deals.filter((d) => {
-        if (filters.CompanyIDs && !filters.CompanyIDs.map(id).includes(id(d.CompanyID))) return false;
+        if (filters.CompanyIDs && !filters.CompanyIDs.some((c) => anyCompany(d).has(id(c)))) return false;
         if (filters.OwnerEmployeeIDs && !filters.OwnerEmployeeIDs.map(id).includes(id(d.OwnerEmployeeID))) return false;
         if (filters.PipelineIDs && !filters.PipelineIDs.map(id).includes(id(d.PipelineID))) return false;
         if (!filters.PipelineIDs && hasFlag(d, 'IsOpen') && !pipelineInForecast(d)) return false;
@@ -189,11 +197,15 @@ const firstOf = (values) => [...new Set(values.filter(Boolean).map(String))].sli
 const CASES = [
     ['all time', ALL_TIME, {}],
     [`${QUARTER.Start}..${QUARTER.End}`, QUARTER, {}],
-    ['all time, one selling company', ALL_TIME, { CompanyIDs: firstOf(deals.map((d) => d.CompanyID)) }],
+    ['all time, one company', ALL_TIME, { CompanyIDs: firstOf(deals.map((d) => d.CompanyID)) }],
+    ['all time, a line\'s company', ALL_TIME, { CompanyIDs: firstOf(lines.map((l) => l.CompanyID)) }],
     ['all time, one owner', ALL_TIME, { OwnerEmployeeIDs: firstOf(deals.map((d) => d.OwnerEmployeeID)) }],
     ['all time, one pipeline', ALL_TIME, { PipelineIDs: firstOf(deals.map((d) => d.PipelineID)) }],
     ['all time, one product company', ALL_TIME, { ProductCompanyIDs: firstOf(lines.map((l) => l.CompanyID)) }],
 ];
+// A company only LISTED on a deal (no deal sells for it), when the data has one (golive #484).
+const listedOnly = firstOf(dealCompanies.map((c) => c.CompanyID).filter((c) => !deals.some((d) => id(d.CompanyID) === id(c))));
+if (listedOnly.length) CASES.push(['all time, a company listed on a deal', ALL_TIME, { CompanyIDs: listedOnly }]);
 
 const FIGURES = Object.keys(clientFigures(ALL_TIME, {}));
 for (const [name, window, filters] of CASES) {
