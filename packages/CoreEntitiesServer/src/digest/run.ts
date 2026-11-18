@@ -4,13 +4,14 @@ import { ActionEngineServer } from '@memberjunction/actions';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
 import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
 
-import { SelectForAudience, type CompanyGroup, type DigestAudience } from './audience.js';
+import { SelectForAudience, type DigestAudience } from './audience.js';
+import { ReadCurrencyCodes } from './currency.js';
 import { LoadLapsedDeals, MAX_DEALS_PER_RUN, type LapsedDealsResult } from './lapsed-deals.js';
 import { LoadDigestRecipients, type DigestRecipient } from './recipients.js';
 import { RenderDigest } from './render.js';
 import { ReadSalesSetting, ResolveSender } from './sender.js';
+import { AUDIENCE_ENTITY, CountDeals, lower } from './shared.js';
 
-const AUDIENCE_ENTITY = 'MJ_BizApps_Sales: Deal Digest Audience Types';
 const ACTION_ENTITY = 'MJ: Actions';
 /** The send action is found by the class that implements it, not by a display name an admin can edit. */
 const SEND_ACTION_DRIVER_CLASS = '__SendSingleMessage';
@@ -40,7 +41,6 @@ export interface DigestRunResult {
     RenderedEmails: RenderedEmail[];
 }
 
-const lower = (id: string | null | undefined): string => (id ?? '').toLowerCase();
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 async function loadAudiences(contextUser: UserInfo): Promise<DigestAudience[]> {
@@ -100,10 +100,20 @@ async function sendOne(action: MJActionEntity, contextUser: UserInfo, provider: 
 
 interface RunState {
     contextUser: UserInfo; options: DigestRunOptions; today: CalendarDay; deals: LapsedDealsResult;
-    explorerBaseUrl: string | null; provider: string | null; sendAction: SendActionLoader; result: DigestRunResult;
+    explorerBaseUrl: string | null; provider: string | null; currencyCodes: ReadonlyMap<string, string>; sendAction: SendActionLoader; result: DigestRunResult;
 }
 
-const countDeals = (groups: readonly CompanyGroup[]): number => groups.reduce((n, g) => n + g.Deals.length, 0);
+/**
+ * The provider, narrowed to a string. `state.provider` is `string | null`, and `strict` is off, so nothing
+ * but this check ties a send to the up-front guard in RunLapsedCloseDateDigest; if that guard ever moves,
+ * this fails loudly instead of sending with `Provider: null`.
+ */
+function requireProvider(state: RunState): string {
+    if (state.provider === null || state.provider === undefined) {
+        throw new Error('the DigestProvider setting is empty, so there is nothing to send with');
+    }
+    return state.provider;
+}
 
 /** Who the override stands in for is the recipient; everything else about the email is the real one's. */
 function withOverride(recipient: DigestRecipient, override: DigestRunOptions['recipientOverride']): DigestRecipient {
@@ -113,14 +123,23 @@ function withOverride(recipient: DigestRecipient, override: DigestRunOptions['re
 /** Selects, renders and (unless dry) sends one recipient's email. Failures are recorded, never thrown. */
 async function deliverOne(state: RunState, audience: DigestAudience, recipient: DigestRecipient): Promise<void> {
     const { result, options } = state;
-    const label = `${audience.Code} digest for ${recipient.Email}`;
+    // One person can hold a leader row at several companies (dedupe keys on audience AND company), so
+    // for a company audience the label names the company, or two failures would read identically.
+    const base = `${audience.Code} digest for ${recipient.Email}`;
+    let label = base;
+    let companyName: string | null = null;
     try {
         const groups = SelectForAudience(state.deals.Deals, audience, recipient.CompanyID);
+        if (!audience.IsPortfolioWide) {
+            companyName = groups[0]?.CompanyName || recipient.CompanyID;
+            label = `${base} (company ${companyName})`;
+        }
         if (groups.length === 0 && !audience.SendWhenEmpty) { result.SkippedEmpty++; return; }
 
         const sender = await ResolveSender(audience.IsPortfolioWide ? null : recipient.CompanyID, state.contextUser);
         if (!sender) {
-            result.Errors.push(`${label} was not sent: no From address resolved (the company has no default Mailbox sender identity, `
+            result.Errors.push(`${label} was not sent: no From address resolved (`
+                + `${companyName === null ? 'this audience has no company' : `company ${companyName} has no default Mailbox sender identity`}, `
                 + 'and the DigestFromAddress setting is empty).');
             return;
         }
@@ -128,7 +147,7 @@ async function deliverOne(state: RunState, audience: DigestAudience, recipient: 
         const target = withOverride(recipient, options.recipientOverride);
         const { Subject, BodyHtml } = RenderDigest({
             audience, recipient: target, groups, today: state.today, explorerBaseUrl: state.explorerBaseUrl,
-            totalDeals: countDeals(groups), truncated: state.deals.Truncated,
+            dealsShown: CountDeals(groups), truncated: state.deals.Truncated, currencyCodes: state.currencyCodes,
         });
         const email: RenderedEmail = {
             To: target.Email, From: sender.From, Subject, BodyHtml, AudienceCode: audience.Code,
@@ -137,7 +156,7 @@ async function deliverOne(state: RunState, audience: DigestAudience, recipient: 
         if (options.dryRun || options.captureRenderedEmails) result.RenderedEmails.push(email);
         if (options.dryRun) return;
 
-        const failure = await sendOne(await state.sendAction.get(), state.contextUser, state.provider, email);
+        const failure = await sendOne(await state.sendAction.get(), state.contextUser, requireProvider(state), email);
         if (failure) result.Errors.push(`${label} failed to send: ${failure}`);
         else result.Sent++;
     } catch (err) {
@@ -178,6 +197,8 @@ export async function RunLapsedCloseDateDigest(contextUser: UserInfo, options: D
             contextUser, options, today, deals, result, sendAction: new SendActionLoader(contextUser),
             explorerBaseUrl: await ReadSalesSetting('ExplorerBaseUrl', contextUser),
             provider: await ReadSalesSetting('DigestProvider', contextUser),
+            // Read once per run; never throws (see ReadCurrencyCodes), so it cannot stop the digest.
+            currencyCodes: await ReadCurrencyCodes(contextUser),
         };
         if (!options.dryRun && state.provider === null) {
             // Once, up front: otherwise every send fails separately with the provider's own "not found".

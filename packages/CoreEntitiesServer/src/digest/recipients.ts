@@ -1,15 +1,13 @@
 import { RunView, type UserInfo } from '@memberjunction/core';
+import { EscapeSQLString } from '@memberjunction/global';
 
-const RECIPIENT_ENTITY = 'MJ_BizApps_Sales: Deal Digest Recipients';
-const EMPLOYEE_ENTITY = 'MJ: Employees';
+import { EMPLOYEE_ENTITY, RECIPIENT_ENTITY, lower } from './shared.js';
 
 /** One person who receives one audience's digest, joined to their employee record. */
 export interface DigestRecipient {
     AudienceTypeID: string; CompanyID: string | null;
     EmployeeID: string; Email: string; FirstName: string; FullName: string;
 }
-
-const lower = (id: string | null): string => (id ?? '').toLowerCase();
 
 /**
  * Drops a repeat of the same address within one audience and company, keeping the first. The same
@@ -48,7 +46,7 @@ export async function LoadDigestRecipients(contextUser: UserInfo): Promise<Diges
     if (recipientRows.length === 0) return [];
 
     const ids = [...new Set(recipientRows.map((r) => String(r.EmployeeID)))];
-    const inList = ids.map((id) => `'${id.replace(/'/g, "''")}'`).join(', ');
+    const inList = ids.map((id) => `'${EscapeSQLString(id)}'`).join(', ');
     const emps = await rv.RunView<EmployeeRow>({
         EntityName: EMPLOYEE_ENTITY,
         ExtraFilter: `Active = 1 AND ID IN (${inList})`,

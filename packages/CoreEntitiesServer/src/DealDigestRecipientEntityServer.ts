@@ -20,14 +20,12 @@ import {
     type IRunViewProvider,
     LogError,
 } from '@memberjunction/core';
-import { RegisterClass } from '@memberjunction/global';
+import { EscapeSQLString, RegisterClass } from '@memberjunction/global';
 import { mjBizAppsSalesDealDigestRecipientEntity } from '@mj-biz-apps/sales-entities';
 
-const RECIPIENT_ENTITY = 'MJ_BizApps_Sales: Deal Digest Recipients';
-const AUDIENCE_ENTITY = 'MJ_BizApps_Sales: Deal Digest Audience Types';
-const EMPLOYEE_ENTITY = 'MJ: Employees';
+import { AUDIENCE_ENTITY, EMPLOYEE_ENTITY, RECIPIENT_ENTITY } from './digest/shared.js';
 
-const quote = (id: string): string => `'${String(id).replace(/'/g, "''")}'`;
+const quote = (id: string): string => `'${EscapeSQLString(String(id))}'`;
 
 @RegisterClass(BaseEntity, RECIPIENT_ENTITY)
 export class DealDigestRecipientEntityServer extends mjBizAppsSalesDealDigestRecipientEntity {

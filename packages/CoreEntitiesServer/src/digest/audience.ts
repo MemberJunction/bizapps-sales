@@ -14,6 +14,8 @@ export interface DigestAudience {
 export interface LapsedDeal {
     ID: string; Name: string; CompanyID: string; CompanyName: string;
     OwnerName: string; Amount: number | null;
+    /** Soft reference to accounting's Currencies; null when the deal has none. */
+    CurrencyID: string | null;
     ExpectedCloseDate: CalendarDay | null; DaysLapsed: number | null;
     StageName: string;
 }

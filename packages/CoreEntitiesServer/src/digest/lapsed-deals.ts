@@ -3,26 +3,31 @@ import { EscapeSQLString } from '@memberjunction/global';
 import { ToCalendarDay, type CalendarDay } from '@mj-biz-apps/common-entities';
 
 import { ComputeDaysLapsed, type LapsedDeal } from './audience.js';
+import { DEAL_ENTITY, EMPLOYEE_ENTITY, lower } from './shared.js';
 
-const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 const STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
-const EMPLOYEE_ENTITY = 'MJ: Employees';
 
 /** The most deals one run reads. Past it the digest says so rather than quietly listing a subset. */
 export const MAX_DEALS_PER_RUN = 5000;
+
+/**
+ * By company, then close date oldest first, with deals that never had a close date LAST. SQL Server sorts
+ * NULLs first, so the CASE puts them after the dated ones, which is also the more useful order: a dated
+ * deal is actionable by its age. The same expression sorts the same way on PostgreSQL.
+ */
+export const ORDER_BY = 'Company, CASE WHEN ExpectedCloseDate IS NULL THEN 1 ELSE 0 END, ExpectedCloseDate';
 
 export interface LapsedDealsResult { Deals: LapsedDeal[]; Truncated: boolean }
 
 interface DealRow {
     ID: string; Name: string; CompanyID: string; Company: string | null;
-    OwnerEmployeeID: string | null; Amount: number | null; ExpectedCloseDate: unknown; PipelineStage: string | null;
+    OwnerEmployeeID: string | null; Amount: number | null; CurrencyID: string | null; ExpectedCloseDate: unknown; PipelineStage: string | null;
 }
 interface EmployeeRow { ID: string; FirstName: string; LastName: string }
 
 const quoted = (id: string): string => `'${EscapeSQLString(String(id))}'`;
 const inList = (ids: readonly string[]): string => ids.map(quoted).join(', ');
-const lower = (id: string | null | undefined): string => (id ?? '').toLowerCase();
 
 async function readIDs(rv: RunView, entity: string, filter: string, contextUser: UserInfo): Promise<string[]> {
     const r = await rv.RunView<{ ID: string }>({
@@ -77,9 +82,9 @@ export async function LoadLapsedDeals(contextUser: UserInfo, today: CalendarDay)
 
     const filter = lapsedFilter(notClosedStatusIDs, excludedPipelineIDs, today);
     const r = await rv.RunView<DealRow>({
-        EntityName: DEAL_ENTITY, ExtraFilter: filter, OrderBy: 'Company, ExpectedCloseDate',
+        EntityName: DEAL_ENTITY, ExtraFilter: filter, OrderBy: ORDER_BY,
         ResultType: 'simple', MaxRows: MAX_DEALS_PER_RUN,
-        Fields: ['ID', 'Name', 'CompanyID', 'Company', 'OwnerEmployeeID', 'Amount', 'ExpectedCloseDate', 'PipelineStage'],
+        Fields: ['ID', 'Name', 'CompanyID', 'Company', 'OwnerEmployeeID', 'Amount', 'CurrencyID', 'ExpectedCloseDate', 'PipelineStage'],
     }, contextUser);
     if (!r.Success) throw new Error(`Could not read the lapsed deals: ${r.ErrorMessage}`);
     const rows = r.Results ?? [];
@@ -90,7 +95,7 @@ export async function LoadLapsedDeals(contextUser: UserInfo, today: CalendarDay)
         return {
             ID: String(row.ID), Name: row.Name, CompanyID: String(row.CompanyID), CompanyName: row.Company ?? '',
             OwnerName: owners.get(lower(row.OwnerEmployeeID)) ?? 'Unassigned',
-            Amount: row.Amount ?? null,
+            Amount: row.Amount ?? null, CurrencyID: row.CurrencyID ? String(row.CurrencyID) : null,
             ExpectedCloseDate: closeDate, DaysLapsed: ComputeDaysLapsed(closeDate, today),
             StageName: row.PipelineStage ?? '',
         };

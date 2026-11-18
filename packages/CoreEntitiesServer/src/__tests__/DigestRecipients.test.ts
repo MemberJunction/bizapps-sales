@@ -50,8 +50,8 @@ describe('DedupeByEmail', () => {
 
     it('compares addresses case-insensitively, ignoring surrounding whitespace', () => {
         const out = DedupeByEmail([
-            recipient({ EmployeeID: 'emp-1', Email: 'Rob@example.invalid' }),
-            recipient({ EmployeeID: 'emp-2', Email: ' rob@EXAMPLE.invalid ' }),
+            recipient({ EmployeeID: 'emp-1', Email: 'Pat@example.invalid' }),
+            recipient({ EmployeeID: 'emp-2', Email: ' pat@EXAMPLE.invalid ' }),
         ]);
         expect(out).toHaveLength(1);
     });
@@ -194,6 +194,12 @@ describe('LoadDigestRecipients', () => {
         expect(calls[1].EntityName).toBe('MJ: Employees');
         expect(calls[1].ExtraFilter).toContain('Active = 1');
         expect(calls[1].ExtraFilter).toContain("IN ('emp-1', 'emp-2')");
+    });
+
+    it('escapes the employee IDs with the library routine: a quote is doubled and a NUL is stripped', async () => {
+        const calls = stub({ Success: true, Results: [recRow("emp'1"), recRow('emp\u00002')] }, { Success: true, Results: [] });
+        await LoadDigestRecipients(user);
+        expect(calls[1].ExtraFilter).toContain("IN ('emp''1', 'emp2')");
     });
 
     it('drops a recipient whose employee address has since been blanked', async () => {

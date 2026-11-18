@@ -63,6 +63,8 @@ interface World {
     recipients: Array<Record<string, unknown>>;
     identities: Array<Record<string, unknown>>;
     actions: Array<Record<string, unknown>>;
+    /** Accounting's currencies; `'fail'` answers Success false, `'throw'` raises, absent means accounting is not installed. */
+    currencies?: Array<Record<string, unknown>> | 'fail' | 'throw';
 }
 
 function emptyWorld(over: Partial<World> = {}): World {
@@ -105,12 +107,20 @@ function stubRunView(world: World): RunViewParams[] {
                 return ok(world.identities);
             case 'MJ: Actions':
                 return ok(world.actions);
+            case 'MJ_BizApps_Accounting: Currencies':
+                if (world.currencies === 'throw') throw new Error('Entity not found');
+                if (world.currencies === 'fail') return { Success: false, ErrorMessage: 'no permission', Results: [] };
+                return ok(world.currencies ?? []);
             default:
                 throw new Error(`unexpected RunView on ${p.EntityName}`);
         }
     }) as never);
     return calls;
 }
+
+/** Makes `new Metadata().Entities` say whether accounting is installed. */
+const stubInstalledEntities = (names: string[]) =>
+    vi.spyOn(Metadata.prototype, 'Entities', 'get').mockReturnValue(names.map((Name) => ({ Name })) as never);
 
 const callsOn = (calls: RunViewParams[], entity: string) => calls.filter((c) => c.EntityName === entity);
 
@@ -130,7 +140,7 @@ function stubEngines(settings: Record<string, string | undefined> = {}) {
 
 const dealRow = (over: Record<string, unknown> = {}) => ({
     ID: 'deal-1', Name: 'Widget renewal', CompanyID: 'co-1', Company: 'Acme Test Co',
-    OwnerEmployeeID: 'emp-owner', Amount: 12000, ExpectedCloseDate: '2026-11-03', PipelineStage: 'Proposal', ...over,
+    OwnerEmployeeID: 'emp-owner', Amount: 12000, CurrencyID: null, ExpectedCloseDate: '2026-11-03', PipelineStage: 'Proposal', ...over,
 });
 
 const ownerRow = (over: Record<string, unknown> = {}) =>
@@ -226,7 +236,8 @@ describe('LoadLapsedDeals', () => {
         const p = callsOn(calls, 'MJ_BizApps_Sales: Deals')[0];
         expect(MAX_DEALS_PER_RUN).toBe(5000);
         expect(p.MaxRows).toBe(MAX_DEALS_PER_RUN);
-        expect(p.OrderBy).toBe('Company, ExpectedCloseDate');
+        // Never-set close dates LAST: SQL Server sorts NULLs first, and a dated deal is actionable by its age.
+        expect(p.OrderBy).toBe('Company, CASE WHEN ExpectedCloseDate IS NULL THEN 1 ELSE 0 END, ExpectedCloseDate');
         expect(p.ResultType).toBe('simple');
         // TotalRowCount is what detects the entity's own row cap; skipping it would blind that check.
         expect(p.SkipTotalRowCount).toBeUndefined();
@@ -248,7 +259,7 @@ describe('LoadLapsedDeals', () => {
         expect(Deals).toEqual([
             {
                 ID: 'deal-1', Name: 'Widget renewal', CompanyID: 'co-1', CompanyName: 'Acme Test Co',
-                OwnerName: 'Olive Owner', Amount: 12000, ExpectedCloseDate: '2026-11-03', DaysLapsed: 20, StageName: 'Proposal',
+                OwnerName: 'Olive Owner', Amount: 12000, CurrencyID: null, ExpectedCloseDate: '2026-11-03', DaysLapsed: 20, StageName: 'Proposal',
             },
             expect.objectContaining({ ID: 'deal-2', ExpectedCloseDate: '2026-11-20', DaysLapsed: 3 }),
         ]);
@@ -755,5 +766,130 @@ describe('RunLapsedCloseDateDigest', () => {
         await RunLapsedCloseDateDigest(user);
         expect(runAction.mock.calls.map(([p]) => toOf(p))).toEqual(
             ['lee@example.invalid', 'lou@example.invalid', 'cleo@example.invalid', 'cato@example.invalid']);
+    });
+});
+
+// ── Finding fixes from the final review ──────────────────────────────────────────────────────────────
+
+const CURRENCY_ENTITY = 'MJ_BizApps_Accounting: Currencies';
+const EUR_ID = 'EEEEEEEE-0000-4000-8000-0000000000EE';
+
+describe('amounts are shown in the deal\'s own currency', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    const withEuroDeal = (over: Partial<World> = {}) => runWorld({
+        deals: [dealRow({ ID: 'd-eur', Name: 'Euro deal', CurrencyID: EUR_ID.toLowerCase(), Amount: 12500 })],
+        currencies: [{ ID: EUR_ID, Code: 'EUR' }], ...over,
+    });
+
+    it('renders a non-USD deal in its currency, reading the codes once for the whole run', async () => {
+        const calls = stubRunView(withEuroDeal());
+        stubEngines(PORTFOLIO);
+        stubInstalledEntities([CURRENCY_ENTITY]);
+        const out = await RunLapsedCloseDateDigest(user, { dryRun: true });
+        expect(out.RenderedEmails.length).toBeGreaterThan(0);
+        for (const e of out.RenderedEmails) {
+            expect(e.BodyHtml).toContain('\u20AC12,500');
+            expect(e.BodyHtml).not.toContain('$');
+        }
+        expect(callsOn(calls, CURRENCY_ENTITY)).toHaveLength(1);
+        expect(callsOn(calls, 'MJ_BizApps_Sales: Deals')[0].Fields).toContain('CurrencyID');
+    });
+
+    it('renders the default for a deal with a null CurrencyID', async () => {
+        stubRunView(withEuroDeal({ deals: [dealRow({ CurrencyID: null })] }));
+        stubEngines(PORTFOLIO);
+        stubInstalledEntities([CURRENCY_ENTITY]);
+        const out = await RunLapsedCloseDateDigest(user, { dryRun: true });
+        expect(out.RenderedEmails[0].BodyHtml).toContain('$12,000');
+    });
+
+    it.each([
+        ['the accounting app is not installed (no read is even attempted)', [], undefined],
+        ['the read reports failure', [CURRENCY_ENTITY], 'fail' as const],
+        ['the read throws', [CURRENCY_ENTITY], 'throw' as const],
+    ])('renders the default, and still sends, when %s', async (_label, installed, mode) => {
+        const calls = stubRunView(withEuroDeal({ currencies: mode }));
+        const { runAction } = stubEngines(PORTFOLIO);
+        stubInstalledEntities(installed);
+        const out = await RunLapsedCloseDateDigest(user, { captureRenderedEmails: true });
+        expect(out.Errors).toEqual([]);
+        expect(out.Success).toBe(true);
+        expect(runAction).toHaveBeenCalledTimes(3); // co-2's leader has nothing lapsed
+        for (const e of out.RenderedEmails) expect(e.BodyHtml).toContain('$12,500');
+        if (installed.length === 0) expect(callsOn(calls, CURRENCY_ENTITY)).toHaveLength(0);
+    });
+});
+
+describe('a failed company digest names its company', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    /** One person leads both companies, so dedupe (audience AND company) keeps two rows for him. */
+    const twoCompanyLeader = (over: Partial<World> = {}) => runWorld({
+        audiences: [LEADER],
+        recipients: [recipientRow('aud-leader', 'co-1', 'emp-l1'), recipientRow('aud-leader', 'co-2', 'emp-l1')],
+        ...over,
+    });
+
+    it('gives two failed sends to one person at two companies two distinguishable messages', async () => {
+        const { runAction } = (() => { stubRunView(twoCompanyLeader()); return stubEngines(PORTFOLIO); })();
+        runAction.mockResolvedValue({ Success: false, Message: 'mailbox unavailable' } as never);
+        const out = await RunLapsedCloseDateDigest(user);
+        expect(out.Errors).toHaveLength(2);
+        expect(new Set(out.Errors).size).toBe(2);
+        expect(out.Errors[0]).toContain('Acme Test Co');
+        expect(out.Errors[1]).toContain('Zed Test Co');
+    });
+
+    it('names the company in the no-sender error', async () => {
+        stubRunView(twoCompanyLeader({ identities: [] }));
+        stubEngines({ ...PORTFOLIO, DigestFromAddress: '' });
+        const out = await RunLapsedCloseDateDigest(user);
+        expect(out.Errors).toHaveLength(2);
+        expect(out.Errors[0]).toContain('company Acme Test Co has no default Mailbox sender identity');
+        expect(out.Errors[1]).toContain('company Zed Test Co has no default Mailbox sender identity');
+    });
+
+    it('falls back to the company ID when the company has no lapsed deal to take a name from', async () => {
+        stubRunView(runWorld({
+            audiences: [{ ...LEADER, SendWhenEmpty: true }], deals: [],
+            recipients: [recipientRow('aud-leader', 'co-9', 'emp-l1')], identities: [],
+        }));
+        stubEngines({ ...PORTFOLIO, DigestFromAddress: '' });
+        const out = await RunLapsedCloseDateDigest(user);
+        expect(out.Errors[0]).toContain('company co-9');
+    });
+
+    it('leaves a portfolio audience unchanged: no company in its failure', async () => {
+        stubRunView(runWorld({ identities: [] }));
+        stubEngines({ ...PORTFOLIO, DigestFromAddress: '' });
+        const out = await RunLapsedCloseDateDigest(user);
+        const ceo = out.Errors.find((e) => e.includes('cleo@example.invalid'));
+        expect(ceo).not.toContain('(company');
+    });
+});
+
+describe('the audience table is the configuration', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('a new audience row with MinDaysLapsed = 30 produces a 30-day digest, with no code change', async () => {
+        stubRunView(runWorld({
+            audiences: [audienceRow({
+                ID: 'aud-30', Code: 'THIRTY', IsPortfolioWide: true, MinDaysLapsed: 30, IncludeMissingCloseDate: false, DisplayRank: 5,
+            })],
+            recipients: [recipientRow('aud-30', null, 'emp-ceo')],
+            deals: [
+                dealRow({ ID: 'd-20', Name: 'Twenty days', ExpectedCloseDate: '2026-11-03' }),
+                dealRow({ ID: 'd-31', Name: 'Thirty-one days', ExpectedCloseDate: '2026-10-23' }),
+                dealRow({ ID: 'd-30', Name: 'Exactly thirty', ExpectedCloseDate: '2026-10-24' }),
+            ],
+        }));
+        stubEngines(PORTFOLIO);
+        const out = await RunLapsedCloseDateDigest(user, { dryRun: true });
+        expect(out.RenderedEmails).toHaveLength(1);
+        const body = out.RenderedEmails[0].BodyHtml;
+        expect(body).toContain('Thirty-one days');
+        expect(body).not.toContain('Exactly thirty'); // the floor is strict
+        expect(body).not.toContain('Twenty days');
     });
 });

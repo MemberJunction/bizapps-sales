@@ -50,7 +50,7 @@ function deal(overrides: Partial<LapsedDeal> = {}): LapsedDeal {
     return {
         ID: 'dddddddd-0000-4000-8000-000000000001', Name: 'Widget renewal',
         CompanyID: 'cccccccc-0000-4000-8000-000000000001', CompanyName: 'Acme Test Co',
-        OwnerName: 'Olive Owner', Amount: 12500,
+        OwnerName: 'Olive Owner', Amount: 12500, CurrencyID: null,
         ExpectedCloseDate: ToCalendarDay('2026-11-09')!, DaysLapsed: 14, StageName: 'Proposal',
         ...overrides,
     };
@@ -65,7 +65,7 @@ function ctx(overrides: Partial<RenderContext> = {}): RenderContext {
     const count = groups.reduce((n, g) => n + g.Deals.length, 0);
     return {
         audience: audience(), recipient: recipient(), groups, today: TODAY,
-        explorerBaseUrl: 'https://explorer.example.test', totalDeals: count, truncated: false,
+        explorerBaseUrl: 'https://explorer.example.test', dealsShown: count, truncated: false,
         ...overrides,
     };
 }
@@ -232,6 +232,38 @@ describe('RenderDigest: row content', () => {
         expect(noAmount).not.toContain('NaN');
     });
 
+    describe('currency', () => {
+        const EUR_ID = 'EEEEEEEE-0000-4000-8000-0000000000EE';
+        const codes = new Map([[EUR_ID, 'EUR']]);
+        const render = (d: Partial<LapsedDeal>, currencyCodes?: ReadonlyMap<string, string>) =>
+            RenderDigest(ctx({ groups: [group([deal({ Amount: 12500, ...d })])], currencyCodes })).BodyHtml;
+
+        it("shows a deal in its own currency, whatever case the ID arrives in", () => {
+            expect(render({ CurrencyID: EUR_ID.toLowerCase() }, codes)).toContain('\u20AC12,500');
+            expect(render({ CurrencyID: EUR_ID.toLowerCase() }, codes)).not.toContain('$');
+        });
+        it('shows the default currency for a deal with no CurrencyID', () => {
+            expect(render({ CurrencyID: null }, codes)).toContain('$12,500');
+        });
+        it('shows the default for a currency the host cannot resolve, or when no codes were read', () => {
+            expect(render({ CurrencyID: 'ffffffff-0000-4000-8000-000000000000' }, codes)).toContain('$12,500');
+            expect(render({ CurrencyID: EUR_ID }, new Map())).toContain('$12,500');
+            expect(render({ CurrencyID: EUR_ID }, undefined)).toContain('$12,500');
+        });
+        it('falls back to the default rather than failing the email on a code Intl rejects', () => {
+            const bad = new Map([[EUR_ID, 'not-a-code']]);
+            expect(render({ CurrencyID: EUR_ID }, bad)).toContain('$12,500');
+        });
+        it('formats two deals in two currencies without combining them', () => {
+            const body = RenderDigest(ctx({
+                groups: [group([deal({ Amount: 1000, CurrencyID: EUR_ID }), deal({ ID: 'dddddddd-0000-4000-8000-000000000009', Amount: 2000 })])],
+                currencyCodes: codes,
+            })).BodyHtml;
+            expect(body).toContain('\u20AC1,000');
+            expect(body).toContain('$2,000');
+        });
+    });
+
     it('shows each deal\'s own figure and never a combined one', () => {
         const { BodyHtml } = RenderDigest(ctx({
             groups: [group([deal({ Amount: 1000 }), deal({ ID: 'dddddddd-0000-4000-8000-000000000002', Amount: 2000 })])],
@@ -250,14 +282,14 @@ describe('RenderDigest: row content', () => {
 describe('RenderDigest: structure and copy', () => {
     it('uses the audience EmptyMessage when there are no groups', () => {
         const out = RenderDigest(ctx({
-            audience: audience({ EmptyMessage: 'Nothing lapsed this week.' }), groups: [], totalDeals: 0,
+            audience: audience({ EmptyMessage: 'Nothing lapsed this week.' }), groups: [], dealsShown: 0,
         }));
         expect(out.BodyHtml).toContain('Nothing lapsed this week.');
         expect(out.BodyHtml).not.toContain('<table');
     });
 
     it('falls back to neutral copy for an empty digest with no EmptyMessage', () => {
-        const out = RenderDigest(ctx({ groups: [], totalDeals: 0 }));
+        const out = RenderDigest(ctx({ groups: [], dealsShown: 0 }));
         expect(out.BodyHtml).toContain('No open deals');
         expect(out.BodyHtml).not.toContain('Pat');
         expect(out.BodyHtml).not.toContain('Hi ');
@@ -277,7 +309,7 @@ describe('RenderDigest: structure and copy', () => {
             }));
             expect(out.Subject).toBe('Lapsed close dates: 1 deal as of 2026-11-23');
             expect(out.BodyHtml).toContain('Hi Pat');
-            const empty = RenderDigest(ctx({ audience: audience({ EmptyMessage: blank }), groups: [], totalDeals: 0 }));
+            const empty = RenderDigest(ctx({ audience: audience({ EmptyMessage: blank }), groups: [], dealsShown: 0 }));
             expect(empty.BodyHtml).toContain('No open deals');
         });
 
@@ -316,7 +348,7 @@ describe('RenderDigest: structure and copy', () => {
     it('says the list is incomplete when truncated, and never claims a complete count', () => {
         // The old footer read "Showing N of N" because the true total is unknowable once the read is
         // capped; that sat beside a truncation notice and said nothing was cut.
-        const { BodyHtml } = RenderDigest(ctx({ truncated: true, totalDeals: 1 }));
+        const { BodyHtml } = RenderDigest(ctx({ truncated: true, dealsShown: 1 }));
         expect(BodyHtml).toContain('This list is incomplete');
         expect(BodyHtml).toContain('only 1 deal could be included');
         expect(BodyHtml).not.toMatch(/Showing \d+ of \d+/);
