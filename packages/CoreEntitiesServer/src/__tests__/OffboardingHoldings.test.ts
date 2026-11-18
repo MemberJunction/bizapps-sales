@@ -23,6 +23,7 @@ const {
     ParseStringList,
     PreSaveSkipReason,
     ReassignSalesOffboardingHoldings,
+    SalesHoldingPermission,
     ListSalesOffboardingHoldings,
 } = await import('../offboarding/OffboardingHoldings.js');
 type Facts = Parameters<typeof BuildSalesHoldings>[0];
@@ -96,6 +97,27 @@ describe('who may reassign (g297.5)', () => {
 
     it('refuses with no caller', () => {
         expect(CanReassignSalesHoldings(null, leaver)).toBe(false);
+    });
+});
+
+describe('accounts and contacts are Sales Admin only (g297.9)', () => {
+    const leaver = { SupervisorEmployeeID: BOSS_EMP, Name: 'Lee' };
+    const supervisor = caller({ employeeID: BOSS_EMP });
+    const admin = caller({ roles: ['Sales Admin'] });
+
+    it.each(['ACCOUNT_OWNER', 'CONTACT_OWNER'] as const)('refuses the supervisor on %s, with the Sales Admin note', (kind) => {
+        expect(SalesHoldingPermission(kind, supervisor, leaver)).toEqual({
+            CanReassign: false,
+            Note: 'Ask a Sales Admin to move this: accounts and contacts sit on shared organization and person records.',
+        });
+    });
+
+    it.each(['ACCOUNT_OWNER', 'CONTACT_OWNER'] as const)('allows a Sales Admin on %s', (kind) => {
+        expect(SalesHoldingPermission(kind, admin, leaver)).toEqual({ CanReassign: true, Note: null });
+    });
+
+    it.each(['DEAL_OWNER', 'DEAL_TEAM_MEMBER', 'PIPELINE_CLOSE_WON_ASSIGNEE'] as const)('still allows the supervisor on %s', (kind) => {
+        expect(SalesHoldingPermission(kind, supervisor, leaver)).toEqual({ CanReassign: true, Note: null });
     });
 });
 
@@ -242,7 +264,9 @@ describe('Sales.ListOffboardingHoldings', () => {
         const result = await ListSalesOffboardingHoldings({ LeaverEmployeeID: LEAVER_EMP }, caller({ employeeID: BOSS_EMP }));
         expect(result.Outcome).toBe('SUCCESS');
         expect(result.Holdings.map((h) => h.Kind)).toEqual(['DEAL_OWNER', 'DEAL_TEAM_MEMBER', 'ACCOUNT_OWNER', 'CONTACT_OWNER', 'PIPELINE_CLOSE_WON_ASSIGNEE']);
-        expect(result.Holdings.every((h) => h.CanReassign && h.Note === null)).toBe(true);
+        const movable = result.Holdings.filter((h) => h.CanReassign).map((h) => h.Kind);
+        expect(movable).toEqual(['DEAL_OWNER', 'DEAL_TEAM_MEMBER', 'PIPELINE_CLOSE_WON_ASSIGNEE']);
+        expect(result.Holdings.find((h) => h.Kind === 'ACCOUNT_OWNER')?.Note).toMatch(/Ask a Sales Admin/);
     });
 
     it('lists for anyone, with CanReassign false and a note for a caller who may not move them', async () => {
@@ -316,7 +340,22 @@ describe('Sales.ReassignOffboardingHoldings', () => {
     it('lets the supervisor move them', async () => {
         world();
         const result = await ReassignSalesOffboardingHoldings({ LeaverEmployeeID: LEAVER_EMP, SuccessorUserID: NEXT_USER }, PROVIDER, caller({ employeeID: BOSS_EMP }));
-        expect(result).toMatchObject({ Outcome: 'SUCCESS', Moved: 5 });
+        expect(result).toMatchObject({ Outcome: 'SUCCESS', Moved: 3 });
+        expect(result.Skipped.map((x) => x.Kind).sort()).toEqual(['ACCOUNT_OWNER', 'CONTACT_OWNER']);
+        expect(result.Skipped.every((x) => x.Reason.startsWith('Ask a Sales Admin'))).toBe(true);
+        expect(FakeEntity.Saved.some((x) => x.Entity.endsWith('Sales Accounts') || x.Entity.endsWith('Sales Contacts'))).toBe(false);
+    });
+
+    it('is NOT_AUTHORIZED when a supervisor asks only for accounts and contacts', async () => {
+        world();
+        const result = await ReassignSalesOffboardingHoldings(
+            { LeaverEmployeeID: LEAVER_EMP, SuccessorUserID: NEXT_USER, Kinds: ['ACCOUNT_OWNER', 'CONTACT_OWNER'] },
+            PROVIDER,
+            caller({ employeeID: BOSS_EMP }),
+        );
+        expect(result.Outcome).toBe('NOT_AUTHORIZED');
+        expect(result.Message).toMatch(/Ask a Sales Admin/);
+        expect(FakeEntity.Saved).toHaveLength(0);
     });
 
     it.each([

@@ -48,6 +48,13 @@ describe('the Sales Offboarding role metadata', () => {
         expect(granted).toEqual(SALES_OFFBOARDING_RIGHTS);
     });
 
+    it('grants nothing on sales accounts or contacts, which are Sales Admin only (g297.9)', () => {
+        const rows = readRecords('entity-permissions').filter((r) => r.fields.RoleID === ROLE_LOOKUP);
+        expect(rows.some((r) => /Sales (Accounts|Contacts)$/.test(String(r.fields.EntityID)))).toBe(false);
+        expect(MissingRightsNote('ACCOUNT_OWNER', () => null)).toBeNull();
+        expect(MissingRightsNote('CONTACT_OWNER', () => null)).toBeNull();
+    });
+
     it('never grants delete except on team rows, and never create elsewhere', () => {
         for (const [entity, rights] of Object.entries(SALES_OFFBOARDING_RIGHTS)) {
             const teamRows = entity === 'MJ_BizApps_Sales: Deal Team Members';
@@ -64,18 +71,18 @@ describe('the missing-rights note', () => {
 
     it('is null when the caller holds every right the kind needs', () => {
         expect(MissingRightsNote('DEAL_OWNER', () => all)).toBeNull();
-        expect(MissingRightsNote('ACCOUNT_OWNER', () => updateOnly)).toBeNull();
+        expect(MissingRightsNote('PIPELINE_CLOSE_WON_ASSIGNEE', () => updateOnly)).toBeNull();
     });
 
     it('names the role when update is missing, or when the owner swap lacks create/delete on team rows', () => {
-        expect(MissingRightsNote('CONTACT_OWNER', () => readOnly)).toContain('Sales Offboarding');
+        expect(MissingRightsNote('DEAL_TEAM_MEMBER', () => readOnly)).toContain('Sales Offboarding');
         expect(MissingRightsNote('DEAL_OWNER', () => updateOnly)).toContain('Sales Offboarding');
         expect(MissingRightsNote('PIPELINE_CLOSE_WON_ASSIGNEE', () => null)).toContain('Sales Offboarding');
     });
 
     it('notes only rows the caller may move; the role never turns CanReassign on', () => {
         const row = (CanReassign: boolean): OffboardingHolding => ({
-            App: 'Sales', Domain: 'Sales', Kind: 'ACCOUNT_OWNER', KindLabel: 'Account owner', EntityName: 'MJ_BizApps_Sales: Sales Accounts',
+            App: 'Sales', Domain: 'Sales', Kind: 'PIPELINE_CLOSE_WON_ASSIGNEE', KindLabel: 'Close-won task assignee', EntityName: 'MJ_BizApps_Sales: Pipelines',
             RecordID: 'a', Label: 'Acme', CanReassign, Note: CanReassign ? null : 'Only the supervisor or a Sales Admin',
         });
         const [movable, notMovable] = NoteMissingRights([row(true), row(false)], () => readOnly);

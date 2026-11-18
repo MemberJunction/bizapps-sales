@@ -11,7 +11,7 @@
     "fields": {
       "Name": "Sales: List Offboarding Holdings",
       "CategoryID": "@lookup:MJ: Action Categories.Name=Offboarding Holdings",
-      "Description": "List the open sales responsibility a departed user holds: open deals they own, their seats on open deal teams, the sales accounts and contacts they own, and pipelines whose close-won tasks go to them. Closed deals and history are not listed. Each row says whether the caller (the leaver's supervisor or a Sales Admin) may reassign it.",
+      "Description": "List the open sales responsibility a departed user holds: open deals they own, their seats on open deal teams, the sales accounts and contacts they own, and pipelines whose close-won tasks go to them. Closed deals and history are not listed. Each row says whether the caller may reassign it: the leaver's supervisor or a Sales Admin for deals, team seats and pipelines; a Sales Admin only for accounts and contacts.",
       "Type": "Custom",
       "DriverClass": "Sales.ListOffboardingHoldings",
       "IconClass": "fa-solid fa-user-minus",
@@ -79,7 +79,7 @@
     "fields": {
       "Name": "Sales: Reassign Offboarding Holdings",
       "CategoryID": "@lookup:MJ: Action Categories.Name=Offboarding Holdings",
-      "Description": "Move a departed user's open sales responsibility to a successor: deal ownership, deal team seats, sales account and contact ownership, and pipeline close-won assignee. Only the leaver's supervisor or a Sales Admin may move them; the server re-checks this per item. History is never rewritten. Refusals are reported in Skipped.",
+      "Description": "Move a departed user's open sales responsibility to a successor: deal ownership, deal team seats, sales account and contact ownership, and pipeline close-won assignee. The leaver's supervisor or a Sales Admin may move deals, team seats and pipelines; only a Sales Admin may move accounts and contacts. The server re-checks this per item. History is never rewritten. Refusals are reported in Skipped.",
       "Type": "Custom",
       "DriverClass": "Sales.ReassignOffboardingHoldings",
       "IconClass": "fa-solid fa-people-arrows",

@@ -18,7 +18,9 @@
  * written.
  *
  * WHO MAY MOVE THEM. The leaver's supervisor (`MJ: Employees`.SupervisorID of the leaver's Employee is
- * the caller's Employee) or a holder of the Sales Admin role. Listing needs only read access; the
+ * the caller's Employee) or a holder of the Sales Admin role. Account and contact ownership is Sales
+ * Admin only (g297.9): those records are IS-A children of common's Organizations and People, so a move
+ * saves the shared record too. Listing needs only read access; the
  * `CanReassign` flag on each row tells the screen what this caller may do, and the reassign re-checks it
  * on the server.
  *
@@ -97,17 +99,19 @@ export interface EntityRights { CanCreate: boolean; CanRead: boolean; CanUpdate:
 export const SALES_OFFBOARDING_RIGHTS: Readonly<Record<string, EntityRights>> = {
     [E_DEAL]: { CanCreate: false, CanRead: true, CanUpdate: true, CanDelete: false },
     [E_DEAL_TEAM_MEMBER]: { CanCreate: true, CanRead: true, CanUpdate: true, CanDelete: true },
-    [E_SALES_ACCOUNT]: { CanCreate: false, CanRead: true, CanUpdate: true, CanDelete: false },
-    [E_SALES_CONTACT]: { CanCreate: false, CanRead: true, CanUpdate: true, CanDelete: false },
     [E_PIPELINE]: { CanCreate: false, CanRead: true, CanUpdate: true, CanDelete: false },
 };
 
-/** The entities whose rights moving one kind needs: a deal owner swap saves the deal and its team rows. */
+/**
+ * The entities whose rights the Sales Offboarding role supplies for each kind: a deal owner swap saves the
+ * deal and its team rows. Accounts and contacts are Sales Admin only (g297.9), so the role supplies
+ * nothing for them and no note is raised.
+ */
 const KIND_ENTITIES: Record<SalesHoldingKind, string[]> = {
     DEAL_OWNER: [E_DEAL, E_DEAL_TEAM_MEMBER],
     DEAL_TEAM_MEMBER: [E_DEAL_TEAM_MEMBER, E_DEAL],
-    ACCOUNT_OWNER: [E_SALES_ACCOUNT],
-    CONTACT_OWNER: [E_SALES_CONTACT],
+    ACCOUNT_OWNER: [],
+    CONTACT_OWNER: [],
     PIPELINE_CLOSE_WON_ASSIGNEE: [E_PIPELINE],
 };
 
@@ -208,6 +212,34 @@ export function CanReassignSalesHoldings(caller: UserInfo | null | undefined, le
     return !!callerEmployeeID && !!leaver.SupervisorEmployeeID && UUIDsEqual(callerEmployeeID, leaver.SupervisorEmployeeID);
 }
 
+/**
+ * Kinds only a Sales Admin may move (g297.9). Sales accounts and contacts are IS-A children of common's
+ * Organizations and People, so a move also saves those shared records.
+ */
+export const SALES_ADMIN_ONLY_KINDS: ReadonlySet<SalesHoldingKind> = new Set<SalesHoldingKind>(['ACCOUNT_OWNER', 'CONTACT_OWNER']);
+
+export const SALES_ADMIN_ONLY_NOTE =
+    'Ask a Sales Admin to move this: accounts and contacts sit on shared organization and person records.';
+
+export interface HoldingPermission { CanReassign: boolean; Note: string | null }
+
+/**
+ * Whether `caller` may move a holding of `kind`. Accounts and contacts: Sales Admin only (g297.9).
+ * Everything else: the leaver's supervisor or a Sales Admin (g297.5).
+ */
+export function SalesHoldingPermission(
+    kind: SalesHoldingKind,
+    caller: UserInfo | null | undefined,
+    leaver: Pick<OffboardingParty, 'SupervisorEmployeeID' | 'Name'>,
+): HoldingPermission {
+    if (SALES_ADMIN_ONLY_KINDS.has(kind)) {
+        const admin = HoldsSalesAdminRole(caller);
+        return { CanReassign: admin, Note: admin ? null : SALES_ADMIN_ONLY_NOTE };
+    }
+    const canReassign = CanReassignSalesHoldings(caller, leaver);
+    return { CanReassign: canReassign, Note: PermissionNote(canReassign, leaver.Name) };
+}
+
 /** The status types whose `IsOpen` flag is set, as lower-case IDs. */
 export function OpenStatusIDs(statuses: ReadonlyArray<{ ID: string; IsOpen: boolean | null }>): Set<string> {
     return new Set(statuses.filter((s) => s.IsOpen === true).map((s) => s.ID.toLowerCase()));
@@ -257,7 +289,7 @@ function contactLabel(c: ContactRow): string {
  */
 export function BuildSalesHoldings(
     facts: SalesHoldingFacts,
-    permission: { CanReassign: boolean; Note: string | null },
+    permission: HoldingPermission | ((kind: SalesHoldingKind) => HoldingPermission),
 ): OffboardingHolding[] {
     const open = OpenStatusIDs(facts.Statuses);
     const teamDeals = new Map(facts.TeamDeals.map((d) => [d.ID.toLowerCase(), d]));
@@ -270,8 +302,7 @@ export function BuildSalesHoldings(
         EntityName,
         RecordID,
         Label,
-        CanReassign: permission.CanReassign,
-        Note: permission.Note,
+        ...(typeof permission === 'function' ? permission(Kind) : permission),
     });
 
     const holdings: OffboardingHolding[] = [];
@@ -465,9 +496,8 @@ export async function ReadSalesHoldingFacts(leaver: OffboardingParty, user: User
 const NO_LEAVER = 'Neither LeaverUserID nor LeaverEmployeeID names a user or employee.';
 
 async function holdingsFor(leaver: OffboardingParty, caller: UserInfo): Promise<OffboardingHolding[]> {
-    const canReassign = CanReassignSalesHoldings(caller, leaver);
     const facts = await ReadSalesHoldingFacts(leaver, caller);
-    return BuildSalesHoldings(facts, { CanReassign: canReassign, Note: PermissionNote(canReassign, leaver.Name) });
+    return BuildSalesHoldings(facts, (kind) => SalesHoldingPermission(kind, caller, leaver));
 }
 
 /**
@@ -571,7 +601,8 @@ export async function ReassignSalesOffboardingHoldings(
         if (requested.length === 0) return { Outcome: 'SUCCESS', Moved: 0, Skipped: [], Message: 'Nothing to move.' };
         const permitted = requested.filter((h) => h.CanReassign);
         if (permitted.length === 0) {
-            return reassignFailure('NOT_AUTHORIZED', PermissionNote(false, leaver.Name) ?? 'Not authorized.');
+            const reasons = [...new Set(requested.map((h) => h.Note).filter((n): n is string => !!n))];
+            return reassignFailure('NOT_AUTHORIZED', reasons.join(' ') || 'Not authorized.');
         }
         if (!successor.EmployeeID && permitted.some((h) => EMPLOYEE_KINDS.has(h.Kind))) {
             return reassignFailure(

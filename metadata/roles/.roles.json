@@ -22,7 +22,7 @@
   {
     "fields": {
       "Name": "Sales Offboarding",
-      "Description": "Held by supervisors who hand a departed person's sales items to a successor. Grants only read and update on the records the offboarding reassign moves (deals, deal team members, sales accounts, sales contacts, pipelines), plus create and delete on deal team members for the owner swap. Holding it does not authorize a move: the reassign still requires the leaver's supervisor or a Sales Admin. Admins assign it.",
+      "Description": "Held by supervisors who hand a departed person's sales items to a successor. Grants only read and update on the records the offboarding reassign moves for them (deals, deal team members, pipelines), plus create and delete on deal team members for the owner swap. Holding it does not authorize a move: the reassign still requires the leaver's supervisor or a Sales Admin, and account and contact moves stay with Sales Admins. Admins assign it.",
       "SQLName": null
     },
     "primaryKey": {
