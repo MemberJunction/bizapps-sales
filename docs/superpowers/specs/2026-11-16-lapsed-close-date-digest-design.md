@@ -76,7 +76,7 @@ Costs a migration, CodeGen, metadata and forms — the largest build of the thre
 
 **B. MJ Roles plus Employee Roles.** New roles as distribution lists, per-company leaders derived
 from `Employee.CompanyID`. **Rejected on the data.** The real roster has one person leading a
-company they are not employed by (a Sidecar leader on a `@bluecypress.io` address) and one person
+company they are not employed by (a Junction Labs leader on a `@example.invalid` address) and one person
 leading two companies. `Employee.CompanyID` holds a single value and can express neither. It also
 makes a permission grant double as a mail subscription, which invites a later accident.
 
@@ -217,7 +217,7 @@ hygiene nagging about it either, and a second flag that hosts must remember to s
 default than reusing the one they already set.
 
 **The limitation this leaves, stated honestly.** CDP also had a *per-company* exclusion list, because
-Sidecar's "Sales Pipeline" was a legacy non-revenue lane while the same name meant real revenue
+Junction Labs's "Sales Pipeline" was a legacy non-revenue lane while the same name meant real revenue
 elsewhere. That cannot be expressed here: `V202611062300__v6.25.x__Pipeline_Company_Link.sql` dropped
 `Pipeline.CompanyID` so that one pipeline row is shared by every company linked to it through
 `PipelineCompany`, while `IncludeInForecast` stayed on `Pipeline`. Excluding a shared pipeline
@@ -407,28 +407,28 @@ Read-only queries against aidp-next production on 2026-11-16, with the owner's e
   missing an email). So `DealDigestRecipient.EmployeeID` can stay NOT NULL and **no override-address
   column is needed** — the gap is three employee records, which is host data work, not schema.
 - `Employee.CompanyID` confirms why approach B had to be rejected: the CEO, the CFO and one company
-  leader are all employed by `BCHQ`, not by the companies they lead.
+  leader are all employed by `NWHQ`, not by the companies they lead.
 
 **Every leader has an employee record. CDP's address list is what was stale** — which is the
 clearest possible argument for taking addresses from `MJ: Employees` rather than from a constant:
 
 | CDP's constant | The actual employee record |
 |---|---|
-| `rob@meetbetty.ai` | `rob@bettybot.ai` |
-| `michael.keller@cimatri.com` (Cimatri) | `michael.keller@bluecypress.io`, EVP Consulting Services at Blue Cypress Consulting — and he covers Cimatri *and* Blue Cypress Consulting |
-| `molly.phayer@rasa.io` | `molly.quast@bluecypress.io`, Account Director, rasa.io |
+| `rob@example.invalid` | `casey@example.invalid` |
+| `michael-keller@example.invalid` (Arcadia) | `victor-alonso@example.invalid`, EVP Consulting Services at Northwind Consulting — and he covers Arcadia *and* Northwind Consulting |
+| `molly.phayer@signal.example` | `sana-oyelaran@example.invalid`, Account Director, signal.example |
 
 Had this shipped as code, three of fifteen weekly emails would have been bouncing into a void with
 nobody the wiser. Rows in a table that an administrator can see and fix are the point.
 
-**One person legitimately has several employee records, one per company.** Sofi Giglio has three
-active rows (`sofi@sidecar.ai` at Sidecar, `sofi.giglio@bluecypress.io` at Elastik Teams,
-`sofi@askskip.ai` at BCHQ); Andrew Schwartz Crane has two (SoundPost and Brightfind). The recipient
-model handles this naturally — Sidecar's leader row points at the Sidecar employee row — and it is
+**One person legitimately has several employee records, one per company.** Lena Petrov has three
+active rows (`sofi@example.invalid` at Junction Labs, `sofi-giglio@example.invalid` at Lumen Teams,
+`sofi@example.invalid` at NWHQ); Rowan Vale has two (Clearwave and Trailhead). The recipient
+model handles this naturally — Junction Labs's leader row points at the Junction Labs employee row — and it is
 also what made approach B look briefly plausible. **Design consequence:** a single rendered digest
 must be deduplicated by email address before sending, because two employee records for one human
 under the same audience and company would otherwise mail them twice. Deduplication is *within* one
-digest only — Johanna Snider receiving both the Blue Cypress leader digest and the CEO digest is
+digest only — Imani Clarke receiving both the Northwind Group leader digest and the CEO digest is
 deliberate, as it was at CDP.
 
 **Still outstanding, and host data rather than code:**
@@ -437,17 +437,17 @@ deliberate, as it was at CDP.
    resolves nothing today, so by this design's own rule every send would fail. The
    `DigestFromAddress` Application Setting must be set, or mailbox identities created, before the job
    is enabled. This is the single most likely cause of a silent-but-for-the-error-log first Monday.
-2. **Jared Loftus (rasa.io, `Title = CEO`) has `Active = 0`.** Recipients filter on an active
-   employee, so rasa.io has no leader until that is resolved. Moot for the 23rd — rasa.io has nothing
+2. **Felix Hartmann (signal.example, `Title = CEO`) has `Active = 0`.** Recipients filter on an active
+   employee, so signal.example has no leader until that is resolved. Moot for the 23rd — signal.example has nothing
    lapsed.
-3. **Two active employees hold `Chief Financial Officer`:** Jeremy Hunnewell (`jeremy@bluecypress.io`,
-   CDP's CFO) and Michael Lardieri (`michael@bluecypress.io`). The `CFO` audience needs to know which,
+3. **Two active employees hold `Chief Financial Officer`:** Dana Whitfield (`dana@example.invalid`,
+   CDP's CFO) and Priya Raman (`michael@example.invalid`). The `CFO` audience needs to know which,
    or both.
-4. **Two test logins carry leadership titles** — `jeremy.hunnewell+ceo@bluecypress.io` ("CEO Test")
-   and `jeremy.hunnewell+ad@bluecypress.io`. Seeding recipients by title would mail them. Seed by
+4. **Two test logins carry leadership titles** — `jeremy-hunnewell+ceo@example.invalid` ("CEO Test")
+   and `jeremy-hunnewell+ad@example.invalid`. Seeding recipients by title would mail them. Seed by
    named employee, never by a title query.
 
-For reference, the CTO audience the owner asked for resolves to Robert Kihm, `Chief Technology
+For reference, the CTO audience the owner asked for resolves to Jordan Reyes, `Chief Technology
 Officer`. CDP achieved roughly this by CC'ing him on the CFO digest from a hardcoded constant; a
 `CTO` audience row is the same outcome as data.
 
@@ -455,8 +455,8 @@ Officer`. CDP achieved roughly this by CC'ing him on the CFO digest from a hardc
 
 | | Deals |
 |---|---|
-| Blue Cypress Consulting | 4 (2 with no close date, 2 newly past) |
-| Betty Bot | 2 (both with no close date) |
+| Northwind Consulting | 4 (2 with no close date, 2 newly past) |
+| Pebble Bot | 2 (both with no close date) |
 | Everything else | 0 |
 | **Deals more than 14 days past** | **0** |
 
@@ -498,36 +498,36 @@ This is a sequencing call for the owner, recorded here as open.
 
 ## Decisions taken 2026-11-16, and the roster they produce
 
-- **CFO** is Jeremy Hunnewell. Michael Lardieri's identical title is not seeded.
-- **Jared Loftus is left out** entirely; his inactive record is not to be reactivated for this.
-- **John Huisman leads both rasa.io and Sidecar.** Worth noting why this is expressible at all: his
-  only employee record sits at `BCHQ`, so `CompanyID` has to live on the recipient row rather than be
+- **CFO** is Dana Whitfield. Priya Raman's identical title is not seeded.
+- **Felix Hartmann is left out** entirely; his inactive record is not to be reactivated for this.
+- **Owen Mbeki leads both signal.example and Junction Labs.** Worth noting why this is expressible at all: his
+  only employee record sits at `NWHQ`, so `CompanyID` has to live on the recipient row rather than be
   derived from the employee. This single requirement is what ruled out approach B, and it is now a
   live case rather than a hypothetical one.
-- **Account Directors are not Company Leaders.** Molly Quast (rasa.io), Sofi Giglio (Elastik Teams)
-  and Elizabeth Crosby (rasa.io) are therefore not seeded as leaders, which drops two names CDP
+- **Account Directors are not Company Leaders.** Sana Oyelaran (signal.example), Lena Petrov (Lumen Teams)
+  and Harriet Lowe (signal.example) are therefore not seeded as leaders, which drops two names CDP
   carried.
 
 Seed roster, to be created as `DealDigestRecipient` rows by hand on the host — not shipped:
 
 | Audience | Company | Employee |
 |---|---|---|
-| `COMPANY_LEADER` | Betty Bot | Rob Barnes `rob@bettybot.ai`; Johanna Byrne `johanna.gundlach@meetbetty.ai` |
-| `COMPANY_LEADER` | Cimatri | Michael Keller `michael.keller@bluecypress.io` |
-| `COMPANY_LEADER` | rasa.io | John Huisman |
-| `COMPANY_LEADER` | Sidecar | John Huisman |
-| `COMPANY_LEADER` | Izzy | Ben Lee `ben@meetizzy.ai` |
-| `COMPANY_LEADER` | Skip | Mark Patterson `mark@askskip.ai` |
-| `COMPANY_LEADER` | Elastik Teams | Abhijeet Wadkar; Ben Lee `ben@elastikteams.com` |
-| `COMPANY_LEADER` | SoundPost | Andrew Schwartz Crane `andrew@soundpost.ai` |
-| `CEO` | — | Johanna Snider |
-| `CFO` | — | Jeremy Hunnewell |
-| `CTO` | — | Robert Kihm |
+| `COMPANY_LEADER` | Pebble Bot | Casey Nolan `casey@example.invalid`; Imani Dorsey `johanna-gundlach@example.invalid` |
+| `COMPANY_LEADER` | Arcadia | Victor Alonso `victor-alonso@example.invalid` |
+| `COMPANY_LEADER` | signal.example | Owen Mbeki |
+| `COMPANY_LEADER` | Junction Labs | Owen Mbeki |
+| `COMPANY_LEADER` | Mira | Theo Marsh `ben@example.invalid` |
+| `COMPANY_LEADER` | Harbor | Tomas Berg `mark@example.invalid` |
+| `COMPANY_LEADER` | Lumen Teams | Nadia Prasad; Theo Marsh `ben@example.invalid` |
+| `COMPANY_LEADER` | Clearwave | Rowan Vale `andrew@example.invalid` |
+| `CEO` | — | Imani Clarke |
+| `CFO` | — | Dana Whitfield |
+| `CTO` | — | Jordan Reyes |
 
-**Still unseeded, and needing a decision:** Blue Cypress Consulting, which CDP called "Blue Cypress"
-and gave Johanna Snider and John Huisman, and where Michael Keller is now EVP Consulting Services. It
+**Still unseeded, and needing a decision:** Northwind Consulting, which CDP called "Northwind Group"
+and gave Imani Clarke and Owen Mbeki, and where Victor Alonso is now EVP Consulting Services. It
 holds 51 open deals and is one of only two companies with anything lapsed on the 23rd, so it cannot
-be left out. `MemberJunction` (2 open deals) and `BCHQ` (1) also have no leader in CDP's roster.
+be left out. `MemberJunction` (2 open deals) and `NWHQ` (1) also have no leader in CDP's roster.
 
 ## Production readiness, measured 2026-11-16
 
@@ -580,7 +580,7 @@ business zone reproduces its arithmetic exactly.
 
 ## Sender resolved
 
-The From address is **`notifications@bluecypress.io`, display name "BC Notifications"** — the address
+The From address is **`notifications@example.invalid`, display name "BC Notifications"** — the address
 CDP's plan proposed and never verified.
 
 `CompanySenderIdentity` rows are seeded by aidp-next
