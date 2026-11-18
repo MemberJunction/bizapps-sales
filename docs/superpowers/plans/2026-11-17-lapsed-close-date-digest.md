@@ -214,7 +214,7 @@ describe('SelectForAudience', () => {
   it('applies MinDaysLapsed as a strict floor', () => { /* daysLapsed 14 excluded when MinDaysLapsed is 14; 15 kept */ });
   it('keeps never-set close dates regardless of MinDaysLapsed when IncludeMissingCloseDate', () => { /* null-date deal survives a 14-day floor */ });
   it('drops never-set close dates when IncludeMissingCloseDate is false', () => { /* empty result */ });
-  it('sorts groups by company name, case-insensitively', () => { /* "rasa.io" between "Izzy" and "Sidecar" */ });
+  it('sorts groups by company name, case-insensitively', () => { /* "signal.example" between "Mira" and "Terra Labs" */ });
 });
 ```
 
@@ -266,9 +266,9 @@ export async function LoadDigestRecipients(contextUser: UserInfo): Promise<Diges
 
 ```typescript
 describe('DedupeByEmail', () => {
-  it('collapses two employee records sharing one address', () => { /* Sofi Giglio twice, one out */ });
+  it('collapses two employee records sharing one address', () => { /* Lena Petrov twice, one out */ });
   it('keeps the same address under two different audiences', () => { /* leader + CEO both survive */ });
-  it('compares addresses case-insensitively', () => { /* Rob@x vs rob@x → one */ });
+  it('compares addresses case-insensitively', () => { /* Pat@x vs pat@x → one */ });
 });
 
 describe('DealDigestRecipientEntityServer.Save', () => {

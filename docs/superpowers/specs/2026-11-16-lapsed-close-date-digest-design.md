@@ -414,16 +414,16 @@ clearest possible argument for taking addresses from `MJ: Employees` rather than
 
 | CDP's constant | The actual employee record |
 |---|---|
-| `rob@example.invalid` | `casey@example.invalid` |
-| `michael-keller@example.invalid` (Arcadia) | `victor-alonso@example.invalid`, EVP Consulting Services at Northwind Consulting — and he covers Arcadia *and* Northwind Consulting |
-| `molly.phayer@signal.example` | `sana-oyelaran@example.invalid`, Account Director, signal.example |
+| `c.nolan@example.invalid` | `casey-nolan@example.invalid` |
+| `former-arcadia-lead@example.invalid` (Arcadia) | `victor-alonso@example.invalid`, EVP Consulting Services at Northwind Consulting — and he covers Arcadia *and* Northwind Consulting |
+| `former-ad@signal.example` | `sana-oyelaran@example.invalid`, Account Director, signal.example |
 
 Had this shipped as code, three of fifteen weekly emails would have been bouncing into a void with
 nobody the wiser. Rows in a table that an administrator can see and fix are the point.
 
 **One person legitimately has several employee records, one per company.** Lena Petrov has three
-active rows (`sofi@example.invalid` at Junction Labs, `sofi-giglio@example.invalid` at Lumen Teams,
-`sofi@example.invalid` at NWHQ); Rowan Vale has two (Clearwave and Trailhead). The recipient
+active rows (`lena.petrov@example.invalid` at Junction Labs, `lena-petrov@example.invalid` at Lumen Teams,
+`lena.petrov@example.invalid` at NWHQ); Rowan Vale has two (Clearwave and Trailhead). The recipient
 model handles this naturally — Junction Labs's leader row points at the Junction Labs employee row — and it is
 also what made approach B look briefly plausible. **Design consequence:** a single rendered digest
 must be deduplicated by email address before sending, because two employee records for one human
@@ -440,11 +440,11 @@ deliberate, as it was at CDP.
 2. **Felix Hartmann (signal.example, `Title = CEO`) has `Active = 0`.** Recipients filter on an active
    employee, so signal.example has no leader until that is resolved. Moot for the 23rd — signal.example has nothing
    lapsed.
-3. **Two active employees hold `Chief Financial Officer`:** Dana Whitfield (`dana@example.invalid`,
-   CDP's CFO) and Priya Raman (`michael@example.invalid`). The `CFO` audience needs to know which,
+3. **Two active employees hold `Chief Financial Officer`:** Dana Whitfield (`dana-whitfield@example.invalid`,
+   CDP's CFO) and Priya Raman (`priya-raman@example.invalid`). The `CFO` audience needs to know which,
    or both.
-4. **Two test logins carry leadership titles** — `jeremy-hunnewell+ceo@example.invalid` ("CEO Test")
-   and `jeremy-hunnewell+ad@example.invalid`. Seeding recipients by title would mail them. Seed by
+4. **Two test logins carry leadership titles** — `test-login+ceo@example.invalid` ("CEO Test")
+   and `test-login+ad@example.invalid`. Seeding recipients by title would mail them. Seed by
    named employee, never by a title query.
 
 For reference, the CTO audience the owner asked for resolves to Jordan Reyes, `Chief Technology
@@ -512,14 +512,14 @@ Seed roster, to be created as `DealDigestRecipient` rows by hand on the host —
 
 | Audience | Company | Employee |
 |---|---|---|
-| `COMPANY_LEADER` | Pebble Bot | Casey Nolan `casey@example.invalid`; Imani Dorsey `johanna-gundlach@example.invalid` |
+| `COMPANY_LEADER` | Pebble Bot | Casey Nolan `casey-nolan@example.invalid`; Imani Dorsey `imani-dorsey@example.invalid` |
 | `COMPANY_LEADER` | Arcadia | Victor Alonso `victor-alonso@example.invalid` |
 | `COMPANY_LEADER` | signal.example | Owen Mbeki |
 | `COMPANY_LEADER` | Junction Labs | Owen Mbeki |
-| `COMPANY_LEADER` | Mira | Theo Marsh `ben@example.invalid` |
-| `COMPANY_LEADER` | Harbor | Tomas Berg `mark@example.invalid` |
-| `COMPANY_LEADER` | Lumen Teams | Nadia Prasad; Theo Marsh `ben@example.invalid` |
-| `COMPANY_LEADER` | Clearwave | Rowan Vale `andrew@example.invalid` |
+| `COMPANY_LEADER` | Mira | Theo Marsh `theo-marsh@example.invalid` |
+| `COMPANY_LEADER` | Harbor | Tomas Berg `tomas-berg@example.invalid` |
+| `COMPANY_LEADER` | Lumen Teams | Nadia Prasad; Theo Marsh `theo-marsh@example.invalid` |
+| `COMPANY_LEADER` | Clearwave | Rowan Vale `rowan-vale@example.invalid` |
 | `CEO` | — | Imani Clarke |
 | `CFO` | — | Dana Whitfield |
 | `CTO` | — | Jordan Reyes |

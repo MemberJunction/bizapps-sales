@@ -32,9 +32,9 @@ function restoreTZ(original: string | undefined): void {
     else process.env.TZ = original;
 }
 
-const IZZY = 'cccccccc-0000-4000-8000-000000000001';
-const RASA = 'cccccccc-0000-4000-8000-000000000002';
-const SIDECAR = 'cccccccc-0000-4000-8000-000000000003';
+const MIRA = 'cccccccc-0000-4000-8000-000000000001';
+const SIGNAL = 'cccccccc-0000-4000-8000-000000000002';
+const TERRA = 'cccccccc-0000-4000-8000-000000000003';
 
 function audience(overrides: Partial<DigestAudience> = {}): DigestAudience {
     return {
@@ -52,7 +52,7 @@ function deal(companyID: string, companyName: string, daysLapsed: number | null,
     return {
         ID: `dddddddd-0000-4000-8000-${String(seq).padStart(12, '0')}`,
         Name: name ?? `Deal ${seq}`, CompanyID: companyID, CompanyName: companyName,
-        OwnerName: 'Owner', Amount: null,
+        OwnerName: 'Owner', Amount: null, CurrencyID: null,
         ExpectedCloseDate: daysLapsed === null ? null : ToCalendarDay('2026-10-01')!,
         DaysLapsed: daysLapsed, StageName: 'Stage',
     };
@@ -80,48 +80,48 @@ describe('ComputeDaysLapsed', () => {
 
 describe('SelectForAudience', () => {
     it('keeps only the recipient company when the audience is not portfolio-wide', () => {
-        const deals = [deal(IZZY, 'Izzy', 3), deal(RASA, 'rasa.io', 3)];
-        const groups = SelectForAudience(deals, audience({ IsPortfolioWide: false }), IZZY);
+        const deals = [deal(MIRA, 'Mira', 3), deal(SIGNAL, 'signal.example', 3)];
+        const groups = SelectForAudience(deals, audience({ IsPortfolioWide: false }), MIRA);
         expect(groups).toHaveLength(1);
-        expect(groups[0].CompanyID).toBe(IZZY);
+        expect(groups[0].CompanyID).toBe(MIRA);
         expect(groups[0].Deals).toEqual([deals[0]]);
     });
     it('returns no deals for a company audience with no recipient company', () => {
-        const groups = SelectForAudience([deal(IZZY, 'Izzy', 3)], audience({ IsPortfolioWide: false }), null);
+        const groups = SelectForAudience([deal(MIRA, 'Mira', 3)], audience({ IsPortfolioWide: false }), null);
         expect(groups).toEqual([]);
     });
     it('returns every company when the audience is portfolio-wide', () => {
-        const deals = [deal(SIDECAR, 'Sidecar', 3), deal(IZZY, 'Izzy', 3), deal(IZZY, 'Izzy', 5)];
+        const deals = [deal(TERRA, 'Terra Labs', 3), deal(MIRA, 'Mira', 3), deal(MIRA, 'Mira', 5)];
         const groups = SelectForAudience(deals, audience({ IsPortfolioWide: true }), null);
-        expect(groups.map(g => g.CompanyName)).toEqual(['Izzy', 'Sidecar']);
+        expect(groups.map(g => g.CompanyName)).toEqual(['Mira', 'Terra Labs']);
         expect(groups[0].Deals).toHaveLength(2);
         expect(groups[1].Deals).toHaveLength(1);
     });
     it('applies MinDaysLapsed as a strict floor', () => {
-        const at14 = deal(IZZY, 'Izzy', 14, 'at floor');
-        const at15 = deal(IZZY, 'Izzy', 15, 'past floor');
+        const at14 = deal(MIRA, 'Mira', 14, 'at floor');
+        const at15 = deal(MIRA, 'Mira', 15, 'past floor');
         const groups = SelectForAudience([at14, at15], audience({ MinDaysLapsed: 14 }), null);
         expect(groups).toHaveLength(1);
         expect(groups[0].Deals.map(d => d.Name)).toEqual(['past floor']);
     });
     it('keeps never-set close dates regardless of MinDaysLapsed when IncludeMissingCloseDate', () => {
-        const never = deal(IZZY, 'Izzy', null, 'never set');
+        const never = deal(MIRA, 'Mira', null, 'never set');
         const groups = SelectForAudience([never], audience({ MinDaysLapsed: 14, IncludeMissingCloseDate: true }), null);
         expect(groups).toHaveLength(1);
         expect(groups[0].Deals).toEqual([never]);
     });
     it('drops never-set close dates when IncludeMissingCloseDate is false', () => {
         const groups = SelectForAudience(
-            [deal(IZZY, 'Izzy', null)], audience({ MinDaysLapsed: null, IncludeMissingCloseDate: false }), null);
+            [deal(MIRA, 'Mira', null)], audience({ MinDaysLapsed: null, IncludeMissingCloseDate: false }), null);
         expect(groups).toEqual([]);
     });
     it('applies no floor when MinDaysLapsed is null', () => {
-        const groups = SelectForAudience([deal(IZZY, 'Izzy', 1)], audience({ MinDaysLapsed: null }), null);
+        const groups = SelectForAudience([deal(MIRA, 'Mira', 1)], audience({ MinDaysLapsed: null }), null);
         expect(groups).toHaveLength(1);
     });
     it('sorts groups by company name, case-insensitively', () => {
-        const deals = [deal(SIDECAR, 'Sidecar', 3), deal(RASA, 'rasa.io', 3), deal(IZZY, 'Izzy', 3)];
+        const deals = [deal(TERRA, 'Terra Labs', 3), deal(SIGNAL, 'signal.example', 3), deal(MIRA, 'Mira', 3)];
         const groups = SelectForAudience(deals, audience(), null);
-        expect(groups.map(g => g.CompanyName)).toEqual(['Izzy', 'rasa.io', 'Sidecar']);
+        expect(groups.map(g => g.CompanyName)).toEqual(['Mira', 'signal.example', 'Terra Labs']);
     });
 });
