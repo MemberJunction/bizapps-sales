@@ -101,6 +101,7 @@ export * from './activities/ActivityWriterService.js';
 export * from './activities/ActivityReader.js';
 export * from './activities/DealMatcher.js';
 export * from './activities/DealLinkerExtension.js';
+export * from './activities/OwnedAccountsConsentSource.js';
 export {
     ActivitySyncEngine,
     FixtureActivitySyncProvider,
@@ -150,6 +151,7 @@ import { DealStageEventEntityServer } from './DealStageEventEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
 import { RecordDiscountConcessionOperation } from './RecordDiscountConcessionOperation.js';
 import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
+import { OwnedAccountsConsentSource } from './activities/OwnedAccountsConsentSource.js';
 
 /**
  * Anchor for the server-side entity subclasses, called from the sales-server bootstrap.
@@ -163,7 +165,7 @@ import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 export function LoadSalesCoreEntitiesServer(): void {
     LoadActivitySyncEngine();
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, DealPaymentScheduleEntityServer, PipelineStageEntityServer, PipelineEntityServer, DealStageEventEntityServer, CloseDealOperation, ReopenDealOperation, RecordDiscountConcessionOperation, DealLinkerExtension];
+    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, DealPaymentScheduleEntityServer, PipelineStageEntityServer, PipelineEntityServer, DealStageEventEntityServer, CloseDealOperation, ReopenDealOperation, RecordDiscountConcessionOperation, DealLinkerExtension, OwnedAccountsConsentSource];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }
