@@ -278,8 +278,12 @@ It is the right trade for a shipped app, and it is also an argument for giving d
 logins — but it is a change in who the email serves, not just how it is built.
 
 **Sending.** Sales has no email capability today. The run calls
-`CommunicationEngine.SendSingleMessage` directly, setting `HTMLBody` (and leaving `Body` unset), with
-the provider resolved once per run from the `DigestProvider` setting.
+`CommunicationEngine.SendSingleMessage` directly, with the provider resolved once per run from the
+`DigestProvider` setting, and sends **both parts** of the message: `HTMLBody` carries the digest and
+`Body` carries a text rendition of the same deals. SendGrid (`text:` + `html:`) and Gmail build a real
+multipart/alternative from the pair; Microsoft Graph takes one content type and sends the HTML. The
+text part is rendered from the same company groups as the HTML, never derived from the HTML — deriving
+it would make it inherit the HTML's escaping, and a text part needs none.
 
 This was MJ's core `Send Single Message` action at first, for the row it writes in
 `MJ: Action Execution Logs` per send — audit being load-bearing for a tool whose value depends on

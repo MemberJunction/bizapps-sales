@@ -5,7 +5,12 @@ import { CurrencyCodeFor, DEFAULT_DISPLAY_CURRENCY } from './currency.js';
 import type { DigestRecipient } from './recipients.js';
 import { DEAL_ENTITY } from './shared.js';
 
-export interface RenderedDigest { Subject: string; BodyHtml: string }
+/**
+ * One recipient's email. `BodyHtml` and `BodyText` are the two parts of the SAME message: SendGrid and
+ * Gmail build a real multipart/alternative from both, Microsoft Graph takes one content type and sends
+ * the HTML. They are produced together so no caller can send a message with only one of them.
+ */
+export interface RenderedDigest { Subject: string; BodyHtml: string; BodyText: string }
 
 export interface RenderContext {
     audience: DigestAudience; recipient: DigestRecipient;
@@ -106,6 +111,46 @@ function dealTable(deals: readonly LapsedDeal[], baseUrl: string, showCompany: b
 }
 
 /**
+ * Host-authored HTML copy, turned into text for the plain-text part. Block ends become blank lines, tags
+ * go, then entities are decoded — `&amp;` LAST, so `&amp;lt;` decodes to `&lt;` and not to `<`.
+ *
+ * A data value substituted into a trusted template arrives raw here (the text part escapes nothing), so
+ * a deal or person whose name contained angle brackets would lose them to the tag strip. That is the
+ * right trade for a part nobody can execute: the alternative is markup in the plain-text body, which is
+ * the defect this whole part exists to avoid.
+ */
+function htmlToText(html: string): string {
+    return html
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/(?:p|div|h[1-6]|tr|table)>/gi, '\n\n')
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&mdash;/gi, '\u2014')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/gi, '&')
+        .replace(/[ \t]+$/gm, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+/** One deal as a line, with its link underneath when links are on. Nothing is escaped: this is text. */
+function dealLineText(deal: LapsedDeal, baseUrl: string, showCompany: boolean, codes: Codes): string {
+    const closeDate = deal.ExpectedCloseDate === null || deal.ExpectedCloseDate === undefined
+        ? 'close date not set' : `close ${deal.ExpectedCloseDate}`;
+    const lapsed = deal.DaysLapsed === null || deal.DaysLapsed === undefined
+        ? 'never had one' : `${plural(deal.DaysLapsed, 'day')} lapsed`;
+    const amount = deal.Amount === null || deal.Amount === undefined
+        ? '\u2014' : formatAmount(deal.Amount, CurrencyCodeFor(deal.CurrencyID, codes));
+    const fields = [deal.Name, showCompany ? deal.CompanyName : null, deal.OwnerName, deal.StageName, closeDate, lapsed, amount]
+        .filter((f): f is string => f !== null && f !== undefined && String(f).trim() !== '');
+    const line = `  - ${fields.join(' | ')}`;
+    return baseUrl === '' ? line : `${line}\n    ${DealRecordUrl(baseUrl, deal.ID)}`;
+}
+
+/**
  * Subject and body for one recipient of one audience.
  *
  * TRUSTED VERSUS ESCAPED. `SubjectTemplate`, `IntroTemplate` and `EmptyMessage` are host-authored copy
@@ -156,5 +201,27 @@ export function RenderDigest(ctx: RenderContext): RenderedDigest {
     const BodyHtml = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#101828;line-height:1.5;">'
         + content
         + footer + '</div>';
-    return { Subject: subject, BodyHtml };
+
+    // The same digest as text. It is built from the same groups, not from BodyHtml: deriving one body
+    // from the other would make the text part inherit every HTML decision, including the escaping.
+    // Placeholders take the RAW values here, since nothing in a text part needs escaping.
+    const defaultIntroText = 'Hi {RecipientFirstName},\n\n'
+        + 'These open deals have an expected close date that has passed, or never had one set.';
+    let textContent: string;
+    if (groups.length === 0) {
+        textContent = htmlToText(FillTemplate(
+            orDefault(audience.EmptyMessage, 'No open deals have a lapsed close date as of {Today}.'), values));
+    } else {
+        const introText = htmlToText(FillTemplate(orDefault(audience.IntroTemplate, defaultIntroText), values));
+        const blocks = audience.GroupByCompany
+            ? groups.map((g) => [`${g.CompanyName}:`, ...g.Deals.map((d) => dealLineText(d, baseUrl, false, codes))].join('\n'))
+            : [groups.flatMap((g) => g.Deals).map((d) => dealLineText(d, baseUrl, true, codes)).join('\n')];
+        textContent = `${introText}\n\n${blocks.join('\n\n')}`;
+    }
+    const footerText = ctx.truncated
+        ? `This list is incomplete: there were too many lapsed deals to read in one run, so only ${plural(ctx.dealsShown, 'deal')} could be included here. Open the deals list in the app for the full picture.`
+        : '';
+    const BodyText = `${[textContent, footerText].filter((part) => part !== '').join('\n\n')}\n`;
+
+    return { Subject: subject, BodyHtml, BodyText };
 }

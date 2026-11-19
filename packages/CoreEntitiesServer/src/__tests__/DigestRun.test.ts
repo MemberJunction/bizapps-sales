@@ -560,7 +560,7 @@ describe('RunLapsedCloseDateDigest', () => {
         expect(sendMessage).toHaveBeenCalledTimes(4);
     });
 
-    it('sends the digest as HTMLBody with Body unset, so the provider chooses contentType HTML', async () => {
+    it('sends both parts: the digest as HTMLBody, its text rendition as Body, never markup in Body', async () => {
         const { sendMessage } = setup();
         await RunLapsedCloseDateDigest(user);
         expect(sendMessage).toHaveBeenCalledTimes(4);
@@ -568,7 +568,11 @@ describe('RunLapsedCloseDateDigest', () => {
             const m = msgOf(c);
             // The regression this guards: markup in `Body` goes out as plain text (MJ#6761).
             expect(m.HTMLBody).toContain('<table');
-            expect(m.Body).toBeUndefined();
+            // The text part is the same digest, not the markup: a provider that builds a
+            // multipart/alternative (SendGrid, Gmail) must not put tags in its text half.
+            expect(m.Body).toBeTruthy();
+            expect(m.Body).not.toContain('<');
+            expect(m.Body).not.toContain('style=');
             expect(m.MessageType).toEqual({ ID: 'pmt-email', Name: 'Email' });
             expect(String(m.To).trim()).not.toBe('');
             expect(String(m.From).trim()).not.toBe('');

@@ -132,8 +132,8 @@ MJ's own route to an HTML email is a `BodyTemplate` carrying HTML content, which
 message shape for a body the digest already renders in code.
 
 **What the digest does instead:** `digest/run.ts` calls `CommunicationEngine.SendSingleMessage`
-directly with `HTMLBody` set and `Body` left unset. Checked on `lts/6.2` (`v6.2.1`) and on `next`
-(2026-11-18); filed as MJ#6761.
+directly, with `HTMLBody` carrying the digest and `Body` carrying its text rendition (`RenderDigest`
+returns both). Checked on `lts/6.2` (`v6.2.1`) and on `next` (2026-11-18); filed as MJ#6761.
 
 The audit trail is unaffected, and this is the reason the swap was safe: the engine writes the
 `MJ: Communication Logs` row itself in `BaseEngine.StartLog`, before the provider call, and refuses to
@@ -144,7 +144,8 @@ more than the one `SUCCESS` row `MJ: Action Execution Logs` held on the action p
 trade the richer Communication Log entry for an Action Execution Log row. Do not reintroduce the
 action without setting an HTML parameter, and do not "simplify" `run.ts` by putting the markup back in
 `Body` — `DigestRun.test.ts` fails on exactly that mutation, which is the regression this entry exists
-to prevent.
+to prevent. The text part has the same protection from the other direction: assigning `BodyHtml` to
+`Body`, or making `htmlToText` stop stripping tags, each fails a test.
 
 ## Standing rules
 

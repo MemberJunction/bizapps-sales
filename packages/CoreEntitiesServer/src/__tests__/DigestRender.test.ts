@@ -358,3 +358,90 @@ describe('RenderDigest: structure and copy', () => {
         expect(RenderDigest(ctx({ truncated: false })).BodyHtml).not.toContain('incomplete');
     });
 });
+
+/**
+ * THE PLAIN-TEXT PART. SendGrid (`text:` + `html:`) and Gmail build a real multipart/alternative from
+ * both bodies, so a recipient on a text-only client reads THIS. It is rendered from the same groups as
+ * the HTML, never derived from `BodyHtml`, so these tests assert the two stay the same digest while the
+ * text half carries no markup — the defect that started this was markup arriving as plain text.
+ */
+describe('RenderDigest — the plain-text part', () => {
+    const tagLike = /<[a-z/!]/i;
+
+    it('carries no markup, entities or inline styles', () => {
+        const { BodyText } = RenderDigest(ctx());
+        expect(BodyText).not.toMatch(tagLike);
+        expect(BodyText).not.toContain('style=');
+        expect(BodyText).not.toContain('&lt;');
+        expect(BodyText).not.toContain('&amp;');
+        expect(BodyText).not.toContain('&nbsp;');
+    });
+
+    it('lists the same deal with its company, owner, stage, close date, lapse and amount', () => {
+        const { BodyText } = RenderDigest(ctx());
+        expect(BodyText).toContain('Widget renewal');
+        expect(BodyText).toContain('Olive Owner');
+        expect(BodyText).toContain('Proposal');
+        expect(BodyText).toContain('close 2026-11-09');
+        expect(BodyText).toContain('14 days lapsed');
+        expect(BodyText).toContain('$12,500');
+        expect(BodyText).toContain('Hi Pat,');
+    });
+
+    it('names the company as a heading when the audience groups by company', () => {
+        const { BodyText } = RenderDigest(ctx({ audience: audience({ GroupByCompany: true }) }));
+        expect(BodyText).toContain('Acme Test Co:');
+    });
+
+    it('puts the company on each deal line when the audience does not group', () => {
+        const { BodyText } = RenderDigest(ctx({ audience: audience({ GroupByCompany: false }) }));
+        expect(BodyText).not.toContain('Acme Test Co:');
+        expect(BodyText).toMatch(/Widget renewal \| Acme Test Co \| Olive Owner/);
+    });
+
+    it('writes a hostile deal name literally, since nothing in a text part is escaped or executed', () => {
+        const HOSTILE = `<script>alert("x")</script> & "Q" 'r'`;
+        const { BodyText } = RenderDigest(ctx({ groups: [group([deal({ Name: HOSTILE })])] }));
+        // Raw, not entities: the tag strip would have eaten it if the text came from the HTML.
+        expect(BodyText).toContain('alert("x")');
+        expect(BodyText).toContain('& "Q" \'r\'');
+    });
+
+    it('includes the deal link when a base URL is set, and no link at all when it is not', () => {
+        const linked = RenderDigest(ctx()).BodyText;
+        expect(linked).toContain('https://explorer.example.test/resource/record/');
+        for (const base of [null, '', '   ']) {
+            const bare = RenderDigest(ctx({ explorerBaseUrl: base as string | null })).BodyText;
+            expect(bare).not.toContain('resource/record');
+            expect(bare).not.toContain('http');
+        }
+    });
+
+    it('shows the empty message, and no deal lines, for an audience with nothing lapsed', () => {
+        const { BodyText } = RenderDigest(ctx({ groups: [], dealsShown: 0 }));
+        expect(BodyText).toContain('No open deals have a lapsed close date as of 2026-11-23.');
+        expect(BodyText).not.toContain('Widget renewal');
+        expect(BodyText).not.toMatch(tagLike);
+    });
+
+    it('strips the tags out of a host-authored HTML intro rather than passing them through', () => {
+        const { BodyText } = RenderDigest(ctx({
+            audience: audience({ IntroTemplate: '<p>Morning <b>{RecipientFirstName}</b> &amp; team &mdash; {Count} to review:</p>' }),
+        }));
+        expect(BodyText).toContain('Morning Pat & team \u2014 1 to review:');
+        expect(BodyText).not.toMatch(tagLike);
+    });
+
+    it('carries the incomplete-list notice when the run was truncated, and not otherwise', () => {
+        expect(RenderDigest(ctx({ truncated: true, dealsShown: 1 })).BodyText).toContain('This list is incomplete');
+        expect(RenderDigest(ctx({ truncated: false })).BodyText).not.toContain('incomplete');
+    });
+
+    it('shows a deal that never had a close date without inventing one', () => {
+        const { BodyText } = RenderDigest(ctx({
+            groups: [group([deal({ ExpectedCloseDate: null, DaysLapsed: null })])],
+        }));
+        expect(BodyText).toContain('close date not set');
+        expect(BodyText).toContain('never had one');
+    });
+});

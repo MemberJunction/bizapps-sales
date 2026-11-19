@@ -29,7 +29,7 @@ export interface DigestRunOptions {
 }
 
 export interface RenderedEmail {
-    To: string; From: string; Subject: string; BodyHtml: string; AudienceCode: string; CompanyName: string | null;
+    To: string; From: string; Subject: string; BodyHtml: string; BodyText: string; AudienceCode: string; CompanyName: string | null;
 }
 
 export interface DigestRunResult {
@@ -96,10 +96,11 @@ class SendTargetLoader {
 }
 
 /**
- * One send. `HTMLBody` carries the digest — that is the whole point of calling the engine directly
- * (see SendTargetLoader). `Body` is deliberately left unset: the digest is rendered as HTML only, and
- * putting the same markup in the plain-text field would hand a text-only provider exactly the broken
- * email this change fixes. A provider that needs a text alternative needs a text renderer first.
+ * One send, with both parts of the message. `HTMLBody` carries the digest — that is the whole point of
+ * calling the engine directly (see SendTargetLoader) — and `Body` carries the text rendition of the
+ * same deals, NOT the markup: SendGrid (`text:` + `html:`) and Gmail build a real multipart/alternative
+ * from the pair, while Microsoft Graph takes one content type and sends the HTML. Never assign the HTML
+ * to `Body`; that is what delivered raw markup to readers in the first place.
  */
 async function sendOne(target: SendTarget, contextUser: UserInfo, email: RenderedEmail): Promise<string | null> {
     const message: Message = {
@@ -108,6 +109,7 @@ async function sendOne(target: SendTarget, contextUser: UserInfo, email: Rendere
         To: email.To,
         Subject: email.Subject,
         HTMLBody: email.BodyHtml,
+        Body: email.BodyText,
     };
     // `MessageResult.Error` is the failure text; `MessageResult.Message` is the processed message object.
     const result = await CommunicationEngine.Instance.SendSingleMessage(
@@ -163,12 +165,12 @@ async function deliverOne(state: RunState, audience: DigestAudience, recipient: 
         }
 
         const target = withOverride(recipient, options.recipientOverride);
-        const { Subject, BodyHtml } = RenderDigest({
+        const { Subject, BodyHtml, BodyText } = RenderDigest({
             audience, recipient: target, groups, today: state.today, explorerBaseUrl: state.explorerBaseUrl,
             dealsShown: CountDeals(groups), truncated: state.deals.Truncated, currencyCodes: state.currencyCodes,
         });
         const email: RenderedEmail = {
-            To: target.Email, From: sender.From, Subject, BodyHtml, AudienceCode: audience.Code,
+            To: target.Email, From: sender.From, Subject, BodyHtml, BodyText, AudienceCode: audience.Code,
             CompanyName: !audience.IsPortfolioWide && groups.length === 1 ? groups[0].CompanyName : null,
         };
         if (options.dryRun || options.captureRenderedEmails) result.RenderedEmails.push(email);
