@@ -28,14 +28,29 @@ function setOutput(params: RunActionParams, name: string, value: unknown): void 
     params.Params.push({ Name: name, Value: value, Type: 'Output' } as ActionParam);
 }
 
-/** A supplied date, or null. Refuses a value it cannot parse rather than substituting today. */
-function readDate(params: RunActionParams, name: string): Date | null {
+interface ParsedDateParam {
+    Value: Date | null;
+    Error: string | null;
+}
+
+/** A supplied date, or null. Refuses a value it cannot parse rather than substituting today (#355 item 7). */
+function readDate(params: RunActionParams, name: string): ParsedDateParam {
     const raw = readParam(params, name);
-    if (raw === null || raw === undefined || raw === '') {
-        return null;
+    if (raw === null || raw === undefined) {
+        return { Value: null, Error: null };
     }
-    const parsed = new Date(String(raw));
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
+    const text = String(raw).trim();
+    if (!text) {
+        return { Value: null, Error: null };
+    }
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) {
+        return {
+            Value: null,
+            Error: `${name} '${text}' is not a valid date.`,
+        };
+    }
+    return { Value: parsed, Error: null };
 }
 
 @RegisterClass(BaseAction, 'Sales.CaptureForecastSnapshot')
@@ -60,8 +75,22 @@ export class CaptureForecastSnapshotAction extends BaseAction {
          * survive. Omitting both is the ordinary case and means "the current month".
          */
         const start = readDate(params, P_PERIOD_START);
+        if (start.Error) {
+            return {
+                Success: false,
+                ResultCode: 'BAD_PERIOD',
+                Message: start.Error,
+            };
+        }
         const end = readDate(params, P_PERIOD_END);
-        if ((start && !end) || (!start && end)) {
+        if (end.Error) {
+            return {
+                Success: false,
+                ResultCode: 'BAD_PERIOD',
+                Message: end.Error,
+            };
+        }
+        if ((start.Value && !end.Value) || (!start.Value && end.Value)) {
             return {
                 Success: false,
                 ResultCode: 'BAD_PERIOD',
@@ -73,7 +102,7 @@ export class CaptureForecastSnapshotAction extends BaseAction {
         }
 
         const period: ForecastPeriod | undefined =
-            start && end ? { PeriodStart: start, PeriodEnd: end } : undefined;
+            start.Value && end.Value ? { PeriodStart: start.Value, PeriodEnd: end.Value } : undefined;
 
         const result = await RunForecastSnapshot(Metadata.Provider, params.ContextUser, new Date(), period);
 

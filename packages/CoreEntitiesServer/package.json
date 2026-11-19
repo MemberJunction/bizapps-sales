@@ -1,8 +1,8 @@
 {
   "name": "@mj-biz-apps/sales-core-entities-server",
   "type": "module",
-  "version": "6.31.0",
-  "description": "Server-side entity subclasses for BizApps Sales \u2014 the close lock (L-17), the OwnerEmployeeID denormalized stamp, and deal lifecycle hooks.",
+  "version": "6.32.0",
+  "description": "Server-side entity subclasses for BizApps Sales — the close lock (L-17), the OwnerEmployeeID denormalized stamp, and deal lifecycle hooks.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "publishConfig": {
@@ -13,8 +13,8 @@
   ],
   "scripts": {
     "build": "tsc && tsc-alias -f",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "vitest run --root ../.. packages/CoreEntitiesServer",
+    "test:watch": "vitest --root ../.. packages/CoreEntitiesServer"
   },
   "author": "MemberJunction.com",
   "license": "BUSL-1.1",
@@ -36,7 +36,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@mj-biz-apps/sales-entities": "^6.31.0"
+    "@mj-biz-apps/sales-entities": "^6.32.0"
   },
   "peerDependencies": {
     "@memberjunction/communication-engine": "^6.2.1",

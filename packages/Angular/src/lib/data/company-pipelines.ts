@@ -213,12 +213,12 @@ export function NoPipelineMessage(state: NoPipelineState): string {
         const name = state.CompanyName?.trim() || 'This company';
         const subject = state.CompanyName?.trim() || 'this company';
         const fix = state.OtherCompanyHasPipeline
-            ? `Choose another company, or ask a Sales admin to link a pipeline to ${subject}.`
-            : `Ask a Sales admin to link a pipeline to ${subject}.`;
+            ? `Choose another company, or please ask a Sales admin to link a pipeline to ${subject}.`
+            : `Please ask a Sales admin to link a pipeline to ${subject}.`;
         return `${name} has no pipeline, so this deal can't be saved. ${fix}`;
     }
     if (!state.CompanyHasPipeline && !state.OtherCompanyHasPipeline) {
-        return 'No company has a pipeline, so deals can\'t be saved. Ask a Sales admin to link a pipeline to a company.';
+        return 'No company has a pipeline, so deals can\'t be saved. Please ask a Sales admin to link a pipeline to a company.';
     }
     if (!state.CompanyID && state.HidePipelines) {
         return 'Choose a company. Its pipeline decides the deal\'s stages.';

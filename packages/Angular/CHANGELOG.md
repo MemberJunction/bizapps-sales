@@ -1,5 +1,34 @@
 # @mj-biz-apps/sales-ng
 
+## 6.32.0
+
+### Minor Changes
+
+- b582eea: Post-go-live sales consolidation:
+  - Enforce single-holder (`AllowsMultiplePerDeal = 0`) and employee-only owner (`IsOwnerRole = 1`) rules on `DealTeamMember` saves, and clear `Deal.OwnerEmployeeID` when the owner row is deactivated.
+  - Record deal close and reopen transitions in the activity timeline, verify `DealID` existence in `ActivityWriterService.LogActivity`, and refusal-check `PeriodEnd < PeriodStart` in `RunSalesForecastSnapshotAction`.
+  - Show `WeightedAmount` on open deals and hide it on closed deals, differentiate close-stamp refusal hints (`ActualCloseDate` vs `ClosedAt`/`ClosedByUserID`), preserve the current inactive closing status in the status dropdown, and lock non-carve-out fields across all form panels when a deal is closed.
+  - Align dashboard, win-rate, bookings, forecast, involvement, and unconfirmed-won-order queries on `CalendarDayIn` (`BusinessTimeZone()`) and `DealStatusType` flags, format pipeline view `Amount` as currency, and compare board idle days by calendar day.
+  - Auto-number `DealPaymentSchedule.DisplayOrder` on insert, guard `MJSDealSchedulePanel.readRows` against out-of-order replies, and flag discounted line cards as `Discount not covered` when an earlier approval covers less than orders' current priced discount.
+
+### Patch Changes
+
+- 5e6438f: The Board gets an "All" tab (All companies / All pipelines) that shows every allowed pipeline at once, one lane per pipeline, and a horizontal scrollbar above the columns that stays at the top of the page. The deal line product search also matches the company name, and lists the whole active catalogue instead of the first 50 products, so other companies' products (bundle SKUs among them) are no longer hidden behind the deal's own company.
+- 78aaeb8: Deal line product picker: add an "Only selling company products" checkbox, checked by default. Unchecking it lists every company's products for multi-company deals; while checked, the list says how many search matches other companies have.
+- 50d2b85: Messages that send a person to a Sales admin now ask politely ("Please ask a Sales admin to…", "Please request this from a Sales Admin."), matching the permission wording in the other apps (bc-aidp-next-golive#493).
+- Updated dependencies [2565036]
+- Updated dependencies [483cb76]
+- Updated dependencies [b582eea]
+  - @mj-biz-apps/sales-entities@6.32.0
+
+## 6.31.1
+
+### Patch Changes
+
+- b8bc9c4: The deal line prompt for a product the customer already has uses the order line's new wording (golive #480): it asks "Is this line a renewal of that subscription, or a new one?" and the choices read "Renew <subscription>" and "Create new subscription". The Close Won and stage-change messages that send a rep to the prompt use the same words. Wording only: what each answer does is unchanged.
+- 05f18b5: A deal team row saved or deleted on its own can no longer leave an open deal with no owner: deleting, deactivating or re-roling the last active Owner row is refused with a message pointing at the Owner field (#568). The owner stamp now credits only an active owner row. The Sales Account's Contacts panel gains "Link person", which links an existing Sales Contact to the account (#443). Adds an integration check that Close Won refuses an unanswered line whose product inherits its subscription type (#504).
+  - @mj-biz-apps/sales-entities@6.31.1
+
 ## 6.31.0
 
 ### Minor Changes

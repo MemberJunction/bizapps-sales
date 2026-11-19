@@ -50,11 +50,11 @@ describe('cycle time starts on the business day, like the close it is measured t
     });
 });
 
-describe('a won deal with only ClosedAt falls back to its business day', () => {
-    it('won-deals-order-not-confirmed.sql takes fnBusinessDayOf(ClosedAt), not CAST(ClosedAt AS DATE)', () => {
+describe('a won deal with only ClosedAt or __mj_UpdatedAt falls back to its business day', () => {
+    it('won-deals-order-not-confirmed.sql takes fnBusinessDayOf(ClosedAt) and fnBusinessDayOf(__mj_UpdatedAt), not CAST(ClosedAt AS DATE)', () => {
         const sql = sqlOf('won-deals-order-not-confirmed.sql');
         expect(sql).toMatch(
-            /COALESCE\(d\.ActualCloseDate, \[__mj_BizAppsCommon\]\.\[fnBusinessDayOf\]\(d\.ClosedAt\)\) AS CloseDate/,
+            /COALESCE\(\s*d\.ActualCloseDate,\s*\[__mj_BizAppsCommon\]\.\[fnBusinessDayOf\]\(d\.ClosedAt\),\s*\[__mj_BizAppsCommon\]\.\[fnBusinessDayOf\]\(d\.__mj_UpdatedAt\)\s*\) AS CloseDate/,
         );
         expect(sql).not.toMatch(/CAST\(d\.ClosedAt AS DATE\)/i);
     });

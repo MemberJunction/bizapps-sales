@@ -6,10 +6,10 @@
  * worth on the way out. That is not checkable from the UI: a board that wrote two events, or none, or one
  * with the arrival probability instead of the departure probability, looks identical on screen.
  *
- * WHERE THE BEHAVIOUR LIVES. `Sales.SaveDeal`, not the board. The board moves a deal by loading its draft,
- * setting the stage and saving — so the event is appended by the operation whenever it sees the stage
- * change, and an Action, an agent or the workspace's own stage dropdown all get it too. These checks
- * therefore exercise the operation directly, which is the level the promise is made at.
+ * WHERE THE BEHAVIOUR LIVES. `DealEntityServer.Save()`, not the board. The board moves a deal by loading
+ * its record, setting the stage and saving — so the event is appended by the entity server whenever it
+ * sees the stage change, and an Action, an agent or the deal form's own stage control all get it too.
+ * These checks therefore exercise `deal.Save()` directly, which is the level the promise is made at.
  *
  * ⚠️ **`RUN_MUTATION_TESTS=1` IS MANDATORY.** Every check here writes. Each rolls its transaction back.
  *
