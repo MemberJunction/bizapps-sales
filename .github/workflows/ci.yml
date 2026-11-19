@@ -48,7 +48,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [next]
+    branches: [next, 'lts/**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
