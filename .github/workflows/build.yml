@@ -95,4 +95,6 @@ jobs:
       # stub pass, so green means "nothing that has tests is failing", not "tested".
       - name: Run tests
         if: ${{ !cancelled() }}
+        env:
+          TZ: America/Los_Angeles
         run: pnpm run test

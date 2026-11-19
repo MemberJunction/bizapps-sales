@@ -1,5 +1,21 @@
 # @mj-biz-apps/sales-entities
 
+## 6.32.0
+
+### Minor Changes
+
+- 483cb76: Installed databases now get this release's metadata (V202611182210 Metadata_Sync): the new SQL of seven dashboard and reporting queries with their new and updated fields, the B2B pipeline's close-won contract type as the code `ORDER_FORM`, the Sales: Pipeline view's Amount and Currency columns, the Close Deal and Reopen Deal type definitions, and Deals' three predicted-win fields taken off the generated form and default views. A host that changed the pipeline policy or the view layout keeps its own.
+- b582eea: Post-go-live sales consolidation:
+  - Enforce single-holder (`AllowsMultiplePerDeal = 0`) and employee-only owner (`IsOwnerRole = 1`) rules on `DealTeamMember` saves, and clear `Deal.OwnerEmployeeID` when the owner row is deactivated.
+  - Record deal close and reopen transitions in the activity timeline, verify `DealID` existence in `ActivityWriterService.LogActivity`, and refusal-check `PeriodEnd < PeriodStart` in `RunSalesForecastSnapshotAction`.
+  - Show `WeightedAmount` on open deals and hide it on closed deals, differentiate close-stamp refusal hints (`ActualCloseDate` vs `ClosedAt`/`ClosedByUserID`), preserve the current inactive closing status in the status dropdown, and lock non-carve-out fields across all form panels when a deal is closed.
+  - Align dashboard, win-rate, bookings, forecast, involvement, and unconfirmed-won-order queries on `CalendarDayIn` (`BusinessTimeZone()`) and `DealStatusType` flags, format pipeline view `Amount` as currency, and compare board idle days by calendar day.
+  - Auto-number `DealPaymentSchedule.DisplayOrder` on insert, guard `MJSDealSchedulePanel.readRows` against out-of-order replies, and flag discounted line cards as `Discount not covered` when an earlier approval covers less than orders' current priced discount.
+
+### Patch Changes
+
+- 2565036: The refusal for a discount typed between 0 and 1 now names a rounded percent ("7%") instead of floating-point noise ("7.000000000000001%"). Fixes #295.
+
 ## 6.31.1
 
 ## 6.31.0

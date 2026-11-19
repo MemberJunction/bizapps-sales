@@ -22,6 +22,7 @@ import {
     type EntityDeleteOptions,
     type EntitySaveOptions,
     type IMetadataProvider,
+    type IRunViewProvider,
     LogError,
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
@@ -34,10 +35,51 @@ const DEAL_PAYMENT_SCHEDULE_ENTITY = 'MJ_BizApps_Sales: Deal Payment Schedules';
 @RegisterClass(BaseEntity, DEAL_PAYMENT_SCHEDULE_ENTITY)
 export class DealPaymentScheduleEntityServer extends DealPaymentScheduleEntity {
     public override async Save(options?: EntitySaveOptions): Promise<boolean> {
+        if (!this.IsSaved && (this.DisplayOrder === null || this.DisplayOrder === undefined || this.DisplayOrder === 0)) {
+            const assigned = await this.assignNextDisplayOrder();
+            if (!assigned) {
+                return false;
+            }
+        }
         // The deal the row was on and the one it is on now: a row moved between deals changes both.
         const before = this.IsSaved ? ((this.GetFieldByName('DealID')?.OldValue as string | null) ?? null) : null;
         const deals = [...new Set([before, this.DealID ?? null].filter((id): id is string => !!id).map((id) => id.toLowerCase()))];
         return this.withOrderSync(deals, 'save', () => super.Save(options));
+    }
+
+    /**
+     * When a new row arrives with DisplayOrder 0 or null (the Explorer grid's inline insert path),
+     * assign max(DisplayOrder) + 1 for the deal so same-date instalments keep their entry order (#444).
+     */
+    private async assignNextDisplayOrder(): Promise<boolean> {
+        const dealID = this.DealID?.trim();
+        if (!dealID) {
+            this.DisplayOrder = 1;
+            return true;
+        }
+        const safeDealID = dealID.replace(/'/g, "''");
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+        const read = await view.RunView<{ DisplayOrder: number | null }>(
+            {
+                EntityName: DEAL_PAYMENT_SCHEDULE_ENTITY,
+                ExtraFilter: `DealID = '${safeDealID}'`,
+                OrderBy: 'DisplayOrder DESC',
+                Fields: ['DisplayOrder'],
+                MaxRows: 1,
+                ResultType: 'simple',
+                BypassCache: true,
+            },
+            this.ContextCurrentUser,
+        );
+        if (!read.Success) {
+            return this.refuse(
+                'save',
+                `This instalment could not be numbered because the deal's existing schedule could not be read: ${read.ErrorMessage ?? 'unknown error'}`,
+            );
+        }
+        const currentMax = Number(read.Results?.[0]?.DisplayOrder ?? 0);
+        this.DisplayOrder = (Number.isFinite(currentMax) && currentMax > 0 ? currentMax : 0) + 1;
+        return true;
     }
 
     public override async Delete(options?: EntityDeleteOptions): Promise<boolean> {

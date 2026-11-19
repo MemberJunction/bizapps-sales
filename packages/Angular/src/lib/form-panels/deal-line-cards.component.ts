@@ -95,8 +95,37 @@ export interface DealLineCardRow {
 const CONCESSION_BADGES: Partial<Record<LineConcessionState, { Label: string; Tone: 'pending' | 'problem'; Retry: boolean }>> = {
     Pending: { Label: 'Discount awaiting approval', Tone: 'pending', Retry: false },
     Rejected: { Label: 'Discount rejected', Tone: 'problem', Retry: true },
+    NotCovered: { Label: 'Discount not covered', Tone: 'problem', Retry: true },
     NotRecorded: { Label: 'Discount not recorded for approval', Tone: 'problem', Retry: true },
 };
+
+interface PriceOrderForCardsInput {
+    CompanyID: string;
+    BillToPersonID?: string | null;
+    BillToOrganizationID?: string | null;
+    OrderDate?: string | null;
+    Lines: Array<{
+        ProductID: string;
+        Quantity: number;
+        UnitPrice?: number | null;
+        DiscountPct?: number | null;
+        ServicePeriodStart?: string | null;
+    }>;
+}
+
+interface PriceOrderForCardsOutput {
+    Success: boolean;
+    Lines?: Array<{
+        DiscountAmount?: number | null;
+    }>;
+}
+
+interface RemoteOperationRouter {
+    RouteOperation<TInput, TOutput>(
+        operationKey: string,
+        input: TInput,
+    ): Promise<{ Success: boolean; Output?: TOutput }>;
+}
 
 /** The product facts a card shows beside the line. */
 export interface DealLineCardProduct {
@@ -422,14 +451,63 @@ export class MJSDealLineCardsComponent implements OnChanges {
         }
         // Whether orders values a line is asked only when nothing was recorded for it (a recorded
         // concession already says orders valued it), so on most deals no line is asked at all.
+        const withConcessions = discounted.filter((line) => rows.some((r) => r.OrderLineID === line.ID));
+        const pricedDiscounts = await this.loadPricedDiscounts(withConcessions);
         await Promise.all(
             discounted.map(async (line) => {
                 const own = rows.filter((r) => r.OrderLineID === line.ID);
                 const valued = own.length > 0 ? true : await this.ordersValuesLine(line);
-                states.set(line.ID, ResolveLineConcessionState({ DiscountPct: line.DiscountPct, Rows: own, OrdersValuesLine: valued }));
+                states.set(
+                    line.ID,
+                    ResolveLineConcessionState({
+                        DiscountPct: line.DiscountPct,
+                        Rows: own,
+                        OrdersValuesLine: valued,
+                        DiscountValue: pricedDiscounts.get(line.ID) ?? null,
+                    }),
+                );
             }),
         );
         return states;
+    }
+
+    /**
+     * Orders' priced discount (`DiscountAmount`) for discounted lines that have concession rows (#510),
+     * read in one `Orders.PriceOrder` call so sales compares orders' own figures without arithmetic.
+     */
+    private async loadPricedDiscounts(lines: DealLineCardRow[]): Promise<Map<string, number | null>> {
+        const out = new Map<string, number | null>();
+        if (lines.length === 0) return out;
+        const companyID = this.Deal?.CompanyID ?? lines[0]?.CompanyID ?? null;
+        const router = Metadata.Provider as unknown as Partial<RemoteOperationRouter> | undefined;
+        if (!companyID || typeof router?.RouteOperation !== 'function') return out;
+        try {
+            const order = this.Deal?.OrderID_Object;
+            const envelope = await router.RouteOperation<PriceOrderForCardsInput, PriceOrderForCardsOutput>(
+                'Orders.PriceOrder',
+                {
+                    CompanyID: companyID,
+                    BillToPersonID: order?.BillToPersonID ?? null,
+                    BillToOrganizationID: order?.BillToOrganizationID ?? null,
+                    OrderDate: DayOf(order?.OrderDate),
+                    Lines: lines.map((line) => ({
+                        ProductID: line.ProductID,
+                        Quantity: line.Quantity,
+                        UnitPrice: line.PriceOverridden ? line.UnitPrice : null,
+                        DiscountPct: line.DiscountPct,
+                        ServicePeriodStart: DayOf(line.ServicePeriodStart),
+                    })),
+                },
+            );
+            const pricedLines = envelope?.Success && envelope.Output?.Success ? (envelope.Output.Lines ?? []) : [];
+            lines.forEach((line, idx) => {
+                const discount = pricedLines[idx]?.DiscountAmount;
+                out.set(line.ID, discount !== undefined && discount !== null ? Number(discount) : null);
+            });
+        } catch {
+            // If orders could not price the lines right now, leave DiscountValue null so the stored row decides.
+        }
+        return out;
     }
 
     /**

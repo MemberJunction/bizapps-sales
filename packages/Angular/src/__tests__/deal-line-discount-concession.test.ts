@@ -87,4 +87,35 @@ describe('the discount is measured in orders\' dollars against what the line\'s 
         const notice = await (e as unknown as { recordDiscountConcession(): Promise<string | null> }).recordDiscountConcession();
         expect(notice).toBeNull();
     });
+
+    it('flushes a pending reprice before Save checks CanSave so raising quantity within 350ms still requires a discount reason (#509)', async () => {
+        const e = pricedEditor({ saved: 0.1, current: 0.1, discount: 100, covered: 100 });
+        let orderSaved = false;
+        Object.assign(e, {
+            Deal: {
+                CompanyID: 'comp-1',
+                OrderID_Object: {
+                    Save: async () => {
+                        orderSaved = true;
+                        return true;
+                    },
+                },
+            },
+            cdr: { detectChanges: () => undefined },
+        });
+        Object.defineProperty(e, 'pricePending', { value: true, writable: true });
+        (e as unknown as { refreshPrice: () => Promise<void> }).refreshPrice = async () => {
+            Object.defineProperty(e, 'pricedDiscount', { value: 200, writable: true });
+            Object.defineProperty(e, 'pricePending', { value: false, writable: true });
+        };
+
+        // Before Save flushes the pending reprice, NeedsDiscountReason is false because pricePending is true
+        // and CurrentPct === SavedPct. Save must await refreshPrice and then block because 200 > 100 covered.
+        expect(e.CanSave).toBe(true);
+        await e.Save();
+
+        expect(orderSaved).toBe(false);
+        expect(e.NeedsDiscountReason).toBe(true);
+        expect(e.CanSave).toBe(false);
+    });
 });
