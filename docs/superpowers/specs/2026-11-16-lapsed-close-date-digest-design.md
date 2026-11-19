@@ -122,7 +122,7 @@ become three rows:
 | `COMPANY_LEADER` | 0 | NULL | 0 | 0 |
 | `CEO` | 1 | 14 | 1 | 1 |
 | `CFO` | 1 | NULL | 1 | 1 |
-| `CTO` | 1 | 14 | **0** | 1 |
+| `CTO` | 1 | 14 | 1 | 1 |
 
 `SendWhenEmpty` is read from CDP, not chosen here. In
 `packages/CustomAgents/src/LapsedCloseDateAgent.ts` the leader loop skips a company outright —
@@ -133,11 +133,16 @@ leader sends are "**Skipped** when that company has zero lapsed deals", CEO and 
 sent**, even when empty". `MinDaysLapsed = 14` is strict for the same reason: CDP filters
 `d.daysLapsed > CEO_AGE_THRESHOLD_DAYS`.
 
+So `COMPANY_LEADER` is the only one of the four that stays quiet. A leader is being nudged about
+their own company's deals, and a silent week is the normal week. For the three portfolio audiences
+an empty digest *is* the report: it is what separates a clean portfolio from a digest that failed to
+run.
+
 The CTO is the one row with no CDP counterpart — CDP sent the CTO a Cc of the CFO digest rather than
-a digest of his own. It is the CEO's slice — portfolio-wide, more than 14 days past, plus never-set
-close dates — but it does not send when there is nothing. All four flags already existed, so the CTO
-needed no schema change: it is four values in a seed row, which is the claim approach A was chosen
-to make.
+a digest of his own. It is the CEO's slice: portfolio-wide, more than 14 days past, plus never-set
+close dates, and it sends when empty, keeping the weekly all-clear that Cc used to deliver. All four
+flags already existed, so the CTO needed no schema change: it is four values in a seed row, which is
+the claim approach A was chosen to make.
 
 `SubjectTemplate` and `IntroTemplate` are columns rather than code because CDP's copy had host
 specifics welded into it — its leader intro names a particular person to contact when deals vanish
@@ -485,8 +490,9 @@ Officer`. CDP achieved roughly this by CC'ing him on the CFO digest from a hardc
 | **Deals more than 14 days past** | **0** |
 
 So: two leader digests, and the CEO, CFO and CTO digests carrying the four never-set-close-date deals
-(which bypass the 14-day floor by design). Nothing is empty, so the CTO's new `SendWhenEmpty = 0`
-does not suppress anything on the first run.
+(which bypass the 14-day floor by design). Nothing is empty on the first run, so no all-clear copy
+appears and no leader digest is suppressed — but note that the three portfolio audiences would each
+have sent an empty digest had the never-set deals not qualified.
 
 That is a very small first digest, and it is worth knowing why rather than being surprised: of 9,918
 deals, only 157 are open, and **every open deal's close date is in the future** — the earliest is

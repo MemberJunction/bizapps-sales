@@ -418,8 +418,18 @@ const CEO = audienceRow({
     GroupByCompany: true, DisplayRank: 20,
 });
 const CTO = audienceRow({
-    ID: 'aud-cto', Code: 'CTO', Name: 'CTO', IsPortfolioWide: true, MinDaysLapsed: 14, SendWhenEmpty: false,
+    ID: 'aud-cto', Code: 'CTO', Name: 'CTO', IsPortfolioWide: true, MinDaysLapsed: 14, SendWhenEmpty: true,
     GroupByCompany: true, DisplayRank: 30,
+});
+/**
+ * A portfolio-wide audience with SendWhenEmpty off. No shipped row looks like this — all three
+ * portfolio audiences send their all-clear, and COMPANY_LEADER is the only one that stays quiet — so
+ * the skip path on a portfolio audience needs an audience of its own to exercise it. A host adding
+ * its own quiet portfolio row is exactly the case this covers.
+ */
+const QUIET = audienceRow({
+    ID: 'aud-quiet', Code: 'QUIET', Name: 'Quiet portfolio', IsPortfolioWide: true, MinDaysLapsed: 14,
+    SendWhenEmpty: false, GroupByCompany: true, DisplayRank: 40,
 });
 
 const recipientRow = (audience: string, company: string | null, employee: string) =>
@@ -519,12 +529,33 @@ describe('RunLapsedCloseDateDigest', () => {
         expect(sendMessage.mock.calls.map((c) => toOf(c))).toContain('cleo@example.invalid');
     });
 
-    it('sends nothing for an empty audience without SendWhenEmpty (the CTO case)', async () => {
+    it('sends nothing for an empty portfolio audience without SendWhenEmpty', async () => {
+        // 3 days lapsed is under the 14-day floor, so the quiet audience has nothing and is skipped
+        // where the CEO, on the same deals, sends its all-clear.
+        const { sendMessage } = setup(runWorld({
+            audiences: [LEADER, CEO, QUIET],
+            recipients: [
+                recipientRow('aud-leader', 'co-1', 'emp-l1'),
+                recipientRow('aud-leader', 'co-2', 'emp-l2'),
+                recipientRow('aud-ceo', null, 'emp-ceo'),
+                recipientRow('aud-quiet', null, 'emp-cto'),
+            ],
+            deals: [dealRow({ ExpectedCloseDate: '2026-11-20' })],
+        }));
+        const out = await RunLapsedCloseDateDigest(user, { captureRenderedEmails: true });
+        expect(out.RenderedEmails.some((e) => e.AudienceCode === 'QUIET')).toBe(false);
+        expect(out.RenderedEmails.some((e) => e.AudienceCode === 'CEO')).toBe(true);
+        expect(sendMessage.mock.calls.map((c) => toOf(c))).not.toContain('cato@example.invalid');
+        expect(out.SkippedEmpty).toBe(2); // the quiet audience, and co-2's leader
+    });
+
+    it('sends the CTO an all-clear when nothing qualifies, as the shipped row does', async () => {
         const { sendMessage } = setup(runWorld({ deals: [dealRow({ ExpectedCloseDate: '2026-11-20' })] }));
         const out = await RunLapsedCloseDateDigest(user, { captureRenderedEmails: true });
-        expect(out.RenderedEmails.some((e) => e.AudienceCode === 'CTO')).toBe(false);
-        expect(sendMessage.mock.calls.map((c) => toOf(c))).not.toContain('cato@example.invalid');
-        expect(out.SkippedEmpty).toBe(2); // the CTO, and co-2's leader
+        const cto = out.RenderedEmails.find((e) => e.AudienceCode === 'CTO');
+        expect(cto).toBeDefined();
+        expect(cto.BodyHtml).toContain('No open deals have a lapsed close date');
+        expect(sendMessage.mock.calls.map((c) => toOf(c))).toContain('cato@example.invalid');
     });
 
     it('continues after one failed send and reports both', async () => {
@@ -773,7 +804,7 @@ describe('RunLapsedCloseDateDigest', () => {
 
     it('does not reach for the provider when there is nothing to send', async () => {
         const { commConfig } = setup(runWorld({
-            deals: [], audiences: [CTO], recipients: [recipientRow('aud-cto', null, 'emp-cto')],
+            deals: [], audiences: [QUIET], recipients: [recipientRow('aud-quiet', null, 'emp-cto')],
         }));
         const out = await RunLapsedCloseDateDigest(user);
         expect(out.Success).toBe(true);

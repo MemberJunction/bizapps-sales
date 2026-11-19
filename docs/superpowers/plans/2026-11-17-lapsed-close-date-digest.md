@@ -112,9 +112,9 @@ Each with a `uuidgen` primaryKey and **no `sync` block**. Exact flag values:
 | `COMPANY_LEADER` | Company Leader | 0 | NULL | 1 | 0 | 0 | 10 |
 | `CEO` | CEO | 1 | 14 | 1 | 1 | 1 | 20 |
 | `CFO` | CFO | 1 | NULL | 1 | 1 | 1 | 30 |
-| `CTO` | CTO | 1 | 14 | 1 | **0** | 1 | 40 |
+| `CTO` | CTO | 1 | 14 | 1 | 1 | 1 | 40 |
 
-`SendWhenEmpty` comes from CDP and must not be "improved": `LapsedCloseDateAgent.ts` skips a company's leader digest when that company has nothing lapsed (`if (companyDeals.length === 0) { result.leaderEmailsSkippedEmpty++; continue; }`), and sends the CEO and CFO digests unconditionally with their all-clear copy. `MinDaysLapsed = 14` is a strict floor there too (`d.daysLapsed > CEO_AGE_THRESHOLD_DAYS`). The CTO row has no CDP counterpart — CDP Cc'd the CTO on the CFO digest — and is the CEO's slice that stays quiet when empty.
+`SendWhenEmpty` comes from CDP: `LapsedCloseDateAgent.ts` skips a company's leader digest when that company has nothing lapsed (`if (companyDeals.length === 0) { result.leaderEmailsSkippedEmpty++; continue; }`), and sends the CEO and CFO digests unconditionally with their all-clear copy. `MinDaysLapsed = 14` is a strict floor there too (`d.daysLapsed > CEO_AGE_THRESHOLD_DAYS`). `COMPANY_LEADER` is therefore the only row that stays quiet; for the three portfolio audiences the empty digest is the all-clear. The CTO row has no CDP counterpart — CDP Cc'd the CTO on the always-sent CFO digest — and sends when empty, keeping what that Cc delivered.
 
 `SubjectTemplate`, `IntroTemplate` and `EmptyMessage` are **NULL on all four** — code supplies neutral defaults, and host-authored copy goes on rows a host adds. A `_comments` block must say that a host wanting different behaviour should add its own audience row rather than edit these, because a later release that edits a shipped row overwrites a host's changes to it.
 
@@ -431,7 +431,7 @@ describe('RunLapsedCloseDateDigest', () => {
   it('sends nothing and reports failure when no sender resolves', () => { /* Errors names the recipient */ });
   it('skips a company-leader digest when that company has nothing lapsed', () => { /* SkippedEmpty increments */ });
   it('sends an all-clear when the audience has SendWhenEmpty', () => { /* … */ });
-  it('sends nothing for an empty audience without SendWhenEmpty', () => { /* the CTO case */ });
+  it('sends nothing for an empty audience without SendWhenEmpty', () => { /* COMPANY_LEADER is the shipped row with the flag off; use a synthetic portfolio audience to cover the portfolio path */ });
   it('continues after one failed send and reports both', () => { /* fail the 2nd of 4 */ });
   it('configures the communication engine and resolves the provider once per run', () => { /* superseded: see the note at the top */ });
   it('passes To, From, Subject, Body, Provider and MessageType on every call', () => { /* … */ });

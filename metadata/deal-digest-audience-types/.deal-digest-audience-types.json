@@ -22,8 +22,8 @@
       "Shipped audience types for the Lapsed Close Date Digest. These four rows are vocabulary; their flags drive who sees what. No recipient rows ship, ever: who actually receives a digest is the host's data, not ours.",
       "A host that wants different behaviour should ADD ITS OWN audience row rather than edit these four. A later release that edits a shipped row overwrites whatever the host changed on it.",
       "SubjectTemplate, IntroTemplate and EmptyMessage are NULL on all four on purpose: code supplies neutral defaults, and host-authored copy belongs on rows a host adds.",
-      "SendWhenEmpty mirrors the CDP agent these four rows replace (CDP packages/CustomAgents/src/LapsedCloseDateAgent.ts): a leader digest is SKIPPED for a company with nothing lapsed (its leader loop does `if (companyDeals.length === 0) { leaderEmailsSkippedEmpty++; continue; }`), while the CEO and CFO digests have no such guard and always send, carrying their all-clear copy. So Company Leader is false and CEO and CFO are true.",
-      "CTO is the one row with no CDP counterpart: CDP sent the CTO a Cc of the CFO digest, not a digest of his own. It is the CEO's slice with SendWhenEmpty = false, so the escalation view stays quiet when there is nothing to escalate. Deliberate, not a typo."
+      "SendWhenEmpty mirrors the CDP agent these four rows replace (CDP packages/CustomAgents/src/LapsedCloseDateAgent.ts): a leader digest is SKIPPED for a company with nothing lapsed (its leader loop does `if (companyDeals.length === 0) { leaderEmailsSkippedEmpty++; continue; }`), while the CEO and CFO digests have no such guard and always send, carrying their all-clear copy.",
+      "So Company Leader is the only one of the four that stays quiet: a leader is nudged about their own company's deals, and silence there is the normal week. The three portfolio audiences all send, because for them an empty digest IS the report — the all-clear that distinguishes a clean portfolio from a digest that never ran. CTO has no CDP counterpart (CDP sent the CTO a Cc of the always-sent CFO digest rather than a digest of his own), and sends when empty for the same reason, keeping what that Cc used to deliver."
     ]
   },
   {
@@ -70,11 +70,11 @@
     "fields": {
       "Code": "CTO",
       "Name": "CTO",
-      "Description": "Portfolio-wide view of deals lapsed more than 14 days, plus deals with no expected close date, grouped by company. Not emailed when there is nothing to report.",
+      "Description": "Portfolio-wide view of deals lapsed more than 14 days, plus deals with no expected close date, grouped by company. Emailed even when there is nothing to report.",
       "IsPortfolioWide": true,
       "MinDaysLapsed": 14,
       "IncludeMissingCloseDate": true,
-      "SendWhenEmpty": false,
+      "SendWhenEmpty": true,
       "GroupByCompany": true,
       "SubjectTemplate": null,
       "IntroTemplate": null,
