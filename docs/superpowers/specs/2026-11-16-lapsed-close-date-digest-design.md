@@ -124,9 +124,20 @@ become three rows:
 | `CFO` | 1 | NULL | 1 | 1 |
 | `CTO` | 1 | 14 | **0** | 1 |
 
-The CTO is the CEO's slice — portfolio-wide, more than 14 days past, plus never-set close dates —
-but it does not send when there is nothing. All four flags already existed, so the CTO needed no
-schema change: it is four values in a seed row, which is the claim approach A was chosen to make.
+`SendWhenEmpty` is read from CDP, not chosen here. In
+`packages/CustomAgents/src/LapsedCloseDateAgent.ts` the leader loop skips a company outright —
+`if (companyDeals.length === 0) { result.leaderEmailsSkippedEmpty++; continue; }` — while the CEO and
+CFO digests have no such guard and send their all-clear copy (`'No deals require attention this
+week. ✅'`, `'No lapsed deals across the portfolio. ✅'`). The agent brief says the same in words:
+leader sends are "**Skipped** when that company has zero lapsed deals", CEO and CFO are "**Always
+sent**, even when empty". `MinDaysLapsed = 14` is strict for the same reason: CDP filters
+`d.daysLapsed > CEO_AGE_THRESHOLD_DAYS`.
+
+The CTO is the one row with no CDP counterpart — CDP sent the CTO a Cc of the CFO digest rather than
+a digest of his own. It is the CEO's slice — portfolio-wide, more than 14 days past, plus never-set
+close dates — but it does not send when there is nothing. All four flags already existed, so the CTO
+needed no schema change: it is four values in a seed row, which is the claim approach A was chosen
+to make.
 
 `SubjectTemplate` and `IntroTemplate` are columns rather than code because CDP's copy had host
 specifics welded into it — its leader intro names a particular person to contact when deals vanish

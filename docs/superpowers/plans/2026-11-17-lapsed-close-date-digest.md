@@ -114,6 +114,8 @@ Each with a `uuidgen` primaryKey and **no `sync` block**. Exact flag values:
 | `CFO` | CFO | 1 | NULL | 1 | 1 | 1 | 30 |
 | `CTO` | CTO | 1 | 14 | 1 | **0** | 1 | 40 |
 
+`SendWhenEmpty` comes from CDP and must not be "improved": `LapsedCloseDateAgent.ts` skips a company's leader digest when that company has nothing lapsed (`if (companyDeals.length === 0) { result.leaderEmailsSkippedEmpty++; continue; }`), and sends the CEO and CFO digests unconditionally with their all-clear copy. `MinDaysLapsed = 14` is a strict floor there too (`d.daysLapsed > CEO_AGE_THRESHOLD_DAYS`). The CTO row has no CDP counterpart — CDP Cc'd the CTO on the CFO digest — and is the CEO's slice that stays quiet when empty.
+
 `SubjectTemplate`, `IntroTemplate` and `EmptyMessage` are **NULL on all four** — code supplies neutral defaults, and host-authored copy goes on rows a host adds. A `_comments` block must say that a host wanting different behaviour should add its own audience row rather than edit these, because a later release that edits a shipped row overwrites a host's changes to it.
 
 - [ ] **Step 3: Push and verify**

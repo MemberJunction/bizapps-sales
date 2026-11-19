@@ -3,11 +3,11 @@
     "fields": {
       "Code": "COMPANY_LEADER",
       "Name": "Company Leader",
-      "Description": "Leaders of a single company. Sees only that company's lapsed deals, including deals with no expected close date. Emailed even when there is nothing to report.",
+      "Description": "Leaders of a single company. Sees only that company's lapsed deals, including deals with no expected close date, and is not emailed when there is nothing to report.",
       "IsPortfolioWide": false,
       "MinDaysLapsed": null,
       "IncludeMissingCloseDate": true,
-      "SendWhenEmpty": true,
+      "SendWhenEmpty": false,
       "GroupByCompany": false,
       "SubjectTemplate": null,
       "IntroTemplate": null,
@@ -22,7 +22,8 @@
       "Shipped audience types for the Lapsed Close Date Digest. These four rows are vocabulary; their flags drive who sees what. No recipient rows ship, ever: who actually receives a digest is the host's data, not ours.",
       "A host that wants different behaviour should ADD ITS OWN audience row rather than edit these four. A later release that edits a shipped row overwrites whatever the host changed on it.",
       "SubjectTemplate, IntroTemplate and EmptyMessage are NULL on all four on purpose: code supplies neutral defaults, and host-authored copy belongs on rows a host adds.",
-      "CTO has SendWhenEmpty = false where Company Leader, CEO and CFO have true. That is deliberate, not a typo."
+      "SendWhenEmpty mirrors the CDP agent these four rows replace (CDP packages/CustomAgents/src/LapsedCloseDateAgent.ts): a leader digest is SKIPPED for a company with nothing lapsed (its leader loop does `if (companyDeals.length === 0) { leaderEmailsSkippedEmpty++; continue; }`), while the CEO and CFO digests have no such guard and always send, carrying their all-clear copy. So Company Leader is false and CEO and CFO are true.",
+      "CTO is the one row with no CDP counterpart: CDP sent the CTO a Cc of the CFO digest, not a digest of his own. It is the CEO's slice with SendWhenEmpty = false, so the escalation view stays quiet when there is nothing to escalate. Deliberate, not a typo."
     ]
   },
   {
