@@ -216,7 +216,7 @@ export const mjBizAppsSalesDealDigestAudienceTypeSchema = z.object({
         * * Field Name: MinDaysLapsed
         * * Display Name: Minimum Days Lapsed
         * * SQL Data Type: int
-        * * Description: A deal appears only once its expected close date is at least this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.`),
+        * * Description: A deal appears only once its expected close date is more than this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.`),
     IncludeMissingCloseDate: z.boolean().describe(`
         * * Field Name: IncludeMissingCloseDate
         * * Display Name: Include Missing Close Date
@@ -2735,7 +2735,7 @@ export class mjBizAppsSalesDealDigestAudienceTypeEntity extends BaseEntity<mjBiz
     * * Field Name: MinDaysLapsed
     * * Display Name: Minimum Days Lapsed
     * * SQL Data Type: int
-    * * Description: A deal appears only once its expected close date is at least this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.
+    * * Description: A deal appears only once its expected close date is more than this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.
     */
     get MinDaysLapsed(): number | null {
         return this.Get('MinDaysLapsed');

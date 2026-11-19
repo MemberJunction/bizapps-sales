@@ -1,9 +1,9 @@
 import { RunView, type UserInfo } from '@memberjunction/core';
-import { EscapeSQLString } from '@memberjunction/global';
+import { EscapeSQLString, NormalizeUUID } from '@memberjunction/global';
 import { ToCalendarDay, type CalendarDay } from '@mj-biz-apps/common-entities';
 
 import { ComputeDaysLapsed, type LapsedDeal } from './audience.js';
-import { DEAL_ENTITY, EMPLOYEE_ENTITY, lower } from './shared.js';
+import { DEAL_ENTITY, EMPLOYEE_ENTITY } from './shared.js';
 
 const STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
 const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
@@ -62,7 +62,7 @@ async function readOwnerNames(rv: RunView, rows: readonly DealRow[], contextUser
         ResultType: 'simple', Fields: ['ID', 'FirstName', 'LastName'],
     }, contextUser);
     if (!r.Success) throw new Error(`Could not read the deal owners: ${r.ErrorMessage}`);
-    return new Map((r.Results ?? []).map((e) => [lower(String(e.ID)), `${e.FirstName} ${e.LastName}`.trim()]));
+    return new Map((r.Results ?? []).map((e) => [NormalizeUUID(String(e.ID)), `${e.FirstName} ${e.LastName}`.trim()]));
 }
 
 /**
@@ -94,7 +94,7 @@ export async function LoadLapsedDeals(contextUser: UserInfo, today: CalendarDay)
         const closeDate = ToCalendarDay(row.ExpectedCloseDate);
         return {
             ID: String(row.ID), Name: row.Name, CompanyID: String(row.CompanyID), CompanyName: row.Company ?? '',
-            OwnerName: owners.get(lower(row.OwnerEmployeeID)) ?? 'Unassigned',
+            OwnerName: owners.get(NormalizeUUID(row.OwnerEmployeeID)) ?? 'Unassigned',
             Amount: row.Amount ?? null, CurrencyID: row.CurrencyID ? String(row.CurrencyID) : null,
             ExpectedCloseDate: closeDate, DaysLapsed: ComputeDaysLapsed(closeDate, today),
             StageName: row.PipelineStage ?? '',

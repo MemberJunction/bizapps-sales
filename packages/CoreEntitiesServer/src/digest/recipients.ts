@@ -1,7 +1,7 @@
 import { RunView, type UserInfo } from '@memberjunction/core';
-import { EscapeSQLString } from '@memberjunction/global';
+import { EscapeSQLString, NormalizeUUID } from '@memberjunction/global';
 
-import { EMPLOYEE_ENTITY, RECIPIENT_ENTITY, lower } from './shared.js';
+import { EMPLOYEE_ENTITY, RECIPIENT_ENTITY } from './shared.js';
 
 /** One person who receives one audience's digest, joined to their employee record. */
 export interface DigestRecipient {
@@ -17,7 +17,7 @@ export function DedupeByEmail(recipients: readonly DigestRecipient[]): DigestRec
     const seen = new Set<string>();
     const kept: DigestRecipient[] = [];
     for (const r of recipients) {
-        const key = `${lower(r.AudienceTypeID)}|${lower(r.CompanyID)}|${r.Email.trim().toLowerCase()}`;
+        const key = `${NormalizeUUID(r.AudienceTypeID)}|${NormalizeUUID(r.CompanyID)}|${r.Email.trim().toLowerCase()}`;
         if (seen.has(key)) continue;
         seen.add(key);
         kept.push(r);
@@ -54,11 +54,11 @@ export async function LoadDigestRecipients(contextUser: UserInfo): Promise<Diges
         Fields: ['ID', 'Email', 'FirstName', 'LastName'],
     }, contextUser);
     if (!emps.Success) throw new Error(`Could not read the digest recipients' employees: ${emps.ErrorMessage}`);
-    const byId = new Map((emps.Results ?? []).map((e) => [lower(String(e.ID)), e]));
+    const byId = new Map((emps.Results ?? []).map((e) => [NormalizeUUID(String(e.ID)), e]));
 
     const out: DigestRecipient[] = [];
     for (const r of recipientRows) {
-        const e = byId.get(lower(String(r.EmployeeID)));
+        const e = byId.get(NormalizeUUID(String(r.EmployeeID)));
         if (!e) continue;
         // Email is NOT NULL, so a blanked address is blank rather than null; Save() checked it once,
         // at creation, and does not re-run for a row nobody edits.

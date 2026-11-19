@@ -968,7 +968,7 @@ BEGIN
         (SELECT COALESCE(MAX("Sequence"), 0) + 1 FROM ${mjSchema}."EntityField" WHERE "EntityID" = 'B16A4047-9415-4F1B-9F6C-59104E788C53'),
         'MinDaysLapsed',
         'Min Days Lapsed',
-        'A deal appears only once its expected close date is at least this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.',
+        'A deal appears only once its expected close date is more than this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.',
         'INTEGER',
         4,
         10,
@@ -2949,7 +2949,7 @@ COMMENT ON COLUMN __mj_BizAppsSales."DealDigestAudienceType"."Description" IS 'W
 
 COMMENT ON COLUMN __mj_BizAppsSales."DealDigestAudienceType"."IsPortfolioWide" IS 'When 1, recipients of this audience receive one digest covering every company, and their recipient rows carry no Company. When 0, each recipient row names the company the digest covers. Enforced in the recipient''s Save(), not by a CHECK, because it ties a column on this table to one on another.';
 
-COMMENT ON COLUMN __mj_BizAppsSales."DealDigestAudienceType"."MinDaysLapsed" IS 'A deal appears only once its expected close date is at least this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.';
+COMMENT ON COLUMN __mj_BizAppsSales."DealDigestAudienceType"."MinDaysLapsed" IS 'A deal appears only once its expected close date is more than this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.';
 
 COMMENT ON COLUMN __mj_BizAppsSales."DealDigestAudienceType"."IncludeMissingCloseDate" IS 'When 1, open deals that never had an expected close date are listed too, after the lapsed ones. When 0 only deals whose date has passed appear.';
 

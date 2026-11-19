@@ -84,7 +84,7 @@ EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'When 1, recipi
     @level0type = N'SCHEMA', @level0name = N'${flyway:defaultSchema}',
     @level1type = N'TABLE',  @level1name = N'DealDigestAudienceType',
     @level2type = N'COLUMN', @level2name = N'IsPortfolioWide';
-EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'A deal appears only once its expected close date is at least this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.',
+EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'A deal appears only once its expected close date is more than this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.',
     @level0type = N'SCHEMA', @level0name = N'${flyway:defaultSchema}',
     @level1type = N'TABLE',  @level1name = N'DealDigestAudienceType',
     @level2type = N'COLUMN', @level2name = N'MinDaysLapsed';
@@ -730,7 +730,7 @@ GO
             (SELECT COALESCE(MAX([Sequence]), 0) + 1 FROM [${mjSchema}].[EntityField] WHERE [EntityID] = 'B16A4047-9415-4F1B-9F6C-59104E788C53'),
             'MinDaysLapsed',
             'Min Days Lapsed',
-            'A deal appears only once its expected close date is at least this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.',
+            'A deal appears only once its expected close date is more than this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.',
             'int',
             4,
             10,

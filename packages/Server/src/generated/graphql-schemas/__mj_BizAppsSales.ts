@@ -653,7 +653,7 @@ export class mjBizAppsSalesDealDigestAudienceType_ {
     @Field(() => Boolean, {nullable: true, description: "When 1, recipients of this audience receive one digest covering every company, and their recipient rows carry no Company. When 0, each recipient row names the company the digest covers. Enforced in the recipient's Save(), not by a CHECK, because it ties a column on this table to one on another."}) 
     IsPortfolioWide?: boolean;
         
-    @Field(() => Int, {nullable: true, description: "A deal appears only once its expected close date is at least this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative."}) 
+    @Field(() => Int, {nullable: true, description: "A deal appears only once its expected close date is more than this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative."}) 
     MinDaysLapsed?: number;
         
     @Field(() => Boolean, {nullable: true, description: "When 1, open deals that never had an expected close date are listed too, after the lapsed ones. When 0 only deals whose date has passed appear."}) 

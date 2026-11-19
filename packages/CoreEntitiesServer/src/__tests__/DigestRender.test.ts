@@ -290,7 +290,8 @@ describe('RenderDigest: structure and copy', () => {
 
     it('falls back to neutral copy for an empty digest with no EmptyMessage', () => {
         const out = RenderDigest(ctx({ groups: [], dealsShown: 0 }));
-        expect(out.BodyHtml).toContain('No open deals');
+        expect(out.Subject).toBe('Lapsed close dates: No lapsed deals as of 2026-11-23');
+        expect(out.BodyHtml).toContain('No open deals have a lapsed close date as of 2026-11-23.');
         expect(out.BodyHtml).not.toContain('Pat');
         expect(out.BodyHtml).not.toContain('Hi ');
     });

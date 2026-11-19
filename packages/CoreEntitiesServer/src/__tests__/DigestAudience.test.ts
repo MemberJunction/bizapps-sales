@@ -86,6 +86,12 @@ describe('SelectForAudience', () => {
         expect(groups[0].CompanyID).toBe(MIRA);
         expect(groups[0].Deals).toEqual([deals[0]]);
     });
+    it('matches and groups CompanyID case-insensitively with UUIDsEqual / NormalizeUUID', () => {
+        const deals = [deal(MIRA.toUpperCase(), 'Mira', 3), deal(MIRA.toLowerCase(), 'Mira', 5), deal(SIGNAL, 'signal.example', 3)];
+        const groups = SelectForAudience(deals, audience({ IsPortfolioWide: false }), MIRA.toLowerCase());
+        expect(groups).toHaveLength(1);
+        expect(groups[0].Deals).toHaveLength(2);
+    });
     it('returns no deals for a company audience with no recipient company', () => {
         const groups = SelectForAudience([deal(MIRA, 'Mira', 3)], audience({ IsPortfolioWide: false }), null);
         expect(groups).toEqual([]);

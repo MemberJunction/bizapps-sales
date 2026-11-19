@@ -173,7 +173,9 @@ export function RenderDigest(ctx: RenderContext): RenderedDigest {
     const escapedValues = Object.fromEntries(
         Object.entries(values).map(([k, v]) => [k, escapeHtml(v)])) as Record<string, string>;
 
-    const defaultSubject = `Lapsed close dates: ${plural(ctx.dealsShown, 'deal')} as of ${today}`;
+    const defaultSubject = ctx.dealsShown === 0
+        ? `Lapsed close dates: No lapsed deals as of ${today}`
+        : `Lapsed close dates: ${plural(ctx.dealsShown, 'deal')} as of ${today}`;
     const subject = FillTemplate(orDefault(audience.SubjectTemplate, defaultSubject), values).replace(/[\r\n]+/g, ' ').trim();
 
     const defaultIntro = '<p style="margin:0 0 16px 0;">Hi {RecipientFirstName},</p>'

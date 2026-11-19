@@ -1,3 +1,4 @@
+import { NormalizeUUID, UUIDsEqual } from '@memberjunction/global';
 import { FromCalendarDay, type CalendarDay } from '@mj-biz-apps/common-entities';
 
 /** One row of the digest audience table; the seeded rows are COMPANY_LEADER, CEO, CFO and CTO. */
@@ -44,7 +45,7 @@ export function SelectForAudience(
     recipientCompanyID: string | null,
 ): CompanyGroup[] {
     const kept = deals.filter(d => {
-        if (!audience.IsPortfolioWide && d.CompanyID !== recipientCompanyID) return false;
+        if (!audience.IsPortfolioWide && !UUIDsEqual(d.CompanyID, recipientCompanyID)) return false;
         if (d.DaysLapsed === null || d.DaysLapsed === undefined) return audience.IncludeMissingCloseDate;
         if (audience.MinDaysLapsed === null || audience.MinDaysLapsed === undefined) return true;
         return d.DaysLapsed > audience.MinDaysLapsed;
@@ -52,10 +53,11 @@ export function SelectForAudience(
 
     const byCompany = new Map<string, CompanyGroup>();
     for (const d of kept) {
-        let group = byCompany.get(d.CompanyID);
+        const key = NormalizeUUID(d.CompanyID);
+        let group = byCompany.get(key);
         if (!group) {
             group = { CompanyID: d.CompanyID, CompanyName: d.CompanyName, Deals: [] };
-            byCompany.set(d.CompanyID, group);
+            byCompany.set(key, group);
         }
         group.Deals.push(d);
     }

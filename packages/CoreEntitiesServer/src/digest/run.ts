@@ -2,6 +2,7 @@ import { RunView, type UserInfo } from '@memberjunction/core';
 import type { MJCommunicationProviderMessageTypeEntity } from '@memberjunction/core-entities';
 import { CommunicationEngine } from '@memberjunction/communication-engine';
 import type { Message } from '@memberjunction/communication-types';
+import { UUIDsEqual } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
 
 import { SelectForAudience, type DigestAudience } from './audience.js';
@@ -10,7 +11,9 @@ import { LoadLapsedDeals, MAX_DEALS_PER_RUN, type LapsedDealsResult } from './la
 import { LoadDigestRecipients, type DigestRecipient } from './recipients.js';
 import { RenderDigest } from './render.js';
 import { ReadSalesSetting, ResolveSender } from './sender.js';
-import { AUDIENCE_ENTITY, CountDeals, lower } from './shared.js';
+import { AUDIENCE_ENTITY, CountDeals } from './shared.js';
+
+const lower = (s: string | null | undefined): string => (s ?? '').toLowerCase();
 
 /**
  * The provider is a host's choice (Microsoft Graph, Gmail, SendGrid... any may be the active one), so it
@@ -228,7 +231,7 @@ export async function RunLapsedCloseDateDigest(contextUser: UserInfo, options: D
             return finish(result);
         }
         for (const audience of audiences) {
-            for (const recipient of recipients.filter((r) => lower(r.AudienceTypeID) === lower(audience.ID))) {
+            for (const recipient of recipients.filter((r) => UUIDsEqual(r.AudienceTypeID, audience.ID))) {
                 await deliverOne(state, audience, recipient);
             }
         }
