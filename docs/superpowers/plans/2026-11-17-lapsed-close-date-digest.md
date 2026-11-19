@@ -43,8 +43,8 @@
 ### Task 1: Schema — the two tables
 
 **Files:**
-- Create: `migrations/V202611170900__v6.32.x__Deal_Digest_Audiences.sql`
-- Create: `migrations-pg/V202611170900__v6.32.x__Deal_Digest_Audiences.pg.sql`
+- Create: `migrations/V202611170900__v6.33.x__Deal_Digest_Audiences.sql`
+- Create: `migrations-pg/V202611170900__v6.33.x__Deal_Digest_Audiences.pg.sql`
 - Create: `.changeset/lapsed-close-date-digest.md`
 
 **Interfaces:**

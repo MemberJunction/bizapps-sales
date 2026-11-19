@@ -1,5 +1,5 @@
 -- =============================================================================================
--- PostgreSQL counterpart of V202611170900__v6.32.x__Deal_Digest_Audiences.sql
+-- PostgreSQL counterpart of V202611170900__v6.33.x__Deal_Digest_Audiences.sql
 -- =============================================================================================
 -- Written by hand to the translation conventions of the neighbouring .pg.sql files:
 -- uniqueidentifier -> UUID (default gen_random_uuid()), bit -> BOOLEAN (TRUE/FALSE), nvarchar(n)
