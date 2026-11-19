@@ -27,7 +27,8 @@
 - **Generated code is committed.** Never hand-edit it.
 - **Database prerequisite:** Tasks 1–3 need a local development database (`scripts/rebuild-db.sh`, `docs/WORKSPACE-SETUP.md`). Never run `mj migrate` / `mj codegen` / `mj sync push` against the test or production database.
 - Tests are **Vitest** at `packages/*/src/**/*.test.ts`. Run with `npx vitest run <path>`.
-- The send action is looked up by **`DriverClass = '__SendSingleMessage'`**, not by name. Its params are `To`, `From`, `Subject`, `Body`, `Provider`, `MessageType`.
+- ~~The send action is looked up by **`DriverClass = '__SendSingleMessage'`**, not by name. Its params are `To`, `From`, `Subject`, `Body`, `Provider`, `MessageType`.~~
+  **Superseded after the first live send.** That action has no HTML parameter, so the digest was delivered as plain text with its markup visible (MJ#6761, KI-30). The run resolves the provider and its `Email` message type from the `DigestProvider` setting and calls `CommunicationEngine.SendSingleMessage` directly, sending `HTMLBody` and a text `Body`.
 
 ## Review Focus
 
@@ -430,7 +431,7 @@ describe('RunLapsedCloseDateDigest', () => {
   it('sends an all-clear when the audience has SendWhenEmpty', () => { /* … */ });
   it('sends nothing for an empty audience without SendWhenEmpty', () => { /* the CTO case */ });
   it('continues after one failed send and reports both', () => { /* fail the 2nd of 4 */ });
-  it('looks the send action up once per run by DriverClass __SendSingleMessage', () => { /* one RunView for Actions */ });
+  it('configures the communication engine and resolves the provider once per run', () => { /* superseded: see the note at the top */ });
   it('passes To, From, Subject, Body, Provider and MessageType on every call', () => { /* … */ });
   it('dryRun renders everything and calls RunAction zero times', () => { /* RenderedEmails populated */ });
   it('recipientOverride reroutes every send while subjects still name the real audience and company', () => { /* … */ });
@@ -448,7 +449,7 @@ Expected: FAIL
 
 `ResolveSender` uses `DefaultSenderForCompany` from `@mj-biz-apps/common-entities` against the company's `CompanySenderIdentity` rows, then the `DigestFromAddress` Application Setting via `ApplicationSettingEngine`.
 
-`RunLapsedCloseDateDigest` orchestrates: load deals once → load audiences and recipients → per audience in `DisplayRank` order, per deduped recipient, select, render, send. Sending goes through `ActionEngineServer.Instance.RunAction` so each send lands a row in `MJ: Action Execution Logs`. The render path must be callable without the send path, so `dryRun` skips loading the action entirely.
+`RunLapsedCloseDateDigest` orchestrates: load deals once → load audiences and recipients → per audience in `DisplayRank` order, per deduped recipient, select, render, send. Sending goes through `CommunicationEngine.SendSingleMessage` (see the superseded note above), which writes a `MJ: Communication Logs` row per send itself. The render path must be callable without the send path, so `dryRun` never reaches the provider.
 
 - [ ] **Step 4: Run to verify they pass**
 
