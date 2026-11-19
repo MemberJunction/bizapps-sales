@@ -358,13 +358,13 @@ importers:
         version: link:../Server
     devDependencies:
       '@mj-biz-apps/accounting-core-entities-server':
-        specifier: '>=0.22.0 <1.0.0'
+        specifier: '>=0.22.0 <2.0.0'
         version: 0.22.0(@memberjunction/actions@6.2.1)(@memberjunction/core-entities@6.2.1)(@memberjunction/core@6.2.1)(@memberjunction/generic-database-provider@6.2.1(@aws-sdk/credential-provider-node@3.972.95)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.5)(@types/node@22.20.1)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.22.2)(zod@3.25.76))(@memberjunction/global@6.2.1)(@memberjunction/integration-engine@6.2.1)(@memberjunction/sqlserver-dataprovider@6.2.1(@aws-sdk/credential-provider-node@3.972.95)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.5)(@types/node@22.20.1)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.22.2)(zod@3.25.76))(@mj-biz-apps/common-entities@5.60.0(@memberjunction/core@6.2.1)(@memberjunction/global@6.2.1))(@mj-biz-apps/tasks-core@1.7.0(@memberjunction/core@6.2.1)(@memberjunction/global@6.2.1))(@mj-biz-apps/tasks-entities@1.7.0(@memberjunction/core@6.2.1)(@memberjunction/global@6.2.1))
       '@mj-biz-apps/accounting-engine-base':
-        specifier: '>=0.22.0 <1.0.0'
+        specifier: '>=0.22.0 <2.0.0'
         version: 0.22.0(@memberjunction/core@6.2.1)(@memberjunction/global@6.2.1)(@mj-biz-apps/common-entities@5.60.0(@memberjunction/core@6.2.1)(@memberjunction/global@6.2.1))
       '@mj-biz-apps/accounting-entities':
-        specifier: '>=0.22.0 <1.0.0'
+        specifier: '>=0.22.0 <2.0.0'
         version: 0.22.0(@memberjunction/core@6.2.1)(@memberjunction/global@6.2.1)(@mj-biz-apps/common-entities@5.60.0(@memberjunction/core@6.2.1)(@memberjunction/global@6.2.1))
       '@mj-biz-apps/accounting-server':
         specifier: 0.22.0
@@ -373,10 +373,10 @@ importers:
         specifier: 5.60.0
         version: 5.60.0(54759ed91689dbe5821496a6757ff4a4)
       '@mj-biz-apps/contracts-core-entities-server':
-        specifier: '>=0.7.3 <1.0.0'
+        specifier: '>=0.7.3 <2.0.0'
         version: 0.7.3(@memberjunction/core-entities@6.2.1)(@memberjunction/core@6.2.1)(@memberjunction/global@6.2.1)(@memberjunction/sqlserver-dataprovider@6.2.1(@aws-sdk/credential-provider-node@3.972.95)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.5)(@types/node@22.20.1)(axios@1.19.0)(chokidar@3.6.0)(encoding@0.1.13)(typescript@5.9.3)(ws@8.22.2)(zod@3.25.76))
       '@mj-biz-apps/contracts-entities':
-        specifier: '>=0.7.3 <1.0.0'
+        specifier: '>=0.7.3 <2.0.0'
         version: 0.7.3(@memberjunction/core@6.2.1)(@memberjunction/global@6.2.1)
       '@mj-biz-apps/orders-core-entities-server':
         specifier: ^5.40.0
@@ -11072,7 +11072,7 @@ snapshots:
       - canvas
     optional: true
 
-  '@hyperframes/engine@0.8.134':
+  '@hyperframes/engine@0.8.134(@types/node@22.20.1)':
     dependencies:
       '@hono/node-server': 2.1.0(hono@4.13.1)
       '@hyperframes/core': 0.8.134(@types/node@22.20.1)
@@ -11082,6 +11082,7 @@ snapshots:
       puppeteer: 25.16.0
       puppeteer-core: 25.16.0
     transitivePeerDependencies:
+      - '@types/node'
       - bufferutil
       - canvas
       - proxy-agent
@@ -11118,7 +11119,7 @@ snapshots:
     dependencies:
       '@hono/node-server': 2.1.0(hono@4.13.1)
       '@hyperframes/core': 0.8.134(@types/node@22.20.1)
-      '@hyperframes/engine': 0.8.134
+      '@hyperframes/engine': 0.8.134(@types/node@22.20.1)
       '@hyperframes/lint': 0.8.134
       '@hyperframes/parsers': 0.8.134
       '@hyperframes/studio-server': 0.8.134(@types/node@22.20.1)
@@ -20485,7 +20486,7 @@ snapshots:
   '@memberjunction/video-studio-render-worker@6.2.1(@types/node@22.20.1)':
     dependencies:
       '@hyperframes/core': 0.8.134(@types/node@22.20.1)
-      '@hyperframes/engine': 0.8.134
+      '@hyperframes/engine': 0.8.134(@types/node@22.20.1)
       '@hyperframes/lint': 0.8.134
       '@hyperframes/parsers': 0.8.134
       '@hyperframes/producer': 0.8.134(@types/node@22.20.1)
