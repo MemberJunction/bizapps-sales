@@ -277,15 +277,24 @@ but no MJ login will get a link that asks them to log in. That was not true of C
 It is the right trade for a shipped app, and it is also an argument for giving digest recipients
 logins — but it is a change in who the email serves, not just how it is built.
 
-**Sending.** Sales has no email capability today. The run uses MJ's core `Send Single Message`
-action through `ActionEngineServer.RunAction` — params `To`, `From`, `Subject`, `Body`, `Provider`,
-`MessageType`. Going through the registered Action rather than calling the communication engine
-directly buys a row in `MJ: Action Execution Logs` per send, which is load-bearing for a tool whose
-value depends on people believing the digests actually went out. The action is looked up once per
-run, not once per send.
+**Sending.** Sales has no email capability today. The run calls
+`CommunicationEngine.SendSingleMessage` directly, setting `HTMLBody` (and leaving `Body` unset), with
+the provider resolved once per run from the `DigestProvider` setting.
+
+This was MJ's core `Send Single Message` action at first, for the row it writes in
+`MJ: Action Execution Logs` per send — audit being load-bearing for a tool whose value depends on
+people believing the digests actually went out. That action turned out to be unable to send HTML at
+all: it accepts a plain-text `Body` and declares no HTML parameter, so the body arrived as
+`Message.Body`, `ProcessedHTMLBody` stayed empty, and every provider chose `contentType: 'Text'`.
+The first real send delivered raw markup to the reader. Filed as MJ#6761 and tracked as KI-30.
+
+Calling the engine directly costs nothing in audit: the engine writes the
+`MJ: Communication Logs` row itself, before the provider is called, refusing to send if that row
+cannot be saved, and writes the outcome back to it. That row carries To, From, Subject and both
+bodies — more than the single `SUCCESS` row the action path left behind.
 
 One recipient per send, each with their own first-name greeting — CDP settled this after a live
-review, and the action takes a single `To` anyway. A company with two leaders gets two emails.
+review, and a message takes a single `To` anyway. A company with two leaders gets two emails.
 
 **The From address.** Resolution order, with no address anywhere in code or shipped metadata:
 
@@ -327,7 +336,7 @@ The scheduled job's `StartingPayload` accepts:
 
 | Field | Effect |
 |---|---|
-| `dryRun` | Render everything, send nothing. Skips loading the send action, so it works where that action is not registered. |
+| `dryRun` | Render everything, send nothing. Never reaches the provider, so it works where no mail provider is configured. |
 | `captureRenderedEmails` | Return each rendered digest — recipient, From, subject, HTML — in the run payload. Always on under `dryRun`; off by default otherwise, so a normal Monday does not write megabytes of HTML into the agent-run audit record. |
 | `recipientOverride` | One `{ name, email }` that **every** send is rerouted to for this run. |
 
@@ -361,9 +370,9 @@ designs; the note exists so the cost is visible, not to reopen the choice.
 
 Vitest, porting the intent of CDP's suite and adding what the new model makes testable:
 
-- Context user missing, and the send action unregistered, both terminate before any send.
+- Context user missing, and a `DigestProvider` naming no configured provider, both terminate before any send.
 - **On Hold deals appear** — the regression guard for the `IsOpen` / `IsClosed` trap above.
-- `dryRun` renders every digest and calls the send action zero times; `recipientOverride` reroutes
+- `dryRun` renders every digest and sends zero times; `recipientOverride` reroutes
   every send to one address while subjects still name the real audience and company.
 - From-address resolution: company mailbox wins; `DigestFromAddress` covers portfolio digests; with
   neither, the send errors and the run reports failure.
@@ -382,7 +391,7 @@ Vitest, porting the intent of CDP's suite and adding what the new model makes te
 - An inactive employee is not a recipient.
 - One failed send does not abort the remaining sends.
 - Every `RunAction` call carries a complete, non-empty param set.
-- The send action is loaded exactly once per run.
+- The provider and its `Email` message type are resolved exactly once per run.
 - Days-lapsed arithmetic across a DST boundary in a non-UTC business zone.
 - Greeting construction from an employee's first name.
 

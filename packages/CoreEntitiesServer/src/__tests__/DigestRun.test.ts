@@ -27,10 +27,13 @@
  * trap was a confirmed bug twice on this branch, in the Explorer base URL and in the audience templates).
  *
  * RunLapsedCloseDateDigest is tested through the real LoadLapsedDeals / LoadDigestRecipients / selection
- * / rendering with only the edges stubbed: `RunView`, the three engines, and `RunAction`. The call to
- * `RunAction` is asserted as a `RunActionParams` INSTANCE (it is a class, not an interface), with
- * `Filters: []` (declared non-optional though documented optional) and `SkipActionLog` unset (the
- * execution log is how anyone later answers "did Monday's run actually send").
+ * / rendering with only the edges stubbed: `RunView`, the three engines, and
+ * `CommunicationEngine.SendSingleMessage`.
+ *
+ * The digest does NOT send through MJ's `__SendSingleMessage` action. That action has no HTML parameter
+ * (MJ#6761), so the body arrived as `Message.Body`, every provider chose `contentType: 'Text'`, and the
+ * reader saw raw markup. The send is therefore asserted to set `HTMLBody` and to leave `Body` unset:
+ * that pair is the whole reason a provider picks HTML, so a regression to either half breaks a test.
  *
  * "Today" is pinned to Monday 2026-11-23, with closes on 2026-11-03 (20 days), 2026-11-20 (3 days) and
  * 2026-11-01 (22 days). Fixtures are fictional.
@@ -38,8 +41,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Metadata, RunView, type RunViewParams, type UserInfo } from '@memberjunction/core';
 import { ApplicationSettingEngine } from '@memberjunction/core-entities';
-import { ActionEngineServer } from '@memberjunction/actions';
-import { RunActionParams } from '@memberjunction/actions-base';
+import { CommunicationEngine } from '@memberjunction/communication-engine';
+import type { Message } from '@memberjunction/communication-types';
 import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 
 import { LoadLapsedDeals, MAX_DEALS_PER_RUN } from '../digest/lapsed-deals.js';
@@ -62,15 +65,18 @@ interface World {
     audiences: Array<Record<string, unknown>>;
     recipients: Array<Record<string, unknown>>;
     identities: Array<Record<string, unknown>>;
-    actions: Array<Record<string, unknown>>;
+    providers: Array<Record<string, unknown>>;
     /** Accounting's currencies; `'fail'` answers Success false, `'throw'` raises, absent means accounting is not installed. */
     currencies?: Array<Record<string, unknown>> | 'fail' | 'throw';
 }
 
+/** The configured provider as `CommunicationEngine.Providers` exposes it: a name, and its message types. */
+const MAIL_PROVIDER = { Name: 'Test Mail Provider', MessageTypes: [{ ID: 'pmt-email', Name: 'Email' }] };
+
 function emptyWorld(over: Partial<World> = {}): World {
     return {
         notClosedStatusIDs: ['st-open', 'st-hold'], excludedPipelineIDs: [], deals: [], employees: [],
-        audiences: [], recipients: [], identities: [], actions: [{ ID: 'act-send' }], ...over,
+        audiences: [], recipients: [], identities: [], providers: [MAIL_PROVIDER], ...over,
     };
 }
 
@@ -105,8 +111,6 @@ function stubRunView(world: World): RunViewParams[] {
                 return ok(world.recipients);
             case 'MJ_BizApps_Common: Company Sender Identities':
                 return ok(world.identities);
-            case 'MJ: Actions':
-                return ok(world.actions);
             case 'MJ_BizApps_Accounting: Currencies':
                 if (world.currencies === 'throw') throw new Error('Entity not found');
                 if (world.currencies === 'fail') return { Success: false, ErrorMessage: 'no permission', Results: [] };
@@ -125,17 +129,19 @@ const stubInstalledEntities = (names: string[]) =>
 const callsOn = (calls: RunViewParams[], entity: string) => calls.filter((c) => c.EntityName === entity);
 
 /** The engines and settings the run touches, stubbed at the edge. */
-function stubEngines(settings: Record<string, string | undefined> = {}) {
+function stubEngines(settings: Record<string, string | undefined> = {}, providers: Array<Record<string, unknown>> = [MAIL_PROVIDER]) {
     vi.spyOn(Metadata.prototype, 'Applications', 'get').mockReturnValue([{ ID: SALES_APP_ID, Name: 'Sales' }] as never);
     const settingsConfig = vi.spyOn(ApplicationSettingEngine.Instance, 'Config').mockResolvedValue(undefined);
     const getSetting = vi.spyOn(ApplicationSettingEngine.Instance, 'GetSetting').mockImplementation(
         ((name: string, appId?: string) => (appId === SALES_APP_ID ? settings[name] : undefined)) as never);
     vi.spyOn(BusinessTimeZoneEngine.Instance, 'Config').mockResolvedValue(undefined);
     const today = vi.spyOn(BusinessTimeZoneEngine.Instance, 'Today').mockReturnValue(TODAY);
-    const actionConfig = vi.spyOn(ActionEngineServer.Instance, 'Config').mockResolvedValue(undefined);
-    const runAction = vi.spyOn(ActionEngineServer.Instance, 'RunAction')
-        .mockResolvedValue({ Success: true, Message: 'sent' } as never);
-    return { settingsConfig, getSetting, today, actionConfig, runAction };
+    const commConfig = vi.spyOn(CommunicationEngine.Instance, 'Config').mockResolvedValue(undefined);
+    const providerList = vi.spyOn(CommunicationEngine.Instance, 'Providers', 'get').mockReturnValue(providers as never);
+    // On MessageResult, `Error` carries the failure text; `Message` is the processed message object.
+    const sendMessage = vi.spyOn(CommunicationEngine.Instance, 'SendSingleMessage')
+        .mockResolvedValue({ Success: true, Error: '' } as never);
+    return { settingsConfig, getSetting, today, commConfig, providerList, sendMessage };
 }
 
 const dealRow = (over: Record<string, unknown> = {}) => ({
@@ -451,15 +457,17 @@ function runWorld(over: Partial<World> = {}): World {
 }
 
 const PORTFOLIO = { DigestFromAddress: 'portfolio@example.invalid', DigestProvider: 'Test Mail Provider' };
-const toOf = (p: RunActionParams): string => String(p.Params.find((x) => x.Name === 'To').Value);
-const paramOf = (p: RunActionParams, name: string): unknown => p.Params.find((x) => x.Name === name).Value;
+/** One recorded send: SendSingleMessage(providerName, messageTypeName, message, ...). */
+type SendCall = Parameters<typeof CommunicationEngine.Instance.SendSingleMessage>;
+const msgOf = (c: SendCall): Message => c[2];
+const toOf = (c: SendCall): string => String(c[2].To);
 
 describe('RunLapsedCloseDateDigest', () => {
     afterEach(() => vi.restoreAllMocks());
 
     function setup(world: World = runWorld(), settings: Record<string, string | undefined> = PORTFOLIO) {
         const calls = stubRunView(world);
-        return { calls, ...stubEngines(settings) };
+        return { calls, ...stubEngines(settings, world.providers) };
     }
 
     it('resolves today with BusinessTimeZoneEngine.Today() and no company, once for the whole run', async () => {
@@ -470,9 +478,9 @@ describe('RunLapsedCloseDateDigest', () => {
     });
 
     it('sends nothing and reports failure when no sender resolves, naming the recipient', async () => {
-        const { runAction } = setup(runWorld({ identities: [] }), { ...PORTFOLIO, DigestFromAddress: '' });
+        const { sendMessage } = setup(runWorld({ identities: [] }), { ...PORTFOLIO, DigestFromAddress: '' });
         const out = await RunLapsedCloseDateDigest(user);
-        expect(runAction).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
         expect(out.Success).toBe(false);
         expect(out.Sent).toBe(0);
         expect(out.Errors.some((e) => e.includes('lee@example.invalid'))).toBe(true);
@@ -480,53 +488,53 @@ describe('RunLapsedCloseDateDigest', () => {
     });
 
     it('treats a blank-after-trim DigestFromAddress as unset: the portfolio digests fail, the company ones still send', async () => {
-        const { runAction } = setup(runWorld(), { ...PORTFOLIO, DigestFromAddress: '   ' });
+        const { sendMessage } = setup(runWorld(), { ...PORTFOLIO, DigestFromAddress: '   ' });
         const out = await RunLapsedCloseDateDigest(user);
         expect(out.Success).toBe(false);
         // Leaders have a company mailbox; the CEO and CTO have deals but nothing to send from.
         expect(out.Sent).toBe(2);
-        expect(runAction).toHaveBeenCalledTimes(2);
+        expect(sendMessage).toHaveBeenCalledTimes(2);
         expect(out.Errors).toHaveLength(2);
         expect(out.Errors.join('\n')).toContain('cleo@example.invalid');
         expect(out.Errors.join('\n')).toContain('cato@example.invalid');
     });
 
     it('skips a company-leader digest when that company has nothing lapsed', async () => {
-        const { runAction } = setup(runWorld({ deals: [dealRow({ ID: 'd-20' })] })); // co-1 only
+        const { sendMessage } = setup(runWorld({ deals: [dealRow({ ID: 'd-20' })] })); // co-1 only
         const out = await RunLapsedCloseDateDigest(user);
         // co-2's leader is skipped; co-1's leader, the CEO and the CTO each have the 20-day deal.
         expect(out.SkippedEmpty).toBe(1);
         expect(out.Sent).toBe(3);
-        expect(runAction).toHaveBeenCalledTimes(3);
+        expect(sendMessage).toHaveBeenCalledTimes(3);
         expect(out.Success).toBe(true);
     });
 
     it('sends an all-clear when the audience has SendWhenEmpty', async () => {
         // 3 days lapsed is under the 14-day floor, so the CEO has nothing.
-        const { runAction } = setup(runWorld({ deals: [dealRow({ ExpectedCloseDate: '2026-11-20' })] }));
+        const { sendMessage } = setup(runWorld({ deals: [dealRow({ ExpectedCloseDate: '2026-11-20' })] }));
         const out = await RunLapsedCloseDateDigest(user, { captureRenderedEmails: true });
         const ceo = out.RenderedEmails.find((e) => e.AudienceCode === 'CEO');
         expect(ceo).toBeDefined();
         expect(ceo.BodyHtml).toContain('No open deals have a lapsed close date');
-        expect(runAction.mock.calls.map(([p]) => toOf(p))).toContain('cleo@example.invalid');
+        expect(sendMessage.mock.calls.map((c) => toOf(c))).toContain('cleo@example.invalid');
     });
 
     it('sends nothing for an empty audience without SendWhenEmpty (the CTO case)', async () => {
-        const { runAction } = setup(runWorld({ deals: [dealRow({ ExpectedCloseDate: '2026-11-20' })] }));
+        const { sendMessage } = setup(runWorld({ deals: [dealRow({ ExpectedCloseDate: '2026-11-20' })] }));
         const out = await RunLapsedCloseDateDigest(user, { captureRenderedEmails: true });
         expect(out.RenderedEmails.some((e) => e.AudienceCode === 'CTO')).toBe(false);
-        expect(runAction.mock.calls.map(([p]) => toOf(p))).not.toContain('cato@example.invalid');
+        expect(sendMessage.mock.calls.map((c) => toOf(c))).not.toContain('cato@example.invalid');
         expect(out.SkippedEmpty).toBe(2); // the CTO, and co-2's leader
     });
 
     it('continues after one failed send and reports both', async () => {
-        const { runAction } = setup();
-        runAction
-            .mockResolvedValueOnce({ Success: true, Message: 'ok' } as never)
-            .mockResolvedValueOnce({ Success: false, Message: 'mailbox unavailable' } as never)
-            .mockResolvedValue({ Success: true, Message: 'ok' } as never);
+        const { sendMessage } = setup();
+        sendMessage
+            .mockResolvedValueOnce({ Success: true, Error: '' } as never)
+            .mockResolvedValueOnce({ Success: false, Error: 'mailbox unavailable' } as never)
+            .mockResolvedValue({ Success: true, Error: '' } as never);
         const out = await RunLapsedCloseDateDigest(user);
-        expect(runAction).toHaveBeenCalledTimes(4);
+        expect(sendMessage).toHaveBeenCalledTimes(4);
         expect(out.Sent).toBe(3);
         expect(out.Success).toBe(false);
         expect(out.Errors).toHaveLength(1);
@@ -535,55 +543,54 @@ describe('RunLapsedCloseDateDigest', () => {
     });
 
     it('treats a send that throws as a failed send, and carries on', async () => {
-        const { runAction } = setup();
-        runAction.mockRejectedValueOnce(new Error('socket hang up')).mockResolvedValue({ Success: true } as never);
+        const { sendMessage } = setup();
+        sendMessage.mockRejectedValueOnce(new Error('socket hang up')).mockResolvedValue({ Success: true } as never);
         const out = await RunLapsedCloseDateDigest(user);
         expect(out.Sent).toBe(3);
         expect(out.Errors).toHaveLength(1);
         expect(out.Errors[0]).toContain('socket hang up');
     });
 
-    it('looks the send action up once per run by DriverClass __SendSingleMessage', async () => {
-        const { calls, actionConfig } = setup();
+    it('configures the communication engine and resolves the provider once per run', async () => {
+        const { commConfig, providerList, sendMessage } = setup();
         await RunLapsedCloseDateDigest(user);
-        const lookups = callsOn(calls, 'MJ: Actions');
-        expect(lookups).toHaveLength(1);
-        expect(lookups[0].ExtraFilter).toContain("DriverClass = '__SendSingleMessage'");
-        expect(actionConfig).toHaveBeenCalledTimes(1);
+        expect(commConfig).toHaveBeenCalledTimes(1);
+        expect(commConfig).toHaveBeenCalledWith(false, user);
+        expect(providerList).toHaveBeenCalled();
+        expect(sendMessage).toHaveBeenCalledTimes(4);
     });
 
-    it('passes To, From, Subject, Body, Provider and MessageType on every call, as a RunActionParams', async () => {
-        const { runAction } = setup();
+    it('sends the digest as HTMLBody with Body unset, so the provider chooses contentType HTML', async () => {
+        const { sendMessage } = setup();
         await RunLapsedCloseDateDigest(user);
-        expect(runAction).toHaveBeenCalledTimes(4);
-        for (const [p] of runAction.mock.calls) {
-            // RunActionParams is a class: an object literal would compile and still not be one.
-            expect(p).toBeInstanceOf(RunActionParams);
-            expect(p.Action).toEqual({ ID: 'act-send' });
-            expect(p.ContextUser).toBe(user);
-            expect(p.Filters).toEqual([]);
-            expect(p.SkipActionLog).toBeUndefined();
-            expect(p.Params.map((x) => x.Name).sort()).toEqual(['Body', 'From', 'MessageType', 'Provider', 'Subject', 'To']);
-            for (const x of p.Params) {
-                expect(x.Type).toBe('Input');
-                expect(String(x.Value).trim()).not.toBe('');
-            }
-            expect(paramOf(p, 'MessageType')).toBe('Email');
-            expect(paramOf(p, 'Provider')).toBe('Test Mail Provider');
+        expect(sendMessage).toHaveBeenCalledTimes(4);
+        for (const c of sendMessage.mock.calls) {
+            const m = msgOf(c);
+            // The regression this guards: markup in `Body` goes out as plain text (MJ#6761).
+            expect(m.HTMLBody).toContain('<table');
+            expect(m.Body).toBeUndefined();
+            expect(m.MessageType).toEqual({ ID: 'pmt-email', Name: 'Email' });
+            expect(String(m.To).trim()).not.toBe('');
+            expect(String(m.From).trim()).not.toBe('');
+            expect(String(m.Subject).trim()).not.toBe('');
+            // provider name, message type, then the message; the context user travels last.
+            expect(c[0]).toBe('Test Mail Provider');
+            expect(c[1]).toBe('Email');
+            expect(c[6]).toBe(user);
         }
     });
 
     it.each([['an empty string (what the row ships with)', ''], ['whitespace', '  '], ['undefined', undefined]])(
         'fails once up front, naming DigestProvider, and sends nothing when it is %s',
         async (_label, value) => {
-            const { runAction, calls } = setup(runWorld(), { ...PORTFOLIO, DigestProvider: value });
+            const { sendMessage, commConfig } = setup(runWorld(), { ...PORTFOLIO, DigestProvider: value });
             const out = await RunLapsedCloseDateDigest(user);
             expect(out.Success).toBe(false);
             expect(out.Sent).toBe(0);
-            expect(runAction).not.toHaveBeenCalled();
+            expect(sendMessage).not.toHaveBeenCalled();
             expect(out.Errors).toHaveLength(1);
             expect(out.Errors[0]).toContain('DigestProvider');
-            expect(callsOn(calls, 'MJ: Actions')).toHaveLength(0);
+            expect(commConfig).not.toHaveBeenCalled();
         });
 
     it('does not need DigestProvider for a dry run, which sends nothing', async () => {
@@ -593,37 +600,36 @@ describe('RunLapsedCloseDateDigest', () => {
         expect(out.RenderedEmails).toHaveLength(4);
     });
 
-    it('trims the DigestProvider value it passes on', async () => {
-        const { runAction } = setup(runWorld(), { ...PORTFOLIO, DigestProvider: '  Test Mail Provider  ' });
+    it('trims the DigestProvider value before resolving it', async () => {
+        const { sendMessage } = setup(runWorld(), { ...PORTFOLIO, DigestProvider: '  Test Mail Provider  ' });
         await RunLapsedCloseDateDigest(user);
-        expect(paramOf(runAction.mock.calls[0][0], 'Provider')).toBe('Test Mail Provider');
+        expect(sendMessage.mock.calls[0][0]).toBe('Test Mail Provider');
     });
 
     it('puts the incomplete-list notice in every email of a truncated run', async () => {
-        const { runAction } = setup(runWorld({ dealsTotalRowCount: 9999 }));
+        const { sendMessage } = setup(runWorld({ dealsTotalRowCount: 9999 }));
         const out = await RunLapsedCloseDateDigest(user, { captureRenderedEmails: true });
         expect(out.Truncated).toBe(true);
         expect(out.RenderedEmails.length).toBeGreaterThan(0);
         for (const e of out.RenderedEmails) expect(e.BodyHtml).toContain('This list is incomplete');
-        expect(runAction).toHaveBeenCalled();
+        expect(sendMessage).toHaveBeenCalled();
     });
 
     it('sends From the mapped, non-empty address: the company mailbox for a leader, the setting for the CEO', async () => {
-        const { runAction } = setup();
+        const { sendMessage } = setup();
         await RunLapsedCloseDateDigest(user);
-        const fromByTo = new Map(runAction.mock.calls.map(([p]) => [toOf(p), String(paramOf(p, 'From'))]));
+        const fromByTo = new Map(sendMessage.mock.calls.map((c) => [toOf(c), String(msgOf(c).From)]));
         expect(fromByTo.get('lee@example.invalid')).toBe('digest@acme.example.invalid');
         expect(fromByTo.get('lou@example.invalid')).toBe('digest@zed.example.invalid');
         expect(fromByTo.get('cleo@example.invalid')).toBe('portfolio@example.invalid');
         for (const from of fromByTo.values()) expect(from).toBeTruthy();
     });
 
-    it('dryRun renders everything and calls RunAction zero times, without loading the action at all', async () => {
-        const { calls, runAction, actionConfig } = setup();
+    it('dryRun renders everything and sends zero times, without reaching the provider at all', async () => {
+        const { sendMessage, commConfig } = setup();
         const out = await RunLapsedCloseDateDigest(user, { dryRun: true });
-        expect(runAction).not.toHaveBeenCalled();
-        expect(actionConfig).not.toHaveBeenCalled();
-        expect(callsOn(calls, 'MJ: Actions')).toHaveLength(0);
+        expect(sendMessage).not.toHaveBeenCalled();
+        expect(commConfig).not.toHaveBeenCalled();
         expect(out.Success).toBe(true);
         expect(out.Sent).toBe(0);
         expect(out.RenderedEmails.map((e) => e.To).sort()).toEqual(
@@ -664,14 +670,14 @@ describe('RunLapsedCloseDateDigest', () => {
     });
 
     it('recipientOverride reroutes every send while subjects still name the real audience and company', async () => {
-        const { runAction } = setup(runWorld({
+        const { sendMessage } = setup(runWorld({
             audiences: [{ ...LEADER, SubjectTemplate: '{Company}: {Count} lapsed' }, CEO, CTO],
         }));
         const out = await RunLapsedCloseDateDigest(user, {
             captureRenderedEmails: true, recipientOverride: { name: 'Tess Tester', email: 'tess@example.invalid' },
         });
-        expect(runAction).toHaveBeenCalledTimes(4);
-        for (const [p] of runAction.mock.calls) expect(toOf(p)).toBe('tess@example.invalid');
+        expect(sendMessage).toHaveBeenCalledTimes(4);
+        for (const c of sendMessage.mock.calls) expect(toOf(c)).toBe('tess@example.invalid');
         expect(out.RenderedEmails.every((e) => e.To === 'tess@example.invalid')).toBe(true);
         const acmeLeader = out.RenderedEmails.find((e) => e.AudienceCode === 'COMPANY_LEADER' && e.CompanyName === 'Acme Test Co');
         expect(acmeLeader.Subject).toBe('Acme Test Co: 2 lapsed');
@@ -707,9 +713,9 @@ describe('RunLapsedCloseDateDigest', () => {
 
     it('reports Success false on a truncated run even when every send succeeded', async () => {
         // The point of the combination: zero send failures, yet the run must still alert someone.
-        const { runAction } = setup(runWorld({ dealsTotalRowCount: 9999 }));
+        const { sendMessage } = setup(runWorld({ dealsTotalRowCount: 9999 }));
         const out = await RunLapsedCloseDateDigest(user);
-        expect(runAction).toHaveBeenCalledTimes(4);
+        expect(sendMessage).toHaveBeenCalledTimes(4);
         expect(out.Sent).toBe(4);
         expect(out.Truncated).toBe(true);
         expect(out.Success).toBe(false);
@@ -734,37 +740,47 @@ describe('RunLapsedCloseDateDigest', () => {
     });
 
     it('reports failure and sends nothing when the deal read fails, naming the reason', async () => {
-        const { runAction } = setup(runWorld({ dealsFail: true }));
+        const { sendMessage } = setup(runWorld({ dealsFail: true }));
         const out = await RunLapsedCloseDateDigest(user);
         expect(out.Success).toBe(false);
         expect(out.Sent).toBe(0);
-        expect(runAction).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
         expect(out.Errors.join('\n')).toContain('deadlock victim');
     });
 
-    it('reports failure and sends nothing when the send action cannot be found', async () => {
-        const { runAction } = setup(runWorld({ actions: [] }));
+    it('reports failure and sends nothing when DigestProvider names no configured provider', async () => {
+        const { sendMessage } = setup(runWorld({ providers: [{ Name: 'Some Other Provider', MessageTypes: [] }] }));
         const out = await RunLapsedCloseDateDigest(user);
         expect(out.Success).toBe(false);
         expect(out.Sent).toBe(0);
-        expect(runAction).not.toHaveBeenCalled();
-        expect(out.Errors.join('\n')).toContain('__SendSingleMessage');
+        expect(sendMessage).not.toHaveBeenCalled();
+        expect(out.Errors.join('\n')).toContain('Test Mail Provider');
+        expect(out.Errors.join('\n')).toContain('Some Other Provider');
     });
 
-    it('does not look the action up when there is nothing to send', async () => {
-        const { calls } = setup(runWorld({
+    it('reports failure and sends nothing when the provider has no Email message type', async () => {
+        const { sendMessage } = setup(runWorld({ providers: [{ Name: 'Test Mail Provider', MessageTypes: [{ ID: 'pmt-sms', Name: 'SMS' }] }] }));
+        const out = await RunLapsedCloseDateDigest(user);
+        expect(out.Success).toBe(false);
+        expect(out.Sent).toBe(0);
+        expect(sendMessage).not.toHaveBeenCalled();
+        expect(out.Errors.join('\n')).toContain("no 'Email' message type");
+    });
+
+    it('does not reach for the provider when there is nothing to send', async () => {
+        const { commConfig } = setup(runWorld({
             deals: [], audiences: [CTO], recipients: [recipientRow('aud-cto', null, 'emp-cto')],
         }));
         const out = await RunLapsedCloseDateDigest(user);
         expect(out.Success).toBe(true);
         expect(out.SkippedEmpty).toBe(1);
-        expect(callsOn(calls, 'MJ: Actions')).toHaveLength(0);
+        expect(commConfig).not.toHaveBeenCalled();
     });
 
     it('orders audiences by DisplayRank, whatever order they are read in', async () => {
-        const { runAction } = setup(runWorld({ audiences: [CTO, CEO, LEADER] }));
+        const { sendMessage } = setup(runWorld({ audiences: [CTO, CEO, LEADER] }));
         await RunLapsedCloseDateDigest(user);
-        expect(runAction.mock.calls.map(([p]) => toOf(p))).toEqual(
+        expect(sendMessage.mock.calls.map((c) => toOf(c))).toEqual(
             ['lee@example.invalid', 'lou@example.invalid', 'cleo@example.invalid', 'cato@example.invalid']);
     });
 });
@@ -810,12 +826,12 @@ describe('amounts are shown in the deal\'s own currency', () => {
         ['the read throws', [CURRENCY_ENTITY], 'throw' as const],
     ])('renders the default, and still sends, when %s', async (_label, installed, mode) => {
         const calls = stubRunView(withEuroDeal({ currencies: mode }));
-        const { runAction } = stubEngines(PORTFOLIO);
+        const { sendMessage } = stubEngines(PORTFOLIO);
         stubInstalledEntities(installed);
         const out = await RunLapsedCloseDateDigest(user, { captureRenderedEmails: true });
         expect(out.Errors).toEqual([]);
         expect(out.Success).toBe(true);
-        expect(runAction).toHaveBeenCalledTimes(3); // co-2's leader has nothing lapsed
+        expect(sendMessage).toHaveBeenCalledTimes(3); // co-2's leader has nothing lapsed
         for (const e of out.RenderedEmails) expect(e.BodyHtml).toContain('$12,500');
         if (installed.length === 0) expect(callsOn(calls, CURRENCY_ENTITY)).toHaveLength(0);
     });
@@ -832,8 +848,8 @@ describe('a failed company digest names its company', () => {
     });
 
     it('gives two failed sends to one person at two companies two distinguishable messages', async () => {
-        const { runAction } = (() => { stubRunView(twoCompanyLeader()); return stubEngines(PORTFOLIO); })();
-        runAction.mockResolvedValue({ Success: false, Message: 'mailbox unavailable' } as never);
+        const { sendMessage } = (() => { stubRunView(twoCompanyLeader()); return stubEngines(PORTFOLIO); })();
+        sendMessage.mockResolvedValue({ Success: false, Error: 'mailbox unavailable' } as never);
         const out = await RunLapsedCloseDateDigest(user);
         expect(out.Errors).toHaveLength(2);
         expect(new Set(out.Errors).size).toBe(2);

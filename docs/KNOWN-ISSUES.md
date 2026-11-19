@@ -39,6 +39,7 @@ Statuses checked on 2026-10-11 against `next` here and in the sibling repos.
 | KI-27 | Orders' lifecycle collapse would break CD24's `Posted` step | Resolved: CD24 asserts the collapse instead (`cf89281`) | sales | — |
 | KI-28 | A fresh install registered 10 fewer orders fields than the views expose, so saves failed on a column-count mismatch | Resolved: orders folded the missing rows into migrations (bizapps-orders `2daf9b9`, `a389782`), and the drift query returned nothing on fresh hosts in October (#161). Metadata that CodeGen still adds on a first run: bizapps-orders#491 | bizapps-orders | bizapps-orders#491 |
 | KI-29 | A very large lapsed-deal list is cut off, and the digest reports failure instead of mailing it | By design, [below](#ki-29--a-lapsed-deal-list-past-the-row-cap-fails-the-run-instead-of-being-mailed) | sales | — |
+| KI-30 | MJ's `Send Single Message` action cannot send HTML, so the digest sends through the communication engine instead | Open upstream, [below](#ki-30--mjs-send-single-message-action-cannot-send-html) | MJ | MJ#6761 |
 | — | Contracts' minimum bootstrap | Obsolete: written for contracts v1 (`ContractTerm`, `ContractLine`), which v2 removed; `scripts/seed-demo-data.sh` seeds the contract template. Its remote-operation rule is [below](#remote-operations-report-success-twice) | — | — |
 
 ---
@@ -117,6 +118,33 @@ about 157 open deals against a 1,000-row cap, roughly an order of magnitude shor
 case that has not happened. If this error ever appears, that is the time to build pagination; raising
 `UserViewMaxRows` on Deals only moves the ceiling to 5,000. Do not "fix" the failure by suppressing the
 error: the cut companies would go back to being invisible.
+
+### KI-30 — MJ's `Send Single Message` action cannot send HTML
+
+MJ's core `__SendSingleMessage` action builds its message from `Subject`, `Body`, `To` and `From`, and
+declares no HTML parameter. An HTML body passed to it arrives as `Message.Body`, so
+`ProcessedHTMLBody` stays empty, and every provider keys its content type off that field — for example
+`MSGraphProvider`: `contentType: message.ProcessedHTMLBody ? 'HTML' : 'Text'`. The email is therefore
+delivered as plain text and the reader sees raw markup. The action reports `SUCCESS` and the provider
+accepts the message, so nothing surfaces until someone opens the mail.
+
+MJ's own route to an HTML email is a `BodyTemplate` carrying HTML content, which means a Template per
+message shape for a body the digest already renders in code.
+
+**What the digest does instead:** `digest/run.ts` calls `CommunicationEngine.SendSingleMessage`
+directly with `HTMLBody` set and `Body` left unset. Checked on `lts/6.2` (`v6.2.1`) and on `next`
+(2026-11-18); filed as MJ#6761.
+
+The audit trail is unaffected, and this is the reason the swap was safe: the engine writes the
+`MJ: Communication Logs` row itself in `BaseEngine.StartLog`, before the provider call, and refuses to
+send when that row cannot be saved. It records To, From, Subject, `HTMLBody` and `TextBody` — strictly
+more than the one `SUCCESS` row `MJ: Action Execution Logs` held on the action path.
+
+**When MJ#6761 ships** the action becomes usable, but moving back is optional, not required: it would
+trade the richer Communication Log entry for an Action Execution Log row. Do not reintroduce the
+action without setting an HTML parameter, and do not "simplify" `run.ts` by putting the markup back in
+`Body` — `DigestRun.test.ts` fails on exactly that mutation, which is the regression this entry exists
+to prevent.
 
 ## Standing rules
 

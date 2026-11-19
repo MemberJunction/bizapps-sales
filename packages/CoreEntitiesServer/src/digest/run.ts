@@ -1,7 +1,7 @@
 import { RunView, type UserInfo } from '@memberjunction/core';
-import type { MJActionEntity } from '@memberjunction/core-entities';
-import { ActionEngineServer } from '@memberjunction/actions';
-import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
+import type { MJCommunicationProviderMessageTypeEntity } from '@memberjunction/core-entities';
+import { CommunicationEngine } from '@memberjunction/communication-engine';
+import type { Message } from '@memberjunction/communication-types';
 import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
 
 import { SelectForAudience, type DigestAudience } from './audience.js';
@@ -12,9 +12,6 @@ import { RenderDigest } from './render.js';
 import { ReadSalesSetting, ResolveSender } from './sender.js';
 import { AUDIENCE_ENTITY, CountDeals, lower } from './shared.js';
 
-const ACTION_ENTITY = 'MJ: Actions';
-/** The send action is found by the class that implements it, not by a display name an admin can edit. */
-const SEND_ACTION_DRIVER_CLASS = '__SendSingleMessage';
 /**
  * The provider is a host's choice (Microsoft Graph, Gmail, SendGrid... any may be the active one), so it
  * is the `DigestProvider` Application Setting. The message type is not: `Email` is one of MJ's base
@@ -53,66 +50,87 @@ async function loadAudiences(contextUser: UserInfo): Promise<DigestAudience[]> {
     return [...(r.Results ?? [])].sort((a, b) => a.DisplayRank - b.DisplayRank);
 }
 
-/** Looks the send action up on first use, once; a run with nothing to send never reads it. */
-class SendActionLoader {
-    private action: Promise<MJActionEntity> | null = null;
-    constructor(private readonly contextUser: UserInfo) {}
+/** What one send needs: the configured provider by name, and its `Email` message type. */
+interface SendTarget { ProviderName: string; MessageType: MJCommunicationProviderMessageTypeEntity; }
 
-    get(): Promise<MJActionEntity> {
-        if (!this.action) this.action = this.load();
-        return this.action;
+/**
+ * Resolves the provider and its message type on first use, once; a run with nothing to send never
+ * reads them.
+ *
+ * WHY NOT MJ's `__SendSingleMessage` ACTION. That action accepts a plain-text `Body` and nothing
+ * else: its class maps four params onto the message and declares no HTML parameter, so an HTML body
+ * passed to it arrives as `Message.Body`, leaves `ProcessedHTMLBody` empty, and every provider then
+ * picks `contentType: 'Text'` — the reader sees raw markup. Filed as MJ#6761; until that ships there
+ * is no parameter spelling that would work, so this calls the Communication engine directly.
+ *
+ * The audit trail does not change. `CommunicationEngine.SendSingleMessage` writes the
+ * `MJ: Communication Logs` row itself (`BaseEngine.StartLog`), before the provider is called and
+ * refusing to send if the row cannot be saved, then writes the outcome back to it. That row records
+ * To, From, Subject and both bodies — strictly more than the one `SUCCESS` row the action path left
+ * in `MJ: Action Execution Logs`.
+ */
+class SendTargetLoader {
+    private target: Promise<SendTarget> | null = null;
+    constructor(private readonly contextUser: UserInfo, private readonly provider: string | null) {}
+
+    get(): Promise<SendTarget> {
+        if (!this.target) this.target = this.load();
+        return this.target;
     }
 
-    private async load(): Promise<MJActionEntity> {
-        await ActionEngineServer.Instance.Config(false, this.contextUser);
-        const r = await new RunView().RunView<MJActionEntity>({
-            EntityName: ACTION_ENTITY, ExtraFilter: `DriverClass = '${SEND_ACTION_DRIVER_CLASS}' AND Status = 'Active'`,
-            ResultType: 'entity_object', MaxRows: 1,
-        }, this.contextUser);
-        if (!r.Success) throw new Error(`Could not look up the send action (DriverClass ${SEND_ACTION_DRIVER_CLASS}): ${r.ErrorMessage}`);
-        const action = r.Results?.[0];
-        if (!action) throw new Error(`No active action with DriverClass ${SEND_ACTION_DRIVER_CLASS} exists, so nothing can be sent.`);
-        return action;
+    private async load(): Promise<SendTarget> {
+        const name = requireProvider(this.provider);
+        await CommunicationEngine.Instance.Config(false, this.contextUser);
+        const provider = CommunicationEngine.Instance.Providers.find((p) => lower(p.Name) === lower(name));
+        if (!provider) {
+            const known = CommunicationEngine.Instance.Providers.map((p) => p.Name).join(', ') || 'none are configured';
+            throw new Error(`the DigestProvider setting names '${name}', which is not a communication provider (${known})`);
+        }
+        const messageType = provider.MessageTypes.find((mt) => lower(mt.Name) === lower(SEND_MESSAGE_TYPE));
+        if (!messageType) {
+            throw new Error(`the '${provider.Name}' provider has no '${SEND_MESSAGE_TYPE}' message type, so an email cannot be sent through it`);
+        }
+        // The provider's own name, not the setting's spelling of it, so the engine's lookup matches this one.
+        return { ProviderName: provider.Name, MessageType: messageType };
     }
-}
-
-function actionParam(Name: string, Value: string): ActionParam {
-    return Object.assign(new ActionParam(), { Name, Value, Type: 'Input' as const });
 }
 
 /**
- * One RunAction call, so the send lands a row in `MJ: Action Execution Logs`. `SkipActionLog` stays
- * unset on purpose: that log is how anyone later answers "did Monday's run actually send". `Filters` is
- * declared non-optional on RunActionParams although its comment says optional, so it is passed as [].
+ * One send. `HTMLBody` carries the digest — that is the whole point of calling the engine directly
+ * (see SendTargetLoader). `Body` is deliberately left unset: the digest is rendered as HTML only, and
+ * putting the same markup in the plain-text field would hand a text-only provider exactly the broken
+ * email this change fixes. A provider that needs a text alternative needs a text renderer first.
  */
-async function sendOne(action: MJActionEntity, contextUser: UserInfo, provider: string, email: RenderedEmail): Promise<string | null> {
-    const params = new RunActionParams();
-    params.Action = action;
-    params.ContextUser = contextUser;
-    params.Filters = [];
-    params.Params = [
-        actionParam('To', email.To), actionParam('From', email.From), actionParam('Subject', email.Subject),
-        actionParam('Body', email.BodyHtml), actionParam('Provider', provider), actionParam('MessageType', SEND_MESSAGE_TYPE),
-    ];
-    const result = await ActionEngineServer.Instance.RunAction(params);
-    return result.Success ? null : (result.Message || 'the send action reported failure with no message');
+async function sendOne(target: SendTarget, contextUser: UserInfo, email: RenderedEmail): Promise<string | null> {
+    const message: Message = {
+        MessageType: target.MessageType,
+        From: email.From,
+        To: email.To,
+        Subject: email.Subject,
+        HTMLBody: email.BodyHtml,
+    };
+    // `MessageResult.Error` is the failure text; `MessageResult.Message` is the processed message object.
+    const result = await CommunicationEngine.Instance.SendSingleMessage(
+        target.ProviderName, SEND_MESSAGE_TYPE, message, undefined, false, undefined, contextUser,
+    );
+    return result.Success ? null : (result.Error || 'the provider reported failure with no message');
 }
 
 interface RunState {
     contextUser: UserInfo; options: DigestRunOptions; today: CalendarDay; deals: LapsedDealsResult;
-    explorerBaseUrl: string | null; provider: string | null; currencyCodes: ReadonlyMap<string, string>; sendAction: SendActionLoader; result: DigestRunResult;
+    explorerBaseUrl: string | null; provider: string | null; currencyCodes: ReadonlyMap<string, string>; sendTarget: SendTargetLoader; result: DigestRunResult;
 }
 
 /**
- * The provider, narrowed to a string. `state.provider` is `string | null`, and `strict` is off, so nothing
+ * The provider, narrowed to a string. The setting is `string | null`, and `strict` is off, so nothing
  * but this check ties a send to the up-front guard in RunLapsedCloseDateDigest; if that guard ever moves,
- * this fails loudly instead of sending with `Provider: null`.
+ * this fails loudly instead of resolving a provider named `null`.
  */
-function requireProvider(state: RunState): string {
-    if (state.provider === null || state.provider === undefined) {
+function requireProvider(provider: string | null): string {
+    if (provider === null || provider === undefined) {
         throw new Error('the DigestProvider setting is empty, so there is nothing to send with');
     }
-    return state.provider;
+    return provider;
 }
 
 /** Who the override stands in for is the recipient; everything else about the email is the real one's. */
@@ -156,7 +174,7 @@ async function deliverOne(state: RunState, audience: DigestAudience, recipient: 
         if (options.dryRun || options.captureRenderedEmails) result.RenderedEmails.push(email);
         if (options.dryRun) return;
 
-        const failure = await sendOne(await state.sendAction.get(), state.contextUser, requireProvider(state), email);
+        const failure = await sendOne(await state.sendTarget.get(), state.contextUser, email);
         if (failure) result.Errors.push(`${label} failed to send: ${failure}`);
         else result.Sent++;
     } catch (err) {
@@ -193,10 +211,11 @@ export async function RunLapsedCloseDateDigest(contextUser: UserInfo, options: D
 
         const audiences = await loadAudiences(contextUser);
         const recipients = await LoadDigestRecipients(contextUser);
+        const provider = await ReadSalesSetting('DigestProvider', contextUser);
         const state: RunState = {
-            contextUser, options, today, deals, result, sendAction: new SendActionLoader(contextUser),
+            contextUser, options, today, deals, result, sendTarget: new SendTargetLoader(contextUser, provider),
             explorerBaseUrl: await ReadSalesSetting('ExplorerBaseUrl', contextUser),
-            provider: await ReadSalesSetting('DigestProvider', contextUser),
+            provider,
             // Read once per run; never throws (see ReadCurrencyCodes), so it cannot stop the digest.
             currencyCodes: await ReadCurrencyCodes(contextUser),
         };
