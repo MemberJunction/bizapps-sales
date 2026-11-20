@@ -51,7 +51,7 @@ vi.mock('@memberjunction/core', () => ({
     LogError: () => undefined,
 }));
 
-import { BaseActivityConsentSource, type StandingConsentRequest } from '@mj-biz-apps/common-activity-sync';
+import { BaseActivityConsentSource, FREE_MAIL_DOMAINS, type StandingConsentRequest } from '@mj-biz-apps/common-activity-sync';
 import { MJGlobal } from '@memberjunction/global';
 
 import { MAX_CONTACT_DOMAINS, MAX_OWNED_ACCOUNTS, OwnedAccountsConsentSource } from '../activities/OwnedAccountsConsentSource.js';
@@ -182,11 +182,16 @@ describe('OwnedAccountsConsentSource', () => {
             expect(consent).toEqual({ Domains: [{ Domain: 'nosite.io', Label: 'No Site Inc' }], Issues: [] });
         });
 
-        it('leaves out a contact on a free-mail domain, and reports nothing: that is ordinary data', async () => {
-            relationships = { Success: true, Results: [{ FromPersonID: P1, ToOrganization: 'Acme Corp' }] };
-            people = { Success: true, Results: [{ ID: P1, EmailDomain: 'GMail.com' }] };
+        // Left out in the database, before the cap is cut, so a gmail contact never takes a pair slot
+        // that a domain which can grant needs. Reported nothing: a gmail contact is ordinary data.
+        it('leaves out every free-mail contact domain IN THE QUERY, before the cap, and reports nothing', async () => {
             const consent = await new OwnedAccountsConsentSource().StandingConsent(request());
-            expect(consent.Domains.map((d) => d.Domain)).toEqual(['acme.com', 'globex.org']);
+            const filter = calls[0].Params[2].ExtraFilter ?? '';
+            const notIn = filter.match(/p\.EmailDomain NOT IN \(([^)]*)\)/);
+            expect(notIn).not.toBeNull();
+            expect(new Set(notIn?.[1].split(', ').map((d) => d.slice(1, -1)))).toEqual(new Set(FREE_MAIL_DOMAINS));
+            // Inside the innermost subquery `x`, which the capped numbering `N` is taken over.
+            expect(filter.indexOf('NOT IN')).toBeLessThan(filter.indexOf(') x WHERE x.RN = 1'));
             expect(consent.Issues).toEqual([]);
         });
 
@@ -216,12 +221,13 @@ describe('OwnedAccountsConsentSource', () => {
             const owned =
                 `SELECT ID FROM [__mj_BizAppsSales].[vwSalesAccounts] WHERE IsActive = 1 AND OwnerEmployeeID IS NOT NULL ` +
                 `AND OwnerEmployeeID IN (SELECT EmployeeID FROM [__mj].[vwUsers] WHERE ID = '${OWNER}')`;
+            const freeMail = [...FREE_MAIL_DOMAINS].map((d) => `'${d}'`).join(', ');
             const onePerPair = (column: string): string =>
                 `SELECT y.${column} FROM (SELECT x.RID, x.PID, ROW_NUMBER() OVER (ORDER BY x.RID) AS N FROM (SELECT r.ID AS RID, r.FromPersonID AS PID, ` +
                 `ROW_NUMBER() OVER (PARTITION BY r.ToOrganizationID, p.EmailDomain ORDER BY r.ID) AS RN ` +
                 `FROM [__mj_BizAppsCommon].[vwRelationships] r INNER JOIN [__mj_BizAppsCommon].[vwPeople] p ON p.ID = r.FromPersonID ` +
                 `WHERE r.Status = 'Active' AND r.RelationshipType = 'Employee' AND p.Status = 'Active' AND p.EmailDomain IS NOT NULL ` +
-                `AND r.ToOrganizationID IN (${owned})) x WHERE x.RN = 1) y WHERE y.N <= ${MAX_CONTACT_DOMAINS + 1}`;
+                `AND p.EmailDomain NOT IN (${freeMail}) AND r.ToOrganizationID IN (${owned})) x WHERE x.RN = 1) y WHERE y.N <= ${MAX_CONTACT_DOMAINS + 1}`;
             const rel = calls[0].Params[2];
             expect(rel.ExtraFilter).toBe(`ID IN (${onePerPair('RID')})`);
             expect(rel.ExtraFilter).not.toContain('WebsiteDomain');
@@ -277,6 +283,9 @@ describe('OwnedAccountsConsentSource', () => {
         accounts = { Success: true, Results: Array.from({ length: MAX_OWNED_ACCOUNTS + 1 }, (_, i) => ({ Name: `A${i}`, WebsiteDomain: `a${i}.com` })) };
         const consent = await new OwnedAccountsConsentSource().StandingConsent(request());
         expect(consent.Domains).toHaveLength(MAX_OWNED_ACCOUNTS);
-        expect(consent.Issues.join(' ')).toMatch(/more than/);
+        // Only the WEBSITE read is capped at this number; contact domains are read for every owned account.
+        expect(consent.Issues).toEqual([
+            `employee ${EMPLOYEE} owns more than ${MAX_OWNED_ACCOUNTS} accounts with a website; only the first ${MAX_OWNED_ACCOUNTS} websites by name grant. Contact domains are read for all owned accounts.`,
+        ]);
     });
 });
