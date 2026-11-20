@@ -9,6 +9,12 @@
  * other: one person with two employee records is mailed once per audience, but the same address under
  * two audiences is two sends, because each audience gets a different slice of deals.
  *
+ * CompanyID in that key is right for a company audience and wrong for a portfolio-wide one, where the
+ * company cannot change what the digest contains: (CEO, NULL, E1) and (CEO, CompanyA, E1) are the same
+ * email, and keyed with the company they survive as two recipients. Both halves of the fix are tested
+ * here — `Save()` refuses the row, and `LoadDigestRecipients` clears the company on the rows already in
+ * the table, which is the half that matters, since nobody re-saves a seeded row.
+ *
  * `MJ: Employees.Email` is NOT NULL, so "no email address" means blank or whitespace. The test uses
  * whitespace; a null check would never fire. Fixtures are fictional.
  *
@@ -135,6 +141,17 @@ describe('DealDigestRecipientEntityServer.Save', () => {
         expect(history[0].Message).toContain('no longer exists');
     });
 
+    it('refuses a portfolio-wide audience row that names a company, naming the audience', async () => {
+        const save = vi.spyOn(mjBizAppsSalesDealDigestRecipientEntity.prototype, 'Save').mockResolvedValue(true);
+        const { r, history } = row({ audience: 'a', company: 'co-1', employee: 'e' }, { audience: PORTFOLIO, employee: GOOD_EMP });
+        expect(await r.Save()).toBe(false);
+        expect(save).not.toHaveBeenCalled();
+        expect(history).toHaveLength(1);
+        expect(history[0].Success).toBe(false);
+        expect(history[0].Message).toContain('CEO');
+        expect(history[0].Message).toContain('Nothing was changed');
+    });
+
     it('accepts a portfolio-wide row with a null CompanyID', async () => {
         const save = vi.spyOn(mjBizAppsSalesDealDigestRecipientEntity.prototype, 'Save').mockResolvedValue(true);
         const { r, history } = row({ audience: 'a', company: null, employee: 'e' }, { audience: PORTFOLIO, employee: GOOD_EMP });
@@ -166,6 +183,8 @@ describe('LoadDigestRecipients', () => {
     afterEach(() => vi.restoreAllMocks());
 
     const user = {} as UserInfo;
+    /** Every row below is on `aud-leader`, a COMPANY audience, unless a test says otherwise. */
+    const NO_PORTFOLIO: ReadonlySet<string> = new Set<string>();
     const recRow = (employee: string, audience = 'aud-leader') =>
         ({ DealDigestAudienceTypeID: audience, CompanyID: 'co-1', EmployeeID: employee });
     const empRow = (id: string, over: Record<string, unknown> = {}) =>
@@ -186,7 +205,7 @@ describe('LoadDigestRecipients', () => {
             { Success: true, Results: [recRow('emp-1'), recRow('emp-2')] },
             { Success: true, Results: [empRow('emp-2')] },
         );
-        const out = await LoadDigestRecipients(user);
+        const out = await LoadDigestRecipients(user, NO_PORTFOLIO);
         expect(out.map((r) => r.EmployeeID)).toEqual(['emp-2']);
         expect(calls).toHaveLength(2);
         expect(calls[0].EntityName).toBe('MJ_BizApps_Sales: Deal Digest Recipients');
@@ -198,7 +217,7 @@ describe('LoadDigestRecipients', () => {
 
     it('escapes the employee IDs with the library routine: a quote is doubled and a NUL is stripped', async () => {
         const calls = stub({ Success: true, Results: [recRow("emp'1"), recRow('emp\u00002')] }, { Success: true, Results: [] });
-        await LoadDigestRecipients(user);
+        await LoadDigestRecipients(user, NO_PORTFOLIO);
         expect(calls[1].ExtraFilter).toContain("IN ('emp''1', 'emp2')");
     });
 
@@ -207,7 +226,7 @@ describe('LoadDigestRecipients', () => {
             { Success: true, Results: [recRow('emp-1'), recRow('emp-2')] },
             { Success: true, Results: [empRow('emp-1', { Email: '  ' }), empRow('emp-2')] },
         );
-        const out = await LoadDigestRecipients(user);
+        const out = await LoadDigestRecipients(user, NO_PORTFOLIO);
         expect(out.map((r) => r.EmployeeID)).toEqual(['emp-2']);
     });
 
@@ -216,7 +235,7 @@ describe('LoadDigestRecipients', () => {
             { Success: true, Results: [recRow('EMP-1')] },
             { Success: true, Results: [empRow('emp-1', { Email: ' pat@example.invalid ', FirstName: 'Pat', LastName: 'Example' })] },
         );
-        const out = await LoadDigestRecipients(user);
+        const out = await LoadDigestRecipients(user, NO_PORTFOLIO);
         expect(out).toEqual([{
             AudienceTypeID: 'aud-leader', CompanyID: 'co-1', EmployeeID: 'EMP-1',
             Email: 'pat@example.invalid', FirstName: 'Pat', FullName: 'Pat Example',
@@ -225,17 +244,64 @@ describe('LoadDigestRecipients', () => {
 
     it('returns an empty list without a second read when there are no recipient rows', async () => {
         const calls = stub({ Success: true, Results: [] });
-        expect(await LoadDigestRecipients(user)).toEqual([]);
+        expect(await LoadDigestRecipients(user, NO_PORTFOLIO)).toEqual([]);
         expect(calls).toHaveLength(1);
     });
 
     it('throws when the recipient read fails, so a broken read is not "nobody to mail"', async () => {
         stub({ Success: false, ErrorMessage: 'boom', Results: [] });
-        await expect(LoadDigestRecipients(user)).rejects.toThrow('boom');
+        await expect(LoadDigestRecipients(user, NO_PORTFOLIO)).rejects.toThrow('boom');
     });
 
     it('throws when the employee read fails', async () => {
         stub({ Success: true, Results: [recRow('emp-1')] }, { Success: false, ErrorMessage: 'bang', Results: [] });
-        await expect(LoadDigestRecipients(user)).rejects.toThrow('bang');
+        await expect(LoadDigestRecipients(user, NO_PORTFOLIO)).rejects.toThrow('bang');
+    });
+
+    it('clears the company on a portfolio-wide row, so one person is not mailed the same digest twice', async () => {
+        // The exact pair the unique key cannot catch, because CompanyID differs.
+        stub(
+            {
+                Success: true,
+                Results: [
+                    { DealDigestAudienceTypeID: 'aud-ceo', CompanyID: null, EmployeeID: 'emp-1' },
+                    { DealDigestAudienceTypeID: 'aud-ceo', CompanyID: 'co-1', EmployeeID: 'emp-1' },
+                ],
+            },
+            { Success: true, Results: [empRow('emp-1')] },
+        );
+        const out = await LoadDigestRecipients(user, new Set(['aud-ceo']));
+        expect(out).toHaveLength(1);
+        expect(out[0].CompanyID).toBeNull();
+    });
+
+    it('matches the portfolio-wide audience whatever the case of its ID', async () => {
+        // `NormalizeUUID` lower-cases and trims (it does NOT strip braces); the caller normalizes the
+        // set with the same routine, so the two sides agree. SQL Server returns a uniqueidentifier
+        // upper-cased, and these IDs reach the set and the row by different reads.
+        stub(
+            {
+                Success: true,
+                Results: [{ DealDigestAudienceTypeID: ' 3F2504E0-4F89-11D3-9A0C-0305E82C3301 ', CompanyID: 'co-1', EmployeeID: 'emp-1' }],
+            },
+            { Success: true, Results: [empRow('emp-1')] },
+        );
+        const out = await LoadDigestRecipients(user, new Set(['3f2504e0-4f89-11d3-9a0c-0305e82c3301']));
+        expect(out[0].CompanyID).toBeNull();
+    });
+
+    it('keeps the company on a company audience, so one leader at two companies gets both emails', async () => {
+        stub(
+            {
+                Success: true,
+                Results: [
+                    { DealDigestAudienceTypeID: 'aud-leader', CompanyID: 'co-1', EmployeeID: 'emp-1' },
+                    { DealDigestAudienceTypeID: 'aud-leader', CompanyID: 'co-2', EmployeeID: 'emp-1' },
+                ],
+            },
+            { Success: true, Results: [empRow('emp-1')] },
+        );
+        const out = await LoadDigestRecipients(user, new Set(['aud-ceo']));
+        expect(out.map((r) => r.CompanyID)).toEqual(['co-1', 'co-2']);
     });
 });

@@ -3,9 +3,10 @@
  *
  * The digest's premise is that an administrator can see a wrong recipient in Explorer and fix it, so a
  * row that can never be delivered is refused when it is saved, with a message saying what to change:
- * a company-scoped audience with no company, an employee with no email address, an employee who is
- * inactive. `LoadDigestRecipients` also drops an employee deactivated after the row was saved; the two
- * layers answer different moments.
+ * a company-scoped audience with no company, a PORTFOLIO-WIDE audience that names one, an employee
+ * with no email address, an employee who is inactive. `LoadDigestRecipients` also drops an employee
+ * deactivated after the row was saved, and clears the company on a portfolio-wide row that predates
+ * the refusal below; the two layers answer different moments.
  *
  * A refusal returns false and registers a failed result, as `DealStageEventEntityServer` does; it does
  * not throw, because every caller reads `LatestResult`.
@@ -58,6 +59,15 @@ export class DealDigestRecipientEntityServer extends mjBizAppsSalesDealDigestRec
         }
         if (!audience.IsPortfolioWide && !this.CompanyID) {
             return `The "${audience.Name}" audience is sent one company at a time, and this row has no company, so it would never receive mail. Nothing was changed. Choose the company this recipient covers.`;
+        }
+        // The converse, and the reason it is a refusal rather than a shrug: a portfolio-wide digest does
+        // not depend on a company, so (CEO, NULL, E1) and (CEO, CompanyA, E1) are the SAME digest. They
+        // do not collide on UQ_DealDigestRecipient, because CompanyID differs, and `LoadDigestRecipients`
+        // now clears the company before the dedupe, so a row like this is harmless at run time — but it
+        // is still a row an administrator would read as "the CEO digest for Company A", which is not a
+        // thing. Refuse it here so the table says what it means.
+        if (audience.IsPortfolioWide && this.CompanyID) {
+            return `The "${audience.Name}" audience covers the whole portfolio in one email, so this row must not name a company: a company on it says this recipient gets a digest for that company alone, which this audience does not send. Nothing was changed. Clear the company on this row.`;
         }
 
         const empRead = await view.RunView<{ FirstName: string; LastName: string; Email: string; Active: boolean }>({

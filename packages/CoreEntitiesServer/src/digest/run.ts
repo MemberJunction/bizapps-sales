@@ -2,7 +2,7 @@ import { RunView, type UserInfo } from '@memberjunction/core';
 import type { MJCommunicationProviderMessageTypeEntity } from '@memberjunction/core-entities';
 import { CommunicationEngine } from '@memberjunction/communication-engine';
 import type { Message } from '@memberjunction/communication-types';
-import { UUIDsEqual } from '@memberjunction/global';
+import { NormalizeUUID, UUIDsEqual } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
 
 import { SelectForAudience, type DigestAudience } from './audience.js';
@@ -31,8 +31,15 @@ export interface DigestRunOptions {
     recipientOverride?: { name: string; email: string };
 }
 
+/**
+ * `FromName` is the sender's display name — the company Mailbox's `DisplayName`, or null when the
+ * address came from the `DigestFromAddress` setting, which carries no name. It is carried here and
+ * onto `Message.FromName` so the reader sees "Acme Digest <digest@acme...>" rather than a bare
+ * address, and so a dry run shows the name that a real send would use.
+ */
 export interface RenderedEmail {
-    To: string; From: string; Subject: string; BodyHtml: string; BodyText: string; AudienceCode: string; CompanyName: string | null;
+    To: string; From: string; FromName: string | null; Subject: string; BodyHtml: string; BodyText: string;
+    AudienceCode: string; CompanyName: string | null;
 }
 
 export interface DigestRunResult {
@@ -109,6 +116,8 @@ async function sendOne(target: SendTarget, contextUser: UserInfo, email: Rendere
     const message: Message = {
         MessageType: target.MessageType,
         From: email.From,
+        // `Message.FromName` is optional, and a null display name must arrive as absent, not as "null".
+        ...(email.FromName ? { FromName: email.FromName } : {}),
         To: email.To,
         Subject: email.Subject,
         HTMLBody: email.BodyHtml,
@@ -173,7 +182,7 @@ async function deliverOne(state: RunState, audience: DigestAudience, recipient: 
             dealsShown: CountDeals(groups), truncated: state.deals.Truncated, currencyCodes: state.currencyCodes,
         });
         const email: RenderedEmail = {
-            To: target.Email, From: sender.From, Subject, BodyHtml, BodyText, AudienceCode: audience.Code,
+            To: target.Email, From: sender.From, FromName: sender.FromName, Subject, BodyHtml, BodyText, AudienceCode: audience.Code,
             CompanyName: !audience.IsPortfolioWide && groups.length === 1 ? groups[0].CompanyName : null,
         };
         if (options.dryRun || options.captureRenderedEmails) result.RenderedEmails.push(email);
@@ -215,7 +224,11 @@ export async function RunLapsedCloseDateDigest(contextUser: UserInfo, options: D
         }
 
         const audiences = await loadAudiences(contextUser);
-        const recipients = await LoadDigestRecipients(contextUser);
+        // Which audiences ignore a recipient's company. `LoadDigestRecipients` clears CompanyID on
+        // their rows so one person cannot survive the dedupe twice and receive the same digest twice.
+        const portfolioWideAudienceIDs = new Set(
+            audiences.filter((a) => a.IsPortfolioWide).map((a) => NormalizeUUID(String(a.ID))));
+        const recipients = await LoadDigestRecipients(contextUser, portfolioWideAudienceIDs);
         const provider = await ReadSalesSetting('DigestProvider', contextUser);
         const state: RunState = {
             contextUser, options, today, deals, result, sendTarget: new SendTargetLoader(contextUser, provider),

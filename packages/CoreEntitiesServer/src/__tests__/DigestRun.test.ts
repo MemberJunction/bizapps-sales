@@ -660,6 +660,37 @@ describe('RunLapsedCloseDateDigest', () => {
         for (const from of fromByTo.values()) expect(from).toBeTruthy();
     });
 
+    it('carries the sender display name onto the message, and leaves it absent when there is none', async () => {
+        const { sendMessage } = setup();
+        await RunLapsedCloseDateDigest(user);
+        const byTo = new Map(sendMessage.mock.calls.map((c) => [toOf(c), msgOf(c)]));
+        // The company Mailbox's DisplayName. Resolved and then dropped, the reader saw a bare address.
+        expect(byTo.get('lee@example.invalid').FromName).toBe('co-1 sender');
+        expect(byTo.get('lou@example.invalid').FromName).toBe('co-2 sender');
+        // `DigestFromAddress` carries no name, and `Message.FromName` is optional: absent, not "null".
+        expect(byTo.get('cleo@example.invalid')).not.toHaveProperty('FromName');
+    });
+
+    it('reports the sender display name in a dry run, so it can be checked before anything is sent', async () => {
+        setup();
+        const out = await RunLapsedCloseDateDigest(user, { dryRun: true });
+        expect(out.RenderedEmails.find((e) => e.To === 'lee@example.invalid').FromName).toBe('co-1 sender');
+        expect(out.RenderedEmails.find((e) => e.To === 'cleo@example.invalid').FromName).toBeNull();
+    });
+
+    it('sends one portfolio digest to a person holding two rows that differ only in CompanyID', async () => {
+        // The pair UQ_DealDigestRecipient cannot catch (CompanyID differs) and the dedupe key used to
+        // keep apart. Both rows are the same CEO digest, so this person must be mailed once.
+        const { sendMessage } = setup(runWorld({
+            audiences: [CEO],
+            recipients: [recipientRow('aud-ceo', null, 'emp-ceo'), recipientRow('aud-ceo', 'co-1', 'emp-ceo')],
+        }));
+        const out = await RunLapsedCloseDateDigest(user);
+        expect(sendMessage.mock.calls.filter((c) => toOf(c) === 'cleo@example.invalid')).toHaveLength(1);
+        expect(out.Sent).toBe(1);
+        expect(out.Errors).toEqual([]);
+    });
+
     it('dryRun renders everything and sends zero times, without reaching the provider at all', async () => {
         const { sendMessage, commConfig } = setup();
         const out = await RunLapsedCloseDateDigest(user, { dryRun: true });
