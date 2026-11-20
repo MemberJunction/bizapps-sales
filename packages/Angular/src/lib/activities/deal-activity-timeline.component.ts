@@ -179,11 +179,11 @@ const LOGGABLE_CODES: readonly ActivityTypeCode[] = ['Call', 'Meeting', 'Note', 
                                     -->
                                     @if (row.SourceSystem) {
                                         <span class="dat__badge dat__badge--sync"
-                                              [title]="'Ingested automatically from ' + row.SourceSystem">
+                                              [title]="'Synced automatically from ' + row.SourceSystem">
                                             <i class="fa-solid fa-inbox" aria-hidden="true"></i> {{ row.SourceSystem }}
                                         </span>
                                     } @else {
-                                        <span class="dat__badge" title="Logged by a person">
+                                        <span class="dat__badge" title="Logged in Sales, not synced from another system">
                                             <i class="fa-solid fa-pen" aria-hidden="true"></i> logged
                                         </span>
                                     }
