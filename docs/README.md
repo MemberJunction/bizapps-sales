@@ -27,6 +27,7 @@ Open defects are GitHub issues, not documents: [bizapps-sales issues](https://gi
 | [`docs/DECISIONS.md`](DECISIONS.md) | The rulings that govern the app, each with its reasoning | Current |
 | [`DECISIONS-NEEDED.md`](../DECISIONS-NEEDED.md) | Calls made while building the app, and the [open questions](../DECISIONS-NEEDED.md#open-questions) that still need a ruling | Current |
 | [`docs/KNOWN-ISSUES.md`](KNOWN-ISSUES.md) | The status of every `KI-n` entry, the open ones, behaviour that is by design, and standing rules | Current |
+| [`docs/superpowers/specs/2026-11-16-lapsed-close-date-digest-design.md`](superpowers/specs/2026-11-16-lapsed-close-date-digest-design.md) | Why the weekly lapsed-close-date digest is built the way it is: audiences as data, what the run reads, and how the sender resolves. Setup is in the QA guide §2 | Current; records where shipped behaviour moved past the first draft |
 | [`docs/UPSTREAM-BLOCKERS.md`](UPSTREAM-BLOCKERS.md) | Asks for other repositories, and whether each is filed | Current |
 | [`docs/upstream/`](upstream/) | Drafts of upstream asks that are not filed yet | Current |
 
@@ -35,7 +36,7 @@ Open defects are GitHub issues, not documents: [bizapps-sales issues](https://gi
 | Document | What it is for | Status |
 |---|---|---|
 | [`docs/WORKSPACE-SETUP.md`](WORKSPACE-SETUP.md) | Building the joined workspace and the database it needs | Current; its header says which parts were last run and when |
-| [`docs/QA-GUIDE.md`](QA-GUIDE.md) | Configuration, seeding, the automated checks, and the manual test scenarios | Current |
+| [`docs/QA-GUIDE.md`](QA-GUIDE.md) | Configuration, seeding, turning on the lapsed close date digest, the automated checks, and the manual test scenarios | Current |
 | [`docs/PUBLISHING.md`](PUBLISHING.md) | How a release is cut, and what the release gates check | Current |
 | [`.changeset/README.md`](../.changeset/README.md) | When a PR needs a changeset, and which bump level | Current |
 | [`docs/CODEGEN-PARTIAL-RUNS.md`](CODEGEN-PARTIAL-RUNS.md) | How a partial CodeGen run drops objects, and the preconditions for every run | Current |
@@ -66,6 +67,7 @@ Work that is designed but not built. A plan becomes current documentation when i
 
 | Document | What it is for | Status |
 |---|---|---|
+| [`docs/superpowers/plans/2026-11-17-lapsed-close-date-digest.md`](superpowers/plans/2026-11-17-lapsed-close-date-digest.md) | The task-by-task plan the digest was built from; read it for the order of work, not for the current shape | History |
 | [`docs/history/agent-working-rules.md`](history/agent-working-rules.md) | The incidents behind `CLAUDE.md` critical rules 5–8 | History |
 | [`docs/history/codegen-one-pass-lag.md`](history/codegen-one-pass-lag.md) | The measurements behind "run CodeGen until it reports `success: true`" | History |
 | [`docs/history/migrations-baseline-in-place.md`](history/migrations-baseline-in-place.md) | The pre-release practice of editing the baseline migration in place, and why it ended | History |

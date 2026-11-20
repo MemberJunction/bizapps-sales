@@ -68,6 +68,12 @@ release, cut by `.github/workflows/publish.yml` when `next` is merged to `main`
 - **Dashboard and forecasting.** The dashboard reads the MJ Queries in `metadata/queries/`.
   `ForecastSnapshot` holds point-in-time forecast figures; its daily scheduled job captures each
   pipeline's forecast by owner from the `Sales: Forecast by Owner` query.
+- **A weekly digest of lapsed close dates.** Open deals whose expected close date has passed, or was
+  never set, are emailed to the people who can push on them: each company's leaders get their own
+  company's list, and portfolio-wide executives get all of them. Who receives what is data
+  (`DealDigestAudienceType`, `DealDigestRecipient`), so a new audience or a different threshold is rows,
+  not a deploy. It ships inert: no recipients, three blank Application Settings and a scheduled job that is
+  `Disabled`. A host turns it on by the sequence in [`docs/QA-GUIDE.md`](docs/QA-GUIDE.md) §2.
 - **In MJExplorer**, the Sales application opens on a Deals section with Dashboard, All deals and Board
   views, beside the generated forms for every entity.
 
@@ -146,6 +152,8 @@ Schema `__mj_BizAppsSales`; entity names are `MJ_BizApps_Sales: <name>`. The cla
 | Pipelines | `Pipeline` | `CloseWonPolicy`, `RequiresDealLines`, `IncludeInForecast`, `IsDefault`; serves the companies linked to it through `PipelineCompany` |
 | Pipeline Companies | `PipelineCompany` | Links a pipeline to a company that sells through it: `PipelineID`, `CompanyID`, `IsActive` (cleared to retire a link without touching its deals); one row per pair |
 | Pipeline Stages | `PipelineStage` | Display order, probability, forecast category, the `DealStatusType` a deal takes on entry, `OrderStatusOnEntry`, entry and exit criteria, required fields, rotting days, guidance |
+| Deal Digest Audience Types | `DealDigestAudienceType` | One kind of digest audience (company leader, CEO, CFO, CTO ship as rows): whether it is portfolio-wide, its minimum days lapsed, whether never-set close dates count, whether it sends when nothing is lapsed, and the copy |
+| Deal Digest Recipients | `DealDigestRecipient` | One employee receiving one audience's digest, for one company or (portfolio-wide) all of them; the address comes from the employee. A host's data, so none ship |
 | Forecast Snapshots | `ForecastSnapshot` | Commit, best-case, pipeline and closed amounts for a period, by company, pipeline and owner |
 | Sales Accounts | `SalesAccount` | IsA child of common's `Organization`: owner, account type, lifecycle stage, lead source, territory, tier, ICP fit, industry, size bands, health |
 | Sales Contacts | `SalesContact` | IsA child of common's `Person`: owner, lifecycle stage, buying role, lead source, seniority, outreach opt-out, last engaged |
@@ -162,20 +170,23 @@ the engine branches on. Their rows are seeded from `metadata/`.
 | `LossReason` | `Category`, `RequiresNotes`, `IsCompetitive` |
 | `LeadSourceType` | `IsInbound`, `IsPaid`, `AttributionWindowDays` |
 | `LifecycleStageType` | `IsMarketingQualified`, `IsSalesQualified`, `IsCustomer` |
+| `DealDigestAudienceType` | `IsPortfolioWide`, `MinDaysLapsed`, `IncludeMissingCloseDate`, `SendWhenEmpty`, `GroupByCompany` |
 | `BuyingRoleType` | `IsDecisionMaker`, `IsBlocker`, `InfluenceWeight` |
 | `AccountType` | `IsCustomer`, `IsProspect`, `IsPartner` |
 
 **References to other apps.** `Deal.OrderID` points at an orders `OrderHeader`; `ContractID` and
 `RenewsContractID` at a contracts `Contract`; `CurrencyID` at an accounting `Currency`.
 `DealTeamMember.PersonID` points at a common `Person`. Companies, employees and users come from MJ core:
-`CompanyID` on `Deal`, `PipelineCompany` and `ForecastSnapshot`, the owner and team `EmployeeID`s, and
-`ClosedByUserID` / `ChangedByUserID`.
+`CompanyID` on `Deal`, `PipelineCompany`, `ForecastSnapshot` and `DealDigestRecipient`, the owner, team
+and digest-recipient `EmployeeID`s, and `ClosedByUserID` / `ChangedByUserID`. The digest sends through MJ's
+communication providers, which the host configures; sales stores no mail credential.
 
 ## Documentation
 
 - [`docs/README.md`](docs/README.md) — every doc in this repo, and whether it is current or history.
 - [`CLAUDE.md`](CLAUDE.md) — the rules for working in this repo.
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — the rulings that govern the app, with their reasoning.
+- [`docs/QA-GUIDE.md`](docs/QA-GUIDE.md) — standing the app up, including turning on the lapsed close date digest.
 - The original specification, `plans/bizapps-sales-master.md`, is on the
   [`an-master-plan`](https://github.com/MemberJunction/bizapps-sales/blob/an-master-plan/plans/bizapps-sales-master.md)
   branch. `docs/DECISIONS.md` records where the app departs from it.
