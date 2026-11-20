@@ -39,9 +39,9 @@
     "@mj-biz-apps/sales-server": "^6.32.0"
   },
   "peerDependencies": {
-    "@memberjunction/core": "^6.2.1",
-    "@memberjunction/global": "^6.2.1",
-    "@memberjunction/testing-integration": "^6.2.1"
+    "@memberjunction/core": ">=6.2.1 <6.3.0",
+    "@memberjunction/global": ">=6.2.1 <6.3.0",
+    "@memberjunction/testing-integration": ">=6.2.1 <6.3.0"
   },
   "repository": {
     "type": "git",
