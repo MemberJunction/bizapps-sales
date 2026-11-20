@@ -100,8 +100,10 @@ overrides:
   '@angular-devkit/build-angular': '21.1.3'
   '@memberjunction/core': '>=6.2.1 <6.3.0'
   '@memberjunction/global': '>=6.2.1 <6.3.0'
-  '@memberjunction/ng-graph-view': '6.2.1'
-  '@memberjunction/ng-hierarchy-tree': '6.2.1'
+  # Workspace-only overrides keeping transitive MJ 6.1.5 peers pulled in by accounting-ng@0.22.0 /
+  # common-ng@^5.60.0 / orders-ng@5.40.0 on the 6.2 line. Remove once those sibling pins move onto 6.2.
+  '@memberjunction/ng-graph-view': '>=6.2.1 <6.3.0'
+  '@memberjunction/ng-hierarchy-tree': '>=6.2.1 <6.3.0'
   '@mj-biz-apps/common-entities': '^5.60.0'
   '@mj-biz-apps/common-ng': '^5.60.0'
   '@mj-biz-apps/common-activity-sync': '^5.60.0'
