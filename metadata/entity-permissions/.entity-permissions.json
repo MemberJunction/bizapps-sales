@@ -24,5 +24,52 @@
     "primaryKey": {
       "ID": "01FE6F87-FFF2-4F7C-B78B-4CF89C43DECE"
     }
+  },
+  {
+    "_comments": [
+      "SALES OFFBOARDING (golive #297, g297.8). The rights the offboarding reassign's saves need, for a",
+      "supervisor who holds no Sales role. Read and update on deals and pipelines; Deal Team Members also create",
+      "and delete, because a deal's owner moves through DealEntity.SetOwner, which removes the owner row and adds",
+      "a new one. No rights on Sales Accounts or Sales Contacts: those moves are Sales Admin only (g297.9). The",
+      "role grants entity rights only: the reassign's own supervisor / Sales Admin check decides who may move",
+      "anything. Pinned by OffboardingRolePermissions.test.ts."
+    ],
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deals",
+      "RoleID": "@lookup:MJ: Roles.Name=Sales Offboarding",
+      "CanCreate": false,
+      "CanRead": true,
+      "CanUpdate": true,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "8DCC0EDB-1673-4EB3-9988-36A51EAF0C24"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Team Members",
+      "RoleID": "@lookup:MJ: Roles.Name=Sales Offboarding",
+      "CanCreate": true,
+      "CanRead": true,
+      "CanUpdate": true,
+      "CanDelete": true
+    },
+    "primaryKey": {
+      "ID": "27B1FD04-FA96-459E-9CFF-1F841C43F3FD"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Pipelines",
+      "RoleID": "@lookup:MJ: Roles.Name=Sales Offboarding",
+      "CanCreate": false,
+      "CanRead": true,
+      "CanUpdate": true,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "2E9478F5-1732-48F5-81C7-831B3A29571B"
+    }
   }
 ]
