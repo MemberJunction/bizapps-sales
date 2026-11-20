@@ -2,7 +2,15 @@
  * `Sales.LapsedCloseDateDigest` is a thin shell over `RunLapsedCloseDateDigest`: it validates the context
  * user, parses an UNTRUSTED payload (a Scheduled Job's StartingPayload, or a person running it by hand),
  * and maps the run's outcome onto the agent's final step. The run is stubbed; its behaviour is proved in
- * sales-core-entities-server. What is pinned here is the mapping and that parsing never throws.
+ * sales-core-entities-server. What is pinned here is the mapping, that parsing never throws, and that
+ * parsing FAILS CLOSED.
+ *
+ * Fail-closed is the one rule here with teeth. `dryRun` and `recipientOverride` exist to stop a real
+ * send, and a `StartingPayload` is typed by hand (QA-GUIDE steps 4 and 5), so `{"dryRun": "true"}` is a
+ * likely typo. Read as the default it mails every CEO, CFO, CTO and company leader, and mail cannot be
+ * recalled. Each test below therefore asserts BOTH that the step is `Failed` AND that the run was never
+ * called: a `Failed` step reached after the send would be no protection at all. The counterpart is the
+ * last test: an absent payload is not a malformed one, and must still run the normal Monday.
  *
  * The agent is held with `Object.create(prototype)` so no MJ metadata is stood up.
  */
@@ -61,7 +69,7 @@ describe('LapsedCloseDateDigestAgent', () => {
         });
     });
 
-    it('ignores a malformed recipientOverride rather than throwing', async () => {
+    it('refuses a malformed recipientOverride instead of sending to the real recipients', async () => {
         const malformed: unknown[] = [
             { name: 'No Email' }, { email: 'no-name@example.com' }, { name: 1, email: 2 }, { name: '', email: '' },
             'tester@example.com', 42, [], null,
@@ -69,22 +77,54 @@ describe('LapsedCloseDateDigestAgent', () => {
         for (const recipientOverride of malformed) {
             run.mockClear();
             const { finalStep } = await agent().Execute(params({ recipientOverride }));
-            expect(finalStep.step).toBe('Success');
-            expect(run.mock.calls[0][1].recipientOverride).toBeUndefined();
+            expect(finalStep.step).toBe('Failed');
+            expect(finalStep.errorMessage).toContain('"recipientOverride"');
+            expect(finalStep.errorMessage).toMatch(/nothing was sent/i);
+            // The whole point: an ignored override is a real send to the real roster.
+            expect(run).not.toHaveBeenCalled();
         }
     });
 
-    it('survives a payload that is not an object, and only honours booleans for the flags', async () => {
-        for (const payload of [undefined, null, 'dryRun', 7, ['dryRun']]) {
+    it.each([
+        ['a string', { dryRun: 'true' }, '"dryRun"'],
+        ['a number', { dryRun: 1 }, '"dryRun"'],
+        ['null', { dryRun: null }, '"dryRun"'],
+        ['a number on captureRenderedEmails', { captureRenderedEmails: 1 }, '"captureRenderedEmails"'],
+    ])('refuses a flag given as %s rather than reading it as the default', async (_label, payload, field) => {
+        const { finalStep } = await agent().Execute(params(payload));
+        expect(finalStep.step).toBe('Failed');
+        expect(finalStep.errorMessage).toContain(field);
+        expect(run).not.toHaveBeenCalled();
+    });
+
+    it('names every unreadable field at once, so one more run does not find the next one', async () => {
+        const { finalStep } = await agent().Execute(params({
+            dryRun: 'true', captureRenderedEmails: 'yes', recipientOverride: { email: 'no-name@example.com' },
+        }));
+        expect(finalStep.step).toBe('Failed');
+        expect(finalStep.errorMessage).toContain('"dryRun"');
+        expect(finalStep.errorMessage).toContain('"captureRenderedEmails"');
+        expect(finalStep.errorMessage).toContain('"recipientOverride"');
+        expect(run).not.toHaveBeenCalled();
+    });
+
+    it('refuses a payload that is not an object at all, which is what a double-encoded JSON string is', async () => {
+        for (const payload of ['dryRun', '{"dryRun":true}', 7, ['dryRun'], true]) {
+            run.mockClear();
+            const { finalStep } = await agent().Execute(params(payload));
+            expect(finalStep.step).toBe('Failed');
+            expect(finalStep.errorMessage).toMatch(/must be a JSON object/i);
+            expect(run).not.toHaveBeenCalled();
+        }
+    });
+
+    it('runs with the defaults when no payload was supplied: the normal Monday has none', async () => {
+        for (const payload of [undefined, null, '', '   ', {}, { somethingElse: 'ignored' }, { recipientOverride: undefined }]) {
             run.mockClear();
             const { finalStep } = await agent().Execute(params(payload));
             expect(finalStep.step).toBe('Success');
-            expect(run).toHaveBeenCalledWith(user, { dryRun: undefined, captureRenderedEmails: undefined, recipientOverride: undefined });
+            expect(run).toHaveBeenCalledWith(user, {});
         }
-        run.mockClear();
-        await agent().Execute(params({ dryRun: 'true', captureRenderedEmails: 1 }));
-        expect(run.mock.calls[0][1].dryRun).toBeUndefined();
-        expect(run.mock.calls[0][1].captureRenderedEmails).toBeUndefined();
     });
 
     it('returns step Failed when the run reports errors', async () => {
