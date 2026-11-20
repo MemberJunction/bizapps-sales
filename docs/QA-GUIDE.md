@@ -136,11 +136,23 @@ passes without it, so the first real send is the first proof. Without it the run
    `{"recipientOverride":{"name":"Your Name","email":"you@example.com"}}` and run once. **Every** email in the
    run goes to that one address, while subjects still name the real audience and company, so the one test
    shows the whole Monday in your own inbox. Confirm it arrives. Each send is also a row in
-   `MJ: Action Execution Logs`, which is where to look later to learn whether a run really sent.
+   `MJ: Communication Logs` — written by the Communication engine, which is what the digest calls (KI-30);
+   the action path that would have written `MJ: Action Execution Logs` cannot send HTML and is not used.
+   That row is where to look later to learn whether a run really sent, and it carries To, From, Subject
+   and both bodies.
 6. **Put the payload back, then enable.** Restore `Configuration` to just the `AgentID`. A leftover `dryRun`
    would make every Monday succeed and send nothing; a leftover override would send everything to you. Then
    set the job's `Status` to `Active` and **restart MJAPI**. The scheduler does not notice job rows written
    out of process, so without the restart the job is not scheduled whatever its `Status` says.
+
+**A payload that cannot be read fails the run; it is never ignored.** The two steps above are typed by
+hand, so `{"dryRun": "true"}` — a string rather than a boolean — is an easy mistake. It ends the run
+`Failed`, naming the field, and sends nothing. The same goes for a `recipientOverride` missing its `name`
+or `email`, and for a payload that is not a JSON object at all (a double-encoded one, say). This is the
+one place the digest is deliberately unhelpful about a typo, because the other reading of a bad value is
+the dangerous one: ignored, a mistyped `dryRun` is a real send to every recipient on the roster, and mail
+cannot be recalled. An ABSENT field still takes its default, so a job with no `StartingPayload` — the
+normal Monday — runs for real, as it should.
 
 The job ships for Monday 09:00 `America/New_York`: a default, not a rule. Set `CronExpression` and
 `Timezone` to when the host wants the email. It will not run twice at once (`Skip`), and a missed week

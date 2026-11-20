@@ -170,7 +170,7 @@ which is the mechanism this design exists to provide, and which is immune to the
 |---|---|---|
 | `ID` | uniqueidentifier, PK | |
 | `DealDigestAudienceTypeID` | uniqueidentifier, NOT NULL, FK | |
-| `CompanyID` | uniqueidentifier, NULL, FK → `MJ: Companies` | required when the audience is not portfolio-wide; ignored when it is |
+| `CompanyID` | uniqueidentifier, NULL, FK → `MJ: Companies` | required when the audience is not portfolio-wide; **refused** when it is, since a company cannot change what a portfolio digest contains and a row carrying one would otherwise be a second, identical send to the same person |
 | `EmployeeID` | uniqueidentifier, NOT NULL, FK → `MJ: Employees` | name and address come from here |
 | `IsActive` | bit, NOT NULL, default 1 | |
 
@@ -301,6 +301,11 @@ multipart/alternative from the pair; Microsoft Graph takes one content type and 
 text part is rendered from the same company groups as the HTML, never derived from the HTML — deriving
 it would make it inherit the HTML's escaping, and a text part needs none.
 
+The sender's display name travels with the address. A company's default Mailbox identity carries one, and
+it is set on the message as `FromName`, so the reader sees the mailbox's name beside the address rather
+than a bare address; `DigestFromAddress` carries no name, and the field is then left absent. A dry run
+reports it with each rendered email, so the name a real send would use can be checked before one happens.
+
 This was MJ's core `Send Single Message` action at first, for the row it writes in
 `MJ: Action Execution Logs` per send — audit being load-bearing for a tool whose value depends on
 people believing the digests actually went out. That action turned out to be unable to send HTML at
@@ -359,6 +364,15 @@ The scheduled job's `StartingPayload` accepts:
 | `dryRun` | Render everything, send nothing. Never reaches the provider, so it works where no mail provider is configured. |
 | `captureRenderedEmails` | Return each rendered digest — recipient, From, subject, HTML — in the run payload. Always on under `dryRun`; off by default otherwise, so a normal Monday does not write megabytes of HTML into the agent-run audit record. |
 | `recipientOverride` | One `{ name, email }` that **every** send is rerouted to for this run. |
+
+**A field that is present and cannot be read refuses the run; it is not ignored.** An absent field takes
+its default, so a job with no `StartingPayload` is the normal Monday, but `{"dryRun": "true"}` — a string,
+which a hand-typed `StartingPayload` produces easily — ends the run `Failed` with a message naming the
+field, having sent nothing. Two of these three fields exist only to stop a real send, so the permissive
+reading is the unsafe one: ignored, a mistyped `dryRun` mails every CEO, CFO, CTO and company leader on
+the roster, and mail cannot be recalled. `captureRenderedEmails` is held to the same rule even though it
+sends nothing either way, because "one field was dropped silently and the other two were honoured" is not
+a contract an operator can hold in their head at the moment they are about to mail the executives.
 
 `recipientOverride` is where this gets simpler than CDP. Because recipients are rows rather than
 constants, there is no need for per-audience override maps: one address catches every digest the run

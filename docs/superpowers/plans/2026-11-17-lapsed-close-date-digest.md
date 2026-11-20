@@ -437,6 +437,8 @@ describe('RunLapsedCloseDateDigest', () => {
   it('passes To, From, Subject, Body, Provider and MessageType on every call', () => { /* … */ });
   it('dryRun renders everything and calls RunAction zero times', () => { /* RenderedEmails populated */ });
   it('recipientOverride reroutes every send while subjects still name the real audience and company', () => { /* … */ });
+  it('carries the sender display name onto the message, and leaves it absent when there is none', () => { /* Message.FromName from the company Mailbox DisplayName; absent for DigestFromAddress */ });
+  it('sends one portfolio digest to a person holding two rows that differ only in CompanyID', () => { /* the pair UQ_DealDigestRecipient cannot catch */ });
 });
 ```
 
@@ -490,7 +492,10 @@ git commit -m "feat(sales): the digest run — query, sender, orchestration"
 describe('LapsedCloseDateDigestAgent', () => {
   it('terminates with an error when there is no context user', () => { /* step: 'Failed' */ });
   it('parses dryRun, captureRenderedEmails and recipientOverride from the payload', () => { /* … */ });
-  it('ignores a malformed recipientOverride rather than throwing', () => { /* missing email → undefined */ });
+  it('refuses a malformed recipientOverride instead of sending to the real recipients', () => { /* step: 'Failed', run never called */ });
+  it('refuses a flag given as a string, a number or null rather than reading it as the default', () => { /* {dryRun: 'true'} */ });
+  it('refuses a payload that is not an object at all, which is what a double-encoded JSON string is', () => { /* … */ });
+  it('runs with the defaults when no payload was supplied: the normal Monday has none', () => { /* undefined, null, '', {} */ });
   it('returns step Failed when the run reports errors', () => { /* … */ });
   it('returns step Success and the tallies in newPayload when the run is clean', () => { /* … */ });
 });
@@ -503,7 +508,9 @@ Expected: FAIL
 
 - [ ] **Step 3: Implement the agent**
 
-`executeAgentInternal` validates `params.contextUser`, parses `params.payload` into `DigestRunOptions` defensively (unknown and malformed fields ignored, never thrown), calls `RunLapsedCloseDateDigest`, and returns `{ finalStep: { terminate: true, step, message, newPayload }, stepCount: 1 }`. `LoadLapsedCloseDateDigestAgent()` exists purely to defeat tree-shaking — follow the comment style on `LoadSalesCoreEntitiesServer`.
+`executeAgentInternal` validates `params.contextUser`, parses `params.payload`, calls `RunLapsedCloseDateDigest`, and returns `{ finalStep: { terminate: true, step, message, newPayload }, stepCount: 1 }`.
+
+`ParseDigestPayload` returns `{ ok: true; options } | { ok: false; message }` and **fails closed**: unknown fields are ignored and an ABSENT field takes the run's default, but a field that is PRESENT and unreadable refuses the run — the agent turns the message into a `Failed` step before `RunLapsedCloseDateDigest` is called at all. Nothing in the parse throws. The reason it is not the permissive reading: `dryRun` and `recipientOverride` exist to stop a real send, a `StartingPayload` is typed by hand, and `{"dryRun": "true"}` read as the default mails every CEO, CFO, CTO and company leader on the roster. The tests therefore assert both the `Failed` step and that the run was never called; a `Failed` step reached after the send would be no protection. `LoadLapsedCloseDateDigestAgent()` exists purely to defeat tree-shaking — follow the comment style on `LoadSalesCoreEntitiesServer`.
 
 - [ ] **Step 4: Run to verify they pass, then build**
 
