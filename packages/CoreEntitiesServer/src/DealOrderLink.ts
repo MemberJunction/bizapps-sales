@@ -95,9 +95,21 @@ export class DealOrderLink implements DealOrderLinkSeam {
     }
 }
 
-/** Single-quote escaping for an id interpolated into an `ExtraFilter`. */
+/**
+ * An id on its way into a filter string, validated rather than merely escaped.
+ *
+ * `orderHeaderID` arrives from Orders, so it is not ours to trust however ordinary its provenance
+ * looks today: the seam hands over whatever the caller passed it. The two vetoes next door take the
+ * same line for the same reason, and this is the third place in the package to build a filter from an
+ * id another app supplied, so it is the third to check the shape of one.
+ *
+ * A UUID has no quotes in it. Anything that does is not one, and it is not going into a filter.
+ */
 function SafeID(id: string): string {
-    return String(id).replace(/'/g, "''");
+    if (!/^[0-9a-fA-F-]{36}$/.test(id)) {
+        throw new Error(`not a usable record id: ${JSON.stringify(id)}`);
+    }
+    return id;
 }
 
 /**
