@@ -81,7 +81,9 @@ packages:
 # Unconfirmed Orders queries call. The floor is now 5.60.0, the Common AIDP Next runs: Sales
 # Accounts inherit Organization.Acronym (common 5.57), and CodeGen run against an older common
 # drops that field from the generated Sales Account code, which breaks every Sales Account load
-# on a host that has it. mj-app.json carries the same floor.
+# on a host that has it. The floor is now 5.67.2: Sales.OwnedAccounts implements common-activity-sync's
+# BaseActivityConsentSource, which 5.67.2 is the first release to carry, and common-activity-sync
+# 5.67.2 itself requires common-entities ^5.67.2, so all three move together. mj-app.json carries the same floor.
 # What travels to a consumer is the range in each package.json, which is what lets a host dedupe
 # instead of nesting a second copy.
 overrides:
@@ -100,9 +102,9 @@ overrides:
   '@angular-devkit/build-angular': '21.1.3'
   '@memberjunction/core': '^6.2.1'
   '@memberjunction/global': '^6.2.1'
-  '@mj-biz-apps/common-entities': '^5.60.0'
-  '@mj-biz-apps/common-ng': '^5.60.0'
-  '@mj-biz-apps/common-activity-sync': '^5.60.0'
+  '@mj-biz-apps/common-entities': '^5.67.2'
+  '@mj-biz-apps/common-ng': '^5.67.2'
+  '@mj-biz-apps/common-activity-sync': '^5.67.2'
   graphql: '16.14.2'
   type-graphql: '2.0.0-beta.3'
   reflect-metadata: '0.2.2'
