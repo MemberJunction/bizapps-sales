@@ -217,11 +217,11 @@ describe('OwnedAccountsConsentSource', () => {
                 `SELECT ID FROM [__mj_BizAppsSales].[vwSalesAccounts] WHERE IsActive = 1 AND OwnerEmployeeID IS NOT NULL ` +
                 `AND OwnerEmployeeID IN (SELECT EmployeeID FROM [__mj].[vwUsers] WHERE ID = '${OWNER}')`;
             const onePerPair = (column: string): string =>
-                `SELECT x.${column} FROM (SELECT r.ID AS RID, r.FromPersonID AS PID, ` +
+                `SELECT y.${column} FROM (SELECT x.RID, x.PID, ROW_NUMBER() OVER (ORDER BY x.RID) AS N FROM (SELECT r.ID AS RID, r.FromPersonID AS PID, ` +
                 `ROW_NUMBER() OVER (PARTITION BY r.ToOrganizationID, p.EmailDomain ORDER BY r.ID) AS RN ` +
                 `FROM [__mj_BizAppsCommon].[vwRelationships] r INNER JOIN [__mj_BizAppsCommon].[vwPeople] p ON p.ID = r.FromPersonID ` +
                 `WHERE r.Status = 'Active' AND r.RelationshipType = 'Employee' AND p.Status = 'Active' AND p.EmailDomain IS NOT NULL ` +
-                `AND r.ToOrganizationID IN (${owned})) x WHERE x.RN = 1`;
+                `AND r.ToOrganizationID IN (${owned})) x WHERE x.RN = 1) y WHERE y.N <= ${MAX_CONTACT_DOMAINS + 1}`;
             const rel = calls[0].Params[2];
             expect(rel.ExtraFilter).toBe(`ID IN (${onePerPair('RID')})`);
             expect(rel.ExtraFilter).not.toContain('WebsiteDomain');
@@ -231,6 +231,19 @@ describe('OwnedAccountsConsentSource', () => {
             expect(ppl.Fields).toEqual(['ID', 'EmailDomain']);
             expect([rel.ResultType, ppl.ResultType]).toEqual(['simple', 'simple']);
             expect([rel.MaxRows, ppl.MaxRows]).toEqual([MAX_CONTACT_DOMAINS + 1, MAX_CONTACT_DOMAINS + 1]);
+        });
+
+        // Two separate reads each take "the first N" with no shared order, so over the cap they could keep
+        // different pairs and a relationship would lose its person. The cap is cut ONCE, inside the
+        // subquery both reads share, so they always hold the same pairs.
+        it('cuts the cap inside the shared subquery, in one order, so both reads keep the SAME pairs', async () => {
+            await new OwnedAccountsConsentSource().StandingConsent(request());
+            const rel = calls[0].Params[2].ExtraFilter ?? '';
+            const ppl = calls[0].Params[3].ExtraFilter ?? '';
+            const bounded = `ROW_NUMBER() OVER (ORDER BY x.RID) AS N`;
+            expect(rel).toContain(bounded);
+            expect(rel).toMatch(new RegExp(`y\\.N <= ${MAX_CONTACT_DOMAINS + 1}\\)$`));
+            expect(ppl).toBe(rel.replace('SELECT y.RID', 'SELECT y.PID'));
         });
 
         it('throws when the People entity is missing from metadata rather than skipping contacts', async () => {

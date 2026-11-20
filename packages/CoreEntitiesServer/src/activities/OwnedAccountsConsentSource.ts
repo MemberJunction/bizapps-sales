@@ -89,12 +89,15 @@ export class OwnedAccountsConsentSource extends BaseActivityConsentSource {
         const ownerIs = `OwnerEmployeeID IS NOT NULL AND OwnerEmployeeID IN (SELECT EmployeeID FROM ${viewOf(usersView)} WHERE ID = '${owner}')`;
         // One (relationship, person) per account and email domain. Not limited to accounts with a website:
         // a contact is how an account with no website grants at all.
+        // The cap is cut HERE, in one order, and not left to each read's MaxRows: the two reads share no
+        // order, so over the cap each would keep its own "first N" and a relationship would lose its person.
         const onePerAccountAndDomain = (column: 'RID' | 'PID'): string =>
-            `SELECT x.${column} FROM (SELECT r.ID AS RID, r.FromPersonID AS PID, ` +
+            `SELECT y.${column} FROM (SELECT x.RID, x.PID, ROW_NUMBER() OVER (ORDER BY x.RID) AS N FROM (SELECT r.ID AS RID, r.FromPersonID AS PID, ` +
             `ROW_NUMBER() OVER (PARTITION BY r.ToOrganizationID, p.EmailDomain ORDER BY r.ID) AS RN ` +
             `FROM ${viewOf(relationshipsView)} r INNER JOIN ${viewOf(peopleView)} p ON p.ID = r.FromPersonID ` +
             `WHERE r.Status = 'Active' AND r.RelationshipType = 'Employee' AND p.Status = 'Active' AND p.EmailDomain IS NOT NULL ` +
-            `AND r.ToOrganizationID IN (SELECT ID FROM ${viewOf(accountsView)} WHERE IsActive = 1 AND ${ownerIs})) x WHERE x.RN = 1`;
+            `AND r.ToOrganizationID IN (SELECT ID FROM ${viewOf(accountsView)} WHERE IsActive = 1 AND ${ownerIs})) x WHERE x.RN = 1) y ` +
+            `WHERE y.N <= ${MAX_CONTACT_DOMAINS + 1}`;
         const views: RunViewParams[] = [
             { EntityName: E_USER, ExtraFilter: `ID = '${owner}'`, Fields: ['ID', 'EmployeeID'], MaxRows: 1, ResultType: 'simple' },
             {
