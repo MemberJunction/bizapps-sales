@@ -50,6 +50,8 @@ import {
 } from '@mj-biz-apps/sales-entities';
 import { MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { FormatDealMoney } from './deal-money';
+import { MJSFieldHelpComponent } from './field-help.component';
+import { DEAL_LINE_HELP } from './deal-field-help';
 
 /** The order line columns a card reads. Virtual name fields (`Product`, `Company`, `ProductPrice`) come with the view. */
 const LINE_FIELDS = [
@@ -148,7 +150,7 @@ function DayOf(value: Date | string | null | undefined): string | null {
 @Component({
     selector: 'mjs-deal-line-cards',
     standalone: true,
-    imports: [CommonModule, SharedGenericModule, MJOConsequenceChipComponent, MJODatePipe],
+    imports: [CommonModule, SharedGenericModule, MJOConsequenceChipComponent, MJODatePipe, MJSFieldHelpComponent],
     template: `
         <div class="mjs-lc" data-testid="deal-lines">
             @if (Loading && Lines.length === 0) {
@@ -229,7 +231,7 @@ function DayOf(value: Date | string | null | undefined): string | null {
 
                         @if (ShowsTermStart(line)) {
                             <div class="mjs-lc-term">
-                                <span class="mjs-lc-term__label">Term start</span>
+                                <span class="mjs-lc-term__label">Term start<mjs-field-help [Text]="Help.TermStart" Label="Term start"></mjs-field-help></span>
                                 <span class="mjs-lc-term__value">{{ (TermStartDay(line) | mjoDate) || 'With the order date' }}</span>
                                 <span class="mjs-lc-term__hint">
                                     @if (HasOwnTermStart(line)) {
@@ -339,6 +341,9 @@ function DayOf(value: Date | string | null | undefined): string | null {
     `],
 })
 export class MJSDealLineCardsComponent implements OnChanges {
+    /** What the help icon beside a label says. */
+    public readonly Help = DEAL_LINE_HELP;
+
     private readonly cdr = inject(ChangeDetectorRef);
 
     /** The deal whose order's lines are listed. */
