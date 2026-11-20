@@ -1,0 +1,12 @@
+{
+  "entity": "MJ_BizApps_Sales: Deal Digest Audience Types",
+  "filePattern": "**/.*.json",
+  "pull": {
+    "createNewFileIfNotFound": true,
+    "newFileName": ".deal-digest-audience-types.json",
+    "appendRecordsToExistingFile": true,
+    "updateExistingRecords": true,
+    "ignoreNullFields": true,
+    "ignoreVirtualFields": true
+  }
+}

@@ -1647,7 +1647,7 @@ const KPI_SHELLS: readonly Omit<SalesKpi, 'Value' | 'Footnote'>[] = [
     { Label: 'Commit', Tooltip: 'Open deals in a Commit forecast category, expected to close in the period.', Filter: 'commit' },
     { Label: 'Open pipeline', Tooltip: 'Open deals expected to close in the period, not counting deals left out of the forecast.', Filter: 'pipe' },
     { Label: 'Weighted pipeline', Tooltip: 'The open pipeline with each deal counted at its probability of closing.', Filter: 'weighted' },
-    { Label: 'Win rate', Tooltip: 'Share of closed deal value that was won, over deals closed in the period.', Filter: 'closed' },
+    { Label: 'Win rate', Tooltip: 'Share of closed deal value that was won, over deals closed in the period. With more than one currency, shows the share of closed deals won.', Filter: 'closed' },
 ];
 
 /** A read that settled: its value, or why it failed. */

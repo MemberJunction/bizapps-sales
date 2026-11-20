@@ -125,3 +125,64 @@ describe('changing the product clears dates the new product cannot use', () => {
         expect(change(SUBSCRIPTION, UNLISTED).ServicePeriodStart).not.toBeNull();
     });
 });
+
+/**
+ * Term start and Service start are the same column under two labels: a subscription line states a term
+ * start, and a line the rep dates states a service period. A stored start is offered as a term start
+ * whatever the product, so it can be seen and cleared, which meant a dated line showed a second date
+ * box, labelled Term start, the moment its Service start was entered. Driven through the real getters
+ * with orders' answer stubbed per product.
+ */
+describe('a line shows a term start or a service period, never both', () => {
+    const SUBSCRIPTION = 'sub-product';
+    const DATED = 'dated-product';
+    const ONE_TIME = 'one-time-product';
+    const SOURCES: Record<string, ServicePeriodSource> = { [SUBSCRIPTION]: 'Subscription', [DATED]: 'Line' };
+
+    afterEach(() => vi.restoreAllMocks());
+
+    function editor(productID: string, start: Date | null) {
+        vi.spyOn(OrdersEngine.Instance, 'ServicePeriodSource').mockImplementation(
+            (id: string) => SOURCES[id] ?? 'NotRequired',
+        );
+        const e = Object.create(MJSDealLineEditorComponent.prototype) as MJSDealLineEditorComponent;
+        Object.defineProperty(e, 'Working', {
+            value: { ProductID: productID, ServicePeriodStart: start, ServicePeriodEnd: null },
+            writable: true, configurable: true,
+        });
+        e.Products = [
+            { ID: SUBSCRIPTION, SubscriptionTypeID: 'type-1' },
+            { ID: DATED, SubscriptionTypeID: null },
+            { ID: ONE_TIME, SubscriptionTypeID: null },
+        ] as unknown as MJSDealLineEditorComponent['Products'];
+        return e;
+    }
+
+    const START = new Date('2026-03-01T00:00:00Z');
+
+    it('shows only the service period on a dated line with no start yet', () => {
+        const e = editor(DATED, null);
+        expect(e.ShowServicePeriod).toBe(true);
+        expect(e.ShowTermStart).toBe(false);
+    });
+
+    it('still shows only the service period once its start is entered', () => {
+        const e = editor(DATED, START);
+        expect(e.ShowServicePeriod).toBe(true);
+        expect(e.ShowTermStart).toBe(false);
+    });
+
+    it('shows only the term start on a subscription line, stored or not', () => {
+        for (const start of [null, START]) {
+            const e = editor(SUBSCRIPTION, start);
+            expect(e.ShowTermStart).toBe(true);
+            expect(e.ShowServicePeriod).toBe(false);
+        }
+    });
+
+    it('keeps a stranded start visible on a line that asks for neither', () => {
+        const e = editor(ONE_TIME, START);
+        expect(e.ShowTermStart).toBe(true);
+        expect(e.ShowServicePeriod).toBe(false);
+    });
+});

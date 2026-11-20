@@ -53,6 +53,10 @@ export * from './deal-delete.js';
 export * from './PipelineStageEntityServer.js';
 export * from './PipelineEntityServer.js';
 export * from './DealStageEventEntityServer.js';
+export * from './DealDigestRecipientEntityServer.js';
+export * from './digest/recipients.js';
+/** The digest's public surface: the run and its option and result types. The query, sender and render modules stay internal. */
+export { RunLapsedCloseDateDigest, type DigestRunOptions, type DigestRunResult, type RenderedEmail } from './digest/run.js';
 export * from './CloseDealOperation.js';
 
 /** `Sales.RecordDiscountConcession`: a deal line's raised discount, recorded where orders' rules run (golive#340). */
@@ -147,6 +151,7 @@ import { DealPaymentScheduleEntityServer } from './DealPaymentScheduleEntityServ
 import { PipelineStageEntityServer } from './PipelineStageEntityServer.js';
 import { PipelineEntityServer } from './PipelineEntityServer.js';
 import { DealStageEventEntityServer } from './DealStageEventEntityServer.js';
+import { DealDigestRecipientEntityServer } from './DealDigestRecipientEntityServer.js';
 import { CloseDealOperation, ReopenDealOperation } from './CloseDealOperation.js';
 import { RecordDiscountConcessionOperation } from './RecordDiscountConcessionOperation.js';
 import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
@@ -163,7 +168,7 @@ import { DealLinkerExtension } from './activities/DealLinkerExtension.js';
 export function LoadSalesCoreEntitiesServer(): void {
     LoadActivitySyncEngine();
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, DealPaymentScheduleEntityServer, PipelineStageEntityServer, PipelineEntityServer, DealStageEventEntityServer, CloseDealOperation, ReopenDealOperation, RecordDiscountConcessionOperation, DealLinkerExtension];
+    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, DealPaymentScheduleEntityServer, PipelineStageEntityServer, PipelineEntityServer, DealStageEventEntityServer, DealDigestRecipientEntityServer, CloseDealOperation, ReopenDealOperation, RecordDiscountConcessionOperation, DealLinkerExtension];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }

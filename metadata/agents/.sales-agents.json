@@ -1,0 +1,28 @@
+[
+  {
+    "_comments": [
+      "LAPSED CLOSE DATE DIGEST. The agent record whose DriverClass resolves to the class registered as",
+      "`@RegisterClass(BaseAgent, 'Sales.LapsedCloseDateDigest')` in",
+      "packages/Server/src/custom/lapsed-close-date-digest.agent.ts. DriverClass must match that string",
+      "exactly: a mismatch does not fail at push time, it fails when the agent first runs.",
+      "",
+      "TypeID is Loop only because an agent needs a type; the class does its work in code and runs one",
+      "iteration (MaxIterationsPerRun 1), with no prompt and no model call.",
+      "",
+      "Who receives a digest is the host's data (Deal Digest Recipients), never seeded here. The sender,",
+      "provider and link base are Application Settings that ship blank; see application-settings/."
+    ],
+    "fields": {
+      "Name": "Sales — Lapsed Close Date Digest",
+      "Description": "Emails each configured recipient the deals whose expected close date has lapsed, scoped by that recipient's audience type. Runs from a scheduled job; pass {\"dryRun\": true} as the job's StartingPayload to compose without sending.",
+      "TypeID": "@lookup:MJ: AI Agent Types.Name=Loop",
+      "DriverClass": "Sales.LapsedCloseDateDigest",
+      "ExecutionMode": "Sequential",
+      "MaxIterationsPerRun": 1,
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "D5306AEA-0736-47C8-8B69-480389857481"
+    }
+  }
+]

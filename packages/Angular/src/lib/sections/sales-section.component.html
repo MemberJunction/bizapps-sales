@@ -121,19 +121,19 @@
                       @if (Stack.BestOnly > 0) {
                         <button type="button" class="stack__seg stack__seg--best" [style.width]="StackPct(Stack.BestOnly)"
                                 [class.is-selected]="IsSelected('best')" [attr.aria-pressed]="IsSelected('best')" [attr.aria-label]="'Best case ' + Money(Stack.BestOnly)"
-                                (click)="SetInspect('best')" title="Best case: not counting deals already in Commit.">{{ Money(Stack.BestOnly) }}</button>
+                                (click)="SetInspect('best')" title="Best case: open deals in a Best case forecast category, expected to close in the period. Excludes deals already in Commit.">{{ Money(Stack.BestOnly) }}</button>
                       }
                       @if (Stack.PipeOnly > 0) {
                         <button type="button" class="stack__seg stack__seg--pipe" [style.width]="StackPct(Stack.PipeOnly)"
                                 [class.is-selected]="IsSelected('remainder')" [attr.aria-pressed]="IsSelected('remainder')" [attr.aria-label]="'Pipeline ' + Money(Stack.PipeOnly)"
-                                (click)="SetInspect('remainder')" title="Pipeline: open deals not in Commit or Best case.">{{ Money(Stack.PipeOnly) }}</button>
+                                (click)="SetInspect('remainder')" title="Pipeline: open deals the forecast counts, expected to close in the period, excluding Commit and Best case.">{{ Money(Stack.PipeOnly) }}</button>
                       }
                     </div>
                     <div class="legend">
                       <span title="Deals won in the period, by the day they closed."><i class="swatch swatch--closed"></i>Won {{ Money(Stack.Closed) }}</span>
                       <span title="Open deals in a Commit forecast category, expected to close in the period."><i class="swatch swatch--commit"></i>Commit {{ Money(Stack.Commit) }}</span>
-                      <span title="Not counting deals already in Commit."><i class="swatch swatch--best"></i>Best case {{ Money(Stack.BestOnly) }}</span>
-                      <span title="Open deals not in Commit or Best case."><i class="swatch swatch--pipe"></i>Pipeline {{ Money(Stack.PipeOnly) }}</span>
+                      <span title="Open deals in a Best case forecast category, expected to close in the period. Excludes deals already in Commit."><i class="swatch swatch--best"></i>Best case {{ Money(Stack.BestOnly) }}</span>
+                      <span title="Open deals the forecast counts, expected to close in the period, excluding Commit and Best case."><i class="swatch swatch--pipe"></i>Pipeline {{ Money(Stack.PipeOnly) }}</span>
                     </div>
                   }
                   @if (NoCloseDateCount && Period !== 'alltime') {

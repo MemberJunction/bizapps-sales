@@ -1,0 +1,66 @@
+[
+  {
+    "_comments": [
+      "Lapsed Close Date Digest. Without these nobody can see, or fix, a wrong recipient address in",
+      "Explorer, which is the premise the design rests on. Sales Admin maintains recipients; Sales User",
+      "can read. Neither role can delete an audience type: those are shipped vocabulary, and a host adds",
+      "its own audience row instead of changing these."
+    ],
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Digest Recipients",
+      "RoleID": "@lookup:MJ: Roles.Name=Sales Admin",
+      "CanCreate": true,
+      "CanRead": true,
+      "CanUpdate": true,
+      "CanDelete": true
+    },
+    "primaryKey": {
+      "ID": "8553B39C-5346-4935-907F-7E6D23A2CAE9"
+    }
+  },
+  {
+    "_comments": [
+      "Sales Admin can ADD an audience row (CanCreate) and change one (CanUpdate): a new audience or a",
+      "different threshold is a row, not a deploy, and MJ has no owner bypass, so without these only",
+      "CodeGen's Developer and Integration defaults could do it. Sales Admin still cannot delete one:",
+      "the four shipped rows are vocabulary. Do not edit those four; add your own audience row instead."
+    ],
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Digest Audience Types",
+      "RoleID": "@lookup:MJ: Roles.Name=Sales Admin",
+      "CanCreate": true,
+      "CanRead": true,
+      "CanUpdate": true,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "3716A059-C26E-4430-AB14-87E56DC57D59"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Digest Recipients",
+      "RoleID": "@lookup:MJ: Roles.Name=Sales User",
+      "CanCreate": false,
+      "CanRead": true,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "6334CFAA-5204-48EA-AAEE-7E8B7F95650B"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Sales: Deal Digest Audience Types",
+      "RoleID": "@lookup:MJ: Roles.Name=Sales User",
+      "CanCreate": false,
+      "CanRead": true,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "3D3B31F9-252A-4BC2-B9EA-0CBF698E2C12"
+    }
+  }
+]
