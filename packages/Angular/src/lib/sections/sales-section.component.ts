@@ -149,7 +149,7 @@ import {
     type DashboardFilters,
     type FilterOption,
 } from '../pages/dashboard-filters';
-import { PipelineCompanies, PipelineCompanyNames, PipelineLabel } from '../data/company-pipelines';
+import { HiddenPipelineLabels, PipelineCompanies, PipelineLabel } from '../data/company-pipelines';
 import { SalesSettings } from '../data/sales-settings';
 import { WatchDealSaves } from '../data/deal-saves';
 import { MJSSalesFilterBarComponent, type FilterKind, type SalesFilterBarState } from './sales-filter-bar.component';
@@ -586,10 +586,6 @@ export class MJSSalesSectionComponent implements OnInit {
 
     public get Title(): string {
         return 'Sales';
-    }
-
-    public get Subtitle(): string {
-        return 'Deals, the lines they carry, and the terms they are signed on';
     }
 
     public OnNav(item: MJLeftNavItem): void {
@@ -1292,7 +1288,7 @@ export class MJSSalesSectionComponent implements OnInit {
             case 'slipped': return 'Open deals past their expected close date';
             case 'noowner': return 'Open deals with no owner';
             case 'nodate': return 'Open deals with no expected close date';
-            case 'idle': return 'Open deals idle past their stage limit';
+            case 'idle': return 'Open deals stalled in their stage';
             case 'won': return 'Won deals';
             case 'closed': return 'Closed deals, won and lost';
             case 'week': return 'Expected to close in the next 7 days';
@@ -1482,9 +1478,15 @@ export class MJSSalesSectionComponent implements OnInit {
         return (picked ?? options[0])?.ID ?? null;
     }
 
-    /** A stage card tab's text: the pipeline, or with pipelines hidden the companies it serves. */
-    public FunnelTabLabel(pipeline: FunnelPipeline): string {
-        return this.HidePipelines ? PipelineCompanyNames(this.Pipelines, pipeline) : pipeline.Name;
+    /**
+     * The stage card's tabs. Each reads as its pipeline, or with pipelines hidden as the companies it
+     * serves, plus the pipeline where two tabs would otherwise read alike (bc-aidp-next-golive#498).
+     * See {@link HiddenPipelineLabels}.
+     */
+    public get FunnelTabs(): { ID: string; Label: string }[] {
+        const options = this.FunnelPipelineOptions;
+        const hidden = this.HidePipelines ? HiddenPipelineLabels(this.Pipelines, options) : null;
+        return options.map((p) => ({ ID: p.ID, Label: hidden?.get(p.ID.toLowerCase()) ?? p.Name }));
     }
 
     public SelectFunnelPipeline(id: string): void {
@@ -1547,9 +1549,9 @@ export class MJSSalesSectionComponent implements OnInit {
         const s = this.summary;
         return [
             { Key: 'slipped', Icon: 'fa-calendar-xmark', Label: 'Past close date', Note: 'Open deals past their expected close date', Tooltip: 'Open deals whose expected close date is before today', Count: s?.PastExpectedCloseCount ?? null },
-            { Key: 'noowner', Icon: 'fa-user-slash', Label: 'No owner', Note: 'Open deals with no employee in the owner role', Tooltip: 'Open deals where no employee on the deal team holds the owner role. A person who is not an employee in that role does not count as the owner', Count: s?.NoOwnerCount ?? null },
+            { Key: 'noowner', Icon: 'fa-user-slash', Label: 'No owner', Note: 'Open deals with no employee in the owner role', Tooltip: 'Open deals with no employee as owner on the deal team', Count: s?.NoOwnerCount ?? null },
             { Key: 'nodate', Icon: 'fa-calendar', Label: 'No close date', Note: 'Open deals with no expected close date', Tooltip: 'Open deals that cannot be placed in any period until someone sets an expected close date', Count: s?.NoCloseDateCount ?? null },
-            { Key: 'idle', Icon: 'fa-hourglass-half', Label: 'Idle past stage limit', Note: 'Open deals in their stage longer than it allows', Tooltip: 'Open deals that have sat in their current stage longer than the stage\'s day limit', Count: this.DetailLoading ? null : this.IdleIDs.size },
+            { Key: 'idle', Icon: 'fa-hourglass-half', Label: 'Stalled in stage', Note: 'Open deals past their stage\'s day limit', Tooltip: 'Open deals that have sat in their current stage longer than the stage\'s day limit', Count: this.DetailLoading ? null : this.IdleIDs.size },
         ];
     }
 
