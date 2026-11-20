@@ -590,6 +590,31 @@
         }
     </mj-collapsible-panel>
 
+    <!-- Deal Companies Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsSalesDealCompanies"
+        SectionName="Deal Companies"
+        Icon="fa fa-handshake"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsSalesDealCompanies')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Sales: Deal Companies','DealID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Sales: Deal Companies','DealID')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsSalesDealCompanies')"
+                [ShowToolbar]="true"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsSalesDealCompanies', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
     <!-- Deal Payment Schedules Section -->
     <mj-collapsible-panel
         SectionKey="mJBizAppsSalesDealPaymentSchedules"

@@ -20,6 +20,7 @@ export class mjBizAppsSalesDealFormComponent extends BaseFormComponent {
             { sectionKey: 'mJBizAppsSalesDealContactRoles', sectionName: 'Deal Contact Roles', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDealStageEvents', sectionName: 'Deal Stage Events', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDealTeamMembers', sectionName: 'Deal Team Members', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesDealCompanies', sectionName: 'Deal Companies', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDealPaymentSchedules', sectionName: 'Deal Payment Schedules', isExpanded: false }
         ]);
     }

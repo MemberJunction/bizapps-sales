@@ -336,6 +336,7 @@ test.describe('golive#291 — a team row saved on its own re-derives the deal ow
         // on purpose would refuse the other order.
         for (const id of [dealID, openPageDealID]) {
             await QueryAll(`DELETE FROM __mj_BizAppsSales.DealTeamMember WHERE DealID = '${id}'`);
+            await QueryAll(`DELETE FROM __mj_BizAppsSales.DealCompany WHERE DealID = '${id}'`);
             await QueryAll(`DELETE FROM __mj_BizAppsSales.DealStageEvent WHERE DealID = '${id}'`);
             await QueryAll(`DELETE FROM __mj_BizAppsSales.Deal WHERE ID = '${id}'`);
         }

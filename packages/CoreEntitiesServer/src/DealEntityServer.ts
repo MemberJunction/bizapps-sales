@@ -79,6 +79,7 @@ import {
 import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
 import { FindUnansweredSubscriptionLines } from './subscription-choice.js';
 import { KeptOnDealNote, SendDealScheduleToOrder, StatusIsWon } from './deal-schedule-to-order.js';
+import { AddMissingDealCompanies } from './deal-companies-sync.js';
 import { OrdersIsInstalled } from './orders-availability.js';
 import { CheckTeamGraphRoleRules } from './team-role-rules.js';
 import { VetoReader } from './veto-reader.js';
@@ -827,14 +828,26 @@ export class DealEntityServer extends DealEntity {
         // `stampOwnerFromTeam()` derives the stamp from it rather than being told the answer.
         await this.seedOwnerOnCreate();
 
+        /**
+         * THE COMPANY LIST HOLDS THE BILLING COMPANY AND EVERY LINE'S COMPANY (golive #484). Checked
+         * when a save could change either: a create, a new company, an edited company list, or the
+         * order's lines (the same trigger as the amount cache, which the line editor's deal save sets).
+         * Not on a locked deal, whose company and lines cannot move.
+         */
+        const companyLinks = !this._lockedAtSave && (
+            !this.IsSaved
+            || this.GetFieldByName('CompanyID')?.Dirty === true
+            || this.Companies?.Dirty === true
+            || amountMayHaveMoved);
+
         const saved = this.IsSaved || this.DealNumber
             ? await this.saveWithinScope(options, {
                   stageOrder, orderBillTo, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: false,
-                  needsStatusDefault, scheduleOrderID,
+                  needsStatusDefault, scheduleOrderID, companyLinks,
               })
             : await this.saveWithinScope(options, {
                   stageOrder, orderBillTo, stageMove, stageDefaults, amountMayHaveMoved, assignNumber: true,
-                  needsStatusDefault, scheduleOrderID,
+                  needsStatusDefault, scheduleOrderID, companyLinks,
               });
 
         // The declaration is cleared by the `finally` in `Save()` above, which covers this exit and the
@@ -1141,6 +1154,8 @@ export class DealEntityServer extends DealEntity {
             needsStatusDefault: boolean;
             /** The won deal's order its schedule is sent to after the save, or null. */
             scheduleOrderID: string | null;
+            /** Whether the deal's company list must be checked for its billing and line companies. */
+            companyLinks: boolean;
         },
     ): Promise<boolean> {
         if (
@@ -1153,7 +1168,8 @@ export class DealEntityServer extends DealEntity {
             // Without this term a create that supplied its own DealNumber and touched no stage would take
             // the fast path and land NULL again -- the exact gap this closes, through the one door left open.
             !work.needsStatusDefault &&
-            !work.scheduleOrderID
+            !work.scheduleOrderID &&
+            !work.companyLinks
         ) {
             this._committed = await super.Save(options);
             return this._committed;
@@ -1229,6 +1245,15 @@ export class DealEntityServer extends DealEntity {
 
             if (work.stageMove) {
                 await this.appendStageEvent(work.stageMove);
+            }
+
+            // AFTER the save, which wrote the deal, its company list and its order's lines.
+            if (work.companyLinks) {
+                await AddMissingDealCompanies(
+                    { DealID: this.ID, CompanyID: this.CompanyID, OrderID: this.OrderID },
+                    this.ProviderToUse as unknown as IMetadataProvider,
+                    this.ContextCurrentUser,
+                );
             }
 
             // AFTER the save, which is what wrote the schedule rows the copy reads.
@@ -1331,6 +1356,7 @@ export class DealEntityServer extends DealEntity {
             this,
             ...(this.Team?.Items ?? []),
             ...(this.PaymentSchedule?.Items ?? []),
+            ...(this.Companies?.Items ?? []),
             ...(order ? [order, ...(order.Lines?.Items ?? [])] : []),
         ];
         return rows

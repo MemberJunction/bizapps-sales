@@ -118,6 +118,7 @@ UPDATE __mj_BizAppsSales.Deal SET OrderID = NULL WHERE DealNumber LIKE 'DEAL-9%'
 -- is not something to widen the WHERE clause for.
 DELETE FROM __mj_BizAppsSales.DealPaymentSchedule WHERE DealID IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.DealContactRole WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
+DELETE FROM __mj_BizAppsSales.DealCompany     WHERE DealID   IN (SELECT ID FROM __mj_BizAppsSales.Deal WHERE DealNumber LIKE 'DEAL-9%');
 DELETE FROM __mj_BizAppsSales.Deal            WHERE DealNumber LIKE 'DEAL-9%';
 IF OBJECT_ID('__mj_BizAppsOrders.OrderLine', 'U') IS NOT NULL
 BEGIN

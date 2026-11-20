@@ -203,7 +203,7 @@ test.describe('golive#291 — a stage belongs to the deal\'s pipeline', () => {
             `SELECT CAST(ID AS nvarchar(50)) AS ID FROM __mj_BizAppsSales.Deal WHERE Name = '${DEAL_NAME}'`,
         );
         if (!row?.ID) return;
-        for (const t of ['DealStageEvent', 'DealTeamMember', 'DealPaymentSchedule', 'DealContactRole']) {
+        for (const t of ['DealStageEvent', 'DealTeamMember', 'DealPaymentSchedule', 'DealContactRole', 'DealCompany']) {
             await QueryAll(`DELETE FROM __mj_BizAppsSales.${t} WHERE DealID = '${row.ID}'`);
         }
         await QueryAll(`DELETE FROM __mj_BizAppsSales.Deal WHERE ID = '${row.ID}'`);

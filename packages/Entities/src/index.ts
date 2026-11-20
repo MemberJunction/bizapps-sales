@@ -75,3 +75,9 @@ export * from './discount-concession.js';
 
 /** Activity vocabulary — shared, because the deal-activity pane needs the codes too. */
 export * from './activities/activity-vocabulary.js';
+
+/**
+ * Which companies a deal must list: its billing company and every line's company (golive #484).
+ * Shared by `DealEntityServer`, which adds the missing ones on save, and the deal form's Companies panel.
+ */
+export * from './deal-companies';

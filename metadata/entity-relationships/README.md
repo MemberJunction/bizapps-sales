@@ -1,9 +1,9 @@
 # Related Record Collections on `Deal`
 
-Two of the `Deal → child` relationships CodeGen creates, to `Deal Payment Schedules` and
-`Deal Team Members`, carry a `RelatedRecordCollection` config (`.deal-child-collections.json`). That
-JSON is what makes CodeGen emit the **typed, writable child collections** `PaymentSchedule` and `Team`
-on `mjBizAppsSalesDealEntity`, so a deal and its children travel, validate and persist as one unit —
+Three of the `Deal → child` relationships CodeGen creates, to `Deal Payment Schedules`,
+`Deal Team Members` and `Deal Companies`, carry a `RelatedRecordCollection` config
+(`.deal-child-collections.json`). That JSON is what makes CodeGen emit the **typed, writable child
+collections** `PaymentSchedule`, `Team` and `Companies` on `mjBizAppsSalesDealEntity`, so a deal and its children travel, validate and persist as one unit —
 `MJ.SaveEntityGraph` on the wire, `EntitySavePlan` inside one `EntityTransactionScope` on the server.
 
 `RelatedEntity` and `RelatedEntityJoinField` are **not** repeated in the JSON. They are real columns on
@@ -25,6 +25,10 @@ relationship on the generated forms; `metadata/entities/README.md` covers it.
 **`PaymentSchedule` is an ordered list.** Its order is meaningful — it is how an instalment plan
 reads — so array position is the authority and `DisplayOrder` is derived from it on every add and
 remove. Nobody sets `DisplayOrder` by hand.
+
+**`Companies` is a set too** (golive #484): `UQ_DealCompany_Deal_Company` allows each company once
+per deal, so it has no sequence, and `DealEntityServer` adds the billing company and every line's
+company to it on save.
 
 **`Team` is a SET, and that is a schema fact rather than a preference.** `DealTeamMember` carries
 `UQ_DealTeamMember_Deal_Employee_Role` and `UQ_DealTeamMember_Deal_Person_Role`: a member is identified

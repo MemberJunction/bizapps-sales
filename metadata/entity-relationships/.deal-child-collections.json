@@ -40,5 +40,20 @@
       "lastModified": "2026-08-26T00:25:24.625Z",
       "checksum": "75df9ca112202413d5d8bd3eb20e93c45be4dc22ffd60466cd13d3dbcbca092e"
     }
+  },
+  {
+    "fields": {
+      "RelatedRecordCollection": {
+        "Name": "Companies",
+        "Source": "database",
+        "Load": "explicit",
+        "OnRemove": "delete",
+        "OrderBy": "__mj_CreatedAt ASC",
+        "ClearAfterSave": false
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Deals&RelatedEntity=MJ_BizApps_Sales: Deal Companies"
+    }
   }
 ]
