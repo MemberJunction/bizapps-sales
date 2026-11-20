@@ -8,10 +8,10 @@ name: Distribution Gate
 
 on:
   workflow_dispatch:
-  # `push` as well as `pull_request`: the PR trigger alone would let a direct commit to next/main
+  # `push` as well as `pull_request`: the PR trigger alone would let a direct commit to next/main/a line
   # land unshipped metadata without the gate ever running.
   push:
-    branches: [next, main]
+    branches: [next, main, 'lts/**']
     paths:
       - 'metadata/**'
       - 'migrations/**'
@@ -20,7 +20,7 @@ on:
       - 'scripts/check-distribution-seed.mjs'
       - '.github/workflows/distribution-gate.yml'
   pull_request:
-    branches: [next, main]
+    branches: [next, main, 'lts/**']
     paths:
       - 'metadata/**'
       - 'migrations/**'
