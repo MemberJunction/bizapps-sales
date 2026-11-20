@@ -130,6 +130,8 @@ import {
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
 import { FormatDealMoney } from './deal-money';
+import { MJSFieldHelpComponent } from './field-help.component';
+import { DEAL_LINE_HELP } from './deal-field-help';
 
 /** `<input type="date">` wants `yyyy-MM-dd`, and nothing else renders; `mjoDate` reads the same day value. */
 function toDateInput(d: Date | string | null | undefined): string | null {
@@ -188,7 +190,7 @@ interface RemoteOperationRouter {
 @Component({
     selector: 'mjs-deal-line-editor',
     standalone: true,
-    imports: [CommonModule, FormsModule, A11yModule, MJOLinePricePickerComponent, MJODatePipe],
+    imports: [CommonModule, FormsModule, A11yModule, MJOLinePricePickerComponent, MJODatePipe, MJSFieldHelpComponent],
     template: `
         <div class="mjs-le__scrim" (click)="Cancel()"></div>
         <!-- Keyboard (#371 item 3): focus is trapped inside while open, Escape cancels, the first
@@ -211,7 +213,7 @@ interface RemoteOperationRouter {
                 <div class="mjs-le__body">
                     <div class="mjs-le__field">
                         <div class="mjs-le__label-row">
-                            <label class="mjs-le__label" for="mjs-le-product">Product</label>
+                            <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-product">Product</label><mjs-field-help [Text]="Help.Product" Label="Product"></mjs-field-help></span>
                             <!-- mousedown is cancelled so the product box keeps focus and an open list
                                  re-filters in place instead of closing. -->
                             <label class="mjs-le__company-only" data-testid="line-product-company-only"
@@ -299,25 +301,28 @@ interface RemoteOperationRouter {
                     </div>
 
                     <div class="mjs-le__row">
-                        <label class="mjs-le__field">
-                            <span class="mjs-le__label">Quantity</span>
+                        <div class="mjs-le__field">
+                            <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-quantity">Quantity</label><mjs-field-help [Text]="Help.Quantity" Label="Quantity"></mjs-field-help></span>
                             <!-- min="1", NOT 0: orders' CK_OrderLine_Quantity is 'Quantity <> 0', so a
                                  floor of zero offers the one value the database forbids. Negative is
                                  legal to orders as its reversal mechanism, but a reversal is not
                                  something a deal line expresses. -->
-                            <input type="number" data-testid="line-quantity" min="1" step="1" [ngModel]="Working.Quantity"
+                            <input id="mjs-le-quantity" type="number" data-testid="line-quantity" min="1" step="1" [ngModel]="Working.Quantity"
                                    (ngModelChange)="SetQuantity($event)"
                                    [disabled]="IsLocked" [title]="BlockedReason" />
                             @if (QuantityInvalid) {
                                 <span class="mjs-le__error" data-testid="line-quantity-error">{{ QuantityInvalidMessage }}</span>
                             }
-                        </label>
+                        </div>
 
                         <div class="mjs-le__field">
                             <div class="mjs-le__label-row">
-                                <label class="mjs-le__label" [for]="DiscountUnit === 'Percent' ? 'mjs-le-discount' : 'mjs-le-discount-amount'">
-                                    Discount {{ DiscountUnit === 'Percent' ? '%' : '$' }}
-                                </label>
+                                <span class="mjs-le__labelled">
+                                    <label class="mjs-le__label" [for]="DiscountUnit === 'Percent' ? 'mjs-le-discount' : 'mjs-le-discount-amount'">
+                                        Discount {{ DiscountUnit === 'Percent' ? '%' : '$' }}
+                                    </label>
+                                    <mjs-field-help [Text]="Help.Discount" Label="Discount"></mjs-field-help>
+                                </span>
                                 <!-- The rep states the discount in whichever unit the signed form uses.
                                      A dollar amount is converted to the percent the line stores. -->
                                 <div class="mjs-le__unit" role="group" aria-label="Discount unit">
@@ -364,32 +369,32 @@ interface RemoteOperationRouter {
                          the moment the line is saved. -->
                     @if (NeedsDiscountReason) {
                         <div class="mjs-le__row">
-                            <label class="mjs-le__field">
-                                <span class="mjs-le__label">Discount reason category</span>
-                                <select data-testid="line-discount-category" [(ngModel)]="DiscountCategory"
+                            <div class="mjs-le__field">
+                                <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-discount-category">Discount reason category</label><mjs-field-help [Text]="Help.DiscountReasonCategory" Label="Discount reason category"></mjs-field-help></span>
+                                <select id="mjs-le-discount-category" data-testid="line-discount-category" [(ngModel)]="DiscountCategory"
                                         [disabled]="IsLocked">
                                     <option [ngValue]="null" disabled>Choose one</option>
                                     @for (c of ReasonCategories; track c) {
                                         <option [ngValue]="c">{{ c }}</option>
                                     }
                                 </select>
-                            </label>
-                            <label class="mjs-le__field">
-                                <span class="mjs-le__label">Discount reason</span>
-                                <textarea data-testid="line-discount-reason" rows="2" [(ngModel)]="DiscountReason"
+                            </div>
+                            <div class="mjs-le__field">
+                                <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-discount-reason">Discount reason</label><mjs-field-help [Text]="Help.DiscountReason" Label="Discount reason"></mjs-field-help></span>
+                                <textarea id="mjs-le-discount-reason" data-testid="line-discount-reason" rows="2" [(ngModel)]="DiscountReason"
                                           [disabled]="IsLocked"
                                           placeholder="Why value is given away on this line"></textarea>
-                            </label>
+                            </div>
                         </div>
                         <small class="mjs-le__hint">
-                            Inside your Sales Authority the discount is approved when you save. Outside it, the
-                            order cannot be confirmed until an approver approves it.
+                            A discount within your Sales Authority is usually approved when you save. Any other
+                            discount goes to an approver, and the order cannot be confirmed until it is approved.
                         </small>
                     }
 
                     @if (ShowPricePicker) {
                         <div class="mjs-le__field">
-                            <span class="mjs-le__label">Price</span>
+                            <span class="mjs-le__labelled"><span class="mjs-le__label">Price</span><mjs-field-help [Text]="Help.Price" Label="Price"></mjs-field-help></span>
                             <!-- Orders' named prices, plus a typed custom amount for an OverrideAny
                                  holder (D-DL2, revised). The picker withholds the custom row from
                                  OverrideList holders and asks for a reason on any pick off the default. -->
@@ -412,19 +417,19 @@ interface RemoteOperationRouter {
                                  whatever the line states, so the start it will use is shown, not offered.
                                  The line's own start is kept for a switch back to a new subscription. -->
                             <div class="mjs-le__field" data-testid="line-term-start-continuation">
-                                <span class="mjs-le__label">Term start</span>
+                                <span class="mjs-le__labelled"><span class="mjs-le__label">Term start</span><mjs-field-help [Text]="Help.TermStartRenewal" Label="Term start"></mjs-field-help></span>
                                 <span class="mjs-le__ro-val">{{ HoldingContinuationStart | mjoDate }}</span>
                                 <small class="mjs-le__hint">next term of {{ holding.SubscriptionNumber }}</small>
                             </div>
                         } @else {
-                            <label class="mjs-le__field">
-                                <span class="mjs-le__label">Term start</span>
-                                <input type="date" data-testid="line-term-start" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
+                            <div class="mjs-le__field">
+                                <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-term-start">Term start</label><mjs-field-help [Text]="Help.TermStart" Label="Term start"></mjs-field-help></span>
+                                <input id="mjs-le-term-start" type="date" data-testid="line-term-start" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
                                        [disabled]="IsLocked" [title]="BlockedReason" />
                                 @if (!HasExplicitTermStart) {
                                     <small class="mjs-le__hint">order date</small>
                                 }
-                            </label>
+                            </div>
                         }
                     }
 
@@ -434,18 +439,18 @@ interface RemoteOperationRouter {
                     @if (ShowServicePeriod) {
                         <div class="mjs-le__field" role="group" aria-label="Service period" data-testid="line-service-period">
                             <div class="mjs-le__row">
-                                <label class="mjs-le__field">
-                                    <span class="mjs-le__label">Service start</span>
-                                    <input type="date" data-testid="line-service-start" [ngModel]="ServicePeriodInput('Start')"
+                                <div class="mjs-le__field">
+                                    <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-service-start">Service start</label><mjs-field-help [Text]="Help.ServiceStart" Label="Service start"></mjs-field-help></span>
+                                    <input id="mjs-le-service-start" type="date" data-testid="line-service-start" [ngModel]="ServicePeriodInput('Start')"
                                            (ngModelChange)="SetServicePeriod('Start', $event)"
                                            [disabled]="IsLocked" [title]="BlockedReason" />
-                                </label>
-                                <label class="mjs-le__field">
-                                    <span class="mjs-le__label">Service end</span>
-                                    <input type="date" data-testid="line-service-end" [ngModel]="ServicePeriodInput('End')"
+                                </div>
+                                <div class="mjs-le__field">
+                                    <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-service-end">Service end</label><mjs-field-help [Text]="Help.ServiceEnd" Label="Service end"></mjs-field-help></span>
+                                    <input id="mjs-le-service-end" type="date" data-testid="line-service-end" [ngModel]="ServicePeriodInput('End')"
                                            (ngModelChange)="SetServicePeriod('End', $event)"
                                            [disabled]="IsLocked" [title]="BlockedReason" />
-                                </label>
+                                </div>
                             </div>
                             @if (ServicePeriodBackwards) {
                                 <small class="mjs-le__error">The service end is before the start.</small>
@@ -461,7 +466,7 @@ interface RemoteOperationRouter {
                     @if (Holding; as holding) {
                         <div class="mjs-le__field" role="group" data-testid="line-subscription-choice"
                              [attr.aria-label]="'Existing subscription ' + holding.SubscriptionNumber">
-                            <span class="mjs-le__label">Existing subscription</span>
+                            <span class="mjs-le__labelled"><span class="mjs-le__label">Existing subscription</span><mjs-field-help [Text]="Help.ExistingSubscription" Label="Existing subscription"></mjs-field-help></span>
                             <span class="mjs-le__muted">
                                 This customer already has this product on {{ holding.SubscriptionNumber }}@if (HoldingCoverageEnd) {, which runs through {{ HoldingCoverageEnd | mjoDate }}}.
                                 Is this line a renewal of that subscription, or a new one?
@@ -502,11 +507,11 @@ interface RemoteOperationRouter {
                          sales states intent, orders states price. -->
                     <div class="mjs-le__readonly">
                         <div>
-                            <span class="mjs-le__label">Unit price</span>
+                            <span class="mjs-le__labelled"><span class="mjs-le__label">Unit price</span><mjs-field-help [Text]="Help.UnitPrice" Label="Unit price"></mjs-field-help></span>
                             <span class="mjs-le__ro-val">{{ Pricing ? '…' : Money(DisplayUnitPrice) }}</span>
                         </div>
                         <div>
-                            <span class="mjs-le__label">Line total</span>
+                            <span class="mjs-le__labelled"><span class="mjs-le__label">Line total</span><mjs-field-help [Text]="Help.LineTotal" Label="Line total"></mjs-field-help></span>
                             <span class="mjs-le__ro-val">{{ Pricing ? '…' : Money(DisplayLineTotal) }}</span>
                         </div>
                         <p class="mjs-le__muted">
@@ -666,6 +671,7 @@ interface RemoteOperationRouter {
             background: var(--mj-status-error, #b3261e); color: #fff; border-color: transparent;
         }
         .mjs-le__confirm { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+        .mjs-le__labelled { display: inline-flex; align-items: center; }
         .mjs-le__label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
         .mjs-le__company-only {
             display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
@@ -694,6 +700,9 @@ interface RemoteOperationRouter {
     `],
 })
 export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDestroy {
+    /** What the help icon beside each label says. */
+    public readonly Help = DEAL_LINE_HELP;
+
     /**
      * The DEAL whose order this line belongs to.
      *
@@ -1361,6 +1370,9 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      * carries a `SubscriptionTypeID`, which is what decides whether confirm builds a term for the line.
      */
     public get ShowTermStart(): boolean {
+        // A line the rep dates shows this same column as Service start. A stored start is otherwise
+        // offered whatever the product, which gave such a line a second box for the one date.
+        if (this.ShowServicePeriod) return false;
         return ShouldOfferTermStart(
             !!this.Working?.ProductID,
             this.SelectedProduct,
