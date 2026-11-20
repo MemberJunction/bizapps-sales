@@ -24,8 +24,10 @@ const OTHER_EMPLOYEE = 'eeeeeeee-0000-4000-8000-000000000002';
 const PERSON = 'pppppppp-0000-4000-8000-000000000001';
 
 const generated = mjBizAppsSalesDealTeamMemberEntity.prototype as unknown as Record<string, unknown>;
-const shadowed = ['Set', 'Get', 'Validate'] as const;
+const shadowed = ['Set', 'Get', 'Validate', 'GetFieldByName'] as const;
 let values: Map<string, unknown>;
+/** Names of the fields whose one-write flag was re-armed. */
+let rearmed: string[];
 
 function member(initial: { EmployeeID?: string | null; PersonID?: string | null }): DealTeamMemberEntity {
     values = new Map(Object.entries(initial));
@@ -34,6 +36,17 @@ function member(initial: { EmployeeID?: string | null; PersonID?: string | null 
 
 beforeEach(() => {
     values = new Map();
+    rearmed = [];
+    Object.defineProperty(generated, 'GetFieldByName', {
+        value: (name: string) => ({
+            ResetNeverSetFlag: () => rearmed.push(name),
+            set Value(value: unknown) {
+                values.set(name, value);
+            },
+        }),
+        configurable: true,
+        writable: true,
+    });
     Object.defineProperty(generated, 'Set', {
         value: (name: string, value: unknown) => values.set(name, value),
         configurable: true,
@@ -94,6 +107,31 @@ describe('picking one identity clears the other', () => {
         const row = member({ EmployeeID: EMPLOYEE, PersonID: null });
         row.Set('Notes', 'reassigned');
         expect(values.get('EmployeeID')).toBe(EMPLOYEE);
+    });
+});
+
+describe('the cleared holder\'s name goes with it (#437)', () => {
+    it('empties the Person name when an employee replaces a Person', () => {
+        const row = member({ EmployeeID: null, PersonID: PERSON });
+        values.set('Person', 'Pat Partner');
+        row.EmployeeID = EMPLOYEE;
+        expect(values.get('Person')).toBeNull();
+        expect(rearmed).toEqual(['Person']);
+    });
+
+    it('empties the Employee name when a Person replaces an employee', () => {
+        const row = member({ EmployeeID: EMPLOYEE, PersonID: null });
+        values.set('Employee', 'Erin Employee');
+        row.PersonID = PERSON;
+        expect(values.get('Employee')).toBeNull();
+    });
+
+    it('leaves names alone when nothing was cleared', () => {
+        const row = member({ EmployeeID: null, PersonID: null });
+        values.set('Person', 'Pat Partner');
+        row.EmployeeID = EMPLOYEE;
+        expect(values.get('Person')).toBe('Pat Partner');
+        expect(rearmed).toEqual([]);
     });
 });
 

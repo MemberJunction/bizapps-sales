@@ -9,20 +9,25 @@ import { expect, type Page } from '@playwright/test';
 
 import { QueryAll, QueryOne } from './db';
 import {
+    ChooseLineProduct,
+    OfferedLineProducts,
     ByTestId,
     DealForm,
     FirstOpenStatus,
     OpenNewDeal,
     OpenSection,
+    FirstSalesAccountName,
     PickLookup,
     RevealInForm,
     PipelineByName,
     SaveDeal,
     FirstOpenStageOf,
+    SALES_DEALS_ROUTE,
     SetPipelineByID,
     SetStageByID,
     SetStatusByID,
     SetText,
+    WaitForFormSettled,
 } from './deal-form';
 import { EXPLORER_BASE_URL } from './env';
 
@@ -58,7 +63,7 @@ export async function ComposeDeal(page: Page, name: string, pipeline?: string): 
      * AFTER the pipeline, never before: choosing a pipeline is what does the clearing.
      */
     await SetStageByID(page, (await FirstOpenStageOf(chosenPipeline.ID)).ID);
-    await PickLookup(page, 'AccountID');
+    await PickLookup(page, 'AccountID', await FirstSalesAccountName());
 
     /**
      * ── THE STATUS, SET EXPLICITLY ──────────────────────────────────────────────────────────────
@@ -183,7 +188,9 @@ export async function AddLines(page: Page, orderID: string, count: number): Prom
         await QueryAll<{ Name: string }>(
             `SELECT DISTINCT p.Name
                FROM __mj_BizAppsOrders.Product p
-               JOIN __mj_BizAppsOrders.ProductPrice pp ON pp.ProductID = p.ID`,
+               JOIN __mj_BizAppsOrders.ProductPrice pp ON pp.ProductID = p.ID
+              WHERE p.Status = 'Active'
+              ORDER BY p.Name`,
         )
     ).map((r) => String(r.Name));
     expect(priceable.length, 'the host needs at least one product carrying a price rule').toBeGreaterThan(0);
@@ -198,27 +205,24 @@ export async function AddLines(page: Page, orderID: string, count: number): Prom
         const editor = page.locator('[data-testid="line-editor"]:visible').first();
         await expect(editor, 'Add a product must open the line editor').toBeVisible({ timeout: 20_000 });
 
-        const product = editor.locator('[data-testid="line-product"]');
-        await expect(product, 'the line editor must offer a product picker').toBeVisible({ timeout: 20_000 });
-        const labels = (await product.locator('option').allTextContents())
-            .map((o) => o.trim())
-            .filter((o) => o && !o.startsWith('—'));
-        if (labels.length === 0) {
-            throw new Error(
-                'the product picker offered nothing — the orders catalogue did not load, and adding a ' +
-                    'line with no product would make this spec pass while testing nothing',
-            );
+        /**
+         * The product box is a type-ahead showing a capped page of rows (golive#360), so each priceable
+         * name is TYPED and kept only when the box offers it — a priced product can still be inactive
+         * or out of window. Stops once there are enough to give each line its own product.
+         */
+        const usable: string[] = [];
+        for (const name of priceable) {
+            if ((await OfferedLineProducts(editor, name)).includes(name)) usable.push(name);
+            if (usable.length > i) break;
         }
-        // An option reads "Name (SKU) — Company", so match on the name the catalogue gave us.
-        const usable = labels.filter((l) => priceable.some((name) => l.startsWith(name)));
         if (usable.length === 0) {
             throw new Error(
-                `the picker offered ${labels.length} product(s) and none of them carries a price rule, so `
-                    + 'every line would be refused for pricing rather than for anything this spec is about. '
-                    + `Priceable products here: ${priceable.join(', ') || '(none)'}`,
+                'the product box offered none of the products that carry a price rule, so every line would '
+                    + 'be refused for pricing rather than for anything this spec is about, or the orders '
+                    + `catalogue did not load. Priceable products here: ${priceable.join(', ') || '(none)'}`,
             );
         }
-        await product.selectOption({ label: usable[Math.min(i, usable.length - 1)] });
+        await ChooseLineProduct(editor, usable[Math.min(i, usable.length - 1)]);
 
         /**
          * Quantity is the rep's to state and is not seeded, so a line without it cannot save — Save
@@ -371,6 +375,73 @@ export async function ReopenRecord(page: Page, name: string): Promise<void> {
     await expect(DealForm(page), 'the reopened form must be the deal asked for').toContainText(name, {
         timeout: 30_000,
     });
+}
+
+/**
+ * Returns to the mounted Sales section without `page.goto` when a record tab is already open, or loads
+ * the Sales section once when nothing is mounted yet (#412, #413).
+ *
+ * A full reload (`page.goto`) tears down existing Explorer record tabs under the ephemeral workspace,
+ * so any spec that needs two tabs alive in one session must return to the Sales section by tab click.
+ */
+async function returnToSalesSection(page: Page): Promise<void> {
+    const section = page.locator('mjs-sales-section');
+    if ((await section.count()) === 0) {
+        await page.goto(`${EXPLORER_BASE_URL}${SALES_DEALS_ROUTE}`, { waitUntil: 'domcontentloaded' });
+        await expect(section, 'the Sales section must mount').toBeVisible({ timeout: 60_000 });
+        return;
+    }
+    if (!(await section.isVisible())) {
+        const dealsTab = page.getByRole('button', { name: /^Deals/i }).first();
+        if (await dealsTab.count()) {
+            await dealsTab.click();
+        } else {
+            const glTab = page.locator('mj-tab-container .lm_tab').filter({ hasText: /Sales|Deals/i }).first();
+            await glTab.click();
+        }
+        await expect(section, 'the Sales section must return to the front without reloading').toBeVisible({
+            timeout: 30_000,
+        });
+    }
+}
+
+/**
+ * Opens a deal from the Sales section's All-deals roster without `page.goto`, so previously opened
+ * Explorer record tabs remain mounted beside the newly opened tab (#412).
+ */
+export async function OpenDealFromRoster(page: Page, name: string): Promise<void> {
+    await returnToSalesSection(page);
+    const allDeals = page.locator('mj-left-nav').getByRole('button', { name: /^All deals/i }).first();
+    await expect(allDeals, 'the left rail must offer All deals').toBeVisible({ timeout: 30_000 });
+    await allDeals.click();
+
+    const rosterRows = page.locator('.wrap--list mj-entity-viewer .ag-center-cols-container .ag-row');
+    await expect(rosterRows.first(), 'the All-deals roster must render its rows').toBeVisible({ timeout: 30_000 });
+
+    const row = rosterRows.filter({ hasText: name }).first();
+    await expect(row, `the All-deals roster must list "${name}"`).toBeVisible({ timeout: 30_000 });
+    await row.dblclick();
+
+    await expect(DealForm(page), `double-clicking "${name}" must open its Deal form`).toBeVisible({
+        timeout: 60_000,
+    });
+    await expect(DealForm(page), `the active Deal form must show "${name}"`).toContainText(name, {
+        timeout: 30_000,
+    });
+    await WaitForFormSettled(page);
+}
+
+/**
+ * Starts a new deal from the already-mounted Sales section without `page.goto`, keeping any open
+ * deal record tab mounted in the same SPA session (#413).
+ */
+export async function OpenNewDealWithoutReload(page: Page): Promise<void> {
+    await returnToSalesSection(page);
+    const primary = page.locator('[data-testid="sales-primary"]:visible').first();
+    await expect(primary, 'the Sales header must offer New deal').toBeVisible({ timeout: 30_000 });
+    await primary.click();
+    await expect(DealForm(page), 'clicking New deal must mount the Deal form').toBeVisible({ timeout: 60_000 });
+    await WaitForFormSettled(page);
 }
 
 /**

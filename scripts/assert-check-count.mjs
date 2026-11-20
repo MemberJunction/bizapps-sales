@@ -263,10 +263,18 @@ if (skipped > 0) {
             '"0 failed".',
     );
 }
-if (ran < expectedTotal) {
+/**
+ * Checks LEFT OUT because their RequiresApp is not present cannot run, so they come off the expected
+ * total, read from each bundle header the runner printed (`=== b (n of m checks, k left out) ===`).
+ */
+const leftOutTotal = [...log.matchAll(/^=== \S+ \(\d+ of \d+ checks?, (\d+) left out\) ===/gm)].reduce(
+    (sum, m) => sum + Number(m[1]),
+    0,
+);
+if (ran + leftOutTotal < expectedTotal) {
     problems.push(
         `only ${ran} checks ran; this host's present apps (${[...linked].join(', ') || 'none'}) mean ` +
-            `${expectedTotal} were expected — ${expectedTotal - ran} are missing, which a passing tally ` +
+            `${expectedTotal - leftOutTotal} were expected — ${expectedTotal - leftOutTotal - ran} are missing, which a passing tally ` +
             'would have hidden.',
     );
 }

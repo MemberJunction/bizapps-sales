@@ -18,6 +18,22 @@
 --
 -- DATE DIMENSION: filtered on expected close for open deals and actual close for closed ones, so one
 -- period filter behaves sensibly across a mixed set.
+--
+-- THE FILTER BAR (bc-aidp-next-golive#350). CompanyIDs, OwnerEmployeeIDs, PipelineIDs and
+-- ProductCompanyIDs are lists, rendered with `sqlIn`, and narrow the rows the same way they narrow
+-- `Sales: Dashboard Summary`, so the dashboard's by-stage, by-owner and by-date cards group exactly the
+-- deals its tiles count. The single-value CompanyID, PipelineID and OwnerEmployeeID still work. A list
+-- that is "All" is left out rather than sent empty: `sqlIn` renders an empty list as `(NULL)`, which
+-- matches nothing.
+--
+-- PRODUCT COMPANIES. A deal's product companies are the distinct companies stamped on its order's
+-- lines (OrderLine.CompanyID, which orders copies from the product). They are returned per row as
+-- ProductCompanyIDs (comma-separated IDs) and ProductCompanyNames (comma-separated names). Each is a
+-- set: the two lists are not guaranteed to be in the same order, because STRING_AGG's WITHIN GROUP
+-- ordering is not something MJ's SQL parser can read, and a query it cannot parse loses its recorded
+-- fields. Read IDs from the ID list and names from the name list, never one by position in the other.
+-- The ProductCompanyIDs parameter keeps a deal when at least one line belongs to a selected company.
+-- A deal with no lines returns NULL for both and does not match the parameter.
 SELECT
     d.ID                                        AS DealID,
     d.DealNumber,
@@ -50,6 +66,9 @@ SELECT
     d.ForecastCategoryType                      AS ForecastCategoryName,
     fc.IncludeInCommit,
     fc.IncludeInBestCase,
+    -- Whether the deal's forecast category counts toward the pipeline (Omitted does not). A deal with
+    -- no category counts, which is how the dashboard has always treated it.
+    ISNULL(fc.IncludeInPipeline, 1)             AS IncludeInPipeline,
     d.OwnerEmployeeID,
     d.OwnerEmployee                             AS OwnerName,
     d.Amount,
@@ -78,6 +97,17 @@ SELECT
           AND d.ExpectedCloseDate < bt.Today
          THEN 1 ELSE 0 END                      AS IsPastExpectedClose,
     d.OrderID,
+    -- The deal's product companies, distinct. See the header.
+    (SELECT STRING_AGG(CAST(pc.CompanyID AS NVARCHAR(36)), ',')
+       FROM (SELECT DISTINCT ol.CompanyID, co.Name AS CompanyName
+               FROM [__mj_BizAppsOrders].OrderLine ol
+               LEFT OUTER JOIN [__mj].Company co ON co.ID = ol.CompanyID
+              WHERE ol.OrderHeaderID = d.OrderID) pc)   AS ProductCompanyIDs,
+    (SELECT STRING_AGG(pc.CompanyName, ', ')
+       FROM (SELECT DISTINCT ol.CompanyID, co.Name AS CompanyName
+               FROM [__mj_BizAppsOrders].OrderLine ol
+               LEFT OUTER JOIN [__mj].Company co ON co.ID = ol.CompanyID
+              WHERE ol.OrderHeaderID = d.OrderID) pc)   AS ProductCompanyNames,
     d.ContractID,
     d.__mj_CreatedAt                            AS CreatedAt
 FROM [__mj_BizAppsSales].vwDeals d
@@ -106,11 +136,25 @@ WHERE 1 = 1
   {% if CompanyID %}
   AND d.CompanyID = {{ CompanyID | sqlString }}
   {% endif %}
+  {% if CompanyIDs %}
+  AND d.CompanyID IN {{ CompanyIDs | sqlIn }}
+  {% endif %}
   {% if PipelineID %}
   AND d.PipelineID = {{ PipelineID | sqlString }}
   {% endif %}
+  {% if PipelineIDs %}
+  AND d.PipelineID IN {{ PipelineIDs | sqlIn }}
+  {% endif %}
   {% if OwnerEmployeeID %}
   AND d.OwnerEmployeeID = {{ OwnerEmployeeID | sqlString }}
+  {% endif %}
+  {% if OwnerEmployeeIDs %}
+  AND d.OwnerEmployeeID IN {{ OwnerEmployeeIDs | sqlIn }}
+  {% endif %}
+  {% if ProductCompanyIDs %}
+  AND EXISTS (SELECT 1 FROM [__mj_BizAppsOrders].OrderLine ol
+              WHERE ol.OrderHeaderID = d.OrderID
+                AND ol.CompanyID IN {{ ProductCompanyIDs | sqlIn }})
   {% endif %}
   {% if OpenOnly == "true" %}
   AND ISNULL(st.IsOpen, 0) = 1
@@ -133,6 +177,18 @@ WHERE 1 = 1
   {% if ClosedSince %}
   AND (ISNULL(st.IsClosed, 0) = 0
        OR COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) >= {{ ClosedSince | sqlString }})
+  {% endif %}
+  /**
+   * CLOSED DEALS UP TO A DATE; EVERY OTHER DEAL ALWAYS (bc-aidp-next-golive#351). The other end of
+   * `ClosedSince`: the Board bounds its closed columns by the section's period, and a period can end
+   * before today (last quarter, last year, a custom range). `PeriodEnd` cannot serve, because it
+   * windows open deals too, and the Board shows every open deal whatever the period.
+   *
+   * A closed deal with neither close date is left out here too: nothing says when it closed.
+   */
+  {% if ClosedUntil %}
+  AND (ISNULL(st.IsClosed, 0) = 0
+       OR COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) <= {{ ClosedUntil | sqlString }})
   {% endif %}
   {% if PeriodEnd %}
   AND COALESCE(d.ActualCloseDate, d.ExpectedCloseDate) <= {{ PeriodEnd | sqlString }}

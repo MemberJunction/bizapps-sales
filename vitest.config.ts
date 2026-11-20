@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config';
  *
  * WHY THIS REPO HAD NONE. Sales' proof has lived at two tiers: integration checks against a real
  * database, and Playwright specs against a real browser. Both are excellent and neither can reach a
- * component method — so anything that is pure logic on `DealWorkspaceComponent` could only be proved by
+ * component method — so anything that is pure logic on a component (then the deal workspace, since removed) could only be proved by
  * driving a browser, and when the browser is unavailable it could not be proved at all.
  *
  * That gap was not theoretical. bizapps-sales#29 has an acceptance criterion — "ProductLabel still

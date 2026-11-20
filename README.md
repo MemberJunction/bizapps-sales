@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@mj-biz-apps/sales-entities"><img alt="npm" src="https://img.shields.io/npm/v/@mj-biz-apps/sales-entities?style=flat-square&label=npm" /></a>
-  <img alt="MJ Version" src="https://img.shields.io/badge/MemberJunction-6.1.5%2B-blue?style=flat-square" />
+  <img alt="MJ Version" src="https://img.shields.io/badge/MemberJunction-6.1.6%2B-blue?style=flat-square" />
   <img alt="Angular" src="https://img.shields.io/badge/Angular-21-DD0031?style=flat-square&logo=angular&logoColor=white" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white" />
   <img alt="SQL Server" src="https://img.shields.io/badge/SQL%20Server-CC2927?style=flat-square&logo=microsoftsqlserver&logoColor=white" />
@@ -54,7 +54,9 @@ release, cut by `.github/workflows/publish.yml` when `next` is merged to `main`
 - **Each deal has an order.** Saving a deal provisions an `OrderHeader` in BizApps Orders
   (`Deal.OrderID`). The deal's lines are that order's `OrderLine` rows; orders prices them, and
   `Deal.Amount` caches `OrderHeader.TotalGross` with its provenance.
-- **Pipelines and stages, per company.** A stage carries a probability, a forecast category, the
+- **Pipelines and stages, shared by companies.** A pipeline serves every company it is actively linked
+  to (`PipelineCompany`); the rep picks a deal's company first and is offered that company's pipelines,
+  and the server refuses a deal whose company is not linked to its pipeline. A stage carries a probability, a forecast category, the
   `DealStatusType` a deal takes on entering it and, optionally, the status the deal's order takes
   (`OrderStatusOnEntry`). Every stage move appends a `DealStageEvent`.
 - **Close and reopen** through the `Sales.CloseDeal` and `Sales.ReopenDeal` remote operations, each one
@@ -64,9 +66,8 @@ release, cut by `.github/workflows/publish.yml` when `next` is merged to `main`
 - **Deal team and buying committee** (`DealTeamMember`, `DealContactRole`), and the agreed payment
   schedule (`DealPaymentSchedule`).
 - **Dashboard and forecasting.** The dashboard reads the MJ Queries in `metadata/queries/`.
-  `ForecastSnapshot` holds point-in-time forecast figures; its daily scheduled job writes nothing until
-  a forecast source is registered, and this repo registers none yet
-  ([#216](https://github.com/MemberJunction/bizapps-sales/issues/216)).
+  `ForecastSnapshot` holds point-in-time forecast figures; its daily scheduled job captures each
+  pipeline's forecast by owner from the `Sales: Forecast by Owner` query.
 - **In MJExplorer**, the Sales application opens on a Deals section with Dashboard, All deals and Board
   views, beside the generated forms for every entity.
 
@@ -76,7 +77,7 @@ code; and provenance is immutable. CI enforces the first two with the money and 
 
 ## Dependencies
 
-Sales runs inside an MJ host at 6.1.5 or a later 6.x release and depends on five other BizApps apps.
+Sales runs inside an MJ host at 6.1.6 or a later 6.x release and depends on five other BizApps apps.
 The version ranges are in [`mj-app.json`](mj-app.json) (`mjVersionRange` and `dependencies`).
 
 | App | What sales uses it for |
@@ -136,13 +137,14 @@ Schema `__mj_BizAppsSales`; entity names are `MJ_BizApps_Sales: <name>`. The cla
 
 | Entity | Table | What it holds |
 |---|---|---|
-| Deals | `Deal` | Pipeline, stage, type, status, account, primary and billing contacts, `CompanyID`, owner, `Amount` with its provenance (`AmountIsComputed`, `AmountComputedAt`, `AmountSourceHash`), term, contract terms and dates, forecast category, loss reason, lead source, `ContractID` / `RenewsContractID`, `OrderID`, and the predicted-win fields |
+| Deals | `Deal` | Pipeline, stage, type, status, account, primary and billing contacts, `CompanyID` (the selling company, actively linked to the pipeline), owner, `Amount` with its provenance (`AmountIsComputed`, `AmountComputedAt`, `AmountSourceHash`), term, contract terms and dates, forecast category, loss reason, lead source, `ContractID` / `RenewsContractID`, `OrderID`, and the predicted-win fields |
 | Deal Team Members | `DealTeamMember` | The people working a deal: exactly one of `EmployeeID` or `PersonID` (a partner rep or contractor), in a `DealRole`, with an optional `AttributionPct` |
 | Deal Contact Roles | `DealContactRole` | The customer's buying committee: a `SalesContact` in a `BuyingRoleType` |
 | Deal Payment Schedules | `DealPaymentSchedule` | The agreed instalments: date, amount, description, display order |
 | Deal Stage Events | `DealStageEvent` | Append-only log of stage and status changes, with `AmountAtTransition` and `ProbabilityAtTransition` |
 | Deal Sequences | `DealSequence` | The counter behind `DealNumber` |
-| Pipelines | `Pipeline` | Owned by a company (`CompanyID` is required); `CloseWonPolicy`, `RequiresDealLines`, `IncludeInForecast`, `IsDefault` |
+| Pipelines | `Pipeline` | `CloseWonPolicy`, `RequiresDealLines`, `IncludeInForecast`, `IsDefault`; serves the companies linked to it through `PipelineCompany` |
+| Pipeline Companies | `PipelineCompany` | Links a pipeline to a company that sells through it: `PipelineID`, `CompanyID`, `IsActive` (cleared to retire a link without touching its deals); one row per pair |
 | Pipeline Stages | `PipelineStage` | Display order, probability, forecast category, the `DealStatusType` a deal takes on entry, `OrderStatusOnEntry`, entry and exit criteria, required fields, rotting days, guidance |
 | Forecast Snapshots | `ForecastSnapshot` | Commit, best-case, pipeline and closed amounts for a period, by company, pipeline and owner |
 | Sales Accounts | `SalesAccount` | IsA child of common's `Organization`: owner, account type, lifecycle stage, lead source, territory, tier, ICP fit, industry, size bands, health |
@@ -166,7 +168,7 @@ the engine branches on. Their rows are seeded from `metadata/`.
 **References to other apps.** `Deal.OrderID` points at an orders `OrderHeader`; `ContractID` and
 `RenewsContractID` at a contracts `Contract`; `CurrencyID` at an accounting `Currency`.
 `DealTeamMember.PersonID` points at a common `Person`. Companies, employees and users come from MJ core:
-`CompanyID` on `Deal`, `Pipeline` and `ForecastSnapshot`, the owner and team `EmployeeID`s, and
+`CompanyID` on `Deal`, `PipelineCompany` and `ForecastSnapshot`, the owner and team `EmployeeID`s, and
 `ClosedByUserID` / `ChangedByUserID`.
 
 ## Documentation

@@ -1,0 +1,63 @@
+[
+  {
+    "_comments": [
+      "Forecast Snapshots had no DefaultInView field, so the grid showed the first ten",
+      "fields, most of them IDs. A snapshot reads as period, owner, the four amounts and when it was",
+      "captured. OwnerEmployee is the view's name field, so it renders as a name. SnapshotJSON stays off."
+    ],
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Forecast Snapshots&Name=PeriodStart"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Forecast Snapshots&Name=OwnerEmployee"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Forecast Snapshots&Name=PipelineAmount"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Forecast Snapshots&Name=BestCaseAmount"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Forecast Snapshots&Name=CommitAmount"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Forecast Snapshots&Name=ClosedAmount"
+    }
+  },
+  {
+    "fields": {
+      "DefaultInView": true
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Forecast Snapshots&Name=CapturedAt"
+    }
+  }
+]

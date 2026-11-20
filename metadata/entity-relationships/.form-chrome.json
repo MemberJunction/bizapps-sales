@@ -44,9 +44,11 @@
   },
   {
     "_comments": [
-      "What this person actually does on the deals they touch -- the buying-role join. First-class."
+      "What this person actually does on the deals they touch -- the buying-role join. First-class.",
+      "DisplayName: the section read \"Deal Contact Roles\", the table name."
     ],
     "fields": {
+      "DisplayName": "Buying roles",
       "Configuration": {
         "UI": {
           "inclusion": "Primary"
@@ -59,6 +61,26 @@
     "sync": {
       "lastModified": "2026-08-26T00:25:24.704Z",
       "checksum": "ffcadf6a38dea7ba00c49040ba5c94475c9266e21b9bc382278ef1da715e8086"
+    }
+  },
+  {
+    "_comments": [
+      "The section read \"Sales Accounts (Default Primary Contact ID)\", the entity",
+      "name plus the foreign key's column label. Named by the role this person plays on those accounts."
+    ],
+    "fields": {
+      "DisplayName": "Accounts (default primary contact)"
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Contacts&RelatedEntity=MJ_BizApps_Sales: Sales Accounts&RelatedEntityJoinField=DefaultPrimaryContactID"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Accounts (default billing contact)"
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.Entity=MJ_BizApps_Sales: Sales Contacts&RelatedEntity=MJ_BizApps_Sales: Sales Accounts&RelatedEntityJoinField=DefaultBillingContactID"
     }
   },
   {
@@ -184,9 +206,14 @@
   {
     "_comments": [
       "Transitions INTO this stage. History; and it shares a form with the FromStageID grid below, so",
-      "both are explicitly placed rather than left to collide."
+      "both are explicitly placed rather than left to collide.",
+      "",
+      "#371 item 21: the four Deal Stage Events sections on the Pipeline Stage and Deal Status Type forms",
+      "were titled 'Deal Stage Events (To Stage ID)' and the like. DisplayName names them by what they",
+      "list. CodeGen bakes the title into the generated form, so it changes on the next CodeGen run."
     ],
     "fields": {
+      "DisplayName": "Deals Entering This Stage",
       "Configuration": {
         "UI": {
           "inclusion": "More",
@@ -208,6 +235,7 @@
       "in miniature, and disambiguated the same way."
     ],
     "fields": {
+      "DisplayName": "Deals Leaving This Stage",
       "Configuration": {
         "UI": {
           "inclusion": "More",
@@ -355,6 +383,7 @@
       "A config record should not be dominated by a grid of everything pointing at it."
     ],
     "fields": {
+      "DisplayName": "Deals Entering This Status",
       "Configuration": {
         "UI": {
           "inclusion": "More",
@@ -376,6 +405,7 @@
       "A config record should not be dominated by a grid of everything pointing at it."
     ],
     "fields": {
+      "DisplayName": "Deals Leaving This Status",
       "Configuration": {
         "UI": {
           "inclusion": "More",

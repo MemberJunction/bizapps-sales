@@ -19,10 +19,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Shown some interest. NOTE THIS IS A STAGE, NOT AN ENTITY — a lead is a common.Person carrying this LifecycleStageTypeID. There is deliberately no Lead table: a second identity table for humans fights the Person graph and buys nothing, and MJ already ships duplicate detection and record merge for the messy inbound case."
+    ],
     "fields": {
       "Code": "LEAD",
       "Name": "Lead",
-      "Description": "Shown some interest. NOTE THIS IS A STAGE, NOT AN ENTITY — a lead is a common.Person carrying this LifecycleStageTypeID. There is deliberately no Lead table: a second identity table for humans fights the Person graph and buys nothing, and MJ already ships duplicate detection and record merge for the messy inbound case.",
+      "Description": "Has shown some interest. A lead is a contact at this stage, not a separate record.",
       "IsMarketingQualified": false,
       "IsSalesQualified": false,
       "IsCustomer": false,
@@ -57,10 +60,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Sales-qualified: a rep has spoken to them and confirmed fit, need and timing. Cumulative with MQL, so a funnel measure tests one flag."
+    ],
     "fields": {
       "Code": "SQL",
       "Name": "SQL",
-      "Description": "Sales-qualified: a rep has spoken to them and confirmed fit, need and timing. Cumulative with MQL, so a funnel measure tests one flag.",
+      "Description": "Sales-qualified: a rep has spoken to them and confirmed fit, need and timing.",
       "IsMarketingQualified": true,
       "IsSalesQualified": true,
       "IsCustomer": false,
@@ -95,10 +101,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: They bought. IsCustomer is the flag every 'existing business' filter reads, rather than a comparison against this row's name."
+    ],
     "fields": {
       "Code": "CUSTOMER",
       "Name": "Customer",
-      "Description": "They bought. IsCustomer is the flag every 'existing business' filter reads, rather than a comparison against this row's name.",
+      "Description": "They bought from us.",
       "IsMarketingQualified": true,
       "IsSalesQualified": true,
       "IsCustomer": true,
@@ -114,10 +123,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: A customer who actively refers others. Still IsCustomer — the distinction drives advocacy programmes, not commercial logic."
+    ],
     "fields": {
       "Code": "EVANGELIST",
       "Name": "Evangelist",
-      "Description": "A customer who actively refers others. Still IsCustomer — the distinction drives advocacy programmes, not commercial logic.",
+      "Description": "A customer who actively refers others.",
       "IsMarketingQualified": true,
       "IsSalesQualified": true,
       "IsCustomer": true,
@@ -133,10 +145,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Not a fit, or asked not to be contacted. A terminal stage rather than a deletion, so the judgement is recorded and not re-made every quarter."
+    ],
     "fields": {
       "Code": "DISQUALIFIED",
       "Name": "Disqualified",
-      "Description": "Not a fit, or asked not to be contacted. A terminal stage rather than a deletion, so the judgement is recorded and not re-made every quarter.",
+      "Description": "Not a fit, or asked not to be contacted. Kept as a stage so the decision is recorded.",
       "IsMarketingQualified": false,
       "IsSalesQualified": false,
       "IsCustomer": false,

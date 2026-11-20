@@ -94,8 +94,8 @@ export default async function globalSetup(): Promise<void> {
   console.log(`  preflight: target entity "${ENTITY.Deals}"`);
 
   // PRE-CLEAN, not just teardown. A previous run that failed part way leaves a PW-VERIFY Pipeline
-  // behind, and the next run then trips over UQ_Pipeline_Company_Code and fails for a reason that has
-  // nothing to do with the code under test. Cleaning on the way IN makes the harness re-runnable even
+  // behind, and the next run then finds two pipelines of that name (Code is no longer unique), may
+  // resolve the stale one, and fails for a reason that has nothing to do with the code under test. Cleaning on the way IN makes the harness re-runnable even
   // after a hard crash that skipped teardown entirely.
   const { cleanup } = await import('./cleanup.mjs');
   cleanup();

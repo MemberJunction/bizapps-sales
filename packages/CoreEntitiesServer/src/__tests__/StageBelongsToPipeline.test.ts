@@ -14,10 +14,10 @@ import { DealEntityServer } from '../DealEntityServer.js';
  * through any form, and a CHECK constraint cannot express it — it cannot reach across the foreign key
  * to compare the stage's pipeline with the deal's.
  *
- * WHY A REFUSAL RATHER THAN A CORRECTION, when `stampCompanyFromPipeline` beside it overwrites: a
- * wrong company has exactly one right answer and it is derivable from the pipeline. A wrong stage has
- * none. Moving the deal to the pipeline's first stage would invent a position in a sales process
- * nobody chose.
+ * WHY A REFUSAL RATHER THAN A CORRECTION: a wrong stage has no derivable right answer. Moving the
+ * deal to the pipeline's first stage would invent a position in a sales process nobody chose. The
+ * company check beside it (`companyLinkedToPipelineRefusal`, `CompanyLinkedToPipeline.test.ts`)
+ * refuses for the same reason now that a pipeline can serve several companies.
  *
  * `Object.create` holds the server entity without standing up metadata, the way `SeedOwnerOnCreate`
  * and `StatusReadFailure` do. It does NOT run the constructor, so everything the method reads is

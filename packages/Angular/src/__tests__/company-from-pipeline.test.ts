@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ShouldStampCompanyFromPipeline } from '../lib/custom/company-from-pipeline';
+import { OnlyLinkedCompany, ShouldStampCompanyFromPipeline } from '../lib/custom/company-from-pipeline';
 
 /**
  * A NEW DEAL COULD NOT BE SAVED AT ALL.
  *
  * `Deal.CompanyID` is NOT NULL with no default, the form renders it server-maintained, and the server
- * fills it — after `SaveRecord` has already run `Validate()` and returned early. Required, unsettable,
- * supplied too late. The deal workspace stamped it client-side and the form never got the equivalent.
+ * used to fill it — after `SaveRecord` had already run `Validate()` and returned early. Required,
+ * unsettable, supplied too late. The deal workspace stamped it client-side and the form never got the
+ * equivalent.
+ *
+ * A pipeline now serves every company it is actively linked to (`PipelineCompany`), so the pre-fill
+ * applies only when the pipeline has exactly one; with several, the rep picks with Company.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -24,7 +28,7 @@ describe('stamping the selling company', () => {
         expect(ShouldStampCompanyFromPipeline({ HasRecord: true, PipelineID: 'p1', CompanyID: 'c1' })).toBe(false);
     });
 
-    it('waits for the pipeline, because the pipeline is what decides the company', () => {
+    it('waits for the pipeline, because the pipeline\'s links are what can supply the company', () => {
         expect(ShouldStampCompanyFromPipeline({ HasRecord: true, PipelineID: null, CompanyID: null })).toBe(false);
     });
 
@@ -60,6 +64,27 @@ describe('stamping the selling company', () => {
     });
 });
 
+describe('the company a pipeline\'s links pre-fill', () => {
+    it('is the only linked company', () => {
+        expect(OnlyLinkedCompany([{ CompanyID: 'c1' }])).toBe('c1');
+    });
+
+    it('is nothing when the pipeline has no active link', () => {
+        expect(OnlyLinkedCompany([])).toBeNull();
+        expect(OnlyLinkedCompany([{ CompanyID: null }, { CompanyID: '' }])).toBeNull();
+    });
+
+    /** Guessing one of several would be the client choosing the selling company after all. */
+    it('is nothing when the pipeline serves several companies', () => {
+        expect(OnlyLinkedCompany([{ CompanyID: 'c1' }, { CompanyID: 'c2' }])).toBeNull();
+    });
+
+    /** Ids round-trip through JSON; the same company in two cases is still one company. */
+    it('counts the same company in different case once, and returns it as read', () => {
+        expect(OnlyLinkedCompany([{ CompanyID: 'C1' }, { CompanyID: 'c1' }])).toBe('C1');
+    });
+});
+
 /**
  * THE STAMP HAS TO RUN BEFORE VALIDATION, which is the whole reason it lives in SaveRecord.
  *
@@ -89,5 +114,15 @@ describe('where the stamp runs', () => {
     /** RunView does not throw; a failed read must leave the deal exactly as it was. */
     it('checks the view succeeded before reading a row off it', () => {
         expect(FORM).toContain('if (!result.Success)');
+    });
+
+    /** The pipeline row carries no company any more; only its active links can name one. */
+    it('reads the pipeline\'s active links and pre-fills only the only one', () => {
+        const method = FORM.indexOf('private async stampCompanyFromPipeline(');
+        expect(method, 'the stamp method must exist').toBeGreaterThan(-1);
+        const body = FORM.slice(method, FORM.indexOf('\n    }', method));
+        expect(body).toContain('MJS_ENTITIES.PipelineCompany');
+        expect(body).toContain('IsActive=1');
+        expect(body).toContain('OnlyLinkedCompany(');
     });
 });

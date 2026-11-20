@@ -13,6 +13,12 @@
 import { RunView, type IMetadataProvider, type UserInfo } from '@memberjunction/core';
 import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '@memberjunction/testing-integration';
 import {
+    SalesCloseDealOperation,
+    SalesReopenDealOperation,
+    type SalesCloseDealOutput,
+    type SalesReopenDealOutput,
+} from '@mj-biz-apps/sales-entities';
+import {
     ActivitySyncEngine,
     FixtureActivitySyncProvider,
     IdentityResolver,
@@ -31,7 +37,7 @@ import type {
     mjBizAppsCommonContactMethodEntity,
 } from '@mj-biz-apps/common-entities';
 
-import { InRolledBackTransaction, ProviderOf, TxOne } from '../fixture.js';
+import { InRolledBackTransaction, ProviderOf, ResolveSalesFixture, TxOne } from '../fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -1432,6 +1438,111 @@ export const ActivitiesChecks: NamedCheck[] = [
                     !!connection['LastError'],
                     'and LastError must survive: the row exists so a week of failure is visible',
                 );
+            }),
+    },
+    {
+        Id: 'activities.AC24',
+        Name: 'AC24: a chosen party list replaces the deal parties, one link per target, deal first (#408)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const deal = await openDeal(ctx);
+
+                /**
+                 * The compose form's shape: the deal parties are NOT added by the service, and the list
+                 * names the deal's own account plus the same person twice. The primary contact is left
+                 * out on purpose, so a service that still added it would show up here.
+                 */
+                const [someone] = await rows(ctx, E_PERSON, `ID <> '${deal.ContactID}'`);
+                Assert(!!someone, 'setup: no Person besides the deal contact on this host');
+                const personID = String(someone['ID']);
+                const out = await writer.LogActivity(
+                    {
+                        DealID: deal.DealID,
+                        TypeCode: 'Call',
+                        Title: 'AC24 call',
+                        StartedAt: new Date('2026-11-04T09:00:00.000Z'),
+                        IncludeDealParties: false,
+                        Parties: [
+                            { Kind: 'Organization', RecordID: deal.AccountID, Role: 'Participant' },
+                            { Kind: 'Person', RecordID: personID, Role: 'Participant' },
+                            { Kind: 'Person', RecordID: personID.toLowerCase(), Role: 'Participant' },
+                        ],
+                    },
+                    ProviderOf(ctx),
+                    ctx.User,
+                );
+                Assert(out.Success, `the writer reported failure — ${out.Issues.join(' | ')}`);
+
+                const links = await rows(ctx, E_ACTIVITY_LINK, `ActivityID = '${out.ActivityID}'`);
+                const targets = links
+                    .sort((a, b) => Number(a['Sequence']) - Number(b['Sequence']))
+                    .map((l) => `${String(l['Role'])}:${String(l['RecordID']).toLowerCase()}`);
+                AssertEqual(
+                    targets.join(' | '),
+                    [
+                        `Regarding:${deal.DealID.toLowerCase()}`,
+                        `Participant:${deal.AccountID.toLowerCase()}`,
+                        `Participant:${personID.toLowerCase()}`,
+                    ].join(' | '),
+                    'exactly the deal (first, Regarding), the account and the person once — no primary contact',
+                );
+            }),
+    },
+    {
+        Id: 'activities.AC25',
+        Name: 'AC25: close and reopen each add a timeline Activity, and LogActivity refuses an unknown DealID (#381, #355)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                requireCommon(ctx);
+                const f = await ResolveSalesFixture(ctx);
+                const deal = await openDeal(ctx);
+
+                const unknown = await writer.LogActivity(
+                    {
+                        DealID: '00000000-0000-0000-0000-000000000999',
+                        TypeCode: 'Note',
+                        Title: 'AC25 unknown deal',
+                        StartedAt: new Date('2026-08-19T12:00:00.000Z'),
+                    },
+                    ProviderOf(ctx),
+                    ctx.User,
+                );
+                Assert(
+                    unknown.Success === false && unknown.Issues.some((i) => i.includes('was not found')),
+                    `LogActivity must refuse an unknown DealID — got ${JSON.stringify(unknown)}`,
+                );
+
+                const closeRes = await new SalesCloseDealOperation().Execute(
+                    {
+                        DealID: deal.DealID,
+                        DealStatusTypeID: f.LostStatusID,
+                        LossReasonID: f.LossReasonPlainID,
+                        Notes: 'AC25 close note',
+                    },
+                    { provider: ctx.Provider, user: ctx.User },
+                );
+                const closeOut = (closeRes as { Output?: SalesCloseDealOutput })?.Output;
+                Assert(closeOut?.Success === true, `setup: close failed — ${JSON.stringify(closeOut?.Issues)}`);
+
+                const reopenRes = await new SalesReopenDealOperation().Execute(
+                    {
+                        DealID: deal.DealID,
+                        Reason: 'AC25 reopen reason',
+                    },
+                    { provider: ctx.Provider, user: ctx.User },
+                );
+                const reopenOut = (reopenRes as { Output?: SalesReopenDealOutput })?.Output;
+                Assert(reopenOut?.Success === true, `setup: reopen failed — ${JSON.stringify(reopenOut?.Issues)}`);
+
+                const timeline = await reader.TimelineForDeal(deal.DealID, ProviderOf(ctx), ctx.User);
+                Assert(timeline.Success, `timeline read failed — ${timeline.Issues.join(' | ')}`);
+                const closedEntry = timeline.Entries.find((e) => e.Title === 'Deal closed' && e.Description?.includes('AC25 close note'));
+                const reopenedEntry = timeline.Entries.find((e) => e.Title === 'Deal reopened' && e.Description?.includes('AC25 reopen reason'));
+                Assert(!!closedEntry, 'closing the deal must write a Deal closed Activity onto the timeline');
+                Assert(!!reopenedEntry, 'reopening the deal must write a Deal reopened Activity onto the timeline');
             }),
     },
 ];

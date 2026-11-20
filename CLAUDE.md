@@ -211,7 +211,21 @@ the thing it names is broken?"** The incidents behind rules 5–8: `docs/history
 - Never add `__mj_CreatedAt`/`__mj_UpdatedAt` columns or FK indexes — CodeGen does both.
 - **Author for PostgreSQL from day one.** Production is PG; keep the T-SQL converter-friendly and
   avoid reserved words as column names (this is why `ForecastSnapshot` has `CommitAmount`, not
-  `Commit`). No migration has a PostgreSQL counterpart yet (#197).
+  `Commit`). Newer migrations ship a counterpart in `migrations-pg/`; the older ones lack one (#197).
+- **A migration that ALTERs an existing column (length, type, nullability) syncs that entity's
+  fields itself.** `omitRecurringScriptsFromLog` is `true` in `mj.config.cjs`, so CodeGen no longer
+  captures the reconcilers it runs every pass (#345); without a sync, every host installed from
+  migrations keeps the old length, type or nullability in `EntityField`. After the entity's view
+  refresh, add the entity-scoped call:
+  `EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', @EntityIDs='<entity ID>', @IncludedSchemaNames='${flyway:defaultSchema}';`
+  Never the schema-wide form, and never `spDeleteUnneededEntityFields`: a shipped prune runs on
+  entities the migration never touched. In CI, `.github/scripts/check-migration-column-sync.mjs` fails a
+  new migration that alters a column without the scoped call, or that carries the schema-wide one.
+- **Known gap: CodeGen leaves regenerated CRUD procs out of the run log on a length-only change.** It
+  regenerates the procedures but writes nothing to `migrations/codegen/`, so the migration would ship
+  without them. Capture them with a temporary `forceRegeneration` block in `mj.config.cjs` (`enabled`,
+  `spUpdate`/`spCreate`, and an `entityWhereClause` naming that entity), copy the output into the
+  migration, and never commit the block.
 - `CONFIRM_DROP=<database> scripts/rebuild-db.sh` drops and rebuilds a local database from migrations:
   MJ core, then common, tasks, accounting, orders and contracts from sibling checkouts, then sales.
   It names the database to DESTROY; there is no default. It applies every migration as shipped and
@@ -253,7 +267,7 @@ PW_HEADLESS=1 pnpm run test:explorer   # unattended
   and view-vs-edit-mode traps that cost real time to find.
 
 ### CI (`.github/workflows/ci.yml`)
-**THIRTEEN gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
+**FOURTEEN gates on every PR and every push to `next`, not two.** This section said "two hard gates" and
 listed the first and third; five more have been added since and went unrecorded. That understatement is
 not harmless — a reviewer who believes CI only greps and builds will reason that a template change, a
 copy change or a query comment cannot be caught by it, and will hand-check things CI already covers
@@ -265,7 +279,7 @@ while trusting things it does not:
 2. **`pnpm run test:money-gate`** — sales records intent; orders computes the number.
 3. **`pnpm run build`** — all turbo tasks including the Angular Explorer.
 4. **`pnpm run test:discount-gate`** — percent vs fraction, both directions.
-5. **`pnpm run test:validation-gate`** — pane attribution, and what blocks a save.
+5. **`pnpm run test:validation-gate`** — pane attribution, and no component writing a stage's defaults.
 6. **`python3 scripts/assert-no-comment-drift.py`** — a documented column that is not returned.
 7. **`npm run test:spec-gate`** — Playwright specs typecheck (it does NOT run them).
 8. **Unit tests**, guarded on any existing.
@@ -274,6 +288,7 @@ while trusting things it does not:
 11. **`npm run test:mutate-harness`** — an interrupted mutation run leaves no mutant in the tree or `dist/`.
 12. **`npm run test:one-copy-harness`** — on sibling-checkout hosts, each `@mj-biz-apps/*` import gets the copy its range or sales' override calls for.
 13. **`pnpm run test:token-gate`** — every `var(--mj-…)` in `packages/Angular` is a token MJ defines (`scripts/mj-tokens.json`). An unknown name drops its rule silently.
+14. **`npm run test:cleanup-harness`** — the Playwright teardown's sqlcmd call turns QUOTED_IDENTIFIER on (`-I`), so its deletes are not refused.
 
 Plus a non-blocking changeset presence check.
 
@@ -309,9 +324,8 @@ AIDP Next runs MemberJunction's 6.1 LTS line, pinned exactly in `aidp-next/packa
 Generated files are committed, and AIDP Next ships them as they are: it excludes every `__mj_BizApps*` schema from its own CodeGen and installs the published packages. So the committed output has to be what this repo's toolchain produces from its migrations.
 
 - Run CodeGen only with this repo's pinned MJ version, against a database built from migrations (MJ core `v6.1.N`, then the apps this one depends on, then this repo), after `mj sync push` of `metadata/`. Remote operations generate from metadata rows, so an operation not yet pushed is silently missing from `remote_operations.ts`.
-- Set an AI key in your gitignored `.env`: `AI_VENDOR_API_KEY__GeminiLLM` (every CodeGen prompt ranks Gemini first), or `AI_VENDOR_API_KEY__OpenRouterLLM`. Without one, CodeGen silently drops AI-written output: check-constraint `Validate*()` methods, display names, descriptions and form layouts.
+- **Canonical CodeGen mode is deterministic (`enable_advanced_generation: false` in `mj.config.cjs`, no AI key).** AI advanced generation is disabled so every developer and CI produces identical generated forms and entity classes without LLM drift; business validators are hand-written on `*EntityServer` subclasses and field labels/descriptions live in `metadata/entity-fields/`.
 - Never hand-edit generated files, and never paste in generated output from another toolchain or another database. That is how OrderLine lost `OrderHeader`'s `@Field` (bc-aidp-next-golive#295).
-- Review what AI wrote. Validators, names and descriptions are not deterministic between runs.
 - If CodeGen has to create metadata in the database that the generated code depends on (fields, value lists, relationships, validator code), ship it in a migration in the same PR. Otherwise every host installed from migrations drifts from the code.
 - **Run CodeGen until it reports `success: true` AND per-entity parity is clean.** A pass that creates a view column registers its `EntityField` only on the next pass, and a view wider than its entity's fields fails every insert. `entityFieldsSequenceCheck` can name the wrong entity, so check parity yourself — every row must match:
 
@@ -408,8 +422,9 @@ Built on MJ's Angular Generic components — `kanban`, `timeline`, `filter-build
 Recorded in full in `docs/DECISIONS.md`; listed here so nobody "fixes" them:
 - **Quota / attainment** — v2. No `Quota` table (D2).
 - **Territory** — a label on `SalesAccount`, not a routing engine (D3).
-- **`Pipeline.CompanyID` stays NOT NULL**; each line takes its company from its product, so a deal can
-  still span companies (D5, ratified 2026-08-26).
+- **A pipeline links to its companies through `PipelineCompany`**, not a column; the rep picks the deal's
+  company and the server checks it is linked to the pipeline. Each line still takes its company from its
+  product, so a deal can span companies (D5, superseded 2026-11-05).
 - **`ForecastSnapshot` columns are `*Amount`-suffixed**, diverging from master plan §9.5's bare
   `Commit`/`BestCase`/`Pipeline`/`Closed`. **The shipped names are authoritative** — `COMMIT` is reserved
   in T-SQL and Postgres, and prod is Postgres (D6).

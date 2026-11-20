@@ -78,12 +78,18 @@ const SKIP_DIR = new Set(['generated', 'node_modules', 'dist', '__tests__']);
  */
 const VOCAB = [
     'Status',
+    'StatusName',
+    'CurrentStatusName',
     'DealStatus',
+    'DealStatusName',
     'DealStatusType',
     'Stage',
+    'StageName',
+    'CurrentStageName',
     'PipelineStage',
     'ForecastCategory',
     'ForecastCategoryType',
+    'ForecastName',
     'DealType',
     'DealRole',
     'LifecycleStage',
@@ -97,10 +103,11 @@ const VOCAB = [
 
 /**
  * `<vocab>[.Name] ===|!==|==|!= 'literal'` and the reversed operand order, plus the
- * `['a','b'].includes(<vocab>)` and `switch (<vocab>)` shapes that smuggle the same thing past a
- * naive equality check.
+ * `['a','b'].includes(<vocab>)`, `<vocab>.includes('literal')` and `switch (<vocab>)` shapes that
+ * smuggle the same thing past a naive equality check (#460).
  */
 const VOCAB_ALT = VOCAB.join('|');
+const VOCAB_CHAIN = `(?:\\b(?:${VOCAB_ALT})\\b(?:\\s*\\.\\s*(?:Name|Code|Label))?(?:\\s*\\.\\s*(?:toLowerCase|toUpperCase|trim)\\s*\\(\\s*\\))*)`;
 
 /**
  * CASE-INSENSITIVE, AND THAT IS NOT COSMETIC — it was a real hole, found by auditing the gate against
@@ -113,18 +120,19 @@ const VOCAB_ALT = VOCAB.join('|');
  * uses to state the rule.
  *
  * The `\b…\b` boundaries keep this from over-reaching: `stage` does not match inside `deploymentStage`
- * or `stageName`, so an unrelated build-stage comparison stays quiet. Where it does fire on something
- * genuinely unrelated, the `vocabulary-grep-allow:` escape hatch is the intended answer.
+ * or `stageName` unless `StageName` is explicitly listed above, so an unrelated build-stage comparison
+ * stays quiet. Where it does fire on something genuinely unrelated, the `vocabulary-grep-allow:` escape
+ * hatch is the intended answer.
  */
 const PATTERNS = [
     {
         // deal.Status === 'Won'   |   stage.Name !== "Closed Won"   |   d.status == 'Won'
-        re: new RegExp(`\\b(?:${VOCAB_ALT})\\b(?:\\s*\\.\\s*(?:Name|Code|Label))?\\s*(?:===|!==|==(?!=)|!=(?!=))\\s*['"\`]`, 'i'),
+        re: new RegExp(`${VOCAB_CHAIN}\\s*(?:===|!==|==(?!=)|!=(?!=))\\s*['"\`]`, 'i'),
         why: 'compares a vocabulary value to a string literal',
     },
     {
         // 'Won' === deal.Status   |   'Closed Won' === stage.Name
-        re: new RegExp(`['"\`]\\s*(?:===|!==|==(?!=)|!=(?!=))\\s*[A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[\\w$]+)*\\b(?:${VOCAB_ALT})\\b|['"\`]\\s*(?:===|!==|==(?!=)|!=(?!=))\\s*\\b(?:${VOCAB_ALT})\\b(?:\\s*\\.\\s*(?:Name|Code|Label))?`, 'i'),
+        re: new RegExp(`['"\`]\\s*(?:===|!==|==(?!=)|!=(?!=))\\s*[A-Za-z_$][\\w$]*(?:\\s*\\.\\s*[\\w$]+)*\\b(?:${VOCAB_ALT})\\b|['"\`]\\s*(?:===|!==|==(?!=)|!=(?!=))\\s*${VOCAB_CHAIN}`, 'i'),
         why: 'compares a string literal to a vocabulary value',
     },
     {
@@ -133,8 +141,18 @@ const PATTERNS = [
         why: 'tests a vocabulary value for membership in a literal list',
     },
     {
+        // statusName.toLowerCase().includes('won')   |   deal.Status.startsWith('Closed')
+        re: new RegExp(`${VOCAB_CHAIN}\\s*\\.\\s*(?:includes|startsWith|endsWith)\\s*\\(\\s*['"\`]`, 'i'),
+        why: 'tests a vocabulary value for a string literal substring',
+    },
+    {
+        // const s = this.StatusName.toLowerCase() — lower-casing a vocabulary display name to branch on it (#460)
+        re: new RegExp(`\\b(?:${VOCAB_ALT})\\b(?:\\s*\\.\\s*(?:Name|Code|Label))?\\s*\\.\\s*to(?:Lower|Upper)Case\\s*\\(\\s*\\)`, 'i'),
+        why: 'normalises a vocabulary name for string comparison',
+    },
+    {
         // switch (deal.Status) — the multi-arm form of the same mistake
-        re: new RegExp(`\\bswitch\\s*\\(\\s*[^)]*\\b(?:${VOCAB_ALT})\\b(?:\\s*\\.\\s*(?:Name|Code|Label))?\\s*\\)`, 'i'),
+        re: new RegExp(`\\bswitch\\s*\\(\\s*[^)]*${VOCAB_CHAIN}\\s*\\)`, 'i'),
         why: 'switches on a vocabulary value',
     },
 ];

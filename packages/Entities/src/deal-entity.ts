@@ -53,7 +53,7 @@ import {
     ValidationErrorType,
     ValidationResult,
 } from '@memberjunction/core';
-import { RegisterClass } from '@memberjunction/global';
+import { RegisterClass, UUIDsEqual } from '@memberjunction/global';
 
 // THE PEER'S GENERATED CLASS, imported across the app boundary. This is the first hard import from
 // another BizApp in this repo, and it is deliberate: the standalone-Sales premise is retired (Amith —
@@ -216,7 +216,7 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
      *
      * Not the round trip. Measured through Angular's dev hooks on a real create: afterwards
      * `deal.OrderID` holds `DA871180-…`, exactly matching the row on disk. The framework already keeps
-     * the promise `DealWorkspaceComponent.Save()` makes — "the same instance now carries the server's
+     * the promise the deal workspace's `Save()` made — "the same instance now carries the server's
      * IDs" — for the FIELD.
      *
      * What it does not carry is the COMPANION. `EmbeddedRecord` gates `Value` on a private `exposed`
@@ -236,7 +236,7 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
      *
      * ── WHY HERE, AND NOT IN THE WORKSPACE ─────────────────────────────────────────────────────────
      *
-     * Fixing `DealWorkspaceComponent.Save()` would fix the one surface that happened to find it. The
+     * Fixing the deal workspace's `Save()` would have fixed the one surface that happened to find it. The
      * board, an Action running client-side, an importer and the next surface nobody has written all reach
      * the same state through plain `entity.Save()`. The entity is where "my FK and my peer agree" belongs,
      * so it is fixed once, for every caller.
@@ -458,10 +458,15 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
         // twice does not re-read — nor does it discard roster edits already staged.
         await this.Team.Load();
 
-        const existing = this.Team.Items.filter((m) => m.DealRoleID === ownerRoleID);
-        if (existing.length === 1 && existing[0].EmployeeID === employeeID) {
+        const existing = this.Team.Items.filter((m) => UUIDsEqual(m.DealRoleID, ownerRoleID));
+        const activeExisting = existing.filter((m) => m.IsActive !== false);
+        if (
+            existing.length === 1
+            && activeExisting.length === 1
+            && UUIDsEqual(activeExisting[0].EmployeeID, employeeID)
+        ) {
             this.OwnerEmployeeID = employeeID;
-            return; // already the owner — nothing to write
+            return; // already the active owner — nothing to write
         }
 
         // Exactly one member may hold the owner role, so every current holder goes.

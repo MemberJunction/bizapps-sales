@@ -207,11 +207,9 @@ describe('after a line is saved', () => {
      */
     it('forces a deal save, because the deal itself is not dirty', async () => {
         const saved: Array<{ IgnoreDirtyState?: boolean }> = [];
-        const p = Object.create(MJSDealLinesPanel.prototype) as {
-            OnLineSaved(): Promise<void>;
-            EditorOpen: boolean;
-            EditingLineID: string | null;
-        };
+        // Constructed, not `Object.create`d: the panel's failure message is a signal field, which only a
+        // constructor initializes.
+        const p = new MJSDealLinesPanel();
         p.EditorOpen = true;
         p.EditingLineID = 'line-1';
         Object.defineProperty(p, 'Record', {
@@ -255,5 +253,48 @@ describe('when the dialog closes mid-type', () => {
 
     it('is safe to call with nothing pending', () => {
         expect(() => editor({ reply: ok(1, 1) }).ngOnDestroy()).not.toThrow();
+    });
+});
+
+describe('stale async replies and product changes (#355)', () => {
+    it('drops a stale refreshPrice reply when a newer request has started (#355 item 16)', async () => {
+        const e = editor({ reply: ok(100, 100) });
+        let resolveFirst: ((v: unknown) => void) | null = null;
+        let callCount = 0;
+        Metadata.Provider = {
+            RouteOperation: async () => {
+                callCount++;
+                if (callCount === 1) {
+                    return await new Promise((resolve) => {
+                        resolveFirst = resolve;
+                    });
+                }
+                return ok(200, 600);
+            },
+        } as unknown as typeof Metadata.Provider;
+
+        const first = e['refreshPrice']();
+        const second = e['refreshPrice']();
+        await second;
+        expect(e.DisplayUnitPrice).toBe(200);
+        expect(e.DisplayLineTotal).toBe(600);
+
+        resolveFirst?.(ok(50, 150));
+        await first;
+        expect(e.DisplayUnitPrice).toBe(200);
+        expect(e.DisplayLineTotal).toBe(600);
+    });
+
+    it('clears Holding on product change (#355 item 18)', () => {
+        const e = editor({ reply: ok(100, 100) });
+        e.Products = [{ ID: 'p-next', Name: 'Next', SKU: 'NXT', CompanyID: COMPANY, Company: 'Co', SubscriptionTypeID: null }];
+        e.Holding = { SubscriptionID: 'sub-1', SubscriptionNumber: 'SUB-1', Status: 'Active', LatestTermEnd: new Date() } as never;
+        (e as unknown as { clearServicePeriodForProductChange: () => void }).clearServicePeriodForProductChange = () => undefined;
+        (e as unknown as { refreshApplicable: () => Promise<void> }).refreshApplicable = async () => undefined;
+        (e as unknown as { refreshHolding: () => Promise<void> }).refreshHolding = async () => undefined;
+
+        e.OnProductChange('p-next');
+
+        expect(e.Holding).toBeNull();
     });
 });

@@ -16,12 +16,15 @@ export class mjBizAppsSalesSalesContactFormComponent extends BaseFormComponent {
     override async ngOnInit() {
         await super.ngOnInit();
         this.initSections([
-            { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
+            { sectionKey: 'salesEngagement', sectionName: 'Sales & Engagement', isExpanded: true },
+            { sectionKey: 'communicationPreferences', sectionName: 'Communication Preferences', isExpanded: true },
+            { sectionKey: 'peopleDetails', sectionName: 'People Details', isExpanded: true },
+            { sectionKey: 'systemMetadata', sectionName: 'System Metadata', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDealsBillingContactID', sectionName: 'Deals (Billing Contact)', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDealsPrimaryContactID', sectionName: 'Deals (Primary Contact)', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesDealContactRoles', sectionName: 'Deal Contact Roles', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesSalesAccountsDefaultPrimaryContactID', sectionName: 'Sales Accounts (Default Primary Contact ID)', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesSalesAccountsDefaultBillingContactID', sectionName: 'Sales Accounts (Default Billing Contact ID)', isExpanded: false }
+            { sectionKey: 'mJBizAppsSalesDealContactRoles', sectionName: 'Buying roles', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesSalesAccountsDefaultPrimaryContactID', sectionName: 'Accounts (default primary contact)', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesSalesAccountsDefaultBillingContactID', sectionName: 'Accounts (default billing contact)', isExpanded: false }
         ]);
     }
 }

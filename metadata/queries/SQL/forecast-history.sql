@@ -35,6 +35,14 @@
 --
 -- DATE DIMENSION: CapturedAt — when the picture was taken. PeriodStart/PeriodEnd describe which
 -- period the snapshot was ABOUT, which is a different thing and is filtered separately.
+--
+-- CapturedOnOrBefore IS A BUSINESS DAY (#289). CapturedAt is a DATETIMEOFFSET and the parameter is
+-- date-only, so comparing them directly put the bound at UTC midnight at the START of that day: "as
+-- we saw it on the 1st" left out every snapshot taken on the 1st itself. The bound is now judged on
+-- `[__mj_BizAppsCommon].[fnBusinessDayOf]()`, the business day of the instant — a function, not an
+-- inline `AT TIME ZONE`, which MJ's SQL parser cannot read (see deal-cycle-time.sql). The padded UTC
+-- bound beside it (two days past the date) is wider than any zone offset and only lets an index on
+-- CapturedAt narrow the scan.
 SELECT
     fs.CapturedAt,
     fs.PeriodStart,
@@ -79,7 +87,8 @@ WHERE 1 = 1
   {% endif %}
   -- When the picture was TAKEN. "As we saw it on the 1st" is this filter, not the two above.
   {% if CapturedOnOrBefore %}
-  AND fs.CapturedAt <= {{ CapturedOnOrBefore | sqlString }}
+  AND fs.CapturedAt < DATEADD(day, 2, {{ CapturedOnOrBefore | sqlString }})
+  AND [__mj_BizAppsCommon].[fnBusinessDayOf](fs.CapturedAt) <= {{ CapturedOnOrBefore | sqlString }}
   {% endif %}
 ORDER BY
     fs.CapturedAt DESC, co.Name, p.Name;

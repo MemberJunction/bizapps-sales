@@ -255,8 +255,10 @@ cd C:\ws && pnpm install
 node MJ/packages/MJCLI/bin/run.js dev workspace doctor --dir C:\ws
 ```
 
-Doctor should report **8 passed, 1 warned, 0 failed**. The warning is a pnpm-not-on-PATH-at-the-parent
-notice and is harmless.
+Doctor reports **8 passed, 1 warned, 0 failed** when pnpm is not on `PATH` at the parent (a harmless
+notice), or **9 passed, 0 warned, 0 failed** when pnpm is on `PATH`. If doctor reports peer or duplicate-package
+warnings on a fresh build, check that `.npmrc` has `strict-peer-dependencies=false` and that all `@angular/*`
+and `@memberjunction/*` packages resolve to the workspace's single pinned version (#396).
 
 ## 3b. ALTERNATIVE — installing from PUBLISHED packages
 
@@ -429,14 +431,14 @@ in this order — it is the dependency order, and it is not negotiable:
 |---|---|---|---|
 | 1 | MJ v6.1.5 | `node packages/MJCLI/bin/run.js migrate` | 89 applied |
 | 2 | common 5.50.1 | `… migrate --schema __mj_BizAppsCommon --dir ./migrations` | 37 |
-| 3 | tasks 1.4.1 | `… migrate --schema __mj_BizAppsTasks --dir ./migrations` | 7 |
+| 3 | tasks 1.7.0 | `… migrate --schema __mj_BizAppsTasks --dir ./migrations` | 9 |
 | 4 | accounting 0.22.0 | `… migrate --schema __mj_BizAppsAccounting --dir ./migrations` | 23 |
 | 5 | orders 5.30.0 | `… migrate --schema __mj_BizAppsOrders --dir ./migrations` | 73 |
 | 6 | **contracts** 0.7.3 | `… migrate --schema __mj_BizAppsContracts --dir ./migrations` | 9 |
-| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 16 |
+| 7 | sales | `… migrate --schema __mj_BizAppsSales --dir ./migrations` | 20 |
 
-The counts are for the versions named: the ones this repo's lockfile resolves, and contracts' latest
-release (sales does not declare contracts). Another version of a sibling applies a different number;
+The counts are for the versions named, which are the ones this repo's lockfile resolves (contracts,
+accounting and `orders-core-entities-server` through `packages/IntegrationTests`' devDependencies). Another version of a sibling applies a different number;
 what matters is that each step reports no failure.
 
 > ⚠️ **Contracts migrates after common, and before sales.** Contracts 0.7.3's migrations reference only
@@ -480,19 +482,20 @@ is wrong.
 > ### ⚠ THE ORDER IS LOAD-BEARING, AND THE FAILURE IT PREVENTS NAMES THE WRONG THING
 >
 > Push metadata FIRST, then seed. Both `metadata/pipelines/.sales-pipelines.json` and
-> `scripts/seed-demo-data.sh` set `Pipeline.CompanyID`, and they disagree: the metadata says
-> **Default Company** (correct on a fresh database, where nothing else exists), the seed splits the two
-> pipelines across **Blue Cypress** and **BC Education Group** so the demo can show that every rollup
-> slices by company.
+> `scripts/seed-demo-data.sh` write the pipelines' company links (`PipelineCompany`), and they disagree:
+> the metadata links both pipelines to **Default Company** (correct on a fresh database, where nothing
+> else exists); the seed links B2B to **Blue Cypress** and D2C to **BC Education Group**, so the demo
+> can show that every rollup slices by company, and retires (`IsActive = 0`) the Default Company links.
 >
-> In this order the seed lands last and everything is right. **Push again after seeding and the
-> metadata wins**, both pipelines collapse onto a company that owns no products, and every product
-> picker in the app goes empty. What you see is `locator.selectOption` timeouts and *"the orders
-> catalogue did not load"* -- nine failures in one run, none of which mentions a company or a pipeline.
-> Measured 2026-08-25. See **KI-26** for the repair, which is to re-run `seed-demo-data.sh`.
+> In this order the seed lands last and everything is right. The seed can only retire a Default Company
+> link that the push has already created. A push AFTER seeding is safe: the metadata's link rows carry no
+> `IsActive`, so a push never re-activates a link the seed retired (KI-26, resolved). Before
+> PipelineCompany the push repointed both pipelines at a company owning no products and emptied every
+> product picker (measured 2026-08-25).
 >
 > This matters because the push is also the remedy for other things -- a missing action, a stale remote
-> operation -- so there is a real reason to run it later in a host's life. When you do, re-seed after.
+> operation -- so there is a real reason to run it later in a host's life. The company links the seed
+> set survive it, so a re-seed after the push is no longer needed for them.
 
 
 > ### ⚠️ NONE OF THE COMMANDS BELOW NAME A DATABASE. They hit whatever `.env` says.
@@ -584,11 +587,22 @@ cd C:\ws\bizapps-sales && bash scripts/seed-dev-data.sh
 #    pipeline (the script's own comment explains it).
 ```
 
-> ### e. THEN the demo data — last, because it embeds what the catalogue provides
+> ### e. Build, then the demo data — last, because it embeds what the catalogue provides
 >
 > ```bash
+> cd C:\ws
+> pnpm exec turbo run build --filter "@mj-biz-apps/sales-integration-tests..." --continue
+> pnpm exec turbo run build --filter "@mj-biz-apps/orders-server..." \
+>                           --filter "@mj-biz-apps/orders-core-entities-server..." \
+>                           --filter "@mj-biz-apps/accounting-core-entities-server..." --continue
+>
 > cd C:\ws\bizapps-sales && bash scripts/seed-demo-data.sh
 > ```
+>
+> **Build first.** The seed's last step, `scripts/seed-demo-lines.mjs`, prices five deals through
+> `@mj-biz-apps/sales-server` and orders-server, which load from their `dist/`. Seeded before the build,
+> it stops with "build them first" and every deal stays hand-typed (`deals w/ order 0`). If that
+> happened, build and run `node scripts/seed-demo-lines.mjs` on its own (sales#457).
 >
 > This used to sit in step (b), ahead of the catalogue. Run in that order it still "succeeds" — it
 > reports seven deals — but every one of them is provisioned with **no order**, because there was no
@@ -640,43 +654,18 @@ without each, is in `docs/KNOWN-ISSUES.md` KI-11.
 
 ## 6. Build and verify
 
-```bash
-cd C:\ws
-pnpm exec turbo run build --filter "@mj-biz-apps/sales-integration-tests..." --continue
-pnpm exec turbo run build --filter "@mj-biz-apps/orders-core-entities-server..." \
-                          --filter "@mj-biz-apps/accounting-core-entities-server..." --continue
+The build is in §5(e), before the demo seed that needs it. After a code change, re-run those two
+`turbo` lines before the suite.
 
+```bash
 cd C:\ws\bizapps-sales
 RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs                     # every bundle whose app is installed
 RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs product-picker      # one bundle: 5
-RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs close-won-order     # 5
-# RUN_MUTATION_TESTS=1 node test-harnesses/smoke-close-won.mjs               # ⚠ SEE BELOW -- 5/11
+RUN_MUTATION_TESTS=1 node test-harnesses/integration.mjs close-won-order     # 6
 ```
 
-Each bundle's check count, and the app it needs, is in `scripts/expected-check-counts.json`: 150 checks
-across 10 bundles when every sibling app is installed.
-
-> ### ⚠ `smoke-close-won.mjs` IS ROTTED. It is commented out above, and 11/11 was never re-measured.
->
-> Measured 2026-08-25: **5/11**, and before repair it did not run at all. It had accumulated three
-> dead references from changes that landed without it being re-run — which is why the number in this
-> document went stale silently rather than going red.
->
-> | Dead reference | Left by |
-> |---|---|
-> | `MJ_BizApps_Sales: Deal Line Types` | the `DealLine` retirement — **the entity exists on no host**, so this threw `Entity ... not found in metadata` at step 2 |
-> | `deal.Lines.Create()` | same retirement — lines live on the embedded order now |
-> | `preview.Amount` | the `PreviewOrderMoney` removal — a `ReferenceError` on a variable whose assignment had already been deleted |
->
-> The first two and the third are fixed. What remains is **not** a stale reference and is not a quick
-> repair: `ClassFactory` falls back to `BaseEntity` inside this harness, so `DealEntityServer` never
-> provisions the embedded order (`deal.OrderID` stays `undefined`) and `OrderLineEntityServer` never
-> stamps `UnitPrice`/`LineNumber`. That is a harness bootstrap problem in the same family as KI-17.
->
-> **Nothing is uncovered by leaving it.** Every behaviour it asserts is also asserted by
-> `integration.mjs`, which is green at **126/6** on this same database — the 6 being contracts checks
-> on a host without contracts. Use that as the gate; treat this harness as needing repair before it is
-> quoted again.
+Each bundle's check count, and the app it needs, is in `scripts/expected-check-counts.json`: 188 checks
+across 14 bundles when every sibling app is installed.
 
 **`RUN_MUTATION_TESTS=1` is mandatory.** Without it the suites run ZERO checks and report success — a
 vacuous pass, which is the failure mode `assert-check-count.mjs` exists to catch.
@@ -684,8 +673,8 @@ vacuous pass, which is the failure mode `assert-check-count.mjs` exists to catch
 `turbo` must be run **from the parent**, not from inside MJ: MJ's own turbo scope cannot see the sibling
 repos and reports *"No package found with name '@mj-biz-apps/sales-integration-tests'"*.
 
-The smoke **commits** what it creates — a `SMOKE-`prefixed deal and a real order — so you can open them
-afterwards. The suite bundles roll everything back.
+`mj.config.cjs` keeps `enable_advanced_generation: false` so `npm run mj:codegen` is deterministic across
+workstations and requires no LLM credentials (#436).
 
 ## 7. Known rough edges, so you can recognise them
 
@@ -728,6 +717,16 @@ returns whichever copy was created first. The runner prints `MJ core instances -
 `BizApps packages loaded more than once -> 0`, and stops before any check if either is higher, naming the
 copies. A copy left over means a package's declared range does not accept the version the sibling builds:
 check that sibling out at a version inside the range. It needs Node 22.15 or 23.5+ (`module.registerHooks`).
+
+The runner and the scripts are held to the range sales' packages declare, not to the repo root's (which
+declares none), so a sibling build older than that range is set aside for sales' own copy and listed as a
+warning (sales#372).
+
+**Several checkouts of one sibling repo beside this one** (a folder of worktrees): set
+`BIZAPPS_<APP>_REPO` (`BIZAPPS_COMMON_REPO`, `BIZAPPS_TASKS_REPO`, …, the variables `scripts/rebuild-db.sh`
+reads; a path relative to this checkout or absolute) to the checkout each run tests. Without it, a package
+more than one checkout carries is taken from none of them, and the runner stops before any check, naming
+the checkouts and the variable (sales#456). Other checkouts of bizapps-sales are never loaded as siblings.
 
 The packages `pnpm-workspace.yaml` overrides (`common-entities`, `common-ng`, `common-activity-sync`) are the
 exception, as they are in sales' own install: every importer is held to the override's range, so it gets

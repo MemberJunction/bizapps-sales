@@ -9,7 +9,7 @@ decision without its reasoning gets re-litigated by the next person, or silently
 assumes it was an accident.
 
 **IDs.** This file holds `D1`–`D7` (the S1 rulings, no hyphen), `I1`–`I10`, and the prefixed series
-`D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL`, `D-FY` and `D-ST`. `D-3`, `D-4` and `D-6` are the master
+`D-OS`, `D-RRC`, `D-CF`, `D-BD`, `D-UX`, `D-DL`, `D-FY`, `D-ST`, `D-SE` and `D-PR`. `D-3`, `D-4` and `D-6` are the master
 plan's IDs; their rulings here are D2, D5 and "Master plan D-6". `DN-n` and every other `D-n`
 are in [`DECISIONS-NEEDED.md`](../DECISIONS-NEEDED.md), which also lists what is still open. A bare `Dn`
 cited as orders' (`D6/D7`, `D8`, `D53`) is orders' own log.
@@ -159,7 +159,7 @@ the door open — a routing engine can later read the same column rather than re
 ### D4 — Default attribution: the owner role
 
 **Decision:** when no `AttributionPct` is set, by-rep roll-ups attribute to the **owner role** (the
-`DealTeamMember` whose `DealRole.IsOwnerRole = 1`). Encoded in the seeds as `Owner / AE` carrying
+`DealTeamMember` whose `DealRole.IsOwnerRole = 1`). Encoded in the seeds as `Owner` (code `OWNER`) carrying
 `DefaultAttributionPct = 100`. No server logic yet — that lands with S3/S4.
 
 **Why:** it is the **only** default where the sum of by-rep attribution equals total bookings. An equal
@@ -174,6 +174,14 @@ produces a "bookings by rep" total that does not reconcile to the company number
 ---
 
 ### D5 — Cross-company pipelines (master plan D-4): `Pipeline.CompanyID` stays required
+
+> **Superseded 2026-11-05.** A pipeline links to several companies through `PipelineCompany`
+> (PipelineID, CompanyID, IsActive) and `Pipeline.CompanyID` is removed. The rep picks the deal's
+> company first and is offered the pipelines actively linked to it; `DealEntityServer` refuses a deal
+> whose company is not linked to its pipeline instead of copying the company from the pipeline (which
+> also retires the first rule in D-RRC4). The link is strongly typed rather than polymorphic like
+> accounting's `GLAccountLink`, because a pipeline only ever links to a company. Lines still take
+> their company from the product. The ruling below is kept as history.
 
 **Decision:** keep `CompanyID` **NOT NULL** on `Pipeline`, as built, mirroring `Order.CompanyID` in
 orders (its D6/D7).
@@ -325,7 +333,9 @@ advisories are therefore presentational rather than entity rules. Header warning
 
 Found by the integration suite rather than by reading, which is the argument for having had it.
 
-- **`Deal.CompanyID` must equal `Pipeline.CompanyID`.** A CHECK constraint cannot reach across the
+- **`Deal.CompanyID` must equal `Pipeline.CompanyID`.** *(Superseded 2026-11-05 with D5: the deal's
+  company is the rep's choice and must be actively linked to its pipeline through `PipelineCompany`;
+  `DealEntityServer.companyLinkedToPipelineRefusal()` refuses rather than overwrites.)* A CHECK constraint cannot reach across the
   foreign key to compare them, so `Sales.SaveDeal` resolved it. Moved to
   `DealEntityServer.stampCompanyFromPipeline()`, which runs on every save for every caller and
   **overwrites** rather than rejects a supplied value — a client stating this is stating something it has
@@ -474,7 +484,7 @@ were copied here. What each ID refers to, from the code that cites it:
 | D-CF1 | A close commits even when a downstream route is stubbed or refused; the routing intent is recorded and `Executed` comes back false (`downstream-seams.ts`, `close-deal.CD7`) | In force |
 | D-CF3 | The deal-to-order route was a stub | Retired: close-won creates no order, because the order is embedded at deal creation |
 | D-CF4 | The deal-to-contract route was a stub | Retired: `LiveContractsSeam` creates the contract (`close-won-contract.CT1`) |
-| D-CF5 | The close writes no `Activity`, because the Activity spine did not exist | Not done: the spine now exists in bizapps-common, and the close still writes none |
+| D-CF5 | The close writes no `Activity`, because the Activity spine did not exist | Done (#381): `CloseDealOperation` and `ReopenDealOperation` write a common `Activity` (`"Deal closed"` / `"Deal reopened"`) via `ActivityWriterService` after commit |
 | D-BD1 | MJ had no generic kanban, so the board lays out its own columns on `@angular/cdk` drag-drop, to be deleted when a generic kanban lands (`deal-board.component.ts`) | In force |
 | D-BD2 | A stage move owes a `DealStageEvent` recording what the deal held on the way out (D-CF8) | Done: `DealEntityServer.appendStageEvent` writes it on every stage move |
 
@@ -723,18 +733,21 @@ logged at STATUS, not error, because logging it at error level would put a `cons
 dashboard load for those users and fail the keystone in exactly the way the guard exists to prevent. A
 THROW is caught for a different reason: the fiscal start has to resolve before the window can be
 computed, so this read is awaited ahead of the roster, the lookups and the summary, and an escaping
-rejection would abort the whole section over a value that has a documented fallback.
+rejection would abort the whole section over a value that has a documented fallback. Both fall back to the
+calendar year with the basis `unreadable`, which the selector words as "fiscal year start could not be
+read". They used to report `no-profiles`, which told a user without accounting access that no company
+profile sets a fiscal year.
 
-Second, the setting is per-company while the dashboard is not company-scoped: `Sales: Dashboard
-Summary` accepts a `CompanyID` the UI does not pass. **When active company profiles disagree about the
-fiscal start, the dashboard falls back to the calendar year rather than picking one.** Choosing
+Second, the setting is per-company while the dashboard's period is read once for the page, whatever
+selling companies the filter bar picks. **When active company profiles disagree about the fiscal start,
+the dashboard falls back to the calendar year rather than picking one.** Choosing
 silently would produce a window correct for one company's figures and wrong for another's, with
 nothing on screen saying which. This is the rule `deal-board` already applies to mixed currency: refuse
 to present a total over a set holding more than one distinct value.
 
-All four cases — configured, accounting absent, no profile, companies disagreeing — are named on the
-dashboard beside the selector. A period control whose boundaries are invisible is the same defect
-golive#232 was filed about.
+All four cases — configured, accounting absent, no profile, companies disagreeing — are named in the
+Period dropdown's tooltip, and the window's dates are printed beside it. A period control whose
+boundaries are invisible is the same defect golive#232 was filed about.
 
 ### What this does NOT do
 
@@ -789,3 +802,247 @@ status unchanged. The save returns false with a message naming both halves. The 
 transactional; a half-done close is not among the outcomes.
 
 ---
+
+## D-SE1 — Stage events are append-only on the server and in the API, not only in the form (#348)
+
+**Decision (the app's owner, 2026-10-16):** `DealStageEvent` refuses an update and a delete in two
+places. `DealStageEventEntityServer` refuses them in `Save()` and `Delete()`, so an Action, an agent or a
+raw `BaseEntity.Save()` cannot rewrite one. The entity's `AllowUpdateAPI` and `AllowDeleteAPI` are off
+(`metadata/entities/.entities.json`), so the GraphQL API has no update or delete mutation for it.
+Inserts are unaffected: `DealEntityServer.appendStageEvent` is the only writer and always creates a new
+row. The stale `spUpdateDealStageEvent` and `spDeleteDealStageEvent` procedures stay in the database;
+dropping them would need a migration and gains nothing once nothing calls them.
+
+**Why the entity-level flag is right here when D-RRC5 rejected the field-level one.** D-RRC5 turned
+down `AllowUpdateAPI = 0` on four `DealLine` columns because that flag takes the columns out of the
+`spCreate` / `spUpdate` parameters, which would have locked out the one caller that must write them.
+A stage event has no such caller. Nothing legitimately updates or deletes one (the one exception, deleting a never-closed deal, is D-DEL1), and the entity-level
+flags leave `spCreate` and the insert path alone. With the flags off, CodeGen drops the update and
+delete mutations, and MemberJunction's own `Save()` and `Delete()` refuse them as well. The server
+subclass is kept beside the flags because it explains the refusal in this app's terms, and because the
+rule should not depend on a metadata row a host may not have pushed or may turn back on.
+
+**What the form does.** `DealStageEventFormComponentExtended` already refuses edit mode. The refusal
+message is `DEAL_STAGE_EVENT_APPEND_ONLY_MESSAGE` in `sales-entities` so the form can share it.
+
+Pinned by `DealStageEventEntityServer.test.ts` and integration check `board-move.BD7`.
+
+---
+
+## D-DEL1 — A deal is deleted only while open and never closed, by role, with its order (golive#429)
+
+**Decision (the go-live owners, 2026-11-05):** deleting a deal is allowed when all of these hold, and
+`DealEntityServer.Delete()` refuses with a reason otherwise:
+
+- **The user holds a grant.** `MJ.BizApps.Sales.Deal.Delete` (the Sales Admin role, and Developer) may
+  delete any deal; `MJ.BizApps.Sales.Deal.DeleteOwn` (the Sales User role) only a deal whose
+  `OwnerEmployeeID` is the user's own Employee. `Delete` is the parent, so it implies `DeleteOwn`. A
+  catalog without these rows grants nothing.
+- **The deal is not closed now, and never was.** The stage history is read for any move into a status
+  whose type has `LocksDeal = 1`. A reopened deal has already produced its close's contract, order
+  status and finance tasks, so deleting it would orphan them.
+- **Its order is not Confirmed.** The order is deleted with the deal through orders' own
+  `OrderEntityServer.Delete()`, which refuses a booked order as well.
+
+**What goes with it, in one transaction:** the deal's `DealStageEvent`, `DealContactRole`,
+`DealPaymentSchedule` and `DealTeamMember` rows (by SQL), the deal, then its order. The child rows go by
+SQL because their entities would not let them go cleanly: a stage event refuses delete (D-SE1), and a
+team member or payment schedule re-stamps or re-syncs the deal after each row, which would re-save the
+deal being removed. This is the one sanctioned delete of stage events; D-SE1 still holds for every other
+caller, and only for a deal that never closed, so no close provenance is lost.
+
+**Why authorizations and not a row-level filter on the permission.** The owner rule needs the user's
+Employee, and a refusal should name the rule it broke. Entity permissions only grant `CanDelete` (to the
+two roles, on Deals); the rule itself lives in code, beside the close lock.
+
+**Why the order goes as the system user.** Orders' delete removes the order's lines, charges,
+allocations and schedule through their own entities, as the user the order was loaded with. Run as the
+caller, that needs the Sales roles to hold delete on the order header and ten child entities, and
+several of those (charges, allocations, price components, dimensions, checkout answers) have no status
+guard, so the grant would let a Sales User delete rows of a Confirmed order directly. The caller's
+right to delete the deal is decided first, from their own grants; the order is then loaded as the
+system user (`VetoReader`, as the order vetoes read Deals), and orders still refuses a booked order.
+The facts read (lock statuses, stage history, order status) runs as the system user for the same
+reason. Integration check DD8 pins that neither role may delete order rows.
+
+Pinned by `DealDelete.test.ts` and integration checks DD1-DD8.
+
+---
+
+## D-DASH2 — Every dashboard figure is bounded by the period, each on its own date
+
+**Ruling (bc-aidp-next-golive#350):** the Deals dashboard's period bounds every figure that answers
+"how are we doing" or "what is coming". Won counts wins whose `ActualCloseDate` is in the period. The
+open figures — Commit, Open pipeline, Weighted pipeline, the forecast's open segments, Open deals by
+stage, Commit by deal owner and the dated Expected to close buckets — count open deals whose
+`ExpectedCloseDate` is in the period. All time is the whole book.
+
+It reverses the earlier rule that open figures describe the current book whatever the period. That
+rule was internally consistent, but a forecast labelled "this quarter" that counts deals expected to
+close years out reads as wrong to everyone who looks at it, and the tester report said so.
+
+Three consequences, each deliberate:
+
+- **An open deal with no expected close date belongs to no bounded period.** It is not counted in a
+  bounded forecast; the forecast card says how many there are, and they are listed under Needs
+  attention's "No close date" and the "No date" bucket, which ignore the period.
+- **Needs attention is about today, not the period.** Past close date, No owner, No close date and Idle
+  past stage limit follow the filter bar but not the period: a deal that needs a person needs one
+  whatever quarter is being read.
+- **The dated buckets intersect with the period.** Under a past period, Next 7 days and Rest of month
+  read empty, because nothing expected to close in a past quarter is still ahead.
+
+The filters (selling company, product company, deal owner, pipeline) and the period are applied by the
+queries (`Sales: Dashboard Summary`, `Sales: Win Rate by Count and Value`, `Sales: Deal Roster`), and the
+deal list under the tiles is filtered with the same predicate on the server, so a tile and its list
+agree. The forecast snapshot and `Sales: Forecast by Category` are unchanged.
+
+---
+
+## D-BOARD2 — The Board reads the section's filter bar, and its period bounds the closed columns
+
+**Ruling (bc-aidp-next-golive#351):** the Dashboard and the Board share one filter bar and one selection,
+held by the Sales section and kept in its URL. Changing a filter on either page changes it on the other,
+and a link copied on one opens the other with the same filters. On the Board:
+
+- **Period bounds the closed columns only.** A closed deal shows when it closed in the period; every open
+  deal shows whatever the period, as before. This reverses bizapps-sales#209's rule that the Board
+  always shows the current fiscal quarter's closed deals. The default period is still This quarter, so
+  the Board looks the same until someone picks another period; All time loads every closed deal.
+- **Selling company and Pipeline decide the tabs.** The Board draws one pipeline's stages at a time. Its
+  tabs are the picked pipelines, else the picked companies' pipelines, else every pipeline; with one,
+  there are no tabs and that pipeline's name is shown in their place. The Board's own Company picker is
+  gone.
+- **Pipeline "All" includes pipelines flagged out of the forecast**, as the Board always has. The
+  Dashboard leaves them out of its figures; that difference is about forecasting, not about which deals
+  exist, so it stays.
+- **The Inspect slice stays Dashboard-only**, and All deals keeps its own grid filters.
+
+---
+
+---
+
+## Promoting an existing Organization or Person into sales (2026-11-11)
+
+Sales Accounts and Sales Contacts are IS-A subtypes: `SalesAccount.ID` **is** `Organization.ID`, and
+`SalesContact.ID` **is** `Person.ID`. So a company or person bizapps-common already holds does not need
+re-entering to become a sales record — it needs **promoting**, which inserts only the subtype row and
+leaves the parent untouched. `IS4` and `IS5` prove the mechanism; these rulings decide the product
+around it. The sequence is MJ's and is not ours to vary: `NewRecord()`, `AttachToParent`, the child's
+own fields, `Save()`.
+
+### D-PR1 — A promotion prefills Account Type and nothing else
+
+**Decision:** promoting an Organization sets `AccountTypeID` to the `AccountType` row carrying
+`IsProspect = 1`. `LifecycleStageTypeID`, `OwnerEmployeeID` and `Territory` stay null. When no row
+carries the flag, Account Type stays null too — never a fallback to the name `Prospect`. Promoting a
+Person sets nothing.
+
+**Why:** every one of those columns is nullable, so a blank promotion is already legal and the rep
+finishes the record on the form. Account Type is the one field where a default is safe: "we are now
+selling to this company" is the entire content of the act of promoting, and `IsProspect` is that
+statement expressed as a behaviour flag. The others are not. An owner assigned by whoever promoted is
+an attribution claim, and `DealTeamMember` — not a stamped column — is the source of truth for who owns
+what. A lifecycle stage would have to be inferred from `DisplayRank`, because `LifecycleStageType` has
+no `IsDefault` column; "lowest rank with no qualification flags" is a guess about the seeds, and it
+would assert that a company somebody is already selling to is a fresh subscriber.
+
+> Found by flag, never by name (Rule 2), and **filtered, not counted**: "exactly one row is flagged"
+> is a statement about today's seeds. Two flagged rows is a seeding error this cannot fix, so it takes
+> the lowest `DisplayRank` and breaks ties on ID — a stable answer rather than whichever row the view
+> happened to return first.
+
+### D-PR2 — The deal's pickers stay restricted; promotion sits BESIDE the field
+
+**Decision:** the account and contact pickers on the deal form continue to offer only Organizations and
+People that already have their sales row. A promotable record is reached from a link under the field,
+which opens a sales-owned dialog reading `Sales: Party Lookup Promotable {Accounts,Contacts}` — the
+exact complement of the picker's own queries.
+
+**Why, and this reverses the first instinct:** the obvious design is to show promotable rows *in* the
+picker, marked. It cannot be done safely. That picker is common's `bizapps-party-field`, whose row
+template is compiled into the component — no row template input, no chips, no per-row action and no
+`BeforeSelect` hook. A promotable row placed there would therefore be **selectable**, setting
+`Deal.AccountID` to a row the server must refuse, which is precisely what `PL1` and `PL3` exist to
+prevent. Relaxing the picker's `EXISTS` is a one-token change that reads like an improvement and
+removes a guarantee.
+
+A separate query and a sales-owned dialog keep that guarantee whole and still answer the real
+complaint (golive#259): the rep who cannot find a company does not conclude it needs promoting, they
+create a second one. `PL7` and `PL8` assert the pair **partitions** the set — disjoint and covering —
+so relaxing the picker's filter cannot stay green.
+
+> The in-picker version needs an upstream contract from common-ng (a row-action or `BeforeSelect`
+> seam). That is worth asking for; it is not worth forking the control or reverting to the
+> `%term%`-unordered-20-row FK picker that golive#372 replaced.
+
+### D-PR3 — All three entry points ship together
+
+**Decision:** promotion is reachable from the Organization or Person record (a form panel), from the
+Sales Accounts and Contacts rail pages (an **Add existing** button beside **New**), and from the deal
+form under the party field.
+
+**Why:** they are three different moments, not three styles of one button. The record surface is where
+someone browsing a company decides to sell to it; the rail pages are where someone deliberately
+onboarding accounts works; the deal form is where the need is discovered under time pressure. Omitting
+any one sends that user to re-entry, which is the duplicate this feature removes. The record-surface
+one needs no change to bizapps-common: `@RegisterClassEx(BaseFormPanel, { entity: … })` already lets
+this app contribute onto another's form, which `party-deals.panels.ts` has done since golive#372.
+
+> The panel renders **nothing** once the record is promoted, and nothing while the existence check is
+> unanswered. An unanswered check must not offer a promotion: `AttachToParent` returns true for an
+> already-promoted record — it only asks whether the PARENT exists — so a second promotion reaches the
+> database and dies on a raw primary-key violation. The pre-check is what turns that into a sentence.
+
+### D-PR4 — Promotion carries no new authorization
+
+**Decision:** no `MJ.BizApps.Sales.*.Promote` authorization. Anyone who can create a Sales Account or
+Sales Contact can promote one.
+
+**Why:** promotion and creation produce the same row with the same permissions; the only difference is
+whether the parent already existed. An authorization separating them would assert that reusing an
+existing company is more sensitive than inventing a new one, which is backwards — re-entry is the
+outcome being prevented. It would also have to be granted to `Sales User` on day one for D-PR3 to work
+at all, so it would gate nothing while adding a surface to maintain.
+
+> Promotion writes only the subtype row. It never updates the parent Organization or Person, so it does
+> not need — and must not acquire — write permission on another app's entity.
+
+> **Undo is not symmetric, so do not add one casually.** `IS8` records that deleting a Sales Contact
+> which is its Person's only subtype deletes the Person too. An "undo promotion" built from a child
+> delete can therefore destroy a record this app does not own.
+
+### D-PR5 — One dialog finds, promotes or creates; the picker's own Create is removed
+
+**Decision:** the promote dialog lists **both** halves — parties that already have their sales row,
+badged and selectable outright, and those that do not, which promote on selection. When a search
+matches nothing it offers to create a new one. The deal form's pickers pass `[AllowCreate]="false"`,
+so creating a party is reachable only through this dialog.
+
+**Why:** D-PR2 kept the picker honest by withholding rows it cannot store, but that left the rep with
+a control that says "no matches" and a separate route whose name presumes the answer — they had to
+know *why* the company was missing before choosing where to look. Showing both states answers that
+instead of asking it: "is this company already an account?" is the thing they came to find out.
+
+Selecting an existing account writes **nothing**. Promotion is for the other half only, which is also
+what keeps `PromoteParty`'s second-promotion refusal from ever being needed here.
+
+Creation moved off the picker for the same reason it exists at all. The picker's built-in Create row
+is offered *while matches are still on screen*, so it competes with the record the rep is looking
+for — which is how golive#259's duplicate was made. In the dialog it appears only **after** a search
+has returned nothing, so it is the last resort rather than the first.
+
+> The merged list needs no de-duplication and cannot be missing a row, because the two queries are
+> the exact complement of one another — the partition `PL7`/`PL8` assert. The test is what lets the
+> union be taken on trust.
+
+> **The search box is the name.** A second field asking for what the rep has already typed is
+> friction at the moment they just want to get on with the deal, so Create takes the term.
+>
+> A Person is the awkward case: `FirstName` and `LastName` are both NOT NULL and `Person.DisplayName`
+> is a persisted computed column that must never be written, so one string has to become two. It
+> splits on the FIRST run of whitespace — `Grace Hopper` gives Grace / Hopper, and
+> `Juan Carlos de la Cruz` gives Juan / `Carlos de la Cruz`, which keeps a compound surname whole.
+> A single word cannot produce a last name, so Create stays disabled and says so rather than
+> inventing one. Splitting is a guess, and this is the one place the app makes it; a rep who needs a
+> different split edits the contact, where the fields are separate.

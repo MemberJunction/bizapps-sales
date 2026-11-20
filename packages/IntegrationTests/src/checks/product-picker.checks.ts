@@ -13,11 +13,9 @@
  *
  * ── WHAT IT READS ───────────────────────────────────────────────────────────────────────────────
  *
- * `MJ_BizApps_Orders: Products`, which on this host is a **DEV-ONLY STAND-IN** — orders' real `Product`
- * DDL transcribed verbatim, because orders' full schema cannot be applied here (it has hard foreign keys
- * into `__mj_BizAppsAccounting`, which in turn has one into `__mj_BizAppsTasks`). The columns, the CHECK
- * constraints and the filtered-unique SKU index are orders' own, so the rule proved here is the rule that
- * will hold against the real schema. What is NOT proved is anything about orders' other 44 tables.
+ * `MJ_BizApps_Orders: Products` from the installed BizApps Orders schema, seeded with active,
+ * non-active, foreign-company and availability-windowed rows so the picker's status, cross-company
+ * and date-window clauses are exercised against live records.
  *
  * @module @mj-biz-apps/sales-integration-tests
  */
@@ -149,10 +147,10 @@ function windowCovers(row: CatalogueRow, day: CalendarDay): boolean {
     return verdict === 'Covers';
 }
 
-/** The company Sales' pipelines sell for — the same source the server stamps `Deal.CompanyID` from. */
+/** The company the fixture's deals sell for: one actively linked to the fixture pipeline, so the server accepts it. */
 async function sellingCompany(ctx: Ctx): Promise<string> {
     const f = await ResolveSalesFixture(ctx);
-    return f.PipelineCompanyID;
+    return f.CompanyID;
 }
 
 /**
@@ -384,7 +382,7 @@ ProductPickerChecks.push({
 
             const foreign = catalogue.find(
                 (x) =>
-                    x.CompanyID.toLowerCase() !== f.PipelineCompanyID.toLowerCase() &&
+                    x.CompanyID.toLowerCase() !== f.CompanyID.toLowerCase() &&
                     x.Status === 'Active', // vocabulary-grep-allow: Status belongs to ORDERS' Product, not to Sales
             );
             Assert(
@@ -411,7 +409,7 @@ ProductPickerChecks.push({
             deal.DealTypeID = f.DealTypeID;
             deal.DealStatusTypeID = f.OpenStatusID;
             deal.AccountID = f.AccountID;
-            deal.CompanyID = f.PipelineCompanyID;
+            deal.CompanyID = f.CompanyID;
             deal.TermMonths = 12;
             Assert(
                 await deal.Save(),
@@ -449,7 +447,7 @@ ProductPickerChecks.push({
                 "the line must book to the PRODUCT's company",
             );
             Assert(
-                rows[0].CompanyID.toLowerCase() !== f.PipelineCompanyID.toLowerCase(),
+                rows[0].CompanyID.toLowerCase() !== f.CompanyID.toLowerCase(),
                 'the line took the DEAL\'s company — the whole point of #29 is that it should not',
             );
         }),
@@ -461,7 +459,7 @@ for (const check of ProductPickerChecks) {
 
 IntegrationCheckRegistry.Instance.RegisterLifecycle('product-picker', {
     Setup: async () => {
-        // Nothing to create: the stand-in catalogue is seeded with the host, like the rest of the fixture.
+        // Nothing to create: the product catalogue is seeded with the host, like the rest of the fixture.
     },
     Teardown: async () => {
         // Nothing to sweep: PP1-PP4 only read, and PP5 writes inside a rolled-back transaction.

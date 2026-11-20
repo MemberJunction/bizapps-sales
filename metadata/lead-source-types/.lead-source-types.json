@@ -1,9 +1,12 @@
 [
   {
+    "_comments": [
+      "Former description, kept as the design note: Introduced by a person who already knows us. A long attribution window, because a referral conversation often predates any recorded activity."
+    ],
     "fields": {
       "Code": "REFERRAL",
       "Name": "Referral",
-      "Description": "Introduced by a person who already knows us. A long attribution window, because a referral conversation often predates any recorded activity.",
+      "Description": "Introduced by someone who already knows us.",
       "IsInbound": true,
       "IsPaid": false,
       "AttributionWindowDays": 90,
@@ -38,10 +41,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Conference, webinar or sponsored session. IsPaid is 1 — events carry direct cost, so CAC reporting needs to separate them from organic inbound."
+    ],
     "fields": {
       "Code": "EVENT",
       "Name": "Event",
-      "Description": "Conference, webinar or sponsored session. IsPaid is 1 — events carry direct cost, so CAC reporting needs to separate them from organic inbound.",
+      "Description": "Conference, webinar or sponsored session.",
       "IsInbound": true,
       "IsPaid": true,
       "AttributionWindowDays": 90,
@@ -57,10 +63,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: We reached out first. The only seeded source with IsInbound = 0, which is what a sourced-vs-generated pipeline split keys on."
+    ],
     "fields": {
       "Code": "OUTBOUND",
       "Name": "Outbound",
-      "Description": "We reached out first. The only seeded source with IsInbound = 0, which is what a sourced-vs-generated pipeline split keys on.",
+      "Description": "We reached out first.",
       "IsInbound": false,
       "IsPaid": false,
       "AttributionWindowDays": 30,
@@ -76,10 +85,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Sourced through a channel or referral partner. A long window because partner pipelines mature slowly."
+    ],
     "fields": {
       "Code": "PARTNER",
       "Name": "Partner",
-      "Description": "Sourced through a channel or referral partner. A long window because partner pipelines mature slowly.",
+      "Description": "Sourced through a channel or referral partner.",
       "IsInbound": true,
       "IsPaid": false,
       "AttributionWindowDays": 180,
@@ -95,10 +107,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: The account was already ours; this is expansion, cross-sell or renewal demand. A full-year window, since the relationship IS the attribution."
+    ],
     "fields": {
       "Code": "EXISTINGCUST",
       "Name": "Existing Customer",
-      "Description": "The account was already ours; this is expansion, cross-sell or renewal demand. A full-year window, since the relationship IS the attribution.",
+      "Description": "Demand from an existing customer: expansion, cross-sell or renewal.",
       "IsInbound": true,
       "IsPaid": false,
       "AttributionWindowDays": 365,

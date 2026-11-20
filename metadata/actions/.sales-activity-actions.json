@@ -22,13 +22,19 @@
       "the browser through GraphQLActionClient.RunAction -- the same path MJ's own",
       "interactive-form-apply.service.ts uses.",
       "",
-      "The four Input params mirror the form. There is deliberately no ParticipantID or LinkTo param: who",
-      "gets attached is the service's decision from the deal, not the browser's to assert."
+      "The Input params mirror the form. Until bc-aidp-next-golive#408 there was deliberately no participant",
+      "param: who got attached was the service's decision from the deal. #408 reversed that, because reps",
+      "need to untick the account or primary contact and add the billing contact, buying-team members and",
+      "anyone else. The Parties param carries that choice. The security point carries forward: the browser",
+      "now names record IDs, so the action refuses (never drops) any entry that is malformed, not a Person or",
+      "Organization, or not readable by the caller, and caps the list. Without Parties the old behaviour holds.",
+      "",
+      "Former description, kept as the design note: Log one activity against a deal — a call, meeting, note or email — writing the Activity and its links in a single transaction, with the deal's account and primary contact attached as participants. The canonical composition; the deal workspace calls this rather than writing rows itself."
     ],
     "fields": {
       "Name": "Log Activity",
       "CategoryID": "@lookup:MJ: Action Categories.Name=Sales",
-      "Description": "Log one activity against a deal — a call, meeting, note or email — writing the Activity and its links in a single transaction, with the deal's account and primary contact attached as participants. The canonical composition; the deal workspace calls this rather than writing rows itself.",
+      "Description": "Logs a call, meeting, note or email against a deal, with the deal's account and primary contact as participants.",
       "Type": "Custom",
       "DriverClass": "Sales.LogActivity",
       "IconClass": "fa-solid fa-clock-rotate-left",
@@ -42,6 +48,9 @@
     "relatedEntities": {
       "MJ: Action Params": [
         {
+          "_comments": [
+            "Former description, kept as the design note: The deal the activity is about. Always linked, always with role Regarding — it is the anchor every read of a deal's timeline starts from, so an activity without it would be unreachable rather than merely unattributed."
+          ],
           "fields": {
             "ActionID": "@parent:ID",
             "Name": "DealID",
@@ -49,7 +58,7 @@
             "ValueType": "Scalar",
             "IsArray": false,
             "IsRequired": true,
-            "Description": "The deal the activity is about. Always linked, always with role Regarding — it is the anchor every read of a deal's timeline starts from, so an activity without it would be unreachable rather than merely unattributed."
+            "Description": "The deal the activity is about."
           },
           "primaryKey": {
             "ID": "5A1E5000-0000-4000-8000-000000000122"
@@ -60,6 +69,9 @@
           }
         },
         {
+          "_comments": [
+            "Former description, kept as the design note: One of Call, Meeting, Note, Email — the ActivityType Code, never its display Name. Validated against that set rather than passed through, so a bad value is reported as a bad request instead of surfacing as 'no ActivityType with Code X', which reads like a missing seed."
+          ],
           "fields": {
             "ActionID": "@parent:ID",
             "Name": "TypeCode",
@@ -67,7 +79,7 @@
             "ValueType": "Scalar",
             "IsArray": false,
             "IsRequired": true,
-            "Description": "One of Call, Meeting, Note, Email — the ActivityType Code, never its display Name. Validated against that set rather than passed through, so a bad value is reported as a bad request instead of surfacing as 'no ActivityType with Code X', which reads like a missing seed."
+            "Description": "The activity type code: Call, Meeting, Note or Email."
           },
           "primaryKey": {
             "ID": "5A1E5000-0000-4000-8000-000000000123"
@@ -78,6 +90,9 @@
           }
         },
         {
+          "_comments": [
+            "Former description, kept as the design note: The subject. Activity.Title is NOT NULL, nvarchar(500)."
+          ],
           "fields": {
             "ActionID": "@parent:ID",
             "Name": "Title",
@@ -85,7 +100,7 @@
             "ValueType": "Scalar",
             "IsArray": false,
             "IsRequired": true,
-            "Description": "The subject. Activity.Title is NOT NULL, nvarchar(500)."
+            "Description": "The subject, up to 500 characters."
           },
           "primaryKey": {
             "ID": "5A1E5000-0000-4000-8000-000000000124"
@@ -96,6 +111,9 @@
           }
         },
         {
+          "_comments": [
+            "Former description, kept as the design note: Free text, stored as Activity.Description."
+          ],
           "fields": {
             "ActionID": "@parent:ID",
             "Name": "Notes",
@@ -103,7 +121,7 @@
             "ValueType": "Scalar",
             "IsArray": false,
             "IsRequired": false,
-            "Description": "Free text, stored as Activity.Description."
+            "Description": "Free text about the activity."
           },
           "primaryKey": {
             "ID": "5A1E5000-0000-4000-8000-000000000125"
@@ -114,6 +132,9 @@
           }
         },
         {
+          "_comments": [
+            "Former description, kept as the design note: When it happened, ISO-8601. Omit for now. An unparseable value is REFUSED rather than defaulted to the current time: a timeline is ordered by StartedAt, so a silent fallback files the activity at the wrong point with nothing to show it moved."
+          ],
           "fields": {
             "ActionID": "@parent:ID",
             "Name": "StartedAt",
@@ -121,7 +142,7 @@
             "ValueType": "Scalar",
             "IsArray": false,
             "IsRequired": false,
-            "Description": "When it happened, ISO-8601. Omit for now. An unparseable value is REFUSED rather than defaulted to the current time: a timeline is ordered by StartedAt, so a silent fallback files the activity at the wrong point with nothing to show it moved."
+            "Description": "When it happened, as an ISO-8601 date and time. Omit for now; a value that cannot be read is refused."
           },
           "primaryKey": {
             "ID": "5A1E5000-0000-4000-8000-000000000126"
@@ -129,6 +150,23 @@
           "sync": {
             "lastModified": "2026-08-26T00:25:24.372Z",
             "checksum": "95cf6d9eb81b3debf6c55868083fce33eff37c5d3c3b5ec8305b45c817d56ca5"
+          }
+        },
+        {
+          "_comments": [
+            "bc-aidp-next-golive#408. Absent means the service links the deal's account and primary contact, as before. Present (even an empty list) means exactly these are linked as Participants, and the deal parties are not added. Every entry is validated and checked readable by the caller; a bad one refuses the whole call."
+          ],
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Parties",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Optional JSON list of people and organizations to link, each {\"Kind\": \"Person\" or \"Organization\", \"RecordID\": \"<id>\"}. When given, exactly these are linked as participants (up to 50) instead of the deal's account and primary contact."
+          },
+          "primaryKey": {
+            "ID": "5A1E5000-0000-4000-8000-000000000127"
           }
         }
       ]

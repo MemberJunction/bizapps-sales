@@ -42,7 +42,7 @@ import { expect, test } from '../lib/test';
 import { captureConsoleErrors, expectOnlyKnownErrors } from '../lib/explorer';
 import { QueryAll, QueryOne } from '../lib/db';
 import { AssertBaseline, ComposeDeal, PurgeByPrefix, PurgeDeal } from '../lib/deal-flow';
-import { ByTestId, OpenSection, RevealInForm } from '../lib/deal-form';
+import { ByTestId, ChooseLineProduct, OfferedLineProducts, OpenSection, RevealInForm } from '../lib/deal-form';
 
 const RUN = `PW-X29-${Date.now().toString(36)}`;
 let dealID = '';
@@ -117,26 +117,24 @@ test.describe('#29 — products from another company are sellable on a deal', ()
 
         const editor = page.locator('[data-testid="line-editor"]:visible').first();
         await expect(editor, 'Add a product must open the line editor').toBeVisible({ timeout: 20_000 });
-        const picker = editor.locator('[data-testid="line-product"]');
-        await expect(picker, 'the line must offer a product picker').toBeVisible({ timeout: 20_000 });
-
         // ── 1. the picker OFFERS it ──────────────────────────────────────────────────────────────
         /**
-         * Found by CONTAINMENT: an option reads `Name (SKU) — Company`, naming its owner because two
-         * companies can sell an identically-named product.
+         * Typed, not read off the list: the box is a type-ahead showing a capped page, with the deal's
+         * company first (golive#360), so a foreign product need not be on the first page.
          */
-        const offered = (await picker.locator('option').allTextContents())
-            .map((o) => o.trim())
-            .filter((o) => o && !o.startsWith('—'));
-        const match = offered.find((o) => o.includes(target.Name));
+        const offered = await OfferedLineProducts(editor, target.Name);
         expect(
-            match,
+            offered,
             `'${target.Name}' is Active and owned by another company, so the picker must offer it (#29). ` +
                 `Offered: ${offered.slice(0, 12).join(' | ')}`,
-        ).toBeTruthy();
+        ).toContain(target.Name);
 
-        // ── 2. choosing it leaves the line SAVEABLE ──────────────────────────────────────────────
-        await picker.selectOption({ label: match as string });
+        // ── 2. choosing it leaves the line SAVEABLE, and says whose revenue it is ────────────────
+        await ChooseLineProduct(editor, target.Name);
+        await expect(
+            editor.locator('[data-testid="line-product-foreign"]'),
+            "a product from another company must say so before the line is saved (golive#360)",
+        ).toBeVisible({ timeout: 10_000 });
 
         /**
          * Fill AND blur. The quantity binding commits on change, so a filled-but-unblurred input can

@@ -2,7 +2,7 @@ import '@angular/compiler';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { DealEntity, DealStatusOption } from '@mj-biz-apps/sales-entities';
-import { MJSDealPipelinePanel, type LossReasonOption } from '../lib/form-panels/deal-form.panels';
+import { MJSDealClosePanel, MJSDealPipelinePanel, type LossReasonOption } from '../lib/form-panels/deal-form.panels';
 
 /**
  * bc-aidp-next-golive#205: the deal form offered Won and Lost in the Status control, and picking one
@@ -132,6 +132,41 @@ describe('editability fails CLOSED when the status cannot be resolved', () => {
 
     it('stays editable on an UNSAVED deal whose status is not set', () => {
         expect(panelWith(null, STATUSES, false).StatusIsEditable).toBe(true);
+    });
+});
+
+/**
+ * A DEAL WHOSE STATUS ROW IS GONE CAN BE REPAIRED FROM HERE (#402).
+ *
+ * The lock notice tells the user to set the status to an open one, and the server allows exactly that
+ * write. The control used to be disabled for it, leaving the notice's instruction impossible to follow.
+ */
+describe('a deal whose status row no longer exists', () => {
+    function missing() {
+        const p = panelWith('ghost-1');
+        Object.defineProperty(p, 'FormComponent', { value: { IsLocked: true, IsStatusMissing: true }, configurable: true });
+        return p;
+    }
+
+    it('leaves the status control editable', () => {
+        expect(missing().StatusIsEditable).toBe(true);
+    });
+
+    it('offers only the open statuses: the server refuses a close from a status it cannot read', () => {
+        expect(missing().SelectableStatuses.map((s) => s.Name)).toEqual(['Open', 'On Hold']);
+    });
+
+    it('writes the open status the user picks, which is the repair', () => {
+        const p = missing();
+        p.SetStatus('open-1');
+        expect(p.Record?.DealStatusTypeID).toBe('open-1');
+        expect(p.PendingReopenStatusID, 'there is no close to undo').toBeNull();
+    });
+
+    it('still fails closed for a status that exists but is not in the list', () => {
+        // A DEACTIVATED row still exists and says whether it locks; it is not the missing case.
+        expect(panelWith('ghost-1').StatusIsMissing).toBe(false);
+        expect(panelWith('ghost-1').StatusIsEditable).toBe(false);
     });
 });
 
@@ -471,7 +506,7 @@ describe('the reopen actually reaches the screen', () => {
 describe('what an operation reported outlives the mode it was started in', () => {
     const source = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
     const statusField = (() => {
-        const start = source.indexOf('<label class="mj-forms-field-label">Status</label>');
+        const start = source.indexOf('<label class="mj-forms-field-label" [attr.for]="EditMode ? FieldIdPrefix + \'-status\' : null">Status</label>');
         return source.slice(start, source.indexOf('</mj-collapsible-panel>', start));
     })();
 
@@ -496,13 +531,35 @@ describe('what an operation reported outlives the mode it was started in', () =>
 describe('the status hints point at this control, not away from it', () => {
     const source = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
     const statusField = (() => {
-        const start = source.indexOf('<label class="mj-forms-field-label">Status</label>');
+        const start = source.indexOf('<label class="mj-forms-field-label" [attr.for]="EditMode ? FieldIdPrefix + \'-status\' : null">Status</label>');
         return source.slice(start, source.indexOf('</mj-collapsible-panel>', start));
     })();
     const hints = [...statusField.matchAll(/class="mjs-field__hint">([^<]+)</g)].map((m) => m[1].trim());
 
-    it('has one hint for each side of the lock', () => {
-        expect(hints.length, 'a closed-deal hint and an open-deal hint').toBe(2);
+    it('has one hint for each side of the lock, one for an unsaved deal, and one for a status that no longer exists', () => {
+        expect(hints.length, 'an unsaved-deal hint, a missing-status hint, a closed-deal hint and an open-deal hint').toBe(4);
+    });
+
+    it('tells a deal whose status is gone how to repair it from here (#402)', () => {
+        const missing = hints.find((h) => h.startsWith('Missing.'));
+        expect(missing, 'a missing-status hint').toBeDefined();
+        expect(missing).toMatch(/Pick an open status and save/);
+    });
+
+    it('does not call an UNSAVED deal open or offer a Close it cannot have yet', () => {
+        /**
+         * A new deal shows "— choose —" for Status, and the Close panel offers Close only after the
+         * first save. The open-deal hint said both "Open." and "use Close on the Close panel" to it.
+         * The unsaved branch has to come first, or the open-deal hint still wins on a new deal.
+         */
+        const unsaved = hints.find((h) => h.startsWith('No status yet.'));
+        expect(unsaved, 'an unsaved-deal hint').toBeDefined();
+        expect(unsaved).toMatch(/saves as open/);
+        expect(unsaved).toMatch(/after saving/);
+        const unsavedAt = statusField.indexOf('@if (!Record.IsSaved)');
+        const openAt = statusField.indexOf('Open. Pick a closing status');
+        expect(unsavedAt, 'the unsaved branch').toBeGreaterThan(-1);
+        expect(unsavedAt, 'the unsaved branch is checked before the open-deal hint').toBeLessThan(openAt);
     });
 
     it('tells an OPEN deal it can close from here', () => {
@@ -532,5 +589,40 @@ describe('the status hints point at this control, not away from it', () => {
                 /\b(Won|Lost|Abandoned|On Hold)\b/,
             );
         }
+    });
+});
+
+describe('a deal in a deactivated closing status can still be reopened (#461)', () => {
+    const WITH_DEACTIVATED_WON: DealStatusOption[] = [
+        { ID: 'open-1', Name: 'Open', LocksDeal: false, IsWon: false, IsLost: false, IsActive: true },
+        { ID: 'hold-1', Name: 'On Hold', LocksDeal: false, IsWon: false, IsLost: false, IsActive: true },
+        { ID: 'won-legacy', Name: 'Legacy Won', LocksDeal: true, IsWon: true, IsLost: false, IsActive: false },
+        { ID: 'lost-1', Name: 'Lost', LocksDeal: true, IsWon: false, IsLost: true, IsActive: true },
+    ];
+
+    it('resolves the deactivated status name and keeps the Status control editable for reopen', () => {
+        const p = panelWith('won-legacy', WITH_DEACTIVATED_WON);
+        expect(p.CurrentStatusName).toBe('Legacy Won');
+        expect(p.CurrentStatusIsClosing).toBe(true);
+        expect(p.StatusIsEditable).toBe(true);
+        expect(p.SelectableStatuses.map((s) => s.Name)).toEqual(['Open', 'On Hold']);
+    });
+
+    it('does not offer a deactivated status as a selectable choice on an open deal', () => {
+        const p = panelWith('open-1', WITH_DEACTIVATED_WON);
+        expect(p.SelectableStatuses.map((s) => s.Name)).toEqual(['Open', 'On Hold', 'Lost']);
+    });
+
+    it('keeps Reopen available on the Close panel while excluding the deactivated status from ClosingStatuses', () => {
+        const closePanel = new MJSDealClosePanel();
+        Object.defineProperty(closePanel, 'Record', {
+            value: { DealStatusTypeID: 'won-legacy', IsSaved: true } as unknown as DealEntity,
+            configurable: true,
+            writable: true,
+        });
+        (closePanel as unknown as { statuses: { set(v: DealStatusOption[]): void } }).statuses.set(WITH_DEACTIVATED_WON);
+        expect(closePanel.CanReopen).toBe(true);
+        expect(closePanel.CanClose).toBe(false);
+        expect(closePanel.ClosingStatuses.map((s) => s.Name)).toEqual(['Lost']);
     });
 });

@@ -32,7 +32,10 @@
  * Creating the marker is the lock, so it is exclusive: a start that checked "no marker" and then wrote
  * one let two drivers launched together both proceed. Every write goes through a temp file, so a kill
  * mid-write never leaves a half-written marker, and a marker that cannot be read or names paths outside
- * the run's own files stops the start rather than being acted on.
+ * the run's own files stops the start rather than being acted on. The one exception is the create on a
+ * filesystem with no hard links (FAT, exFAT, some network shares): it writes the marker in place with
+ * an exclusive open, which is still the lock but not atomic. A kill mid-write there leaves a marker
+ * that does not parse, and the next start refuses it as unreadable (`readMarker`) rather than guessing.
  *
  * ── WHY THE COMMANDS ARE SPAWNED, NOT `execSync`'d ─────────────────────────────────────────────
  *
@@ -47,6 +50,11 @@
  * `MUTATE_CHECKS_BUILD_COMMAND` and `MUTATE_CHECKS_TEST_COMMAND` replace `npm run build:packages` and
  * the integration suite, so `mutate-checks.spec.mjs` can interrupt a run with no database. Either one
  * set prints a warning, because a stray value reports results the real suite never produced.
+ *
+ * `MUTATE_CHECKS_CLAIM_GATE` names a path. A start that has it set, once recovery is done and before it
+ * creates its marker, writes `<path>.waiting` and waits for `<path>.go` to exist. The spec uses it to
+ * put a second driver in that gap every time, instead of hoping two launches collide. It warns too,
+ * because a stray value makes every start hang.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, linkSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -85,6 +93,7 @@ export async function startMutationRun(repo) {
         repo,
         markerPath: join(repo, MARKER_NAME),
         commands: readCommands(),
+        claimGate: readClaimGate(),
         procs: createProcessTracker(repo),
         state: null,
     };
@@ -114,6 +123,7 @@ export async function startMutationRun(repo) {
 async function claimTree(ctx, state) {
     for (let attempt = 0; attempt < 2; attempt++) {
         await recoverStrandedRun(ctx);
+        await passClaimGate(ctx);
         if (createMarker(ctx, state)) return;
     }
     console.error(`\n✖ another driver keeps claiming this tree (${ctx.markerPath}). Nothing was run.\n`);
@@ -156,6 +166,19 @@ function readCommands() {
     return { build: build ?? REAL_BUILD_COMMAND, test: test ?? REAL_TEST_COMMAND, testSeamed: Boolean(test) };
 }
 
+function readClaimGate() {
+    const gate = process.env.MUTATE_CHECKS_CLAIM_GATE;
+    if (gate) console.error(`WARNING: MUTATE_CHECKS_CLAIM_GATE is set to "${gate}" -- every start waits for ${gate}.go before it claims the tree.`);
+    return gate || null;
+}
+
+/** The test seam above: holds the start between recovery and create until the spec lets it go. */
+async function passClaimGate(ctx) {
+    if (!ctx.claimGate) return;
+    writeFileSync(`${ctx.claimGate}.waiting`, String(process.pid));
+    while (!existsSync(`${ctx.claimGate}.go`)) await new Promise((resolve) => setTimeout(resolve, 25));
+}
+
 /** Written beside the marker, so the rename or link never crosses a filesystem. */
 function stageMarker(ctx, state) {
     const staged = `${ctx.markerPath}.${process.pid}.tmp`;
@@ -168,6 +191,9 @@ function writeMarker(ctx) {
     renameSync(stageMarker(ctx, ctx.state), ctx.markerPath);
 }
 
+/** What `linkSync` throws on a filesystem that has no hard links, depending on the OS. */
+const NO_HARD_LINKS = new Set(['EPERM', 'ENOTSUP', 'ENOSYS']);
+
 /** A hard link fails if the marker exists, which makes the first write the lock. False if we lost. */
 function createMarker(ctx, state) {
     const staged = stageMarker(ctx, state);
@@ -176,9 +202,24 @@ function createMarker(ctx, state) {
         return true;
     } catch (err) {
         if (err.code === 'EEXIST') return false;
+        if (NO_HARD_LINKS.has(err.code)) return createMarkerInPlace(ctx, state);
         throw err;
     } finally {
         rmSync(staged, { force: true });
+    }
+}
+
+/**
+ * The fallback for a filesystem with no hard links. `wx` fails if the marker exists, so it is still the
+ * lock, but the bytes land in place: a kill mid-write leaves a marker `readMarker` refuses as unreadable.
+ */
+function createMarkerInPlace(ctx, state) {
+    try {
+        writeFileSync(ctx.markerPath, `${JSON.stringify(state, null, 2)}\n`, { flag: 'wx' });
+        return true;
+    } catch (err) {
+        if (err.code === 'EEXIST') return false;
+        throw err;
     }
 }
 

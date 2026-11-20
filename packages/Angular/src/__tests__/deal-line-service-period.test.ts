@@ -1,7 +1,9 @@
 import '@angular/compiler';
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { OrdersEngine, type ServicePeriodSource } from '@mj-biz-apps/orders-entities';
+import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.component';
 
 /**
  * A deal line whose product earns over a window (`RequiresServicePeriod`) and that orders cannot date
@@ -47,9 +49,79 @@ describe('the deal line editor asks for a service period orders cannot supply', 
 
     it('clears the window when the product changes to one that is dated elsewhere', () => {
         const change = EDITOR.slice(EDITOR.indexOf('public OnProductChange('), EDITOR.indexOf('public get ShowPricePicker'));
-        const clearAt = change.indexOf('clearServicePeriodLeavingLineSource(productID)');
+        const clearAt = change.indexOf('clearServicePeriodForProductChange(productID)');
         // Before ProductID moves, so the rule reads the product being left.
         expect(clearAt).toBeGreaterThan(-1);
         expect(clearAt).toBeLessThan(change.indexOf('this.Working.ProductID = productID'));
+    });
+});
+
+/**
+ * #374: a subscription line re-picked as a one-time or event product kept its term start. The old rule
+ * cleared only when leaving a `Line`-source product, and a subscription reports `Subscription`, so an
+ * event line reached confirm with a start and no end and orders skipped stamping the event's dates.
+ * Driven through the real method with orders' answer stubbed per product.
+ */
+describe('changing the product clears dates the new product cannot use', () => {
+    const SUBSCRIPTION = 'sub-product';
+    const EVENT = 'event-product';
+    const DATED = 'dated-product';
+    const DATED_2 = 'dated-product-2';
+    const UNLISTED = 'withdrawn-product';
+    const SOURCES: Record<string, ServicePeriodSource> = {
+        [SUBSCRIPTION]: 'Subscription', [EVENT]: 'Event', [DATED]: 'Line', [DATED_2]: 'Line',
+    };
+
+    afterEach(() => vi.restoreAllMocks());
+
+    function change(from: string, to: string | null) {
+        vi.spyOn(OrdersEngine.Instance, 'ServicePeriodSource').mockImplementation(
+            (id: string) => SOURCES[id] ?? 'NotRequired',
+        );
+        const e = Object.create(MJSDealLineEditorComponent.prototype) as MJSDealLineEditorComponent & {
+            clearServicePeriodForProductChange(next: string | null): void;
+        };
+        const working = {
+            ProductID: from,
+            ServicePeriodStart: new Date('2026-01-01T00:00:00Z') as Date | null,
+            ServicePeriodEnd: new Date('2026-12-31T00:00:00Z') as Date | null,
+        };
+        Object.defineProperty(e, 'Working', { value: working, writable: true, configurable: true });
+        e.Products = [
+            { ID: SUBSCRIPTION, SubscriptionTypeID: 'type-1' },
+            { ID: EVENT, SubscriptionTypeID: null },
+            { ID: DATED, SubscriptionTypeID: null },
+            { ID: DATED_2, SubscriptionTypeID: null },
+        ] as unknown as MJSDealLineEditorComponent['Products'];
+        e.clearServicePeriodForProductChange(to);
+        return working;
+    }
+
+    it('clears both dates moving from a subscription to an event product', () => {
+        const w = change(SUBSCRIPTION, EVENT);
+        expect(w.ServicePeriodStart).toBeNull();
+        expect(w.ServicePeriodEnd).toBeNull();
+    });
+
+    it('clears them moving from a subscription to a product the rep dates', () => {
+        expect(change(SUBSCRIPTION, DATED).ServicePeriodStart).toBeNull();
+    });
+
+    it('keeps the term start moving between two subscription products', () => {
+        expect(change(SUBSCRIPTION, SUBSCRIPTION).ServicePeriodStart).not.toBeNull();
+    });
+
+    it('keeps a window moving between two products the rep dates', () => {
+        const w = change(DATED, DATED_2);
+        expect(w.ServicePeriodStart).not.toBeNull();
+        expect(w.ServicePeriodEnd).not.toBeNull();
+    });
+
+    it('still clears a window moving from a dated product to a subscription', () => {
+        expect(change(DATED, SUBSCRIPTION).ServicePeriodStart).toBeNull();
+    });
+
+    it('leaves the dates alone for a product the catalogue does not list', () => {
+        expect(change(SUBSCRIPTION, UNLISTED).ServicePeriodStart).not.toBeNull();
     });
 });

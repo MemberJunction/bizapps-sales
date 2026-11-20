@@ -9,7 +9,8 @@
  *
  * Every step below therefore asserts a ROW, not a rendering:
  *
- *   create      -> an OrderHeader exists, Draft, CompanyID from the pipeline, bill-to from the account
+ *   create      -> an OrderHeader exists, Draft, CompanyID from the deal (a company linked to the
+ *                  pipeline), bill-to from the account
  *   add lines   -> OrderLine rows exist with a UnitPrice sales never sent
  *   stage move  -> the order's status became Quoted because the STAGE declared it
  *   close won   -> the order is UNCHANGED, both tasks exist and are linked to the ORDER, and a contract
@@ -62,8 +63,8 @@ test.describe('lifecycle — create, price, advance, close won', () => {
          * pipeline's `CloseWonPolicy` says `CreateContract: true`, and picking the pipeline by its label
          * would silently test the D2C path the day the seed reorders them.
          */
-        const pipeline = await QueryOne<{ Name: string; CompanyID: string }>(`
-            SELECT TOP 1 Name, CompanyID FROM __mj_BizAppsSales.Pipeline
+        const pipeline = await QueryOne<{ ID: string; Name: string }>(`
+            SELECT TOP 1 CAST(ID AS nvarchar(50)) AS ID, Name FROM __mj_BizAppsSales.Pipeline
              WHERE IsActive = 1 AND ISJSON(CloseWonPolicy) = 1
                AND JSON_VALUE(CloseWonPolicy, '$.CreateContract') = 'true'
              ORDER BY DisplayRank`);
@@ -129,10 +130,18 @@ test.describe('lifecycle — create, price, advance, close won', () => {
               FROM __mj_BizAppsOrders.OrderHeader WHERE ID = '${orderID}'`);
         expect(order, 'the embedded order must exist in orders, not merely be referenced').toBeTruthy();
         expect(String(order!.Status), 'a new deal\'s order starts in Draft').toBe('Draft');
+        // The deal's company is the rep's choice among the companies its pipeline is actively linked
+        // to; the order sells as the deal's company.
+        const dealCompany = await QueryOne<{ CompanyID: string; Linked: number }>(`
+            SELECT CAST(d.CompanyID AS nvarchar(50)) AS CompanyID,
+                   (SELECT COUNT(*) FROM __mj_BizAppsSales.PipelineCompany pc
+                     WHERE pc.PipelineID = '${pipeline!.ID}' AND pc.CompanyID = d.CompanyID AND pc.IsActive = 1) AS Linked
+              FROM __mj_BizAppsSales.Deal d WHERE d.ID = '${dealID}'`);
+        expect(Number(dealCompany?.Linked ?? 0), 'the deal sells as a company actively linked to its pipeline').toBe(1);
         expect(
             String(order!.CompanyID).toLowerCase(),
-            'and its CompanyID comes from the PIPELINE — the deal never chooses the selling company',
-        ).toBe(String(pipeline!.CompanyID).toLowerCase());
+            'and the order\'s CompanyID is the deal\'s company',
+        ).toBe(String(dealCompany!.CompanyID).toLowerCase());
 
         const deal = await QueryOne<{ AccountID: string | null }>(
             `SELECT AccountID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}'`,
@@ -171,12 +180,13 @@ test.describe('lifecycle — create, price, advance, close won', () => {
          * The Stage select offers only THIS pipeline's stages since golive#291, and the pick is by the
          * option's ID rather than its text -- so the stage no longer has to be the only active one
          * carrying its name. The move is still confirmed by ID from the database rather than trusted
-         * from the pick.
+         * from the pick. A stage whose status locks is not offered, so the pick is an open one.
          */
         const quoting = await QueryOne<{ ID: string; Name: string }>(`
             SELECT TOP 1 s.ID, s.Name FROM __mj_BizAppsSales.PipelineStage s
+              JOIN __mj_BizAppsSales.DealStatusType t ON t.ID = s.DealStatusTypeID
              WHERE s.PipelineID = (SELECT PipelineID FROM __mj_BizAppsSales.Deal WHERE ID = '${dealID}')
-               AND s.IsActive = 1 AND s.OrderStatusOnEntry = 'Quoted'
+               AND s.IsActive = 1 AND s.OrderStatusOnEntry = 'Quoted' AND t.LocksDeal = 0
              ORDER BY s.DisplayOrder`);
         expect(
             quoting?.Name,

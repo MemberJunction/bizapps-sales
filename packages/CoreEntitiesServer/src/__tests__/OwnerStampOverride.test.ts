@@ -14,8 +14,9 @@ import { DealEntityServer } from '../DealEntityServer.js';
  * is indistinguishable from a deliberate hand-set, and refused the save — losing an unrelated edit
  * and telling the user to do the thing they had just done.
  *
- * `CompanyID` is the precedent. It is `serverMaintained` in the same field list, equally derived, and
- * `stampCompanyFromPipeline` overwrites a supplied value rather than refusing.
+ * `CompanyID` was the precedent: `serverMaintained` in the same field list, it was copied from the
+ * pipeline and a supplied value overwritten rather than refused. It is the rep's choice now that a
+ * pipeline can serve several companies, and is checked against the pipeline's links instead.
  */
 
 type Harness = {

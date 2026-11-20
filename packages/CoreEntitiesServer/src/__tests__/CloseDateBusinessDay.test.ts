@@ -248,6 +248,8 @@ describe('Sales.CloseDeal configures the zone, then stamps and dates its tasks f
         op.resolvePolicy = async () => ({ CloseWonTasks: { DueInDays: DUE_IN_DAYS } });
         op.planRouting = async () => [];
         op.resolveClosing = async () => ({ ...NO_CLOSING, Probability: 100 });
+        // The deal's schedule reaching its order has its own checks (close-won-schedule CS1-CS5).
+        op.sendScheduleToOrder = async () => null;
 
         h.result = await op.InternalExecute({ DealID: 'd1', DealStatusTypeID: WON.ID }, h.provider, h.user);
         return h;

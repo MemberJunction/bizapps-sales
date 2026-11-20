@@ -27,10 +27,12 @@ function amountMayHaveMoved(s: {
     linesDirty?: boolean;
     amountIsComputed?: boolean;
     amount?: number | null;
+    /** The persisted status locks the deal: this save is a permitted edit to a closed deal. */
+    locked?: boolean;
 }): boolean {
     const orderID = s.orderID ?? s.hasOrder;
-    return (!!s.hasOrder && (!!s.orderDirty || !!s.linesDirty))
-        || (!!orderID && (s.amountIsComputed === true || (s.amount ?? null) === null));
+    return !s.locked && ((!!s.hasOrder && (!!s.orderDirty || !!s.linesDirty))
+        || (!!orderID && (s.amountIsComputed === true || (s.amount ?? null) === null)));
 }
 
 describe('when a deal re-reads its order total', () => {
@@ -69,6 +71,16 @@ describe('when a deal re-reads its order total', () => {
         expect(amountMayHaveMoved({ hasOrder: false, orderID: true, amount: null })).toBe(true);
         expect(amountMayHaveMoved({ hasOrder: false, orderID: true, amount: 229, amountIsComputed: true })).toBe(true);
     });
+
+    /**
+     * A CLOSED DEAL'S AMOUNT IS WHAT WAS AGREED (#351). The refresh writes `Amount` with raw SQL, past
+     * the close lock, so a permitted edit to a locked deal must not re-copy an order total that moved.
+     */
+    it('never re-reads on a locked deal, whatever else is true', () => {
+        expect(amountMayHaveMoved({ locked: true, hasOrder: false, orderID: true, amount: 229, amountIsComputed: true })).toBe(false);
+        expect(amountMayHaveMoved({ locked: true, hasOrder: true, amount: null })).toBe(false);
+        expect(amountMayHaveMoved({ locked: true, hasOrder: true, amount: 5000, linesDirty: true })).toBe(false);
+    });
 });
 
 /**
@@ -91,6 +103,7 @@ describe('the table describes the code that actually runs', () => {
             'this.AmountIsComputed === true',
             'this.Amount === null',
             'this.OrderID',   // the state tests must ask the FK, not the in-memory object
+            '!this._lockedAtSave &&',   // #351: a locked deal's amount is frozen
         ]) {
             expect(expr, `the guard no longer tests ${term}`).toContain(term);
         }

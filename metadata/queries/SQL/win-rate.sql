@@ -30,6 +30,17 @@
 -- now read the same way: an undated win is outside every bounded window and inside the unbounded
 -- one, so it is never invisible everywhere at once.
 --
+-- ── THE FILTER BAR (bc-aidp-next-golive#350) ────────────────────────────────────────────────────
+--
+-- CompanyIDs, OwnerEmployeeIDs, PipelineIDs and ProductCompanyIDs are lists, rendered with `sqlIn`,
+-- and narrow the closed deals the rate is computed over, exactly as they narrow `Sales: Dashboard
+-- Summary`, so the Win rate tile describes the same deals as the tiles beside it. The single-value
+-- CompanyID and PipelineID still work. A list that is "All" is left out rather than sent empty, since
+-- `sqlIn` renders an empty list as `(NULL)`, which matches nothing.
+--
+-- Product company matches a deal when at least one line of its order belongs to a selected company
+-- (OrderLine.CompanyID). The deal counts once at its full amount; a deal with no lines cannot match.
+--
 -- NULLIF GUARDS BOTH RATES. A period with no closed deals returns NULL rather than dividing by zero,
 -- and NULL is the honest answer: "no rate" is a different fact from "a rate of zero".
 SELECT
@@ -39,6 +50,7 @@ SELECT
     d.Pipeline                                   AS PipelineName,
     d.DealTypeID,
     d.DealType                                   AS DealTypeName,
+    ISNULL(cur.Code, N'USD')                     AS CurrencyCode,
     COUNT(*)                                     AS ClosedCount,
     SUM(CASE WHEN st.IsWon  = 1 THEN 1 ELSE 0 END) AS WonCount,
     SUM(CASE WHEN st.IsLost = 1 THEN 1 ELSE 0 END) AS LostCount,
@@ -52,12 +64,28 @@ FROM [__mj_BizAppsSales].vwDeals d
 INNER JOIN [__mj_BizAppsSales].DealStatusType st
         ON st.ID = d.DealStatusTypeID
        AND st.IsClosed = 1
+LEFT OUTER JOIN [__mj_BizAppsAccounting].Currency cur
+        ON cur.ID = d.CurrencyID
 WHERE 1 = 1
   {% if CompanyID %}
   AND d.CompanyID = {{ CompanyID | sqlString }}
   {% endif %}
+  {% if CompanyIDs %}
+  AND d.CompanyID IN {{ CompanyIDs | sqlIn }}
+  {% endif %}
   {% if PipelineID %}
   AND d.PipelineID = {{ PipelineID | sqlString }}
+  {% endif %}
+  {% if PipelineIDs %}
+  AND d.PipelineID IN {{ PipelineIDs | sqlIn }}
+  {% endif %}
+  {% if OwnerEmployeeIDs %}
+  AND d.OwnerEmployeeID IN {{ OwnerEmployeeIDs | sqlIn }}
+  {% endif %}
+  {% if ProductCompanyIDs %}
+  AND EXISTS (SELECT 1 FROM [__mj_BizAppsOrders].OrderLine ol
+              WHERE ol.OrderHeaderID = d.OrderID
+                AND ol.CompanyID IN {{ ProductCompanyIDs | sqlIn }})
   {% endif %}
   {% if PeriodStart %}
   AND d.ActualCloseDate >= {{ PeriodStart | sqlString }}
@@ -66,6 +94,7 @@ WHERE 1 = 1
   AND d.ActualCloseDate <= {{ PeriodEnd | sqlString }}
   {% endif %}
 GROUP BY
-    d.CompanyID, d.Company, d.PipelineID, d.Pipeline, d.DealTypeID, d.DealType
+    d.CompanyID, d.Company, d.PipelineID, d.Pipeline, d.DealTypeID, d.DealType,
+    ISNULL(cur.Code, N'USD')
 ORDER BY
-    d.Company, d.Pipeline, d.DealType;
+    d.Company, d.Pipeline, d.DealType, CurrencyCode;

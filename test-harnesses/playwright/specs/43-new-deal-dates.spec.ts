@@ -35,6 +35,7 @@ import {
     FirstOpenStageOf,
     FirstOpenStatus,
     OpenNewDeal,
+    FirstSalesAccountName,
     PickLookup,
     PipelineByName,
     SaveDeal,
@@ -104,7 +105,7 @@ test.describe('new deal — dates entered before the first save', () => {
                 const pipeline = await PipelineByName();
                 await SetPipelineByID(page, pipeline.ID);
                 await SetStageByID(page, (await FirstOpenStageOf(pipeline.ID)).ID);
-                await PickLookup(page, 'AccountID');
+                await PickLookup(page, 'AccountID', await FirstSalesAccountName());
                 await SetStatusByID(page, (await FirstOpenStatus()).ID);
 
                 await enter(page, 'ExpectedCloseDate', EXPECTED_CLOSE);

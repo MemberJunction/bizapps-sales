@@ -14,6 +14,11 @@
  *      Entity rows, not `sys.schemas`: a schema can exist and be empty, and an entity the provider does
  *      not know is unusable however many tables back it.
  *
+ * A FEATURE of an app that arrives in a newer release of it (contracts' order links) is judged the same
+ * way, by its probe package and by ONE ENTITY instead of a schema: `manifest.entities[feature]` names the
+ * entity, and the feature is present when the provider registers an entity of exactly that name. A check
+ * that needs it names the feature in `RequiresApp`.
+ *
  * A linked app whose schema is missing is treated exactly like an unlinked one: its bundles, and any
  * check that names it in `RequiresApp`, are left out and listed with the reason. They are not "skipped"
  * (that word is reserved for RequiresMutation checks the run chose not to execute).
@@ -26,9 +31,9 @@ export const PRESENCE_PREFIX = 'sibling apps ->';
 const PRESENT = 'present';
 
 /**
- * @param {{ probes: Record<string, string>, schemas: Record<string, string> }} manifest
+ * @param {{ probes: Record<string, string>, schemas: Record<string, string>, entities?: Record<string, string> }} manifest
  * @param {string[]} optionalLoads  the runner's `<pkg>: loaded | absent | FAILED (...)` entries
- * @param {{ SchemaName: string }[]} entities  the provider's entity metadata
+ * @param {{ SchemaName: string, Name: string }[]} entities  the provider's entity metadata
  * @returns {Map<string, string>} app -> 'present' or the reason it is not
  */
 export function judgeAppPresence(manifest, optionalLoads, entities) {
@@ -36,6 +41,12 @@ export function judgeAppPresence(manifest, optionalLoads, entities) {
     for (const [app, pkg] of Object.entries(manifest.probes)) {
         if (!optionalLoads.includes(`${pkg}: loaded`)) {
             out.set(app, `not linked (${pkg} did not load)`);
+            continue;
+        }
+        const entity = manifest.entities?.[app];
+        if (entity) {
+            const has = entities.some((e) => String(e.Name).toLowerCase() === entity.toLowerCase());
+            out.set(app, has ? PRESENT : `linked, but not installed (no entity named ${entity})`);
             continue;
         }
         const schema = manifest.schemas?.[app];

@@ -88,23 +88,27 @@ module.exports = {
   /**
    * Build commands to run after code generation. Left EMPTY for the initial
    * scaffold: the first CodeGen run only needs to generate + persist entity
-   * metadata. Package builds are run explicitly via `npm run build` once the
+   * metadata. Package builds are run explicitly via `pnpm run build` once the
    * generated code exists.
    */
   commands: [],
 
-  /**
-   * Open App installer layout. This distribution puts its server/client apps
-   * under apps/ (not the MJ-repo default of packages/MJAPI + packages/MJExplorer).
-   */
-  openApps: {
-    serverPackagePath: 'apps/MJAPI',
-    clientPackagePath: 'apps/MJExplorer',
-  },
-
   // ============================================================================
   // CodeGen Overrides
   // ============================================================================
+
+  /**
+   * Canonical CodeGen mode (#436): AI advanced generation is OFF so generated
+   * output is deterministic across machines without an LLM API key. Both the
+   * master switch and the feature allow-list are emptied so a local `.mjrc.cjs`
+   * overlay that sets `enableAdvancedGeneration: true` still runs zero AI steps.
+   * Any check-constraint validators or custom form groupings are authored
+   * explicitly in entity subclasses and `metadata/entity-fields/`.
+   */
+  advancedGeneration: {
+    enableAdvancedGeneration: false,
+    features: [],
+  },
 
   newEntityDefaults: {
     NameRulesBySchema: [
@@ -158,7 +162,12 @@ module.exports = {
     folderPath: './migrations/codegen/',
     appendToFile: false,
     convertCoreSchemaToFlywayMigrationFile: true,
-    omitRecurringScriptsFromLog: false,
+    // Leave out the reconcilers CodeGen runs on every pass (field prunes, schema
+    // syncs, column widths), matching MJ's default and the sibling apps. Captured,
+    // they ran schema-wide in shipped migrations and pruned fields of entities the
+    // migration never touched (#345). A migration that alters an existing column
+    // adds its own scoped field sync instead; see CLAUDE.md "Migrations".
+    omitRecurringScriptsFromLog: true,
     schemaPlaceholders: [
       // Order matters: the more-specific schema must come first because
       // substitution runs sequentially with a greedy regex. If '__mj' were

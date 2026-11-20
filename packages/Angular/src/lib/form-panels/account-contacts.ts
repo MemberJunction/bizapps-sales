@@ -41,3 +41,46 @@ export function AccountContactsWhere(
         `ID IN (SELECT ToPersonID FROM ${view} WHERE FromOrganizationID = ${id} AND ToPersonID IS NOT NULL AND Status = 'Active'))`
     );
 }
+
+/**
+ * The filter on the Sales Accounts view that selects the accounts a contact works at (#442): the same
+ * Relationship rows read from the person's end. Same rules as {@link AccountContactsWhere}: both
+ * directions, every relationship type, active links only, base view, OR rather than UNION. An
+ * organization that is not a Sales Account is left out, because the rows are Sales Accounts.
+ */
+export function ContactAccountsWhere(
+    contactId: string,
+    relationshipView: { SchemaName: string; BaseView: string },
+): string {
+    const view = `[${relationshipView.SchemaName}].[${relationshipView.BaseView}]`;
+    const id = sqlString(contactId);
+    return (
+        `(ID IN (SELECT ToOrganizationID FROM ${view} WHERE FromPersonID = ${id} AND ToOrganizationID IS NOT NULL AND Status = 'Active')` +
+        ` OR ` +
+        `ID IN (SELECT FromOrganizationID FROM ${view} WHERE ToPersonID = ${id} AND FromOrganizationID IS NOT NULL AND Status = 'Active'))`
+    );
+}
+
+/**
+ * The filter on the Relationships view that finds an ACTIVE link between one person and one account,
+ * in either direction (#443). The Contacts panel reads it before linking a person, so the same person
+ * is not linked twice: both directions, because {@link AccountContactsWhere} lists a person stored
+ * either way round, and active only, because an ended link is history and does not list the person.
+ */
+export function ExistingAccountLinkWhere(personId: string, accountId: string): string {
+    const person = sqlString(personId);
+    const account = sqlString(accountId);
+    return (
+        `Status = 'Active' AND (` +
+        `(FromPersonID = ${person} AND ToOrganizationID = ${account})` +
+        ` OR ` +
+        `(FromOrganizationID = ${account} AND ToPersonID = ${person}))`
+    );
+}
+
+/**
+ * The relationship types offered when linking a person to an account: active person-to-organization
+ * types. `Category` is a fixed set held by a CHECK constraint on Common's table, like `Status`, so this
+ * names a structural category, not a type by name; which types exist is still data.
+ */
+export const PERSON_TO_ORGANIZATION_TYPES_WHERE = "Category = 'PersonToOrganization' AND IsActive = 1";

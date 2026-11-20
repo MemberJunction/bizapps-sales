@@ -53,12 +53,14 @@ export async function FindUnansweredSubscriptionLines(
     provider: IRunViewProvider,
     user: UserInfo,
 ): Promise<UnansweredSubscriptionLine[]> {
-    if (!deal.OrderID) return [];
-    const order = deal.OrderID_Object ?? (await deal.OrderID_LoadObject());
+    // A new deal's order is in memory before `OrderID` is written, so the object is asked first.
+    const order = deal.OrderID_Object ?? (deal.OrderID ? await deal.OrderID_LoadObject() : null);
     if (!order || IsBooked(order.Status)) return [];
 
-    // The same collection the confirm reads, so an answer written below is the one it applies.
-    await order.Lines.Load();
+    // The same collection the confirm reads, so an answer written below is the one it applies. Loaded
+    // only when nothing has loaded it yet, as orders' own confirm does: a reload would replace lines
+    // the deal's save is about to write with their stored rows, and lose the edits (#426).
+    if (order.IsSaved && !order.Lines.IsLoaded) await order.Lines.Load();
     const lines = order.Lines.Items;
     const held = await FindUnansweredHeldLines(order, lines, provider, user);
     return held.flatMap((h) => {
@@ -80,8 +82,8 @@ export function SubscriptionChoiceIssue(entry: UnansweredSubscriptionLine): Sale
         Severity: 'error',
         Message:
             `Line ${Line.LineNumber} (${product}): the customer already holds this product ` +
-            `(${Held.Holding.SubscriptionNumber}${coveredThrough}). Open the line and choose whether it is ` +
-            'the next term of that subscription or a new subscription on its own dates, then close the deal.',
+            `(${Held.Holding.SubscriptionNumber}${coveredThrough}). Open the line and choose whether it ` +
+            'renews that subscription or creates a new one on its own dates, then close the deal.',
     };
 }
 

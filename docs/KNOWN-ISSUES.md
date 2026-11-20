@@ -35,7 +35,7 @@ Statuses checked on 2026-10-11 against `next` here and in the sibling repos.
 | KI-23 | `spCreateOrganization` and `spUpdateOrganization` were missing | Not a defect: one host had lost two procedures that common's migrations create (`V202608132239__v5.34.x__Layered_Base_Views_Metadata.sql`); repaired on that host (`1bad97f`) | — | — |
 | KI-24 | `rebuild-db.sh` could not build a database the sales baseline applies to | Resolved: it migrates common, tasks, accounting and orders first (`6b39252`), and editing the baseline in place ended on 2026-09-18 | sales | — |
 | KI-25 | `metadata/queries` failed to seed onto a fresh database | Resolved: MJ derives the query parameters (`c25bad3`) | sales | — |
-| KI-26 | `mj sync push` after seeding empties every product picker | Standing rule, [below](#ki-26--mj-sync-push-after-seeding-empties-every-product-picker) | sales | — |
+| KI-26 | `mj sync push` after seeding empties every product picker | Resolved: pipelines link to companies, and a push no longer re-activates a retired link, [below](#ki-26--mj-sync-push-after-seeding-empties-every-product-picker) | sales | — |
 | KI-27 | Orders' lifecycle collapse would break CD24's `Posted` step | Resolved: CD24 asserts the collapse instead (`cf89281`) | sales | — |
 | KI-28 | A fresh install registered 10 fewer orders fields than the views expose, so saves failed on a column-count mismatch | Resolved: orders folded the missing rows into migrations (bizapps-orders `2daf9b9`, `a389782`), and the drift query returned nothing on fresh hosts in October (#161). Metadata that CodeGen still adds on a first run: bizapps-orders#491 | bizapps-orders | bizapps-orders#491 |
 | — | Contracts' minimum bootstrap | Obsolete: written for contracts v1 (`ContractTerm`, `ContractLine`), which v2 removed; `scripts/seed-demo-data.sh` seeds the contract template. Its remote-operation rule is [below](#remote-operations-report-success-twice) | — | — |
@@ -186,19 +186,21 @@ Before calling a deployment done, check that `grep -A3 'dynamicPackages' mj.conf
 
 ### KI-26 — `mj sync push` after seeding empties every product picker
 
-`metadata/pipelines/.sales-pipelines.json` puts both pipelines on Default Company, the only company on a
-fresh database. `scripts/seed-demo-data.sh` then moves them to the demo companies, which own the products.
-A push after the seed moves them back to Default Company, which owns no products, so every product picker
-is empty and the errors name the orders catalogue:
+**Resolved 2026-11-05 by PipelineCompany.** Before it, `metadata/pipelines/.sales-pipelines.json` set both
+pipelines' `CompanyID` to Default Company, `scripts/seed-demo-data.sh` moved them to the demo companies
+that own the products, and a push after the seed moved them back. Every product picker then failed with:
 
 ```
 Error: the product picker offered nothing -- the orders catalogue did not load
 ```
 
-Push metadata first and seed after (`WORKSPACE-SETUP.md` §5). If you push later, for example to restore an
-action or a remote operation, re-run `scripts/seed-demo-data.sh`; it is idempotent. The metadata cannot
-name the demo companies, because they come from `scripts/seed-dev-data.sh`, which is local dev data and not
-part of the app.
+Pipelines now link to companies. The metadata's Default Company link rows carry no `IsActive`, so a push
+creates them active but never re-activates one the seed retired (`IsActive = 0`), and the seed's links to
+the demo companies are not metadata rows at all. A push after seeding leaves the pipelines where the seed
+put them.
+
+Push metadata first and seed after (`WORKSPACE-SETUP.md` §5) still holds on a fresh database: the seed
+can only retire a Default Company link that already exists.
 
 ### Remote operations report success twice
 

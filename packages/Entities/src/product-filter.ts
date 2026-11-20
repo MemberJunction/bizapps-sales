@@ -89,9 +89,14 @@ export interface ProductLookup {
 
     /**
      * Non-null when this product is sold as a subscription — read only for WHETHER it is set, never for
-     * its value. The rule that consumes it lives in `term-start.ts`, with the reasoning.
+     * its value. The rule that consumes it lives in `term-start.ts`, with the reasoning. Read from the
+     * product, then filled from its product type's default by `WithInheritedSubscriptionType` when the
+     * product names none, as orders' confirm resolves it (golive #339).
      */
     SubscriptionTypeID: string | null;
+
+    /** The product's type, whose `DefaultSubscriptionTypeID` applies when the product names none. */
+    ProductTypeID: string | null;
 }
 
 /**
@@ -115,6 +120,8 @@ export const PRODUCT_LOOKUP_FIELDS = [
     // #32: decides whether a line offers a term start at all. Drop it and the control silently vanishes
     // from every line — which is what `term-start.TS5` exists to catch.
     'SubscriptionTypeID',
+    // golive #339: a product naming no subscription type inherits its product type's default.
+    'ProductTypeID',
     /**
      * `as const satisfies` rather than a type ANNOTATION, and the difference is the whole point.
      *
@@ -158,11 +165,39 @@ void _everyLookupFieldIsRequested;
  *   anywhere but the engine would otherwise be an injection point. Anything else throws.
  */
 export function ProductFilterFor(asOfDay: CalendarDay): string {
+    return statusAndWindowFilter('Active', asOfDay, 'ProductFilterFor');
+}
+
+/**
+ * The same filter for products still in `Draft`: the ones the picker would offer once activated.
+ *
+ * Read so the picker can say when a search matches products it is hiding (bc-aidp-next-golive#433).
+ * A product created in orders starts as Draft, and without a note the rep who just made it searches,
+ * finds nothing, and cannot tell "not activated" from "not there". The window applies here too, so
+ * only products that activating today would bring into the list are counted.
+ *
+ * @param asOfDay - `YYYY-MM-DD`, validated before interpolation exactly as {@link ProductFilterFor} does.
+ */
+export function DraftProductFilterFor(asOfDay: CalendarDay): string {
+    return statusAndWindowFilter('Draft', asOfDay, 'DraftProductFilterFor');
+}
+
+/** The columns the Draft read needs: enough to match a search, nothing to sell with. */
+export const DRAFT_PRODUCT_FIELDS = ['ID', 'Name', 'SKU'] as const satisfies readonly (keyof ProductLookup)[];
+
+/** A Draft product as the picker reads it — matched against the search, never offered. */
+export type DraftProductLookup = Pick<ProductLookup, (typeof DRAFT_PRODUCT_FIELDS)[number]>;
+
+/** One of orders' product statuses, as the two filters above name them. */
+type ProductStatus = 'Active' | 'Draft';
+
+/** `Status = <status>` and the availability window as of `asOfDay`, after validating the day. */
+function statusAndWindowFilter(status: ProductStatus, asOfDay: CalendarDay, caller: string): string {
     if (!IsCalendarDay(asOfDay)) {
-        throw new Error(`ProductFilterFor: expected a calendar day (YYYY-MM-DD), got ${JSON.stringify(asOfDay)}`);
+        throw new Error(`${caller}: expected a calendar day (YYYY-MM-DD), got ${JSON.stringify(asOfDay)}`);
     }
     return (
-        `Status = 'Active' ` +
+        `Status = '${status}' ` +
         `AND (AvailableFrom IS NULL OR AvailableFrom <= '${asOfDay}') ` +
         `AND (AvailableTo IS NULL OR AvailableTo >= '${asOfDay}')`
     );

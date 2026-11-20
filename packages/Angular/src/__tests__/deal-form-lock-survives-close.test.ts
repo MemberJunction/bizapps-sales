@@ -50,7 +50,6 @@ function form() {
         RecordRefreshed: emitter(),
         // `super.ngOnInit()` — shadowed, because standing up the base form needs a provider.
         resolveCloseLock: async () => { resolves += 1; },
-        resolveAmountFreshness: async () => undefined,
         cdr: { detectChanges: () => undefined },
     })) {
         Object.defineProperty(instance, k, { value: v, writable: true });

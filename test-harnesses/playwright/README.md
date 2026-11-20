@@ -147,8 +147,10 @@ Things the harness surfaced that are worth knowing, and are not bugs in this app
    still reports a non-zero bounding box — so "visible and sized" heuristics accept it and the click
    then times out. The real one carries a trash icon; the harness discriminates on that.
 5. **NOT NULL surfaces in the UI.** Required-but-empty fields get
-   `.mj-forms-field--required-empty`, which the spec asserts for `Deal.Pipeline`, `Deal.Company` and
-   `Pipeline.Company` — a real check that the generated form honours the schema.
+   `.mj-forms-field--required-empty`, which the spec asserts for `Deal.Pipeline` and `Deal.Company` —
+   a real check that the generated form honours the schema. A pipeline has no company column: it is
+   linked to companies through `PipelineCompany`, which `10-deal-crud` writes in SQL and removes before
+   it deletes the pipeline (the link's FK does not cascade).
 6. **View mode omits NULL fields entirely.** It is not a read-only copy of the edit form, so a nullable
    field can only be asserted to render in edit mode. This is why the provenance trio
    (`Amount Is Computed` / `Amount Computed At` / `Amount Source Hash`) is checked after

@@ -30,7 +30,7 @@ import { MJSDealClosePanel, MJSDealPipelinePanel } from '../lib/form-panels/deal
  * finance task that could not be routed, an order status orders would not take. A handler that only
  * populated the list on `!Success` would look right, pass a failure-path test, and drop every warning
  * on the closes that actually happen. Both panels had exactly that bug once -- `ApplyCloseIssues` ran
- * only on the failure branch -- which is recorded in `deal-workspace.component.ts`.
+ * only on the failure branch -- first recorded in the deal workspace, since deleted (#291).
  *
  * So every check here drives a SUCCESSFUL operation carrying a warning, and the failure path is
  * covered alongside it rather than instead of it.
@@ -148,7 +148,9 @@ describe('the Pipeline status field surfaces what the close could not do', () =>
         await panel.ConfirmClose();
 
         expect(panel.ActionFailed).toBe(true);
-        expect(panel.ActionIssues).toContain(CONTRACT_REFUSED);
+        // The one reason is the headline, and only there: the list holds the rest (#268).
+        expect(panel.ActionMessage).toBe(CONTRACT_REFUSED);
+        expect(panel.ActionIssues).not.toContain(CONTRACT_REFUSED);
     });
 
     it('starts each attempt from a clean list', async () => {
@@ -192,7 +194,8 @@ describe('the Close panel surfaces them too', () => {
         await panel.ConfirmClose();
 
         expect(panel.MessageIsError).toBe(true);
-        expect(panel.Issues).toContain(CONTRACT_REFUSED);
+        expect(panel.Message).toBe(CONTRACT_REFUSED);
+        expect(panel.Issues).not.toContain(CONTRACT_REFUSED);
     });
 
     it('shows an info note apart from the warnings', async () => {

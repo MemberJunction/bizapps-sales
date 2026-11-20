@@ -17,8 +17,8 @@ export class mjBizAppsSalesPipelineStageFormComponent extends BaseFormComponent 
         await super.ngOnInit();
         this.initSections([
             { sectionKey: 'details', sectionName: 'Details', isExpanded: true },
-            { sectionKey: 'mJBizAppsSalesDealStageEventsToStageID', sectionName: 'Deal Stage Events (To Stage ID)', isExpanded: false },
-            { sectionKey: 'mJBizAppsSalesDealStageEventsFromStageID', sectionName: 'Deal Stage Events (From Stage ID)', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesDealStageEventsToStageID', sectionName: 'Deals Entering This Stage', isExpanded: false },
+            { sectionKey: 'mJBizAppsSalesDealStageEventsFromStageID', sectionName: 'Deals Leaving This Stage', isExpanded: false },
             { sectionKey: 'mJBizAppsSalesDeals', sectionName: 'Deals', isExpanded: false }
         ]);
     }

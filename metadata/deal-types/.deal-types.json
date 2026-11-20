@@ -1,9 +1,12 @@
 [
   {
+    "_comments": [
+      "Former description, kept as the design note: A first sale to a new customer. (Was seeded as code NEWBIZ / name \"New Business\" in S1; renamed to match master plan §4.2, which specifies exactly New, Upsell and Renewal. A rename costs nothing precisely because no code was ever aware of either name — that is Rule 2 paying for itself.)"
+    ],
     "fields": {
       "Code": "NEW",
       "Name": "New",
-      "Description": "A first sale to a new customer. (Was seeded as code NEWBIZ / name \"New Business\" in S1; renamed to match master plan §4.2, which specifies exactly New, Upsell and Renewal. A rename costs nothing precisely because no code was ever aware of either name — that is Rule 2 paying for itself.)",
+      "Description": "A first sale to a new customer.",
       "RequiresContract": true,
       "RequiresRenewalSource": false,
       "DisplayRank": 10,
@@ -18,10 +21,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: More of what the customer already buys, or a step up in tier — seats, volume, edition. A separate deal against the same contract, which is why the relationship is one contract to many deals. (Reuses the row seeded in S1 as EXPANSION: the same concept under the plan's word for it.)"
+    ],
     "fields": {
       "Code": "UPSELL",
       "Name": "Upsell",
-      "Description": "More of what the customer already buys, or a step up in tier — seats, volume, edition. A separate deal against the same contract, which is why the relationship is one contract to many deals. (Reuses the row seeded in S1 as EXPANSION: the same concept under the plan's word for it.)",
+      "Description": "More of what an existing customer already buys, or a move up a tier, sold as a separate deal against the same contract.",
       "RequiresContract": true,
       "RequiresRenewalSource": false,
       "DisplayRank": 20,
@@ -36,10 +42,13 @@
     }
   },
   {
+    "_comments": [
+      "Former description, kept as the design note: Continuation of an existing agreement. RequiresRenewalSource is what makes the chain enforceable: the deal must name the contract it renews (Deal.RenewsContractID), and closing it routes to Contracts.RenewTerm rather than Contracts.CreateFromDeal."
+    ],
     "fields": {
       "Code": "RENEWAL",
       "Name": "Renewal",
-      "Description": "Continuation of an existing agreement. RequiresRenewalSource is what makes the chain enforceable: the deal must name the contract it renews (Deal.RenewsContractID), and closing it routes to Contracts.RenewTerm rather than Contracts.CreateFromDeal.",
+      "Description": "Continues an existing agreement. The deal must name the contract it renews.",
       "RequiresContract": true,
       "RequiresRenewalSource": true,
       "DisplayRank": 30,

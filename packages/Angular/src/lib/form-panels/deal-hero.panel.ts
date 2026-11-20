@@ -8,7 +8,7 @@
  *
  * @module @mj-biz-apps/sales-ng
  */
-import { AfterViewInit, ChangeDetectorRef, Component, DoCheck, ElementRef, ViewEncapsulation, inject } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, DestroyRef, DoCheck, ElementRef, OnDestroy, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey, Metadata, RunView } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
@@ -25,6 +25,10 @@ import {
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { DealRelatedLinks, DealRelatedLinksKey } from './deal-related-links';
 import { DealCloseDay } from './deal-close-day';
+import { IsFieldReadable } from './field-readable';
+import { WeightedAmount } from './deal-weighted-amount';
+import { FormatDealMoney, RefreshDealCurrencyCodes } from './deal-money';
+import { SalesSettings } from '../data/sales-settings';
 
 
 /**
@@ -60,9 +64,14 @@ export function ShouldPlaceCursorInName(state: {
 }
 const COLLAPSE_SETTING = 'mj.identityHeader.collapsed.deal';
 
-function money(n: number | null | undefined): string {
-    if (n == null || !Number.isFinite(Number(n))) return '—';
-    return Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+/** The part of the deal form the hero listens to; see `MJSDealHeroPanel.dealStateSource`. */
+interface DealStateSource {
+    DealStateRefreshed?: { subscribe(next: () => void): { unsubscribe(): void } };
+}
+
+/** Whole units in the deal's currency: the header is the one place on the form without cents. See deal-money.ts. */
+function money(n: number | null | undefined, currencyID: string | null | undefined): string {
+    return FormatDealMoney(n, currencyID, 'whole') || '—';
 }
 
 @RegisterClassEx(BaseFormPanel, {
@@ -73,6 +82,11 @@ function money(n: number | null | undefined): string {
         slot: 'before-fields',
         sortKey: 100,
         contributionKey: 'header',
+        // Hides the generated field list: the Deal panels draw every field. The claim sits on the
+        // hero, not on Overview, because MJ 6.2 files a panel that replaces the Details tab inside
+        // Details, so an Overview holding it became a "Details" item at the end of the rail. The
+        // hero is not a rail item, so claiming here empties Details and Overview leads.
+        replacesSectionKey: 'details',
     },
 })
 @Component({
@@ -111,7 +125,7 @@ function money(n: number | null | undefined): string {
                         }
                         @if (IsLocked) {
                             <span class="mjs-deal-hero__chip" data-tone="warning">
-                                <i class="fa-solid fa-lock"></i> Locked
+                                <i class="fa-solid fa-lock"></i> Closed
                             </span>
                         }
                     </div>
@@ -187,7 +201,11 @@ function money(n: number | null | undefined): string {
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Account</span>
                         @if (Record.AccountID && AccountName) {
-                            <button type="button" class="mjs-deal-hero__stat-val is-link" (click)="OpenAccount($event)">{{ AccountName }}</button>
+                            <button type="button" class="mjs-deal-hero__stat-val is-link"
+                                [mjRecordLink]="Record"
+                                FieldName="AccountID"
+                                [HandleClick]="false"
+                                (click)="OpenAccount($event)">{{ AccountName }}</button>
                         } @else {
                             <span class="mjs-deal-hero__stat-val">{{ AccountName || '—' }}</span>
                         }
@@ -195,7 +213,11 @@ function money(n: number | null | undefined): string {
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Owner</span>
                         @if (Record.OwnerEmployeeID && OwnerName) {
-                            <button type="button" class="mjs-deal-hero__stat-val is-link" (click)="OpenOwner($event)">{{ OwnerName }}</button>
+                            <button type="button" class="mjs-deal-hero__stat-val is-link"
+                                [mjRecordLink]="Record"
+                                FieldName="OwnerEmployeeID"
+                                [HandleClick]="false"
+                                (click)="OpenOwner($event)">{{ OwnerName }}</button>
                         } @else {
                             <span class="mjs-deal-hero__stat-val">{{ OwnerName || 'No owner' }}</span>
                         }
@@ -204,14 +226,20 @@ function money(n: number | null | undefined): string {
                         <span class="mjs-deal-hero__stat-label">Stage</span>
                         <span class="mjs-deal-hero__stat-val">{{ StageName || '—' }}</span>
                     </div>
-                    <div class="mjs-deal-hero__stat">
-                        <span class="mjs-deal-hero__stat-label">Amount</span>
-                        <span class="mjs-deal-hero__stat-val">{{ AmountText }}</span>
-                    </div>
-                    <div class="mjs-deal-hero__stat">
-                        <span class="mjs-deal-hero__stat-label">Weighted</span>
-                        <span class="mjs-deal-hero__stat-val">{{ WeightedText }}</span>
-                    </div>
+                    <!-- Both read Amount, which field-level security may deny (#403). -->
+                    @if (AmountReadable) {
+                        <div class="mjs-deal-hero__stat">
+                            <span class="mjs-deal-hero__stat-label">Amount</span>
+                            <span class="mjs-deal-hero__stat-val">{{ AmountText }}</span>
+                        </div>
+                    }
+                    <!-- Weighted also reads Probability, which can be denied on its own. -->
+                    @if (WeightedReadable) {
+                        <div class="mjs-deal-hero__stat">
+                            <span class="mjs-deal-hero__stat-label">Weighted</span>
+                            <span class="mjs-deal-hero__stat-val">{{ WeightedText }}</span>
+                        </div>
+                    }
                     <!-- A CLOSED DEAL REPORTS, IT DOES NOT FORECAST (golive#231 item 4). This stat
                          showed ExpectedCloseDate whatever had happened, so a deal that closed in March
                          still announced a February expectation under a label that reads as fact. -->
@@ -219,10 +247,19 @@ function money(n: number | null | undefined): string {
                         <span class="mjs-deal-hero__stat-label">{{ CloseStatLabel }}</span>
                         <span class="mjs-deal-hero__stat-val">{{ CloseStatValue }}</span>
                     </div>
-                    <div class="mjs-deal-hero__stat">
-                        <span class="mjs-deal-hero__stat-label">Pipeline</span>
-                        <span class="mjs-deal-hero__stat-val">{{ PipelineName || '—' }}</span>
-                    </div>
+                    <!-- With pipelines hidden (the HidePipelines setting) the company stands in for the
+                         pipeline: choosing it is what chose the pipeline. -->
+                    @if (HidePipelines) {
+                        <div class="mjs-deal-hero__stat">
+                            <span class="mjs-deal-hero__stat-label">Company</span>
+                            <span class="mjs-deal-hero__stat-val">{{ CompanyName || '—' }}</span>
+                        </div>
+                    } @else {
+                        <div class="mjs-deal-hero__stat">
+                            <span class="mjs-deal-hero__stat-label">Pipeline</span>
+                            <span class="mjs-deal-hero__stat-val">{{ PipelineName || '—' }}</span>
+                        </div>
+                    }
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Type</span>
                         <span class="mjs-deal-hero__stat-val">{{ TypeName || '—' }}</span>
@@ -237,9 +274,13 @@ function money(n: number | null | undefined): string {
                         }
                     </div>
                 }
-                @if (LockNotice) { <div class="mjs-flag">{{ LockNotice }}</div> }
-                @if (StaleAmountNotice) { <div class="mjs-flag">{{ StaleAmountNotice }}</div> }
             }
+            <!-- OUTSIDE the collapsed region (#371 item 2). Collapsed is a persisted per-user
+                 setting, and these say why the form will refuse an edit or why the amount is out of
+                 date; hiding them with the briefing left a rep who had collapsed the header once
+                 with no warning at all. -->
+            @if (Record.IsSaved && LockNotice) { <div class="mjs-flag">{{ LockNotice }}</div> }
+            @if (Record.IsSaved && StaleAmountNotice) { <div class="mjs-flag">{{ StaleAmountNotice }}</div> }
         </div>
     `,
     styles: [`
@@ -252,12 +293,13 @@ function money(n: number | null | undefined): string {
             box-shadow: var(--mj-shadow-md, 0 4px 16px rgba(0, 0, 0, .08));
             position: relative; overflow: hidden;
             container-type: inline-size; container-name: mjs-deal-hero;
-            /* NEVER SHRINKS. MJ's slot host and this panel's host are display:contents, so this div
-               is the flex item in the form's fixed-height column, and MJ's flex-shrink: 0 on that
-               column's direct children does not reach it. With overflow hidden its minimum height is
-               0, so on a short window with tall panels below it was squeezed to the title row and
-               clipped the Name editor and the summary (bc-aidp-next-golive#287). */
-            flex-shrink: 0;
+            /* NEVER SHRINKS, AND SITS ABOVE SIBLING PANELS (#287, #397). MJ's slot host and this
+               panel's host are display:contents, so this div is the flex item in the form's
+               fixed-height column, and MJ's flex-shrink: 0 on that column's direct children does not
+               reach it. With overflow hidden its minimum height is 0, so on a short or narrow window
+               with tall panels below it was squeezed to the title row and the Pipeline panel covered
+               the Name editor. */
+            flex-shrink: 0; z-index: 1;
         }
         .mjs-deal-hero::before {
             content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3.5px;
@@ -395,17 +437,19 @@ function money(n: number | null | undefined): string {
             margin-top: var(--mj-space-2);
         }
         .mjs-deal-hero--collapsed { padding: 12px 20px; gap: 0; margin-bottom: var(--mj-space-3); }
+        .mjs-deal-hero--collapsed > .mjs-flag { margin-top: var(--mj-space-3); }
         .mjs-deal-hero--collapsed .mjs-deal-hero__avatar { width: 42px; height: 42px; border-radius: var(--mj-radius-md, 10px); font-size: 1.05rem; }
         .mjs-deal-hero--collapsed .mjs-deal-hero__name { font-size: 1.15rem; }
-        @media (max-width: 720px) {
-            .mjs-deal-hero__identity { align-items: flex-start; }
+        @media (max-width: 1024px) {
+            .mjs-deal-hero__identity { align-items: flex-start; flex-wrap: wrap; }
             .mjs-deal-hero__summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
     `],
 })
-export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements AfterViewInit, DoCheck {
+export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements AfterViewInit, DoCheck, OnDestroy {
     private readonly cdr = inject(ChangeDetectorRef);
     private readonly host = inject(ElementRef<HTMLElement>);
+    private readonly destroyRef = inject(DestroyRef);
     /** The record the cursor has already been placed for, so it is never taken twice. */
     private focusedFor: string | null = null;
     public Collapsed = false;
@@ -415,6 +459,8 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     /** Whether the PERSISTED status is a WIN — its own flag, never `!IsLost`. Decides the Order and
      *  Contract chips (golive#226); the Overview's outcome tiles read it too (golive#231). */
     public IsWon = false;
+    /** Whether the PERSISTED status carries `IsOpen` (#460), so `StatusTone` never reads a status name. */
+    public IsOpen = false;
 
     /** The links last published to the chip row, and the state they were built from. */
     private relatedFor: string | null = null;
@@ -443,12 +489,20 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     }
     public LockNotice: string | null = null;
     public StaleAmountNotice: string | null = null;
+    /** The `HidePipelines` setting, read in `ngOnInit`. */
+    public HidePipelines = false;
 
     public async ngOnInit(): Promise<void> {
         const raw = UserInfoEngine.Instance.GetSetting(COLLAPSE_SETTING);
         if (raw) {
             try { this.Collapsed = JSON.parse(raw) === true; } catch { this.Collapsed = false; }
         }
+        // Subscribed before the first await, while the panel is certainly alive: registering the
+        // teardown on a panel destroyed during that await would throw and leave the subscription open.
+        this.refreshNoticesAfterEverySave();
+        this.dealStateSubscription = this.dealStateSource()?.DealStateRefreshed?.subscribe(() => {
+            void this.refreshNotices();
+        });
         await this.refreshNotices();
         /**
          * The business zone, for a legacy `ClosedAt`-only row's close day ({@link CloseStatValue},
@@ -456,7 +510,11 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
          * `sales-ng` is lazily loaded, so the boot sequence is not relied on — the Overview panel does
          * the same. Marked for check because nothing else repaints the stat when it lands.
          */
-        await BusinessTimeZoneEngine.Instance.Config(false);
+        const [, hidePipelines] = await Promise.all([
+            BusinessTimeZoneEngine.Instance.Config(false),
+            SalesSettings.LoadHidePipelines(),
+        ]);
+        this.HidePipelines = hidePipelines;
         this.cdr?.markForCheck();
     }
 
@@ -468,6 +526,35 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
      */
     public override OnRecordRefreshed(_record: DealEntity): void {
         void this.refreshNotices();
+    }
+
+    /**
+     * A SAVE CAN CLEAR A NOTICE TOO, not only a refresh (#399).
+     *
+     * `OnRecordRefreshed` fires when the form reloads the record, and a plain save does not reload it.
+     * So a save that brought the amount back in line with the order left "The products on this deal
+     * changed…" on screen until the next reload, which reads as a save that did nothing. The form's
+     * emitter outlives this panel (the slot remounts panels), so the subscription ends with the panel.
+     */
+    private refreshNoticesAfterEverySave(): void {
+        const saved = this.FormComponent?.RecordSaved;
+        if (!saved) return;
+        const subscription = saved.subscribe(() => { void this.refreshNotices(); });
+        this.destroyRef.onDestroy(() => subscription.unsubscribe());
+    }
+
+    /**
+     * The deal form's signal that a save it did not run changed the deal (#271): the products panel
+     * saves the deal to refresh its amount, which raises no refresh here. Read structurally, as the
+     * other panels read `IsLocked`, so this file does not import the form.
+     */
+    private dealStateSource(): DealStateSource | undefined {
+        return this.FormComponent as unknown as DealStateSource | undefined;
+    }
+    private dealStateSubscription?: { unsubscribe(): void };
+
+    public ngOnDestroy(): void {
+        this.dealStateSubscription?.unsubscribe();
     }
 
     /**
@@ -588,6 +675,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     public get OwnerName(): string { return String(this.Record?.OwnerEmployee ?? this.Record?.Get?.('OwnerEmployee') ?? ''); }
     public get StageName(): string { return String(this.Record?.PipelineStage ?? this.Record?.Get?.('PipelineStage') ?? ''); }
     public get PipelineName(): string { return String(this.Record?.Pipeline ?? this.Record?.Get?.('Pipeline') ?? ''); }
+    public get CompanyName(): string { return String(this.Record?.Company ?? this.Record?.Get?.('Company') ?? ''); }
     public get TypeName(): string { return String(this.Record?.DealType ?? this.Record?.Get?.('DealType') ?? ''); }
 
     /**
@@ -620,18 +708,32 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         });
     }
 
-    public get AmountText(): string { return money(this.Record?.Amount); }
+    /**
+     * Whether the viewer may read `Amount`. The header draws it itself, so it asks what
+     * `mj-form-field` asks, and asks first: `BaseEntity.Get()` throws for a denied field (#403).
+     */
+    public get AmountReadable(): boolean {
+        return this.fieldReadable('Amount');
+    }
+
+    /** Weighted reads Probability too, which field-level security can deny on its own. */
+    public get WeightedReadable(): boolean {
+        return this.AmountReadable && this.fieldReadable('Probability');
+    }
+
+    private fieldReadable(fieldName: string): boolean {
+        const provider = this.FormComponent?.ProviderToUse ?? Metadata.Provider;
+        return IsFieldReadable(this.Record?.EntityInfo, fieldName, provider?.CurrentUser);
+    }
+
+    public get AmountText(): string { return money(this.Record?.Amount, this.Record?.CurrencyID); }
     public get WeightedText(): string {
-        const a = Number(this.Record?.Amount);
-        const p = Number(this.Record?.Probability);
-        if (!Number.isFinite(a) || !Number.isFinite(p)) return '—';
-        return money(a * p / 100);
+        return money(WeightedAmount(this.Record?.Amount, this.Record?.Probability), this.Record?.CurrencyID);
     }
     public get StatusTone(): 'success' | 'warning' | 'muted' {
-        const s = this.StatusName.toLowerCase();
-        if (!s) return 'muted';
-        if (s.includes('won') || s === 'open' || s.includes('active')) return 'success';
-        if (s.includes('lost') || s.includes('dead') || s.includes('disqual') || this.IsLocked) return 'warning';
+        if (!this.StatusName) return 'muted';
+        if (this.IsWon || this.IsOpen) return 'success';
+        if (this.IsLost || this.IsLocked) return 'warning';
         return 'muted';
     }
 
@@ -679,6 +781,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     }
 
     private async refreshNotices(): Promise<void> {
+        await RefreshDealCurrencyCodes();
         await this.resolveLock();
         await this.resolveReversals();
         await this.resolveStale();
@@ -687,10 +790,13 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
 
     private async resolveLock(): Promise<void> {
         const persisted = this.Record?.GetFieldByName?.('DealStatusTypeID')?.OldValue as string | null | undefined;
-        const lock = await ResolveDealLockState(persisted ?? this.Record?.DealStatusTypeID);
+        const accountOld = this.Record?.GetFieldByName?.('AccountID')?.OldValue as string | null | undefined;
+        const accountBlank = this.Record !== undefined && (!accountOld || String(accountOld).trim() === '');
+        const lock = await ResolveDealLockState(persisted ?? this.Record?.DealStatusTypeID, undefined, accountBlank);
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
         this.IsWon = lock.IsWon;
+        this.IsOpen = lock.IsOpen;
         this.LockNotice = lock.Notice;
     }
 
@@ -733,7 +839,8 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
      */
     private async resolveStale(): Promise<void> {
         this.StaleAmountNotice = null;
-        if (!this.Record) return;
+        // A viewer who may not read the amount gets no notice about it either.
+        if (!this.Record || !this.AmountReadable) return;
         const freshness = await ResolveDealAmountFreshness({
             IsLocked: this.IsLocked,
             AmountIsComputed: this.Record.AmountIsComputed,

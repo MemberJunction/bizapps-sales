@@ -90,12 +90,18 @@ export function DiscountPercentToFraction(percent: number | null | undefined): D
         };
     }
     if (percent > 0 && percent < 1) {
+        /**
+         * Rounded for the message only: `0.07 * 100` is `7.000000000000001` in binary floating point,
+         * and the rep should read the percent the column would hold. The band check above has already
+         * been decided on the unrounded value.
+         */
+        const asFraction = RoundDiscountPercent(percent * 100);
         return {
             Ok: false,
             Reason:
                 `A discount of ${percent} is ambiguous: as a percentage it is a fraction of one percent, ` +
-                `and as a fraction it would be ${percent * 100}%. Enter whole percent — ${percent * 100} ` +
-                `for ${percent * 100}%, or 0 for no discount.`,
+                `and as a fraction it would be ${asFraction}%. Enter whole percent — ${asFraction} ` +
+                `for ${asFraction}%, or 0 for no discount.`,
         };
     }
     /**
@@ -126,7 +132,7 @@ export function DiscountPercentToFraction(percent: number | null | undefined): D
  * cannot be relaxed here without reintroducing the hundred-fold error this module exists to stop.
  * The resolution is on the caller's side and is stated where it lives: a value this function
  * produced is not an entry, so it must not be fed back through the entry guard. See
- * `SetDiscountPercent` in `deal-workspace.component.ts`.
+ * `SetDiscountPercent` in `deal-line-editor.component.ts` (sales-ng).
  *
  * @param fraction The value as stored on `OrderLine.DiscountPct` (0–1).
  */

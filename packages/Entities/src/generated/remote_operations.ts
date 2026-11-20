@@ -77,7 +77,7 @@ export interface SalesCloseDealInput {
 
     /**
      * Per-deal overrides merged OVER the pipeline's policy. This is how §7.1's "a deal may override
-     * it" is expressed without a per-deal policy column — see CLOSE-FLOW-DECISIONS.md D-CF6.
+     * it" is expressed without a per-deal policy column — see `docs/DECISIONS.md`.
      */
     PolicyOverrides?: SalesCloseWonPolicy;
 
@@ -137,17 +137,17 @@ export interface SalesCloseIssue {
 /**
  * What the policy decided, per downstream target.
  *
- * RETURNED EVEN WHEN THE CALL WAS STUBBED, and `Executed` is what says which. Today both downstreams
- * are stubs (CLOSE-FLOW-DECISIONS.md D-CF3/D-CF4), so a close reports `Planned: true,
- * Executed: false` with a reason — the intent is auditable now and the flag flips to true when the
- * seam lands, with no shape change.
+ * RETURNED EVEN WHEN THE CALL WAS STUBBED OR REFUSED, and `Executed` is what says which. The contract
+ * route is live through `LiveContractsSeam` and the order is embedded at deal creation (see
+ * `docs/DECISIONS.md` D-CF1, D-CF3 and D-CF4); when a route is declined or stubbed in a test, a close
+ * reports `Planned: true, Executed: false` with a reason so the intent remains auditable.
  */
 export interface SalesCloseRoutingResult {
     /** `Contract` | `Order` | `Subscription`. */
     Target: string;
     /** The policy said this should happen. */
     Planned: boolean;
-    /** It actually happened. False while the downstream is stubbed. */
+    /** It actually happened. False when the downstream route was declined or stubbed. */
     Executed: boolean;
     /** How many deal lines were routed here. */
     LineCount: number;
@@ -191,12 +191,52 @@ export interface SalesReopenDealOutput {
     DealStageEventID?: string | null;
 }
 
+/**
+ * What the deal-line editor sends when a line's discount went up. NO `import` statements in this file:
+ * CodeGen emits it verbatim into `remote_operations.ts` and resolves none (see
+ * `sales-close-deal.input.ts`).
+ */
+export interface SalesRecordDiscountConcessionInput {
+    /** The saved order line the discount is on. Orders values the concession from what it stores. */
+    OrderLineID: string;
+    /**
+     * One of orders' concession reason categories. Typed as a string because orders owns the list
+     * (its `CK_OrderConcession_ReasonCategory`), so a category it adds needs no sales release.
+     */
+    ReasonCategory: string;
+    /** The rep's reason. Required: an approver decides on it. */
+    Reason: string;
+    /**
+     * Client-generated UUID for this recording attempt, so a retry after a timeout finds the
+     * concession the first attempt already wrote instead of withdrawing and recreating it.
+     */
+    ConcessionID?: string | null;
+}
+
+/**
+ * What orders decided about a discount concession, or why it refused to record one. NO `import`
+ * statements in this file (see `sales-close-deal.input.ts`).
+ */
+export interface SalesRecordDiscountConcessionOutput {
+    /** The concession was recorded. False when sales or orders refused it; `Message` says why. */
+    Success: boolean;
+    /** The recorded concession, when there is one. */
+    ConcessionID?: string | null;
+    /**
+     * Recorded but not decided: the discount is outside the requester's Sales Authority and waits for
+     * the approving role. Read from whether orders stamped a decider, never from the status's name.
+     */
+    AwaitingApproval: boolean;
+    /** Orders' or sales' refusal, verbatim, when `Success` is false. */
+    Message?: string | null;
+}
+
 // ============================================================
 // Sales.CloseDeal — Close Deal
 // ============================================================
 /**
  * Close Deal
- * Close a deal into a target status, in ONE transaction: validate it is closeable, resolve the effective CloseWonPolicy (pipeline default + caller overrides), route lines to a contract and/or an order per that policy, append the DealStageEvent, stamp ActualCloseDate/ClosedAt/ClosedByUserID, and apply the close lock when the status carries LocksDeal. Routing is decided by the policy and by DealStatusType FLAGS — never by a pipeline or status NAME. Sales passes intent only; every figure is computed downstream by orders.
+ * Closes a deal into the chosen status in one step. It checks the deal can close, records the stage change and close details, follows the pipeline's close-won policy (contract and follow-up tasks), and locks the deal when the status locks.
  * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
  * under 'Sales.CloseDeal'. This generated base provides the typed contract only (client-safe).
  */
@@ -205,6 +245,24 @@ export class SalesCloseDealOperation extends BaseRemotableOperation<SalesCloseDe
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "sales:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_57e3ba4c40f3ec25";
+}
+
+// ============================================================
+// Sales.RecordDiscountConcession — Record Discount Concession
+// ============================================================
+/**
+ * Record Discount Concession
+ * Records a deal line's raised discount as a Price concession on its order line, replacing the line's earlier one, for orders to value and decide.
+ * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
+ * under 'Sales.RecordDiscountConcession'. This generated base provides the typed contract only (client-safe).
+ */
+export class SalesRecordDiscountConcessionOperation extends BaseRemotableOperation<SalesRecordDiscountConcessionInput, SalesRecordDiscountConcessionOutput> {
+    public readonly OperationKey = "Sales.RecordDiscountConcession";
+    public readonly ExecutionMode = 'Sync' as const;
+    public readonly RequiredScope = "sales:write";
+    public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_cfdbd5c68d759b1b";
 }
 
 // ============================================================
@@ -212,7 +270,7 @@ export class SalesCloseDealOperation extends BaseRemotableOperation<SalesCloseDe
 // ============================================================
 /**
  * Reopen Deal
- * Reopen a locked deal into a non-locking status, recording a mandatory reason. Appends a DealStageEvent, clears the close stamps, and releases the immutability enforced by DealEntityServer.Save(). The only sanctioned exit from the close lock (§7.3).
+ * Reopens a locked deal into a status that does not lock, with a required reason. It records the stage change, clears the close details and unlocks the deal.
  * GenerationType=Manual — the server body is supplied by a hand-authored subclass registered
  * under 'Sales.ReopenDeal'. This generated base provides the typed contract only (client-safe).
  */
@@ -221,5 +279,6 @@ export class SalesReopenDealOperation extends BaseRemotableOperation<SalesReopen
     public readonly ExecutionMode = 'Sync' as const;
     public readonly RequiredScope = "sales:write";
     public readonly RequiresSystemUser = false;
+    public readonly ContractFingerprint = "ro_fp_5187c9ed4c4f62a9";
 }
 

@@ -12,9 +12,10 @@
  * a second section later means adding an Application nav item plus a resource, not a widget here.
  *
  * ONE SECTION TODAY. Contracts has three (Contracts / Billing / Setup) because it has three distinct
- * jobs. Sales has one job worth its own section so far — working deals. Accounts and forecasting are real
- * sections later, and they are absent rather than stubbed because **a nav item pointing at an
- * unregistered component mounts a blank tab with no error anywhere**.
+ * jobs. Sales has one job worth its own section so far — working deals. Accounts and Contacts are rail
+ * pages here (the entity grids) until they have work of their own; forecasting is a section later, and
+ * absent rather than stubbed because **a nav item pointing at an unregistered component mounts a blank
+ * tab with no error anywhere**.
  *
  * The pipeline BOARD is a rail page here rather than a section of its own, and that is a claim about what
  * it is: another way to look at the same deals, alongside the dashboard and the roster — not a different
@@ -75,13 +76,35 @@ export const DEALS_SUB_PAGES: SalesSubPage[] = [
     { Id: 'dashboard', Label: 'Dashboard', Icon: 'fa-solid fa-gauge-high', Description: 'What is moving, what has stalled' },
     { Id: 'list', Label: 'All deals', Icon: 'fa-solid fa-table-list' },
     { Id: 'board', Label: 'Board', Icon: 'fa-solid fa-diagram-project', Description: 'Move deals through the pipeline' },
+    // The accounts and people deals are sold to. Each is the entity's own grid, opening records as
+    // Explorer tabs, so the app can find and create them without the generated entity browser.
+    { Id: 'accounts', Label: 'Accounts', Icon: 'fa-solid fa-building', Group: 'Customers' },
+    { Id: 'contacts', Label: 'Contacts', Icon: 'fa-solid fa-address-book', Group: 'Customers' },
 ];
 
+/**
+ * Settings for the whole instance, such as hiding pipelines. Shown only to users who may change the
+ * Sales application settings; see `SalesSettings.CanChange`.
+ */
+export const SETTINGS_SUB_PAGE: SalesSubPage = {
+    Id: 'settings',
+    Label: 'Settings',
+    Icon: 'fa-solid fa-sliders',
+    Description: 'How Sales works for everyone',
+    Group: 'Admin',
+};
+
+/** Who is looking at the rail. */
+export interface SalesNavAudience {
+    /** The user may change the Sales settings, so the Settings page is listed. */
+    CanChangeSettings?: boolean;
+}
+
 /** The rail for a section id. An unknown id gives an empty rail rather than throwing. */
-export function SubPagesFor(sectionId: string): SalesSubPage[] {
+export function SubPagesFor(sectionId: string, audience: SalesNavAudience = {}): SalesSubPage[] {
     switch (sectionId) {
         case 'deals':
-            return DEALS_SUB_PAGES;
+            return audience.CanChangeSettings ? [...DEALS_SUB_PAGES, SETTINGS_SUB_PAGE] : DEALS_SUB_PAGES;
         default:
             return [];
     }
@@ -95,9 +118,11 @@ export function DefaultPageFor(sectionId: string): string {
 /** Which badge, if any, belongs on a page. */
 function badgeFor(pageId: string, badges: SalesNavBadges): number | undefined {
     switch (pageId) {
-        case 'list':
+        case 'dashboard':
             // Slipped deals, not the total count. A deal count is the pipeline existing; a slipped one
-            // is a person's problem, and a badge should mean the second thing.
+            // is a person's problem, and a badge should mean the second thing. On Dashboard because
+            // its "Past expected close" tile and "Close date slipped" queue show the same count; All
+            // deals lists every deal with no marker, so a badge there matched nothing on the page.
             return badges.Slipped;
         default:
             return undefined;
@@ -149,6 +174,11 @@ export function BuildLeftNavSections(pages: SalesSubPage[], badges: SalesNavBadg
 export interface SalesPrimaryAction {
     Label: string;
     Icon: string;
+    /**
+     * What the button does. The three `*` kinds CREATE a record; the two `promote-*` kinds open the
+     * promote dialog instead, because the record already exists and only its sales half is missing.
+     */
+    Creates: 'deal' | 'account' | 'contact' | 'promote-account' | 'promote-contact';
 }
 
 /**
@@ -163,7 +193,50 @@ export function PrimaryActionFor(pageId: string): SalesPrimaryAction | null {
         case 'dashboard':
         case 'list':
         case 'board':
-            return { Label: 'New deal', Icon: 'fa-solid fa-plus' };
+            return { Label: 'New deal', Icon: 'fa-solid fa-plus', Creates: 'deal' };
+        case 'accounts':
+            return NEW_ACCOUNT;
+        case 'contacts':
+            return { Label: 'New contact', Icon: 'fa-solid fa-plus', Creates: 'contact' };
+        default:
+            // Settings creates nothing.
+            return null;
+    }
+}
+
+const NEW_ACCOUNT: SalesPrimaryAction = { Label: 'New account', Icon: 'fa-solid fa-building', Creates: 'account' };
+
+/**
+ * ADD EXISTING, beside NEW. A Sales Account is the sales half of an Organization Common may already
+ * hold, so "New account" is the wrong verb for most of them — and a rep who cannot find a company
+ * does not conclude it needs promoting, they create a second one (bc-aidp-next-golive#259). Offering
+ * both verbs on the page where accounts are managed is what makes the existing one findable (D-PR3).
+ */
+const ADD_EXISTING_ACCOUNT: SalesPrimaryAction = {
+    Label: 'Add existing',
+    Icon: 'fa-solid fa-building-circle-arrow-right',
+    Creates: 'promote-account',
+};
+const ADD_EXISTING_CONTACT: SalesPrimaryAction = {
+    Label: 'Add existing',
+    Icon: 'fa-solid fa-user-plus',
+    Creates: 'promote-contact',
+};
+
+/**
+ * A second, outline button beside the primary. The dashboard offers a new account, because that is
+ * the other thing someone starting work there needs and the Accounts page is otherwise a click away.
+ * Accounts and Contacts offer the EXISTING one instead: on those pages "New" is already the primary,
+ * and the thing that page cannot otherwise do is reach a record Common already has.
+ */
+export function SecondaryActionFor(pageId: string): SalesPrimaryAction | null {
+    switch (pageId) {
+        case 'dashboard':
+            return NEW_ACCOUNT;
+        case 'accounts':
+            return ADD_EXISTING_ACCOUNT;
+        case 'contacts':
+            return ADD_EXISTING_CONTACT;
         default:
             return null;
     }
