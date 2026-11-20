@@ -29,7 +29,9 @@
  * A contact on a free-mail domain is left out here, and that is NOT the safety rule moving: Common
  * still drops free-mail domains whatever this class returns. It is left out because Common reports
  * every entry it drops, and a contact with a gmail address is ordinary data, not a fault to report
- * on every run. A free-mail WEBSITE is a data fault, so that one is still returned and reported.
+ * on every run. It is left out IN THE QUERY, before the contact cap is cut, so a gmail contact never
+ * takes a slot that a domain which can grant needs. A free-mail WEBSITE is a data fault, so that one
+ * is still returned and reported.
  *
  * ── A FAILED READ THROWS; "OWNS NOTHING" IS AN EMPTY LIST ────────────────────────────────────
  *
@@ -62,6 +64,8 @@ const E_RELATIONSHIP = 'MJ_BizApps_Common: Relationships';
 const E_PERSON = 'MJ_BizApps_Common: People';
 const SOURCE_KEY = 'Sales.OwnedAccounts';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** `Person.EmailDomain` is computed lower-case, so a plain `NOT IN` matches it on SQL Server and PostgreSQL. */
+const FREE_MAIL_SQL = [...FREE_MAIL_DOMAINS].map((domain) => `'${domain.replace(/'/g, "''")}'`).join(', ');
 
 /** Accounts read per owner. More than this is reported, never silently cut. */
 export const MAX_OWNED_ACCOUNTS = 5000;
@@ -96,7 +100,7 @@ export class OwnedAccountsConsentSource extends BaseActivityConsentSource {
             `ROW_NUMBER() OVER (PARTITION BY r.ToOrganizationID, p.EmailDomain ORDER BY r.ID) AS RN ` +
             `FROM ${viewOf(relationshipsView)} r INNER JOIN ${viewOf(peopleView)} p ON p.ID = r.FromPersonID ` +
             `WHERE r.Status = 'Active' AND r.RelationshipType = 'Employee' AND p.Status = 'Active' AND p.EmailDomain IS NOT NULL ` +
-            `AND r.ToOrganizationID IN (SELECT ID FROM ${viewOf(accountsView)} WHERE IsActive = 1 AND ${ownerIs})) x WHERE x.RN = 1) y ` +
+            `AND p.EmailDomain NOT IN (${FREE_MAIL_SQL}) AND r.ToOrganizationID IN (SELECT ID FROM ${viewOf(accountsView)} WHERE IsActive = 1 AND ${ownerIs})) x WHERE x.RN = 1) y ` +
             `WHERE y.N <= ${MAX_CONTACT_DOMAINS + 1}`;
         const views: RunViewParams[] = [
             { EntityName: E_USER, ExtraFilter: `ID = '${owner}'`, Fields: ['ID', 'EmployeeID'], MaxRows: 1, ResultType: 'simple' },
@@ -162,7 +166,7 @@ function toConsent(users: readonly UserRow[], accounts: readonly AccountRow[], c
     if (!user.EmployeeID) return { Domains: [], Issues: [`owner user ${owner} is not linked to an employee, so no account is owned.`] };
     const issues: string[] = [];
     if (accounts.length > MAX_OWNED_ACCOUNTS) {
-        issues.push(`employee ${user.EmployeeID} owns more than ${MAX_OWNED_ACCOUNTS} accounts; only the first ${MAX_OWNED_ACCOUNTS} by name grant standing consent.`);
+        issues.push(`employee ${user.EmployeeID} owns more than ${MAX_OWNED_ACCOUNTS} accounts with a website; only the first ${MAX_OWNED_ACCOUNTS} websites by name grant. Contact domains are read for all owned accounts.`);
     }
     if (contacts.Relationships.length > MAX_CONTACT_DOMAINS || contacts.People.length > MAX_CONTACT_DOMAINS) {
         issues.push(`employee ${user.EmployeeID}'s accounts have more than ${MAX_CONTACT_DOMAINS} contact email domains; the rest grant nothing.`);
@@ -180,7 +184,7 @@ function contactDomains(contacts: ContactRows): StandingConsentDomain[] {
     const domainOfPerson = new Map<string, string>();
     for (const person of contacts.People.slice(0, MAX_CONTACT_DOMAINS)) {
         const domain = person.EmailDomain?.trim().toLowerCase();
-        if (domain && !FREE_MAIL_DOMAINS.has(domain)) domainOfPerson.set(person.ID.toLowerCase(), domain);
+        if (domain) domainOfPerson.set(person.ID.toLowerCase(), domain);
     }
     return contacts.Relationships.slice(0, MAX_CONTACT_DOMAINS).flatMap((relationship) => {
         const domain = relationship.FromPersonID ? domainOfPerson.get(relationship.FromPersonID.toLowerCase()) : undefined;
