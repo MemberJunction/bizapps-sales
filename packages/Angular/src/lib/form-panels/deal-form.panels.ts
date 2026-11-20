@@ -21,6 +21,8 @@ import { RegisterClassEx } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import { PartyFieldComponent, type PartyKind } from '@mj-biz-apps/common-ng';
 import { MJSPromotePartyDialog, type PromoteKind } from './promote-party-dialog.component';
+import { MJSFieldHelpDirective } from './field-help.component';
+import { DealFieldHelp } from './deal-field-help';
 import { CanCreateEntity } from '../data/promote-party';
 import { BaseFormPanel, BaseFormsModule, type FormContext } from '@memberjunction/ng-base-forms';
 import {
@@ -668,6 +670,11 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
      */
     public readonly FieldIdPrefix = `mjs-deal-panel-${++dealFieldPanelInstances}`;
 
+    /** What the help icon beside this field's label says, or null for a field with no icon. */
+    public Help(fieldName: string): string | null {
+        return DealFieldHelp(fieldName);
+    }
+
     /**
      * Whether a `currency` field should be drawn by the panel rather than by `mj-form-field`.
      *
@@ -1168,9 +1175,19 @@ const FIELD_STYLES = `
     .mjs-reopen__msg.is-error { color: var(--mj-status-warning); font-weight: 500; }
     .mjs-reopen__issue { font-size: 0.78rem; color: var(--mj-status-warning); }
     .mjs-reopen__note { font-size: 0.78rem; color: var(--mj-text-muted); }
-    .mjs-field .mj-forms-field {
-        display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 0;
+    /* Label above control, as a two-column grid so a help icon can share the label's line: the label
+       takes the first column, the icon after it the second, and everything else spans both. It was a
+       flex column, in which an icon beside the label would have taken a row of its own. The party
+       field is common's and stacks the same way, so it gets the same grid. The extra class outranks
+       the emulated rule each control ships with, whatever order the stylesheets load in. */
+    .mjs-fields .mjs-field .mj-forms-field, .mjs-fields .mjs-field .bizapps-party-field {
+        display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 0; padding: 0;
     }
+    .mjs-fields .mjs-field .mj-forms-field > :not(.mj-forms-field-label, .mj-forms-field-label-row, mjs-field-help),
+    .mjs-fields .mjs-field .bizapps-party-field > :not(.bizapps-party-field-label, mjs-field-help) {
+        grid-column: 1 / -1;
+    }
+    .mjs-field mjs-field-help, .mjs-fields .mjs-field .bizapps-party-field-create { justify-self: start; }
     .mjs-field .mj-forms-field-label {
         font-size: var(--mj-text-xs); font-weight: 700; letter-spacing: .06em;
         text-transform: uppercase; color: var(--mj-text-muted);
@@ -1806,14 +1823,14 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
     selector: 'mjs-deal-pipeline-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent, MJSPromotePartyDialog],
+    imports: [CommonModule, FormsModule, BaseFormsModule, MJSFieldHelpDirective, PartyFieldComponent, MJSPromotePartyDialog],
     styles: [FIELD_STYLES, PROMOTE_LINK_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="pipeline" [SectionName]="HidePipelines() ? 'Stage' : 'Pipeline'" Icon="fa-solid fa-diagram-project"
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
                 @for (f of Fields; track FieldTrackKey(f)) {
-                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
+                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name" [mjsFieldHelp]="Help(f.name)">
                         @if (f.party) {
                             <bizapps-party-field [Record]="Record" [FieldName]="f.name" [Kind]="f.party.Kind" [QueryName]="f.party.QueryName"
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext"
@@ -1869,7 +1886,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                      With pipelines hidden (the HidePipelines setting) this is the only choice: the
                      company's default pipeline follows it, and the Pipeline control below is gone. -->
                 @if (EditMode && FieldEditable('PipelineID') && ShowCompanyPicker) {
-                    <div class="mjs-field" data-field="PipelineCompany">
+                    <div class="mjs-field" data-field="PipelineCompany" [mjsFieldHelp]="Help('PipelineCompany')">
                         <div class="mj-forms-field mj-forms-field--editing">
                             <label class="mj-forms-field-label" [attr.for]="FieldIdPrefix + '-company'">Company</label>
                             <select [id]="FieldIdPrefix + '-company'" [ngModel]="SelectedCompanyID" data-testid="deal-pipeline-company"
@@ -1899,7 +1916,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 }
 
                 @if (!HidePipelines()) {
-                <div class="mjs-field" data-field="PipelineID">
+                <div class="mjs-field" data-field="PipelineID" [mjsFieldHelp]="Help('PipelineID')">
                     <!-- The editing modifier class is MJ's own marker for a field it is currently
                          letting you edit, and FieldIsEditable in the Explorer harness reads exactly
                          that. A dedicated control that omits it reports frozen while perfectly
@@ -1930,7 +1947,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                 </div>
                 }
 
-                <div class="mjs-field" data-field="PipelineStageID">
+                <div class="mjs-field" data-field="PipelineStageID" [mjsFieldHelp]="Help('PipelineStageID')">
                     <!-- The editing modifier class is MJ's own marker for a field it is currently
                          letting you edit, and FieldIsEditable in the Explorer harness reads exactly
                          that. A dedicated control that omits it reports frozen while perfectly
@@ -1967,7 +1984,7 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                      the close running. The deal workspace has never offered them; this brings the form
                      into line with it rather than the other way round. One door, and it is the audited
                      one. -->
-                <div class="mjs-field" data-field="DealStatusTypeID">
+                <div class="mjs-field" data-field="DealStatusTypeID" [mjsFieldHelp]="Help('DealStatusTypeID')">
                     <div class="mj-forms-field">
                         <label class="mj-forms-field-label" [attr.for]="EditMode ? FieldIdPrefix + '-status' : null">Status</label>
                         @if (EditMode) {
@@ -2855,14 +2872,14 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
     selector: 'mjs-deal-party-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule, PartyFieldComponent, MJSPromotePartyDialog],
+    imports: [CommonModule, FormsModule, BaseFormsModule, MJSFieldHelpDirective, PartyFieldComponent, MJSPromotePartyDialog],
     styles: [FIELD_STYLES, PROMOTE_LINK_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="party" SectionName="Account &amp; people" Icon="fa-solid fa-building"
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
                 @for (f of Fields; track FieldTrackKey(f)) {
-                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
+                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name" [mjsFieldHelp]="Help(f.name)">
                         @if (ShowsOwnerPicker(f)) {
                             <!-- THE OWNER IS CHANGED THROUGH THE DEAL TEAM, never typed. The column is a
                                  server-maintained stamp; SetOwner swaps the owner-role team row and the
@@ -2905,7 +2922,7 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                                 [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                                 (ValueChange)="OnFieldValueChange($event)" (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
                             @if (EditMode && f.name === 'CompanyID') {
-                                <small class="mjs-field__hint" data-testid="deal-company-hint">Change it with Company on the Pipeline panel.</small>
+                                <small class="mjs-field__hint" data-testid="deal-company-hint">Change it with Company, beside the deal's stage.</small>
                             }
                         }
                     </div>
@@ -3040,14 +3057,14 @@ const COMMERCIAL_FIELDS: DealFieldSpec[] = [
     selector: 'mjs-deal-commercial-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, BaseFormsModule],
+    imports: [CommonModule, BaseFormsModule, MJSFieldHelpDirective],
     styles: [FIELD_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="commercial" SectionName="Commercial" Icon="fa-solid fa-coins"
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
                 @for (f of Fields; track f.name) {
-                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
+                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name" [mjsFieldHelp]="Help(f.name)">
                         @if (DrawsOwnMoney(f)) {
                             <!-- Read-only money. See DealFieldSpec.currency for why this is not
                                  mj-form-field; the class names are the shared control's own, so the
@@ -3304,14 +3321,14 @@ export class MJSDealLinesPanel extends BaseFormPanel<DealEntity> {
     selector: 'mjs-deal-motion-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, BaseFormsModule],
+    imports: [CommonModule, BaseFormsModule, MJSFieldHelpDirective],
     styles: [FIELD_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="motion" SectionName="Motion" Icon="fa-solid fa-person-walking"
             [Form]="FormComponent" [FormContext]="FormContext">
             <div class="mjs-fields">
                 @for (f of Fields; track f.name) {
-                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
+                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name" [mjsFieldHelp]="Help(f.name)">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FieldFormContext(f)" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
@@ -3373,7 +3390,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
     selector: 'mjs-deal-close-panel',
     standalone: true,
     encapsulation: ViewEncapsulation.None,
-    imports: [CommonModule, FormsModule, BaseFormsModule],
+    imports: [CommonModule, FormsModule, BaseFormsModule, MJSFieldHelpDirective],
     styles: [FIELD_STYLES, CLOSE_ACTION_STYLES],
     template: `
         <mj-collapsible-panel SectionKey="close" SectionName="Close" Icon="fa-solid fa-flag-checkered"
@@ -3391,8 +3408,8 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                             <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i> Close this deal
                         </button>
                         <small class="mjs-close-action__hint">
-                            Records the outcome, writes the stage history, and for a won B2B deal creates
-                            the contract and finance tasks.
+                            Records the outcome in the stage history and locks the deal. A won deal also
+                            gets its follow-up tasks, and a contract when its pipeline creates one.
                         </small>
                     } @else {
                         <div class="mjs-close-action__form" data-testid="close-panel">
@@ -3476,8 +3493,8 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
                             <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reopen this deal
                         </button>
                         <small class="mjs-close-action__hint">
-                            Records the reason on the stage history, clears the close stamps and returns
-                            the order to the pipeline. Refused if the order has already booked.
+                            Records the reason in the stage history, clears the close date and returns the
+                            deal to its previous stage. Not available once the order is confirmed.
                         </small>
                     } @else {
                         <div class="mjs-close-action__form" data-testid="reopen-panel">
@@ -3526,7 +3543,7 @@ export class MJSDealMotionPanel extends MJSDealFieldPanel {
 
             <div class="mjs-fields">
                 @for (f of Fields; track f.name) {
-                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name">
+                    <div class="mjs-field" [class.mjs-field--span]="f.span" [attr.data-field]="f.name" [mjsFieldHelp]="Help(f.name)">
                         <mj-form-field [Record]="Record" [ShowLabel]="true" [FieldName]="f.name" [Type]="f.type"
                             [EditMode]="EditMode && FieldEditable(f.name)" [FormContext]="FormContext" [LinkType]="f.link ?? 'None'"
                             (Navigate)="FormComponent.OnFormNavigate($event)"></mj-form-field>
