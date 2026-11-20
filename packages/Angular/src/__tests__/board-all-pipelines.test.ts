@@ -70,10 +70,38 @@ describe('the Board All tab', () => {
         expect(b.ColumnIDsFor(a.PipelineID, b.Lanes[0].Columns)).toBe(b.ColumnIDsFor(a.PipelineID, a.Columns));
     });
 
-    it('names the tab by company when pipelines are hidden', () => {
-        const b = boardWith(ALL_PIPELINES);
-        expect(b.AllLabel).toBe('All pipelines');
+    it('shows every lane when pipelines are hidden, whatever tab was chosen before', () => {
+        for (const selected of [null, 'p-c']) {
+            const b = boardWith(selected);
+            Object.assign(b, { HidePipelines: true });
+            expect(b.ShowingAll).toBe(true);
+            expect(b.Lanes.map((l) => l.PipelineID)).toEqual(['p-a', 'p-b']);
+        }
+    });
+
+    it('shows the one pipeline when pipelines are hidden and the filters leave only one', () => {
+        const b = boardWith(null, ['company-c']);
         Object.assign(b, { HidePipelines: true });
-        expect(b.AllLabel).toBe('All companies');
+        expect(b.ShowingAll).toBe(false);
+        expect(b.Lanes.map((l) => l.PipelineID)).toEqual(['p-c']);
+    });
+
+    it("adds the pipeline's name to a heading only where two lanes share a company", () => {
+        const b = boardWith(null);
+        Object.assign(b, {
+            HidePipelines: true,
+            Pipelines: [P('p-a', 'company-a', 1), P('p-a2', 'company-a', 2), P('p-b', 'company-b', 3)],
+            Stages: [...STAGES, S('x1', 'p-a2', 1)],
+            Deals: [...DEALS, D('d4', 'p-a2', 'x1')],
+        });
+        expect(b.Lanes.map((l) => l.Label)).toEqual(['company-a · p-a', 'company-a · p-a2', 'company-b']);
+
+        // The second pipeline holds no deal, so its lane is not drawn and nothing is shared.
+        Object.assign(b, { Deals: DEALS });
+        expect(b.Lanes.map((l) => l.Label)).toEqual(['company-a', 'company-b']);
+    });
+
+    it('leaves headings alone while pipelines are shown', () => {
+        expect(boardWith(ALL_PIPELINES).Lanes.map((l) => l.Label)).toEqual(['p-a (company-a)', 'p-b (company-b)']);
     });
 });

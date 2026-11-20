@@ -38,7 +38,7 @@ const RAIL_ITEMS = ['Dashboard', 'All deals', 'Board'] as const;
 
 /**
  * One rail item, located the way `mj-left-nav` actually renders it: a BUTTON whose accessible name is
- * the label followed by its optional description ("Dashboard What is moving, what has stalled").
+ * the label followed by an optional description and badge.
  *
  * A prefix match rather than an exact one, for that reason — and by role rather than by text, because
  * the component also emits hidden `.mj-left-nav__switcher-label` spans carrying the same words, which is
