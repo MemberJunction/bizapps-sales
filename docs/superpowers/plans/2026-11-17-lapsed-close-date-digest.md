@@ -18,7 +18,7 @@
 - **Owner comes from `Deal.OwnerEmployeeID`.** Never join `DealTeamMember` — it triple-counts.
 - **"Not closed" is `IsClosed = 0`, never `IsOpen = 1`.** `ONHOLD` ships as `IsOpen=0, IsClosed=0`; they are not inverses.
 - **Every migration needs a Postgres mirror** at `migrations-pg/<same name>.pg.sql`. No CI gate parses it, so a missing or wrong mirror ships silently.
-- **Migration naming:** `V<YYYYMMDDHHMM>__v6.32.x__<Name>.sql`. Current tip is `v6.31.x`; confirm `6.32.x` is still the shipping release at merge time.
+- **Migration naming:** `V<YYYYMMDDHHMM>__v6.33.x__<Name>.sql`. Current tip is `v6.32.x`; confirm `6.33.x` is still the shipping release at merge time.
 - **Metadata PRs are declarative JSON only** — fields, `@lookup`, a `uuidgen` primaryKey, **no `sync` block**, no `*__Metadata_Sync.sql`. The build engineer generates one consolidated Metadata_Sync per release.
 - **New vocabulary is a metadata row with a hardcoded UUID**, never a SQL `INSERT` in a migration.
 - **CHECK constraints are for structural invariants only**, never domain vocabulary or cross-table rules.
@@ -180,7 +180,7 @@ export interface DigestAudience {
 }
 export interface LapsedDeal {
     ID: string; Name: string; CompanyID: string; CompanyName: string;
-    OwnerName: string; Amount: number | null;
+    OwnerName: string; Amount: number | null; CurrencyID: string | null;
     ExpectedCloseDate: CalendarDay | null; DaysLapsed: number | null;
     StageName: string;
 }
@@ -261,7 +261,10 @@ export interface DigestRecipient {
     EmployeeID: string; Email: string; FirstName: string; FullName: string;
 }
 export function DedupeByEmail(recipients: readonly DigestRecipient[]): DigestRecipient[];
-export async function LoadDigestRecipients(contextUser: UserInfo): Promise<DigestRecipient[]>;
+export async function LoadDigestRecipients(
+    contextUser: UserInfo,
+    portfolioWideAudienceIDs: ReadonlySet<string>,
+): Promise<DigestRecipient[]>;
 ```
 `DealDigestRecipientEntityServer` is `@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Digest Recipients')`.
 
@@ -276,6 +279,7 @@ describe('DedupeByEmail', () => {
 
 describe('DealDigestRecipientEntityServer.Save', () => {
   it('refuses a non-portfolio audience row with no CompanyID', () => { /* message names the audience */ });
+  it('refuses a portfolio-wide audience row that names a company', () => { /* message names the audience */ });
   it('refuses an employee with no email address', () => { /* message names the employee */ });
   it('refuses an inactive employee', () => { /* Review Focus 4 */ });
   it('accepts a portfolio-wide row with a null CompanyID', () => { /* saves */ });
@@ -315,11 +319,12 @@ git commit -m "feat(sales): digest recipient loading and validation"
 - Consumes: `CompanyGroup`, `DigestAudience` (Task 4); `DigestRecipient` (Task 5).
 - Produces:
 ```typescript
-export interface RenderedDigest { Subject: string; BodyHtml: string }
+export interface RenderedDigest { Subject: string; BodyHtml: string; BodyText: string }
 export interface RenderContext {
     audience: DigestAudience; recipient: DigestRecipient;
     groups: readonly CompanyGroup[]; today: CalendarDay;
-    explorerBaseUrl: string | null; totalDeals: number; truncated: boolean;
+    explorerBaseUrl: string | null; dealsShown: number; truncated: boolean;
+    currencyCodes?: ReadonlyMap<string, string>;
 }
 export function FillTemplate(template: string, values: Readonly<Record<string, string>>): string;
 export function DealRecordUrl(baseUrl: string, dealID: string): string;
@@ -400,10 +405,14 @@ export interface DigestRunOptions {
     dryRun?: boolean; captureRenderedEmails?: boolean;
     recipientOverride?: { name: string; email: string };
 }
+export interface RenderedEmail {
+    To: string; From: string; FromName: string | null; Subject: string; BodyHtml: string; BodyText: string;
+    AudienceCode: string; CompanyName: string | null;
+}
 export interface DigestRunResult {
     Success: boolean; TotalLapsedDeals: number; Truncated: boolean;
     Sent: number; SkippedEmpty: number; Errors: string[];
-    RenderedEmails: Array<{ To: string; From: string; Subject: string; BodyHtml: string; AudienceCode: string; CompanyName: string | null }>;
+    RenderedEmails: RenderedEmail[];
 }
 export async function RunLapsedCloseDateDigest(contextUser: UserInfo, options?: DigestRunOptions): Promise<DigestRunResult>;
 ```
@@ -510,7 +519,7 @@ Expected: FAIL
 
 `executeAgentInternal` validates `params.contextUser`, parses `params.payload`, calls `RunLapsedCloseDateDigest`, and returns `{ finalStep: { terminate: true, step, message, newPayload }, stepCount: 1 }`.
 
-`ParseDigestPayload` returns `{ ok: true; options } | { ok: false; message }` and **fails closed**: unknown fields are ignored and an ABSENT field takes the run's default, but a field that is PRESENT and unreadable refuses the run — the agent turns the message into a `Failed` step before `RunLapsedCloseDateDigest` is called at all. Nothing in the parse throws. The reason it is not the permissive reading: `dryRun` and `recipientOverride` exist to stop a real send, a `StartingPayload` is typed by hand, and `{"dryRun": "true"}` read as the default mails every CEO, CFO, CTO and company leader on the roster. The tests therefore assert both the `Failed` step and that the run was never called; a `Failed` step reached after the send would be no protection. `LoadLapsedCloseDateDigestAgent()` exists purely to defeat tree-shaking — follow the comment style on `LoadSalesCoreEntitiesServer`.
+`ParseDigestPayload` returns `ParsedDigestPayload` (`{ refusal?: string; options: DigestRunOptions }` — one shape rather than a `{ ok: true } | { ok: false }` union because `strict` is off in this repo and TypeScript does not narrow a boolean discriminant without `strictNullChecks`) and **fails closed**: unknown fields are ignored and an ABSENT field takes the run's default, but a field that is PRESENT and unreadable refuses the run — the agent turns `refusal` into a `Failed` step before `RunLapsedCloseDateDigest` is called at all. Nothing in the parse throws. The reason it is not the permissive reading: `dryRun` and `recipientOverride` exist to stop a real send, a `StartingPayload` is typed by hand, and `{"dryRun": "true"}` read as the default mails every CEO, CFO, CTO and company leader on the roster. The tests therefore assert both the `Failed` step and that the run was never called; a `Failed` step reached after the send would be no protection. `LoadLapsedCloseDateDigestAgent()` exists purely to defeat tree-shaking — follow the comment style on `LoadSalesCoreEntitiesServer`.
 
 - [ ] **Step 4: Run to verify they pass, then build**
 

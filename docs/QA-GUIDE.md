@@ -372,7 +372,7 @@ the screen disagree, the spec is the reference.
 2. Set that deal's expected close date to today. ✅ It is no longer listed: a deal closing today has not lapsed.
 3. Run again with `recipientOverride`. ✅ It arrives at the override address and the real recipient gets
    nothing. With `DigestProvider` blank, the same run fails once with an error naming it.
-4. A recipient whose company has nothing lapsed gets no email, while a `CEO` or `CFO` recipient gets the
+4. A recipient whose company has nothing lapsed gets no email, while a `CEO`, `CFO` or `CTO` recipient gets the
    all-clear text. ✅ Both are expected, not a defect.
 
 ### 5.14 Regression sweep
