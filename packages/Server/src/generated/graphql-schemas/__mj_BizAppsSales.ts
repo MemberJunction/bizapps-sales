@@ -2758,6 +2758,25 @@ export class mjBizAppsSalesDeal_ {
     @Field(() => Int, {nullable: true}) 
     StandardAgreementModifiedFlag?: number;
         
+    @Field(() => Int, {nullable: true}) 
+    InvoiceCount?: number;
+        
+    @Field(() => Float, {nullable: true}) 
+    InvoicedAmount?: number;
+        
+    @Field(() => Float, {nullable: true}) 
+    PaidAmount?: number;
+        
+    @Field(() => Float, {nullable: true}) 
+    OutstandingBalance?: number;
+        
+    @Field({nullable: true}) 
+    @MaxLength(20)
+    PaymentStatus?: string;
+        
+    @Field({nullable: true}) 
+    NextPaymentDueDate?: Date;
+        
     @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
     ReadableFields___?: string[];
         
