@@ -95,7 +95,7 @@ import {
 } from '../nav/sales-nav.model';
 import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 import { TimeLimitExceeded, WithinTimeLimit } from '../data/time-limit';
-import { DealBoardComponent, DEFAULT_DISPLAY_CURRENCY, StageIdleFor } from '../board/deal-board.component';
+import { BoardPipelines, DealBoardComponent, DEFAULT_DISPLAY_CURRENCY, StageIdleFor } from '../board/deal-board.component';
 import {
     DealWorkspaceService,
     SECTION_LOOKUP_KEYS,
@@ -141,10 +141,13 @@ import {
     HasFilters,
     HasID,
     NO_FILTERS,
+    OpenStageIDs,
     PipelineOptionsFor,
     PipelinesWithinCompanies,
     SameFilters,
     SortedOptions,
+    StageOptionsFor,
+    StagesWithinPipelines,
     ToggleID,
     type DashboardFilters,
     type FilterOption,
@@ -490,6 +493,7 @@ export class MJSSalesSectionComponent implements OnInit {
             ProductCompanies: [...this.Filters.ProductCompanyIDs],
             Owners: [...this.Filters.OwnerEmployeeIDs],
             Pipelines: [...this.Filters.PipelineIDs],
+            Stages: [...this.Filters.StageIDs],
             Inspect: this.InspectFilter === DEFAULT_INSPECT ? null : this.InspectFilter,
             InspectArg: this.InspectArg,
             Pipeline: this.BoardPipelineID,
@@ -502,6 +506,7 @@ export class MJSSalesSectionComponent implements OnInit {
             ProductCompanyIDs: url.ProductCompanies,
             OwnerEmployeeIDs: url.Owners,
             PipelineIDs: url.Pipelines,
+            StageIDs: url.Stages,
         };
     }
 
@@ -1069,6 +1074,28 @@ export class MJSSalesSectionComponent implements OnInit {
             .map((p) => ({ ID: p.ID, Name: several && !shared(p.ID) ? PipelineLabel(p) : p.Name }));
     }
 
+    /**
+     * The pipelines the Stage list covers: those the Selling company and Pipeline filters allow, in the
+     * Board's tab order (bc-aidp-next-golive#488).
+     */
+    private stagePipelines(filters: DashboardFilters = this.Filters): PipelineLookup[] {
+        return BoardPipelines(this.Pipelines, filters.CompanyIDs, filters.PipelineIDs);
+    }
+
+    /**
+     * Stages, grouped under each allowed pipeline, or under the companies it serves while pipelines are
+     * hidden. Names repeat across pipelines, so the heading tells them apart.
+     */
+    public get StageOptions(): FilterOption[] {
+        const heading = (p: PipelineLookup): string => (this.HidePipelines ? PipelineCompanyNames(this.Pipelines, p) : p.Name);
+        return StageOptionsFor(this.stagePipelines(), this.Stages, heading);
+    }
+
+    /** The listed stages whose status is open: what "Open stages" picks. */
+    public get OpenStageIDs(): string[] {
+        return OpenStageIDs(this.Stages, this.DealStatusTypes, this.stagePipelines().map((p) => p.ID));
+    }
+
     private companyName(id: string): string {
         return this.companies.find((c) => HasID([c.ID], id))?.Name
             ?? PipelineCompanies(this.Pipelines).find((c) => HasID([c.CompanyID], id))?.CompanyName
@@ -1107,8 +1134,10 @@ export class MJSSalesSectionComponent implements OnInit {
                 CompanyIDs: this.CompanyOptions,
                 ProductCompanyIDs: this.ProductCompanyOptions,
                 PipelineIDs: this.PipelineOptions,
+                StageIDs: this.StageOptions,
                 OwnerEmployeeIDs: this.OwnerOptions,
             },
+            OpenStageIDs: this.OpenStageIDs,
             // All Deals lists every deal, so it has no period, and the summary's no-lines count is the period's.
             HidePeriod: this.Page === 'list',
             HiddenKinds: this.HidePipelines ? ['PipelineIDs'] : [],
@@ -1127,6 +1156,11 @@ export class MJSSalesSectionComponent implements OnInit {
         this.setFilters({ ...this.Filters, [kind]: [] });
     }
 
+    /** A filter list replaced whole: the Stage list's "Open stages". */
+    public SetFilter(kind: FilterKind, ids: readonly string[]): void {
+        this.setFilters({ ...this.Filters, [kind]: CleanIDs(ids) });
+    }
+
     /** "My deals": the owner filter becomes the signed-in user alone, or back to every owner. */
     public ToggleMyDeals(): void {
         const me = this.MyEmployeeID;
@@ -1135,9 +1169,14 @@ export class MJSSalesSectionComponent implements OnInit {
         }
     }
 
-    /** Applies new filters: a selected pipeline outside the selected companies is dropped. */
+    /**
+     * Applies new filters: a selected pipeline outside the selected companies is dropped, and a selected
+     * stage outside the pipelines those two lists allow.
+     */
     private setFilters(next: DashboardFilters): void {
-        const filters = { ...next, PipelineIDs: PipelinesWithinCompanies(next.PipelineIDs, this.Pipelines, next.CompanyIDs) };
+        const narrowed = { ...next, PipelineIDs: PipelinesWithinCompanies(next.PipelineIDs, this.Pipelines, next.CompanyIDs) };
+        const allowed = this.stagePipelines(narrowed).map((p) => p.ID);
+        const filters = { ...narrowed, StageIDs: this.Pipelines.length ? StagesWithinPipelines(narrowed.StageIDs, this.Stages, allowed) : [...narrowed.StageIDs] };
         if (SameFilters(filters, this.Filters)) {
             return;
         }

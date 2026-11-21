@@ -1,6 +1,6 @@
 /**
- * @fileoverview The Sales section's filter bar: period, selling company, product company, pipeline and
- * deal owner (bc-aidp-next-golive#350, #351).
+ * @fileoverview The Sales section's filter bar: period, selling company, product company, pipeline,
+ * stage and deal owner (bc-aidp-next-golive#350, #351, #488).
  *
  * ONE COMPONENT FOR EVERY PAGE THAT FILTERS. The Dashboard and the Board both render this, so the
  * controls' labels, order and defaults cannot drift between them. It holds no state: the section owns
@@ -48,6 +48,8 @@ export interface SalesFilterBarState {
     MyEmployeeID: string | null;
     /** Deals a Product company filter leaves out because they have no lines yet; 0 hides the chip. */
     NoLinesLeftOut: number;
+    /** What the Stage list's "Open stages" button picks: the listed stages whose status is open. */
+    OpenStageIDs?: readonly string[];
 }
 
 /** A custom range's two days as picked; empty is no bound on that side. */
@@ -67,6 +69,7 @@ const FILTER_LISTS: readonly FilterList[] = [
     { Kind: 'CompanyIDs', Label: 'Selling company', TestID: 'sales-filter-company' },
     { Kind: 'ProductCompanyIDs', Label: 'Product company', TestID: 'sales-filter-product-company' },
     { Kind: 'PipelineIDs', Label: 'Pipeline', TestID: 'sales-filter-pipeline' },
+    { Kind: 'StageIDs', Label: 'Stage', TestID: 'sales-filter-stage' },
     { Kind: 'OwnerEmployeeIDs', Label: 'Deal owner', TestID: 'sales-filter-owner' },
 ];
 
@@ -89,6 +92,8 @@ export class MJSSalesFilterBarComponent {
     @Output() public readonly FilterToggled = new EventEmitter<{ Kind: FilterKind; ID: string }>();
     /** A list's Clear. */
     @Output() public readonly FilterCleared = new EventEmitter<FilterKind>();
+    /** A list replaced whole: the Stage list's "Open stages". */
+    @Output() public readonly FilterSet = new EventEmitter<{ Kind: FilterKind; IDs: string[] }>();
     /** "My deals" was pressed. */
     @Output() public readonly MyDealsToggled = new EventEmitter<void>();
 
@@ -113,6 +118,18 @@ export class MJSSalesFilterBarComponent {
 
     public IsPicked(kind: FilterKind, id: string): boolean {
         return HasID(this.State.Filters[kind], id);
+    }
+
+    /** The heading to draw above a grouped list's choice: its group, where the group starts. */
+    public GroupHeading(kind: FilterKind, index: number): string | null {
+        const options = this.State.Options[kind];
+        const group = options[index]?.Group;
+        return group && (index === 0 || options[index - 1].Group !== group) ? group : null;
+    }
+
+    /** The Stage list's "Open stages" button. */
+    public PickOpenStages(): void {
+        this.FilterSet.emit({ Kind: 'StageIDs', IDs: [...(this.State.OpenStageIDs ?? [])] });
     }
 
     /** "Selling company: Acme +2": the list's button. */

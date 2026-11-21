@@ -177,7 +177,7 @@ describe('the filter bar with HidePeriod', () => {
         return {
             Period: 'custom', CustomStart: '2026-01-01', CustomEnd: '2026-03-31', WindowLabel: 'Jan 1 – Mar 31',
             PeriodTooltip: '', Filters: NO_FILTERS,
-            Options: { CompanyIDs: [], ProductCompanyIDs: [], PipelineIDs: [], OwnerEmployeeIDs: [] },
+            Options: { CompanyIDs: [], ProductCompanyIDs: [], PipelineIDs: [], StageIDs: [], OwnerEmployeeIDs: [] },
             MyEmployeeID: null, NoLinesLeftOut: 0, ...overrides,
         };
     }

@@ -280,6 +280,7 @@
             (CustomRangeChange)="SetCustomRange($event.Start, $event.End)"
             (FilterToggled)="ToggleFilter($event.Kind, $event.ID)"
             (FilterCleared)="ClearFilter($event)"
+            (FilterSet)="SetFilter($event.Kind, $event.IDs)"
             (MyDealsToggled)="ToggleMyDeals()"></mjs-sales-filter-bar>
         </ng-template>
 
@@ -390,6 +391,7 @@
               [StageEnteredOn]="StageEnteredOn"
               [CompanyIDs]="Filters.CompanyIDs"
               [PipelineIDs]="Filters.PipelineIDs"
+              [StageIDs]="Filters.StageIDs"
               [SelectedPipelineID]="BoardPipelineID"
               [HidePipelines]="HidePipelines"
               (SelectedPipelineIDChange)="OnBoardPipeline($event)"

@@ -129,7 +129,7 @@ describe('a filter bar choice (bc-aidp-next-golive#350)', () => {
         fixture.componentInstance.ToggleFilter('CompanyIDs', 'C1');
         await vi.waitFor(() => expect(service.LoadRoster).toHaveBeenCalledTimes(2));
 
-        const filters = { CompanyIDs: ['C1'], ProductCompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: [] };
+        const filters = { CompanyIDs: ['C1'], ProductCompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: [], StageIDs: [] };
         // Open deals, and those closed in the period, narrowed by the lists: the Board's cards and the
         // dashboard's grouped cards read the same rows (bc-aidp-next-golive#351).
         expect(service.LoadRoster).toHaveBeenLastCalledWith('2026-07-01', filters, '2026-09-30');
