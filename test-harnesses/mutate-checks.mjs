@@ -192,8 +192,8 @@ const MUTATIONS = [
     // company from its pipeline, it refuses one the pipeline is not actively linked to. Accepting every
     // company is the defect SD2 names.
     { id: 'M-SD2', file: DES, expect: ['SD2'],
-      from: "        if ((result.Results ?? []).length === 0) {\n            return 'the pipeline on this deal is not available to its company.",
-      to: "        if (false) {\n            return 'the pipeline on this deal is not available to its company.",
+      from: "        if ((result.Results ?? []).length === 0) {\n            return 'The pipeline on this deal is not available to its company.",
+      to: "        if (false) {\n            return 'The pipeline on this deal is not available to its company.",
       note: 'the link lookup still runs, but no answer refuses the save -- an unlinked company is stored' },
     { id: 'M-SD3', file: DES, expect: ['SD3'],
       from: '        this.OwnerEmployeeID = owner?.EmployeeID ?? null;',

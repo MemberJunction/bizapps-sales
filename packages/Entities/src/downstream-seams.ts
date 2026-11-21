@@ -243,8 +243,8 @@ export class StubDownstreamSeam implements IDownstreamSeam {
         return {
             Success: false,
             Message:
-                'The contract route was planned but not executed: bizapps-contracts is not installed in ' +
-                'this deployment, so its entities cannot be resolved.',
+                'The Contracts app (bizapps-contracts) is not installed in this deployment, so no contract ' +
+                'was created.',
         };
     }
 
@@ -263,8 +263,8 @@ export class StubDownstreamSeam implements IDownstreamSeam {
         return {
             Success: false,
             Message:
-                'The renewal route was planned but not executed: bizapps-contracts is not installed in ' +
-                'this deployment, so its entities cannot be resolved.',
+                'The Contracts app (bizapps-contracts) is not installed in this deployment, so no renewal ' +
+                'was created.',
         };
     }
 
@@ -273,8 +273,8 @@ export class StubDownstreamSeam implements IDownstreamSeam {
         return {
             Success: false,
             Message:
-                'The order was not linked to the contract: bizapps-contracts is not installed in this ' +
-                'deployment, so its entities cannot be resolved.',
+                'The order was not linked to a contract, because the Contracts app (bizapps-contracts) is ' +
+                'not installed in this deployment.',
         };
     }
 }
