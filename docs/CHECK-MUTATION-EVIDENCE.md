@@ -15,11 +15,11 @@ paths. The round-by-round narratives behind these results are in this file's his
 
 | | |
 |---|---|
-| Checks registered | **214** in 16 bundles (`scripts/expected-check-counts.json`) |
+| Checks registered | **215** in 16 bundles (`scripts/expected-check-counts.json`) |
 | Mutants registered | **113** |
 | Last full campaign | 2026-08-21/22: 68 mutants against a 121-check suite. It recorded totals, not per-mutant results, and its commit (`6d3add4`) is not in this repository |
 | Since then | single mutants only, recorded below |
-| Checks no mutant declares | **83** of 214, listed below the table |
+| Checks no mutant declares | **84** of 215, listed below the table |
 
 ## Per mutant
 
@@ -152,7 +152,7 @@ reached the running code.
 | Bundle | Checks |
 |---|---|
 | `save-deal` | SD1, SD6, SD7, SD13, SD14, SD17, SD19, SD20, SD28, SD38, SD39, SD42, SD43, SD44, SD45, SD46, SD47, SD48 |
-| `close-deal` | CD3, CD12, CD19, CD25, CD31, CD32, CD33, CD34, CD35, CD36, CD37, CD38, CD41, CD42, CD43 |
+| `close-deal` | CD3, CD12, CD19, CD25, CD31, CD32, CD33, CD34, CD35, CD36, CD37, CD38, CD41, CD42, CD43, CD45 |
 | `product-picker` | PP5 |
 | `close-won-order` | CO2, CO4 |
 | `close-won-contract` | CT1, CT7 |
@@ -197,6 +197,6 @@ none: a figure without one describes no tree in particular.
 
 That the suite is adequate. An `OK` here shows that the checks a mutant declares fail for the reason
 they claim, against that one mutation, on the commit it ran against. Most recorded runs predate the
-current tree, and 83 of the 214 checks have no declared mutant. And no mutation run says anything about
+current tree, and 84 of the 215 checks have no declared mutant. And no mutation run says anything about
 behaviour no check covers — for that, see the Explorer specs under `test-harnesses/playwright/specs/`
 (`COVERAGE-MAP.md`).
