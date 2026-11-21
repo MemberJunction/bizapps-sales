@@ -90,23 +90,27 @@ export class OwnedAccountsConsentSource extends BaseActivityConsentSource {
         const peopleView = requireEntity(request, E_PERSON);
         // The employee is resolved inside each filter (a subquery over the Users base view), so no read
         // waits on another and all four go in one round trip. The user row is read only to say WHY a list is empty.
-        const ownerIs = `OwnerEmployeeID IS NOT NULL AND OwnerEmployeeID IN (SELECT EmployeeID FROM ${viewOf(usersView)} WHERE ID = '${owner}')`;
+        // EVERY identifier is bracketed and no boolean is a bit literal: the PostgreSQL provider turns `[x]`
+        // into `"x"`, but quotes a bare name (and turns `= 1` into `= TRUE`) only for the columns of the entity
+        // being read. A bare column of another view in a subquery folds to lower case there and the read fails.
+        // `'true'` compares to a bit on SQL Server and to a boolean on PostgreSQL.
+        const ownerIs = `[OwnerEmployeeID] IS NOT NULL AND [OwnerEmployeeID] IN (SELECT [EmployeeID] FROM ${viewOf(usersView)} WHERE [ID] = '${owner}')`;
         // One (relationship, person) per account and email domain. Not limited to accounts with a website:
         // a contact is how an account with no website grants at all.
         // The cap is cut HERE, in one order, and not left to each read's MaxRows: the two reads share no
         // order, so over the cap each would keep its own "first N" and a relationship would lose its person.
         const onePerAccountAndDomain = (column: 'RID' | 'PID'): string =>
-            `SELECT y.${column} FROM (SELECT x.RID, x.PID, ROW_NUMBER() OVER (ORDER BY x.RID) AS N FROM (SELECT r.ID AS RID, r.FromPersonID AS PID, ` +
-            `ROW_NUMBER() OVER (PARTITION BY r.ToOrganizationID, p.EmailDomain ORDER BY r.ID) AS RN ` +
-            `FROM ${viewOf(relationshipsView)} r INNER JOIN ${viewOf(peopleView)} p ON p.ID = r.FromPersonID ` +
-            `WHERE r.Status = 'Active' AND r.RelationshipType = 'Employee' AND p.Status = 'Active' AND p.EmailDomain IS NOT NULL ` +
-            `AND p.EmailDomain NOT IN (${FREE_MAIL_SQL}) AND r.ToOrganizationID IN (SELECT ID FROM ${viewOf(accountsView)} WHERE IsActive = 1 AND ${ownerIs})) x WHERE x.RN = 1) y ` +
-            `WHERE y.N <= ${MAX_CONTACT_DOMAINS + 1}`;
+            `SELECT y.[${column}] FROM (SELECT x.[RID], x.[PID], ROW_NUMBER() OVER (ORDER BY x.[RID]) AS [N] FROM (SELECT r.[ID] AS [RID], r.[FromPersonID] AS [PID], ` +
+            `ROW_NUMBER() OVER (PARTITION BY r.[ToOrganizationID], p.[EmailDomain] ORDER BY r.[ID]) AS [RN] ` +
+            `FROM ${viewOf(relationshipsView)} r INNER JOIN ${viewOf(peopleView)} p ON p.[ID] = r.[FromPersonID] ` +
+            `WHERE r.[Status] = 'Active' AND r.[RelationshipType] = 'Employee' AND p.[Status] = 'Active' AND p.[EmailDomain] IS NOT NULL ` +
+            `AND p.[EmailDomain] NOT IN (${FREE_MAIL_SQL}) AND r.[ToOrganizationID] IN (SELECT [ID] FROM ${viewOf(accountsView)} WHERE [IsActive] = 'true' AND ${ownerIs})) x WHERE x.[RN] = 1) y ` +
+            `WHERE y.[N] <= ${MAX_CONTACT_DOMAINS + 1}`;
         const views: RunViewParams[] = [
-            { EntityName: E_USER, ExtraFilter: `ID = '${owner}'`, Fields: ['ID', 'EmployeeID'], MaxRows: 1, ResultType: 'simple' },
+            { EntityName: E_USER, ExtraFilter: `[ID] = '${owner}'`, Fields: ['ID', 'EmployeeID'], MaxRows: 1, ResultType: 'simple' },
             {
                 EntityName: E_SALES_ACCOUNT,
-                ExtraFilter: `IsActive = 1 AND WebsiteDomain IS NOT NULL AND ${ownerIs}`,
+                ExtraFilter: `[IsActive] = 'true' AND [WebsiteDomain] IS NOT NULL AND ${ownerIs}`,
                 Fields: ['Name', 'WebsiteDomain'],
                 OrderBy: 'Name',
                 MaxRows: MAX_OWNED_ACCOUNTS + 1,
@@ -114,12 +118,12 @@ export class OwnedAccountsConsentSource extends BaseActivityConsentSource {
             },
             {
                 EntityName: E_RELATIONSHIP,
-                ExtraFilter: `ID IN (${onePerAccountAndDomain('RID')})`,
+                ExtraFilter: `[ID] IN (${onePerAccountAndDomain('RID')})`,
                 Fields: ['FromPersonID', 'ToOrganization'],
                 MaxRows: MAX_CONTACT_DOMAINS + 1,
                 ResultType: 'simple',
             },
-            { EntityName: E_PERSON, ExtraFilter: `ID IN (${onePerAccountAndDomain('PID')})`, Fields: ['ID', 'EmailDomain'], MaxRows: MAX_CONTACT_DOMAINS + 1, ResultType: 'simple' },
+            { EntityName: E_PERSON, ExtraFilter: `[ID] IN (${onePerAccountAndDomain('PID')})`, Fields: ['ID', 'EmailDomain'], MaxRows: MAX_CONTACT_DOMAINS + 1, ResultType: 'simple' },
         ];
         const [users, accounts, relationships, people] = await RunView.FromMetadataProvider(request.Provider).RunViews(views, request.ContextUser);
         if (!users?.Success) throw readFailed(E_USER, request, users?.ErrorMessage);
