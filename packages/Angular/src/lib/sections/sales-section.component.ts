@@ -111,7 +111,6 @@ import type {
 } from '../workspace/deal-workspace.types';
 import {
     CloseBuckets,
-    ClosingSoon,
     BookSlippedCount,
     FilterInspect,
     InForecast,
@@ -336,7 +335,7 @@ export class MJSSalesSectionComponent implements OnInit {
     private abandonedToken = 0;
     /** Identifies the newest deal list request, so a slower superseded one cannot replace the grid. */
     private inspectToken = 0;
-    /** Which figure the deal list is showing. Default is closing in the next 30 days. */
+    /** Which figure the deal list is showing. Default is open deals expected to close in the period. */
     public InspectFilter: InspectKey = DEFAULT_INSPECT;
     /** The list's argument: the stage for `stage`, the owner for `owner`. */
     public InspectArg: string | null = null;
@@ -1250,11 +1249,6 @@ export class MJSSalesSectionComponent implements OnInit {
         return { Slipped: BookSlippedCount(this.Deals, this.summary?.PastExpectedCloseCount, HasFilters(this.Filters)) };
     }
 
-    /** The default list: open deals expected to close in the next 30 days, soonest first. */
-    public get ClosingSoon(): DealRosterRow[] {
-        return ClosingSoon(this.dashboardDeals, BusinessToday(this.singleCompanyID));
-    }
-
     /**
      * The roster rows behind the selected figure. Empty for `won` and `closed`: the dashboard's rows are
      * open deals, so those two are listed from the server alone (see `inspectWhere`).
@@ -1283,7 +1277,7 @@ export class MJSSalesSectionComponent implements OnInit {
     /** What the deal list is showing, in the words of the figure that was clicked. */
     public get InspectLabel(): string {
         switch (this.InspectFilter) {
-            case 'closing': return 'Closing in the next 30 days';
+            case 'closing': return this.closingLabel();
             case 'commit': return 'Commit deals';
             case 'best': return 'Best case deals, not counting Commit';
             case 'pipe': return 'Open pipeline';
@@ -1309,6 +1303,17 @@ export class MJSSalesSectionComponent implements OnInit {
         const count = this.InspectCount;
         const counted = count === null ? '' : ` · ${count}`;
         return `Showing ${this.InspectLabel.charAt(0).toLowerCase()}${this.InspectLabel.slice(1)}${counted}`;
+    }
+
+    /**
+     * The default list's title, naming the period it follows (bc-aidp-next-golive#489): "Open deals
+     * expected to close this quarter". With no bounds it lists every open deal.
+     */
+    private closingLabel(): string {
+        const window = this.Window;
+        return window.Start === null && window.End === null
+            ? 'Open deals, soonest close first'
+            : `Open deals expected to close ${this.PeriodPhrase}`;
     }
 
     private stageName(arg: string | null): string {

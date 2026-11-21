@@ -188,7 +188,7 @@ export const INSPECT_KEYS: readonly InspectKey[] = [
 
 /** The keys whose figures the period bounds. Every other key ignores it (see each case). */
 export const PERIOD_BOUND_KEYS: readonly InspectKey[] = [
-    'commit', 'best', 'pipe', 'weighted', 'remainder', 'won', 'closed', 'week', 'month', 'later', 'stage', 'owner',
+    'closing', 'commit', 'best', 'pipe', 'weighted', 'remainder', 'won', 'closed', 'week', 'month', 'later', 'stage', 'owner',
 ];
 
 /** The `owner` argument for deals with no owner. */
@@ -220,31 +220,26 @@ export interface InspectDayBounds {
      * the buckets cover every dated open deal from today on.
      */
     LaterFrom: string;
-    /** Thirty days on from today: the end of the default list, "closing in the next 30 days". */
-    ClosingEnd: string;
 }
 
 /** {@link InspectDayBounds} for `today`. Shared by the roster filter and the grid's server-side filter. */
 export function InspectDateBounds(today: string): InspectDayBounds {
     const WeekEnd = addDays(today, 7);
     const MonthEnd = monthEnd(today);
-    return { WeekEnd, MonthEnd, LaterFrom: WeekEnd > MonthEnd ? WeekEnd : MonthEnd, ClosingEnd: addDays(today, 30) };
+    return { WeekEnd, MonthEnd, LaterFrom: WeekEnd > MonthEnd ? WeekEnd : MonthEnd };
 }
 
 /**
- * Open deals expected to close from today through 30 days on, soonest first: the dashboard's default
- * list. Not bounded by the period: it answers "what is about to close", whatever period is selected.
+ * The dashboard's default list: open deals expected to close in the selected period, soonest first
+ * (bc-aidp-next-golive#489). It follows the period like the figures above it; the near term is the
+ * Expected to close card's buckets. With no window ("All time") every open deal is listed, those with
+ * no expected close date last.
  */
-export function ClosingSoon(deals: readonly DealRosterRow[], today: string = BusinessToday()): DealRosterRow[] {
-    const end = InspectDateBounds(today).ClosingEnd;
+export function ClosingInPeriod(deals: readonly DealRosterRow[], window?: PeriodWindow): DealRosterRow[] {
+    const day = (d: DealRosterRow): string => (d.ExpectedCloseDate ? UtcDatePart(d.ExpectedCloseDate) : '\uffff');
     return deals
-        .filter((d) => {
-            if (!d.IsOpen || !d.ExpectedCloseDate) return false;
-            const c = UtcDatePart(d.ExpectedCloseDate);
-            return c >= today && c <= end;
-        })
-        .slice()
-        .sort((a, b) => UtcDatePart(a.ExpectedCloseDate!).localeCompare(UtcDatePart(b.ExpectedCloseDate!)));
+        .filter((d) => OpenInPeriod(d, window))
+        .sort((a, b) => day(a).localeCompare(day(b)));
 }
 
 /** Ids round-trip through JSON and SQL in different cases. */
@@ -264,10 +259,10 @@ function closesBetween(d: DealRosterRow, from: string | null, to: string | null,
  * Each case is the client form of the same case in `InspectCriteriaWhere` (the grid's server filter)
  * and of the matching column in `dashboard-summary.sql`, so the figure, this list and the grid agree.
  *
- * @param window The selected period. The forecast, pipeline, stage, owner and date-bucket cases count
- * open deals expected to close in it ({@link OpenInPeriod}); `won` reads `ActualCloseDate`. The
- * attention cases (`slipped`, `noowner`, `nodate`, `idle`) and `closing` ignore it: they are about the
- * open book today. `closed` is the win rate's deals and needs closed rows, which the dashboard's open
+ * @param window The selected period. The default list (`closing`) and the forecast, pipeline, stage,
+ * owner and date-bucket cases count open deals expected to close in it ({@link OpenInPeriod}); `won`
+ * reads `ActualCloseDate`. The attention cases (`slipped`, `noowner`, `nodate`, `idle`) ignore it: they
+ * are about the open book today. `closed` is the win rate's deals and needs closed rows, which the dashboard's open
  * roster does not hold, so the grid reads it from the server.
  * @param arg The stage ID for `stage`; the owner's employee ID, or {@link NO_OWNER_ARG}, for `owner`.
  * @param idle The IDs of open deals idle past their stage's limit, for `idle`.
@@ -284,7 +279,7 @@ export function FilterInspect(
     const inPeriod = (d: DealRosterRow): boolean => OpenInPeriod(d, window);
     switch (key) {
         case 'closing':
-            return ClosingSoon(deals, today);
+            return ClosingInPeriod(deals, window);
         case 'commit':
             return deals.filter((d) => inPeriod(d) && InCommit(d));
         case 'best':
@@ -317,7 +312,7 @@ export function FilterInspect(
         case 'owner':
             return deals.filter((d) => inPeriod(d) && InCommit(d) && OwnerKey(d) === idKey(arg));
         default:
-            return ClosingSoon(deals, today);
+            return ClosingInPeriod(deals, window);
     }
 }
 
