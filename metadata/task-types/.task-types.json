@@ -67,7 +67,7 @@
     "fields": {
       "Name": "Contract Processing",
       "Code": "CONTRACT_PROCESSING",
-      "Description": "Process the contract a won deal created: attach the executed document, confirm the agreement version against what it cites, record the executed/effective/end dates, validate whether the template was modified, and move the contract to active.",
+      "Description": "Process the contract a won deal created: upload the signed agreement in the contract's Executed agreement section and mark it as the executed agreement (a file attached from the toolbar must also be marked), confirm the agreement version against what it cites, record the executed/effective/end dates, validate whether the template was modified, and move the contract to active.",
       "IconClass": "fa-solid fa-file-signature",
       "DefaultPriority": "High"
     },
