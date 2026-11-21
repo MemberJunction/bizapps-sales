@@ -67,6 +67,7 @@ import { ActivityWriterService } from './activities/ActivityWriterService.js';
 import { DealEntityServer } from './DealEntityServer.js';
 import { SendDealScheduleToOrder } from './deal-schedule-to-order.js';
 import { OrdersIsInstalled } from './orders-availability.js';
+import { CloseTermMonths } from './deal-commercial-defaults.js';
 import { ContractsIsInstalled, LiveContractsSeam } from './LiveContractsSeam.js';
 import { CloseWonTaskDueAt, CloseWonTaskService, RaisesOrderReviewTask, ReadCloseWonTaskConfig, WithPipelineAssignee } from './CloseWonTaskService.js';
 import {
@@ -1118,7 +1119,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
                 ? await seam.RenewContractTerm({
                       ContractID: deal.RenewsContractID ?? '',
                       DealID: deal.ID,
-                      TermMonths: policy.TermMonths ?? deal.TermMonths ?? null,
+                      // The deal's own term beats the pipeline's (golive #486).
+                      TermMonths: CloseTermMonths(deal.TermMonths, policy.TermMonths),
                   })
                 : await seam.CreateContractFromDeal(await this.buildContractInput(deal, policy, provider, user));
 
@@ -1559,7 +1561,8 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             DealID: deal.ID,
             CompanyID: deal.CompanyID,
             ContractTypeCode: policy.ContractTypeCode ?? null,
-            TermMonths: policy.TermMonths ?? deal.TermMonths ?? null,
+            // The deal's own term beats the pipeline's (golive #486).
+            TermMonths: CloseTermMonths(deal.TermMonths, policy.TermMonths),
             // The AD's red-lines travel with the agreement — a contract that silently dropped them
             // would send a human reviewer in blind.
             ContractVariances: deal.ContractVariances,

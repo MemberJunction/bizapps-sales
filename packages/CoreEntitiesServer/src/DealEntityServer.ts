@@ -72,6 +72,8 @@ import {
     DealFieldsEditableWhileLocked,
     DealFieldLabel,
     DealEntity,
+    DEAL_ORDER_PRICED_FIELDS,
+    DealOrderPricedEditRefusal,
     JoinLabels,
     type mjBizAppsSalesDealStageEventEntity,
 } from '@mj-biz-apps/sales-entities';
@@ -82,6 +84,7 @@ import { KeptOnDealNote, SendDealScheduleToOrder, StatusIsWon } from './deal-sch
 import { OrdersIsInstalled } from './orders-availability.js';
 import { CheckTeamGraphRoleRules } from './team-role-rules.js';
 import { VetoReader } from './veto-reader.js';
+import { PipelineDefaultTermMonths, PlanCommercialDefaults } from './deal-commercial-defaults.js';
 import {
     DealDeleteRefusal,
     DeleteDealChildRows,
@@ -190,11 +193,28 @@ interface PipelineCompanyLinkRow {
 }
 
 const STAGE_ENTITY = 'MJ_BizApps_Sales: Pipeline Stages';
+const PIPELINE_ENTITY = 'MJ_BizApps_Sales: Pipelines';
 const ORDER_HEADER_ENTITY = 'MJ_BizApps_Orders: Order Headers';
 
-/** The one column the order lookup selects for the amount cache. */
+/** The columns the order lookup selects for the amount cache. */
 interface OrderTotalRow {
     TotalGross: number | null;
+    /** Orders' recurring totals (golive #485). Absent on a host whose orders release predates them. */
+    RecurringMonthlyTotal?: number | null;
+    RecurringAnnualTotal?: number | null;
+}
+
+/** Orders' recurring totals and the deal columns each is copied to (golive #485). */
+const ORDER_RECURRING_COPIES = [
+    { Order: 'RecurringMonthlyTotal', Deal: 'MRR' },
+    { Order: 'RecurringAnnualTotal', Deal: 'ARR' },
+] as const;
+
+/** A finite number from a decimal column, or null. See the note in `refreshAmountFromOrder`. */
+function finiteOrNull(raw: unknown): number | null {
+    if (raw === null || raw === undefined) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
 }
 
 /** What the stage lookup selects for the order rule: the status it names, and the stage's own status. */
@@ -535,6 +555,12 @@ export class DealEntityServer extends DealEntity {
             return this.refuseSave(wonRefusal ?? stampRefusal);
         }
 
+        // Amount, MRR and ARR are copied from the order once the deal has products (golive #485).
+        const pricedRefusal = this.orderPricedEditRefusal();
+        if (pricedRefusal) {
+            return this.refuseSave(pricedRefusal);
+        }
+
         /**
          * THE CLOSE LOCK (L-17, master plan §7.3) — enforced HERE and nowhere else.
          *
@@ -639,8 +665,12 @@ export class DealEntityServer extends DealEntity {
         /**
          * AFTER the company check, because the company is what decides the currency, and OUTSIDE the
          * try above, because this one may not refuse a save. See {@link defaultCurrencyOnCreate}.
+         *
+         * The term and start date fill the same way (golive #486): only when empty, never on a locked
+         * deal, never refusing the save. See `deal-commercial-defaults.ts`.
          */
         await this.defaultCurrencyOnCreate();
+        await this.defaultEmptyTermAndStart();
         this.defaultCreationDateOnCreate();
 
         /**
@@ -2538,7 +2568,7 @@ export class DealEntityServer extends DealEntity {
                 EntityName: ORDER_HEADER_ENTITY,
                 ExtraFilter: `ID = '${this.OrderID}'`,
                 ResultType: 'simple',
-                Fields: ['TotalGross'],
+                Fields: ['TotalGross', ...this.orderRecurringFields()],
             },
             this.ContextCurrentUser,
         );
@@ -2565,11 +2595,12 @@ export class DealEntityServer extends DealEntity {
          * So the rule is the one a money cache should have had from the start: cache a finite number, or
          * do not touch the columns.
          */
-        const raw = (result.Results ?? [])[0]?.TotalGross;
-        const total = raw === null || raw === undefined ? null : Number(raw);
-        if (total === null || !Number.isFinite(total)) {
+        const row = (result.Results ?? [])[0];
+        const total = finiteOrNull(row?.TotalGross);
+        if (total === null) {
             return;   // no usable answer — see the note above; this still guards the mid-transaction read
         }
+        const recurring = this.recurringCopies(row);
 
         /**
          * ── "NO PRICED LINES" IS NOT REACHABLE ON THIS SCHEMA, AND THE COMMENT ABOVE OVERCLAIMED ───────
@@ -2599,7 +2630,8 @@ export class DealEntityServer extends DealEntity {
          * a reader holding the order can recompute this and compare without a second table.
          */
         const hash = createHash('sha256').update(`${this.OrderID}|${total}`).digest('hex');
-        if (Number(this.Amount) === Number(total) && this.AmountSourceHash === hash && this.AmountIsComputed) {
+        const recurringCurrent = recurring.every((c) => Number(this.Get(c.Deal)) === c.Value && this.Get(c.Deal) !== null);
+        if (Number(this.Amount) === Number(total) && this.AmountSourceHash === hash && this.AmountIsComputed && recurringCurrent) {
             return;   // already current; a no-op write would only churn the row
         }
 
@@ -2612,11 +2644,14 @@ export class DealEntityServer extends DealEntity {
                 user: unknown,
             ) => Promise<unknown>;
         };
+        // MRR and ARR travel in the same statement, as copies of orders' figures (golive #485).
+        const recurringSet = recurring.map((c) => `, ${c.Deal} = @${c.Deal}`).join('');
+        const recurringParams = Object.fromEntries(recurring.map((c) => [c.Deal, c.Value]));
         await sql.ExecuteSQL(
             `UPDATE ${SALES_SCHEMA}.Deal
-                SET Amount = @amount, AmountIsComputed = 1, AmountComputedAt = @at, AmountSourceHash = @hash
+                SET Amount = @amount, AmountIsComputed = 1, AmountComputedAt = @at, AmountSourceHash = @hash${recurringSet}
               WHERE ID = @id`,
-            { amount: total, at: now, hash, id: this.ID },
+            { amount: total, at: now, hash, id: this.ID, ...recurringParams },
             { isMutation: true, description: 'DealEntityServer: refresh Deal.Amount from OrderHeader.TotalGross' },
             this.ContextCurrentUser,
         );
@@ -2627,6 +2662,9 @@ export class DealEntityServer extends DealEntity {
         this.AmountIsComputed = true;
         this.AmountComputedAt = now;
         this.AmountSourceHash = hash;
+        for (const c of recurring) {
+            this.Set(c.Deal, c.Value);
+        }
 
         /**
          * ── ...AND THE DIRTY FLAGS THOSE FOUR ASSIGNMENTS JUST SET ARE CLEARED ──────────────
@@ -2642,9 +2680,37 @@ export class DealEntityServer extends DealEntity {
          * legitimate to reset because the database already holds precisely what is in memory: this
          * method put it there itself, in the statement above.
          */
-        for (const name of ['Amount', 'AmountIsComputed', 'AmountComputedAt', 'AmountSourceHash']) {
+        for (const name of ['Amount', 'AmountIsComputed', 'AmountComputedAt', 'AmountSourceHash', ...recurring.map((c) => c.Deal)]) {
             this.GetFieldByName(name)?.ResetOldValue();
         }
+    }
+
+    /**
+     * Orders' recurring-total columns this host has (golive #485).
+     *
+     * Sales builds against RELEASED orders packages, and a host can run an orders release older than
+     * the one that added `RecurringMonthlyTotal` / `RecurringAnnualTotal`. Asking for a column the
+     * view lacks fails the whole read, Amount included, so each is requested only when the Order
+     * Headers entity's metadata lists it. Until orders ships them, MRR and ARR stay as typed; once it
+     * does, they are copied with no change here.
+     */
+    private orderRecurringFields(): string[] {
+        const provider = this.ProviderToUse as unknown as IMetadataProvider;
+        const fields = provider.Entities?.find((e) => e.Name === ORDER_HEADER_ENTITY)?.Fields ?? [];
+        return ORDER_RECURRING_COPIES.map((c) => c.Order).filter((name) => fields.some((f) => f.Name === name));
+    }
+
+    /**
+     * The MRR and ARR values to copy from an order row: each recurring total the row carries as a
+     * finite number. A copy, never a calculation: ARR is orders' annual figure, not twelve times MRR here.
+     */
+    private recurringCopies(row: OrderTotalRow | undefined): { Deal: 'MRR' | 'ARR'; Value: number }[] {
+        const out: { Deal: 'MRR' | 'ARR'; Value: number }[] = [];
+        for (const c of ORDER_RECURRING_COPIES) {
+            const value = finiteOrNull(row?.[c.Order]);
+            if (value !== null) out.push({ Deal: c.Deal, Value: value });
+        }
+        return out;
     }
 
     /* ── The close lock (L-17, master plan §7.3) ────────────────────────────── */
@@ -2834,6 +2900,18 @@ export class DealEntityServer extends DealEntity {
             'use Expected Close Date. If this page was open while the deal was closed or reopened, ' +
             'reload it and try again. Nothing was changed.'
         );
+    }
+
+    /**
+     * Refuses a typed Amount, MRR or ARR on a deal whose saved row says its money comes from the order
+     * (golive #485). Keyed on the PERSISTED `AmountIsComputed`, the rule the deal form's
+     * `FieldEditable` reads, so a header-only deal can take a typed figure and its first products in
+     * one save; `refreshAmountFromOrder` then replaces the figure.
+     */
+    private orderPricedEditRefusal(): string | null {
+        const dirty = DEAL_ORDER_PRICED_FIELDS.filter((name) => this.GetFieldByName(name)?.Dirty === true);
+        const persisted = this.GetFieldByName('AmountIsComputed')?.OldValue as boolean | null | undefined;
+        return DealOrderPricedEditRefusal(this.IsSaved ? persisted : null, dirty, DealFieldLabel);
     }
 
     /**
@@ -3677,9 +3755,9 @@ export class DealEntityServer extends DealEntity {
      *
      * ── THE THREE THINGS IT WILL NOT DO ────────────────────────────────────────────────────────
      *
-     * 1. NOT ON UPDATE. `IsSaved` returns early: a default belongs to birth. A saved deal whose
-     *    currency is null is one somebody cleared, and re-filling it behind them is a write nobody
-     *    asked for -- the same reasoning `seedOwnerOnCreate` states for the owner.
+     * 1. NOT ON A LOCKED DEAL. A closed deal is the record of what was agreed. Until golive #486 this
+     *    ran only at create; older and migrated deals then kept no currency, so it now fills an empty
+     *    currency on every save of an open deal.
      * 2. NOT OVER A CALLER'S CHOICE. A supplied `CurrencyID` is left exactly as it is.
      * 3. NEVER REFUSES THE SAVE. Every failure path returns and leaves the field null, which is the
      *    state this method found. It sits outside the stamp try/catch for that reason: a *stamp* that
@@ -3689,8 +3767,9 @@ export class DealEntityServer extends DealEntity {
      * Absence of accounting is therefore ordinary, not exceptional: a host without it creates deals
      * with no currency exactly as it did before this existed.
      */
+    // Named for where it started; since golive #486 it also fills an empty currency on update.
     private async defaultCurrencyOnCreate(): Promise<void> {
-        if (this.IsSaved || this.CurrencyID) {
+        if (this._lockedAtSave || this.CurrencyID) {
             return;
         }
         if (!this.CompanyID) {
@@ -3702,6 +3781,41 @@ export class DealEntityServer extends DealEntity {
         if (currencyID) {
             this.CurrencyID = currencyID;
         }
+    }
+
+    /**
+     * Fills an empty `TermMonths` from the pipeline's Close Won Policy and an empty `StartDate` from
+     * `ExpectedCloseDate` (golive #486). Never on a locked deal, never over a value, never refusing the
+     * save: a pipeline that cannot be read leaves the term empty.
+     */
+    private async defaultEmptyTermAndStart(): Promise<void> {
+        if (this._lockedAtSave) {
+            return;
+        }
+        const pipelineTerm = this.TermMonths == null ? await this.pipelineDefaultTermMonths() : null;
+        const plan = PlanCommercialDefaults(
+            { TermMonths: this.TermMonths, StartDate: this.StartDate, ExpectedCloseDate: this.ExpectedCloseDate },
+            pipelineTerm,
+        );
+        if (plan.TermMonths !== undefined) this.TermMonths = plan.TermMonths;
+        if (plan.StartDate !== undefined) this.StartDate = plan.StartDate;
+    }
+
+    /** The deal's pipeline's Close Won Policy `TermMonths`, or null when there is none to read. */
+    private async pipelineDefaultTermMonths(): Promise<number | null> {
+        if (!this.PipelineID || !GUID_SHAPE.test(this.PipelineID)) {
+            return null;
+        }
+        const result = await (this.ProviderToUse as unknown as IRunViewProvider).RunView<{ CloseWonPolicy: string | null }>(
+            {
+                EntityName: PIPELINE_ENTITY,
+                ExtraFilter: `ID='${this.PipelineID}'`,
+                ResultType: 'simple',
+                Fields: ['CloseWonPolicy'],
+            },
+            this.ContextCurrentUser,
+        );
+        return result.Success ? PipelineDefaultTermMonths((result.Results ?? [])[0]?.CloseWonPolicy) : null;
     }
 
     /**
