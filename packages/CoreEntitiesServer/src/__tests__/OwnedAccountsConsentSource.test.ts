@@ -103,11 +103,35 @@ describe('OwnedAccountsConsentSource', () => {
     it('asks only for ACTIVE accounts this user\'s employee owns that have a website domain', async () => {
         await new OwnedAccountsConsentSource().StandingConsent(request());
         const filter = calls[0].Params[1].ExtraFilter ?? '';
-        expect(filter).toContain('IsActive = 1');
-        expect(filter).toContain('WebsiteDomain IS NOT NULL');
-        expect(filter).toContain(`OwnerEmployeeID IN (SELECT EmployeeID FROM [__mj].[vwUsers] WHERE ID = '${OWNER}')`);
+        expect(filter).toContain(`[IsActive] = 'true'`);
+        expect(filter).toContain('[WebsiteDomain] IS NOT NULL');
+        expect(filter).toContain(`[OwnerEmployeeID] IN (SELECT [EmployeeID] FROM [__mj].[vwUsers] WHERE [ID] = '${OWNER}')`);
         expect(calls[0].Params[1].Fields).toEqual(['Name', 'WebsiteDomain']);
         expect(calls[0].Params[1].ResultType).toBe('simple');
+    });
+
+    it('reads exactly the owner user row, so the "not linked to an employee" issue is about the right user', async () => {
+        await new OwnedAccountsConsentSource().StandingConsent(request());
+        expect(calls[0].Params[0].ExtraFilter).toBe(`[ID] = '${OWNER}'`);
+        expect(calls[0].Params[0].MaxRows).toBe(1);
+    });
+
+    // The PostgreSQL provider turns `[x]` into `"x"`, but it quotes a BARE name only when it is a column
+    // of the entity being read, and turns `= 1` into `= TRUE` only for that entity's booleans. PG folds
+    // an unquoted name to lower case, so `p.EmailDomain` inside a Relationships read becomes
+    // `p.emaildomain` and fails. Every identifier is therefore bracketed, and no boolean is written as a bit.
+    it('brackets every identifier and writes no bit literal, so PostgreSQL can run every read', async () => {
+        await new OwnedAccountsConsentSource().StandingConsent(request());
+        const sqlWords = new Set(['SELECT', 'FROM', 'WHERE', 'AND', 'IN', 'IS', 'NOT', 'NULL', 'INNER', 'JOIN', 'ON', 'AS', 'ROW_NUMBER', 'OVER', 'ORDER', 'PARTITION', 'BY']);
+        const aliases = new Set(['r', 'p', 'x', 'y']);
+        for (const params of calls[0].Params) {
+            const filter = params.ExtraFilter ?? '';
+            const code = filter.replace(/'(?:[^']|'')*'/g, "''").replace(/\[[^\]]*\]/g, '[]');
+            const bare = (code.match(/[A-Za-z_]\w*/g) ?? []).filter((w) => !sqlWords.has(w) && !aliases.has(w));
+            expect(bare, `${params.EntityName}: ${filter}`).toEqual([]);
+            // Booleans here are the `Is*` columns; `x.[RN] = 1` is a row number and stays an integer.
+            expect(filter, `${params.EntityName}: ${filter}`).not.toMatch(/\[Is\w*\]\s*=\s*'?[01]\b/);
+        }
     });
 
     it('a user not linked to an employee owns nothing: an empty list and an issue, not an error', async () => {
@@ -187,11 +211,11 @@ describe('OwnedAccountsConsentSource', () => {
         it('leaves out every free-mail contact domain IN THE QUERY, before the cap, and reports nothing', async () => {
             const consent = await new OwnedAccountsConsentSource().StandingConsent(request());
             const filter = calls[0].Params[2].ExtraFilter ?? '';
-            const notIn = filter.match(/p\.EmailDomain NOT IN \(([^)]*)\)/);
+            const notIn = filter.match(/p\.\[EmailDomain\] NOT IN \(([^)]*)\)/);
             expect(notIn).not.toBeNull();
             expect(new Set(notIn?.[1].split(', ').map((d) => d.slice(1, -1)))).toEqual(new Set(FREE_MAIL_DOMAINS));
             // Inside the innermost subquery `x`, which the capped numbering `N` is taken over.
-            expect(filter.indexOf('NOT IN')).toBeLessThan(filter.indexOf(') x WHERE x.RN = 1'));
+            expect(filter.indexOf('NOT IN')).toBeLessThan(filter.indexOf(') x WHERE x.[RN] = 1'));
             expect(consent.Issues).toEqual([]);
         });
 
@@ -219,21 +243,21 @@ describe('OwnedAccountsConsentSource', () => {
         it('asks for ONE active Employee contact per account and email domain, at accounts this user owns', async () => {
             await new OwnedAccountsConsentSource().StandingConsent(request());
             const owned =
-                `SELECT ID FROM [__mj_BizAppsSales].[vwSalesAccounts] WHERE IsActive = 1 AND OwnerEmployeeID IS NOT NULL ` +
-                `AND OwnerEmployeeID IN (SELECT EmployeeID FROM [__mj].[vwUsers] WHERE ID = '${OWNER}')`;
+                `SELECT [ID] FROM [__mj_BizAppsSales].[vwSalesAccounts] WHERE [IsActive] = 'true' AND [OwnerEmployeeID] IS NOT NULL ` +
+                `AND [OwnerEmployeeID] IN (SELECT [EmployeeID] FROM [__mj].[vwUsers] WHERE [ID] = '${OWNER}')`;
             const freeMail = [...FREE_MAIL_DOMAINS].map((d) => `'${d}'`).join(', ');
             const onePerPair = (column: string): string =>
-                `SELECT y.${column} FROM (SELECT x.RID, x.PID, ROW_NUMBER() OVER (ORDER BY x.RID) AS N FROM (SELECT r.ID AS RID, r.FromPersonID AS PID, ` +
-                `ROW_NUMBER() OVER (PARTITION BY r.ToOrganizationID, p.EmailDomain ORDER BY r.ID) AS RN ` +
-                `FROM [__mj_BizAppsCommon].[vwRelationships] r INNER JOIN [__mj_BizAppsCommon].[vwPeople] p ON p.ID = r.FromPersonID ` +
-                `WHERE r.Status = 'Active' AND r.RelationshipType = 'Employee' AND p.Status = 'Active' AND p.EmailDomain IS NOT NULL ` +
-                `AND p.EmailDomain NOT IN (${freeMail}) AND r.ToOrganizationID IN (${owned})) x WHERE x.RN = 1) y WHERE y.N <= ${MAX_CONTACT_DOMAINS + 1}`;
+                `SELECT y.[${column}] FROM (SELECT x.[RID], x.[PID], ROW_NUMBER() OVER (ORDER BY x.[RID]) AS [N] FROM (SELECT r.[ID] AS [RID], r.[FromPersonID] AS [PID], ` +
+                `ROW_NUMBER() OVER (PARTITION BY r.[ToOrganizationID], p.[EmailDomain] ORDER BY r.[ID]) AS [RN] ` +
+                `FROM [__mj_BizAppsCommon].[vwRelationships] r INNER JOIN [__mj_BizAppsCommon].[vwPeople] p ON p.[ID] = r.[FromPersonID] ` +
+                `WHERE r.[Status] = 'Active' AND r.[RelationshipType] = 'Employee' AND p.[Status] = 'Active' AND p.[EmailDomain] IS NOT NULL ` +
+                `AND p.[EmailDomain] NOT IN (${freeMail}) AND r.[ToOrganizationID] IN (${owned})) x WHERE x.[RN] = 1) y WHERE y.[N] <= ${MAX_CONTACT_DOMAINS + 1}`;
             const rel = calls[0].Params[2];
-            expect(rel.ExtraFilter).toBe(`ID IN (${onePerPair('RID')})`);
+            expect(rel.ExtraFilter).toBe(`[ID] IN (${onePerPair('RID')})`);
             expect(rel.ExtraFilter).not.toContain('WebsiteDomain');
             expect(rel.Fields).toEqual(['FromPersonID', 'ToOrganization']);
             const ppl = calls[0].Params[3];
-            expect(ppl.ExtraFilter).toBe(`ID IN (${onePerPair('PID')})`);
+            expect(ppl.ExtraFilter).toBe(`[ID] IN (${onePerPair('PID')})`);
             expect(ppl.Fields).toEqual(['ID', 'EmailDomain']);
             expect([rel.ResultType, ppl.ResultType]).toEqual(['simple', 'simple']);
             expect([rel.MaxRows, ppl.MaxRows]).toEqual([MAX_CONTACT_DOMAINS + 1, MAX_CONTACT_DOMAINS + 1]);
@@ -246,10 +270,10 @@ describe('OwnedAccountsConsentSource', () => {
             await new OwnedAccountsConsentSource().StandingConsent(request());
             const rel = calls[0].Params[2].ExtraFilter ?? '';
             const ppl = calls[0].Params[3].ExtraFilter ?? '';
-            const bounded = `ROW_NUMBER() OVER (ORDER BY x.RID) AS N`;
+            const bounded = `ROW_NUMBER() OVER (ORDER BY x.[RID]) AS [N]`;
             expect(rel).toContain(bounded);
-            expect(rel).toMatch(new RegExp(`y\\.N <= ${MAX_CONTACT_DOMAINS + 1}\\)$`));
-            expect(ppl).toBe(rel.replace('SELECT y.RID', 'SELECT y.PID'));
+            expect(rel).toMatch(new RegExp(`y\\.\\[N\\] <= ${MAX_CONTACT_DOMAINS + 1}\\)$`));
+            expect(ppl).toBe(rel.replace('SELECT y.[RID]', 'SELECT y.[PID]'));
         });
 
         it('throws when the People entity is missing from metadata rather than skipping contacts', async () => {
