@@ -3,7 +3,7 @@
  *
  * Replaces the generated `details` dump (one accordion of every column) with:
  *   Overview (exec briefing) · Pipeline · What's being sold · Payment schedule · Account · Commercial
- *   Close · Buying team · Internal team · Motion · Activity · Stage history
+ *   Close · Customer contacts · Internal team · Motion · Activity · Stage history
  *
  * The hero's `replacesSectionKey: 'details'` hides the generated field list. `contributionKey` equals
  * each panel's `SectionKey` so left-nav rail items attach. Every panel declares `inclusion: 'Primary'`:
@@ -72,6 +72,7 @@ import { FormatDealMoney } from './deal-money';
 import { ExplainDealScheduleGap, ReadDealScheduleTotal, type DealScheduleRowFigures, type DealScheduleTotal } from './deal-schedule-total';
 import { StageMoveHintsFor, type StageDefaults, type StageMoveHints } from './deal-stage-preview';
 import { IsFieldReadable } from './field-readable';
+import { DealContactsSummary, type DealContactSummaryPart } from './deal-contacts-summary';
 import { SelectableStages } from '../data/selectable-stages';
 import { BillComCustomerWarning, CheckBillComCustomer } from '../data/billcom-customer';
 import type { DealFormLockState } from '../custom/deal-form.component';
@@ -1108,6 +1109,10 @@ interface DealFieldSpec {
 
 const EMPTY_STATE_STYLES =
     '.mjs-deal-empty { margin: 0; padding: var(--mj-space-4) var(--mj-space-5); color: var(--mj-text-muted); }';
+
+/** The lines above the Customer contacts grid: who is already on the deal, and who belongs in the grid. */
+const CONTACTS_HINT_STYLES =
+    '.mjs-deal-hint { margin: 0; padding: var(--mj-space-3) var(--mj-space-5) 0; color: var(--mj-text-muted); font-size: var(--mj-text-sm); }';
 
 /**
  * The link under a party field that opens the promote dialog. A button, not an anchor: it performs an
@@ -2927,6 +2932,11 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
                         }
                     </div>
                 }
+                <!-- Where the rest of the people on a deal go (golive#428). Saved deals only: both
+                     sections say "Save the deal first" until then. -->
+                @if (ShowsMorePeoplePointer) {
+                    <small class="mjs-field__hint mjs-field--span" data-testid="deal-party-more-people">Add more customer contacts under Customer contacts. Add colleagues under Internal team.</small>
+                }
                 @if (AccountDefaultsError()) {
                     <div class="mjs-hint" data-testid="account-defaults-error">{{ AccountDefaultsError() }}</div>
                 }
@@ -2946,6 +2956,15 @@ const PIPELINE_FIELDS: readonly DealFieldSpec[] = [
     `,
 })
 export class MJSDealPartyPanel extends MJSDealFieldPanel {
+    /**
+     * The line pointing to Customer contacts and Internal team (golive#428). Saved deals only: until
+     * then both sections say "Save the deal first", and this panel has lent its contact fields to the
+     * Overview. A hint, not a panel body, so it has no empty state of its own.
+     */
+    public get ShowsMorePeoplePointer(): boolean {
+        return this.Record?.IsSaved === true;
+    }
+
     /**
      * Record links on these fields emit `Navigate` from `mj-form-field`. That output must be
      * forwarded to `FormComponent.OnFormNavigate`, which Explorer maps onto
@@ -4043,10 +4062,18 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
     standalone: true,
     imports: [CommonModule, BaseFormsModule],
     template: `
-        <mj-collapsible-panel SectionKey="buying-team" SectionName="Buying team" Icon="fa-solid fa-user-tag"
+        <mj-collapsible-panel SectionKey="buying-team" SectionName="Customer contacts" Icon="fa-solid fa-user-tag"
             Variant="related-entity" [Form]="FormComponent" [FormContext]="FormContext" [DefaultExpanded]="!Record.IsSaved"
             [BadgeCount]="FormComponent.GetSectionRowCount('buying-team')">
             @if (Record.IsSaved) {
+                <!-- golive#428: reps read "Buying team" as roles only, and could not see the deal's
+                     primary and billing contacts here. Those two are fields on the deal, not rows in
+                     this grid, so they are shown above it and set in Account & people. What may be
+                     printed is decided in deal-contacts-summary.ts. -->
+                @if (ContactsSummary; as summary) {
+                    <p class="mjs-deal-hint" data-testid="deal-contacts-summary">{{ summary }}. Set them under Account &amp; people.</p>
+                }
+                <p class="mjs-deal-hint" data-testid="deal-contacts-hint">Add anyone else involved on the customer side. A buying role is optional.</p>
                 <mj-explorer-entity-data-grid
                     [Params]="FormComponent.BuildRelationshipViewParamsByEntityName(Entity, 'DealID')"
                     [NewRecordValues]="FormComponent.NewRecordValues(Entity, 'DealID')"
@@ -4060,12 +4087,32 @@ export class MJSDealTeamGridPanel extends BaseFormPanel<DealEntity> {
             }
         </mj-collapsible-panel>
     `,
-    styles: [EMPTY_STATE_STYLES],
+    styles: [EMPTY_STATE_STYLES, CONTACTS_HINT_STYLES],
 })
 export class MJSDealBuyingTeamPanel extends BaseFormPanel<DealEntity> {
     public readonly Entity = MJS_ENTITIES.DealContactRole;
     public OnDataLoad(event: AfterDataLoadEventArgs): void {
         this.FormComponent.SetSectionRowCount('buying-team', event.totalRowCount);
+    }
+
+    /** The deal's primary and billing contacts, as the line above the grid. See `deal-contacts-summary.ts`. */
+    public get ContactsSummary(): string | null {
+        return DealContactsSummary([
+            this.contactPart('Primary contact', 'PrimaryContactID', 'PrimaryContact'),
+            this.contactPart('Billing contact', 'BillingContactID', 'BillingContact'),
+        ]);
+    }
+
+    /** Reads the name only when field-level security allows it: `Get()` throws for a denied field (#403). */
+    private contactPart(label: string, idField: string, nameField: 'PrimaryContact' | 'BillingContact'): DealContactSummaryPart {
+        const provider = this.FormComponent?.ProviderToUse ?? Metadata.Provider;
+        const readable = IsFieldReadable(this.Record?.EntityInfo, nameField, provider?.CurrentUser);
+        return {
+            Label: label,
+            Name: readable ? this.Record[nameField] : null,
+            Readable: readable,
+            Changed: this.Record.GetFieldByName(idField)?.Dirty === true,
+        };
     }
 }
 
