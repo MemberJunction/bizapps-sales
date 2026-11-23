@@ -44,7 +44,7 @@ export interface SalesSubPage {
     Label: string;
     /** Font Awesome class. */
     Icon: string;
-    /** Optional muted second line in the rail. */
+    /** Optional muted second line in the rail. No page sets one: a label that needs explaining is the wrong label. */
     Description?: string;
     /** Rail group header. Items sharing a group render under one heading. */
     Group?: string;
@@ -73,9 +73,9 @@ export const SALES_SECTIONS: SalesSection[] = [
  * orders already left.
  */
 export const DEALS_SUB_PAGES: SalesSubPage[] = [
-    { Id: 'dashboard', Label: 'Dashboard', Icon: 'fa-solid fa-gauge-high', Description: 'What is moving, what has stalled' },
+    { Id: 'dashboard', Label: 'Dashboard', Icon: 'fa-solid fa-gauge-high' },
     { Id: 'list', Label: 'All deals', Icon: 'fa-solid fa-table-list' },
-    { Id: 'board', Label: 'Board', Icon: 'fa-solid fa-diagram-project', Description: 'Move deals through the pipeline' },
+    { Id: 'board', Label: 'Board', Icon: 'fa-solid fa-diagram-project' },
     // The accounts and people deals are sold to. Each is the entity's own grid, opening records as
     // Explorer tabs, so the app can find and create them without the generated entity browser.
     { Id: 'accounts', Label: 'Accounts', Icon: 'fa-solid fa-building', Group: 'Customers' },
@@ -90,7 +90,6 @@ export const SETTINGS_SUB_PAGE: SalesSubPage = {
     Id: 'settings',
     Label: 'Settings',
     Icon: 'fa-solid fa-sliders',
-    Description: 'How Sales works for everyone',
     Group: 'Admin',
 };
 

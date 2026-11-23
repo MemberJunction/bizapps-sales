@@ -17,7 +17,7 @@ import { MaxLength } from 'class-validator';
 import * as mj_core_schema_server_object_types from '@memberjunction/server'
 
 
-import { mjBizAppsSalesAccountTypeEntity, mjBizAppsSalesBuyingRoleTypeEntity, mjBizAppsSalesDealContactRoleEntity, mjBizAppsSalesDealPaymentScheduleEntity, mjBizAppsSalesDealRoleEntity, mjBizAppsSalesDealSequenceEntity, mjBizAppsSalesDealStageEventEntity, mjBizAppsSalesDealStatusTypeEntity, mjBizAppsSalesDealTeamMemberEntity, mjBizAppsSalesDealTypeEntity, mjBizAppsSalesDealEntity, mjBizAppsSalesForecastCategoryTypeEntity, mjBizAppsSalesForecastSnapshotEntity, mjBizAppsSalesLeadSourceTypeEntity, mjBizAppsSalesLifecycleStageTypeEntity, mjBizAppsSalesLossReasonEntity, mjBizAppsSalesPipelineCompanyEntity, mjBizAppsSalesPipelineStageEntity, mjBizAppsSalesPipelineEntity, mjBizAppsSalesSalesAccountEntity, mjBizAppsSalesSalesContactEntity } from '@mj-biz-apps/sales-entities';
+import { mjBizAppsSalesAccountTypeEntity, mjBizAppsSalesBuyingRoleTypeEntity, mjBizAppsSalesDealContactRoleEntity, mjBizAppsSalesDealDigestAudienceTypeEntity, mjBizAppsSalesDealDigestRecipientEntity, mjBizAppsSalesDealPaymentScheduleEntity, mjBizAppsSalesDealRoleEntity, mjBizAppsSalesDealSequenceEntity, mjBizAppsSalesDealStageEventEntity, mjBizAppsSalesDealStatusTypeEntity, mjBizAppsSalesDealTeamMemberEntity, mjBizAppsSalesDealTypeEntity, mjBizAppsSalesDealEntity, mjBizAppsSalesForecastCategoryTypeEntity, mjBizAppsSalesForecastSnapshotEntity, mjBizAppsSalesLeadSourceTypeEntity, mjBizAppsSalesLifecycleStageTypeEntity, mjBizAppsSalesLossReasonEntity, mjBizAppsSalesPipelineCompanyEntity, mjBizAppsSalesPipelineStageEntity, mjBizAppsSalesPipelineEntity, mjBizAppsSalesSalesAccountEntity, mjBizAppsSalesSalesContactEntity } from '@mj-biz-apps/sales-entities';
     
 
 //****************************************************************************
@@ -626,6 +626,446 @@ export class mjBizAppsSalesDealContactRoleResolver extends ResolverBase {
         const provider = GetReadWriteProvider(providers);
         const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
         return this.DeleteRecord('MJ_BizApps_Sales: Deal Contact Roles', key, options, provider, userPayload, pubSub);
+    }
+    
+}
+
+//****************************************************************************
+// ENTITY CLASS for MJ_BizApps_Sales: Deal Digest Audience Types
+//****************************************************************************
+@ObjectType({ description: "One kind of audience for the Lapsed Close Date Digest (Company Leader, CEO, CFO, CTO). Behaviour comes from the flags on this row, never from the Code or Name: the digest builder reads IsPortfolioWide, MinDaysLapsed, IncludeMissingCloseDate, SendWhenEmpty and GroupByCompany, so adding an audience is a data change with no code impact." })
+export class mjBizAppsSalesDealDigestAudienceType_ {
+    @Field() 
+    @MaxLength(36)
+    ID: string;
+        
+    @Field({nullable: true, description: "Stable identifier the seeds and the digest builder key on. Renaming Name is cosmetic; renaming Code changes an identifier."}) 
+    @MaxLength(50)
+    Code?: string;
+        
+    @Field({nullable: true, description: "Display name of the audience, as shown to the people who administer recipients."}) 
+    @MaxLength(100)
+    Name?: string;
+        
+    @Field({nullable: true, description: "What this audience is for and who belongs in it."}) 
+    Description?: string;
+        
+    @Field(() => Boolean, {nullable: true, description: "When 1, recipients of this audience receive one digest covering every company, and their recipient rows carry no Company. When 0, each recipient row names the company the digest covers. Enforced in the recipient's Save(), not by a CHECK, because it ties a column on this table to one on another."}) 
+    IsPortfolioWide?: boolean;
+        
+    @Field(() => Int, {nullable: true, description: "A deal appears only once its expected close date is more than this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative."}) 
+    MinDaysLapsed?: number;
+        
+    @Field(() => Boolean, {nullable: true, description: "When 1, open deals that never had an expected close date are listed too, after the lapsed ones. When 0 only deals whose date has passed appear."}) 
+    IncludeMissingCloseDate?: boolean;
+        
+    @Field(() => Boolean, {nullable: true, description: "When 1, a recipient with nothing lapsed still gets the email, carrying the Empty Message, so silence cannot be mistaken for a missed send. When 0 the email is skipped."}) 
+    SendWhenEmpty?: boolean;
+        
+    @Field(() => Boolean, {nullable: true, description: "When 1, the digest lists deals under a heading per company. When 0 it is one flat list."}) 
+    GroupByCompany?: boolean;
+        
+    @Field({nullable: true, description: "Subject line of the email. Empty means the digest builder's built-in subject."}) 
+    @MaxLength(255)
+    SubjectTemplate?: string;
+        
+    @Field({nullable: true, description: "Opening text of the email, above the deal list. Empty means the digest builder's built-in introduction."}) 
+    IntroTemplate?: string;
+        
+    @Field({nullable: true, description: "Text sent in place of the deal list when nothing is lapsed and Send When Empty is on."}) 
+    @MaxLength(500)
+    EmptyMessage?: string;
+        
+    @Field(() => Int, {nullable: true, description: "Order in which audiences are listed and processed; lowest first."}) 
+    DisplayRank?: number;
+        
+    @Field(() => Boolean, {nullable: true, description: "Whether this audience is sent at all. Clearing it pauses the audience without deleting its recipients."}) 
+    IsActive?: boolean;
+        
+    @Field() 
+    _mj__CreatedAt: Date;
+        
+    @Field() 
+    _mj__UpdatedAt: Date;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
+        
+}
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Sales: Deal Digest Audience Types
+//****************************************************************************
+@InputType()
+export class CreatemjBizAppsSalesDealDigestAudienceTypeInput {
+    @Field({ nullable: true })
+    ID?: string;
+
+    @Field({ nullable: true })
+    Code?: string;
+
+    @Field({ nullable: true })
+    Name?: string;
+
+    @Field({ nullable: true })
+    Description: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IsPortfolioWide?: boolean;
+
+    @Field(() => Int, { nullable: true })
+    MinDaysLapsed: number | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IncludeMissingCloseDate?: boolean;
+
+    @Field(() => Boolean, { nullable: true })
+    SendWhenEmpty?: boolean;
+
+    @Field(() => Boolean, { nullable: true })
+    GroupByCompany?: boolean;
+
+    @Field({ nullable: true })
+    SubjectTemplate: string | null;
+
+    @Field({ nullable: true })
+    IntroTemplate: string | null;
+
+    @Field({ nullable: true })
+    EmptyMessage: string | null;
+
+    @Field(() => Int, { nullable: true })
+    DisplayRank?: number;
+
+    @Field(() => Boolean, { nullable: true })
+    IsActive?: boolean;
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Sales: Deal Digest Audience Types
+//****************************************************************************
+@InputType()
+export class UpdatemjBizAppsSalesDealDigestAudienceTypeInput {
+    @Field()
+    ID: string;
+
+    @Field({ nullable: true })
+    Code?: string;
+
+    @Field({ nullable: true })
+    Name?: string;
+
+    @Field({ nullable: true })
+    Description?: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IsPortfolioWide?: boolean;
+
+    @Field(() => Int, { nullable: true })
+    MinDaysLapsed?: number | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IncludeMissingCloseDate?: boolean;
+
+    @Field(() => Boolean, { nullable: true })
+    SendWhenEmpty?: boolean;
+
+    @Field(() => Boolean, { nullable: true })
+    GroupByCompany?: boolean;
+
+    @Field({ nullable: true })
+    SubjectTemplate?: string | null;
+
+    @Field({ nullable: true })
+    IntroTemplate?: string | null;
+
+    @Field({ nullable: true })
+    EmptyMessage?: string | null;
+
+    @Field(() => Int, { nullable: true })
+    DisplayRank?: number;
+
+    @Field(() => Boolean, { nullable: true })
+    IsActive?: boolean;
+
+    @Field(() => [KeyValuePairInput], { nullable: true })
+    OldValues___?: KeyValuePairInput[];
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+//****************************************************************************
+// RESOLVER for MJ_BizApps_Sales: Deal Digest Audience Types
+//****************************************************************************
+@ObjectType()
+export class RunmjBizAppsSalesDealDigestAudienceTypeViewResult {
+    @Field(() => [mjBizAppsSalesDealDigestAudienceType_])
+    Results: mjBizAppsSalesDealDigestAudienceType_[];
+
+    @Field(() => String, {nullable: true})
+    UserViewRunID?: string;
+
+    @Field(() => Int, {nullable: true})
+    RowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    TotalRowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    ExecutionTime: number;
+
+    @Field({nullable: true})
+    ErrorMessage?: string;
+
+    @Field(() => Boolean, {nullable: false})
+    Success: boolean;
+}
+
+@Resolver(mjBizAppsSalesDealDigestAudienceType_)
+export class mjBizAppsSalesDealDigestAudienceTypeResolver extends ResolverBase {
+    @Query(() => RunmjBizAppsSalesDealDigestAudienceTypeViewResult)
+    async RunmjBizAppsSalesDealDigestAudienceTypeViewByID(@Arg('input', () => RunViewByIDInput) input: RunViewByIDInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByIDGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsSalesDealDigestAudienceTypeViewResult)
+    async RunmjBizAppsSalesDealDigestAudienceTypeViewByName(@Arg('input', () => RunViewByNameInput) input: RunViewByNameInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByNameGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsSalesDealDigestAudienceTypeViewResult)
+    async RunmjBizAppsSalesDealDigestAudienceTypeDynamicView(@Arg('input', () => RunDynamicViewInput) input: RunDynamicViewInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        input.EntityName = 'MJ_BizApps_Sales: Deal Digest Audience Types';
+        return super.RunDynamicViewGeneric(input, provider, userPayload, pubSub);
+    }
+    @Query(() => mjBizAppsSalesDealDigestAudienceType_, { nullable: true })
+    async mjBizAppsSalesDealDigestAudienceType(@Arg('ID', () => String) ID: string, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine): Promise<mjBizAppsSalesDealDigestAudienceType_ | null> {
+        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Digest Audience Types', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealDigestAudienceTypes')} WHERE ${provider.QuoteIdentifier('ID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Digest Audience Types', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.MapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Digest Audience Types', rows && rows.length > 0 ? rows[0] : null, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+    
+    @Mutation(() => mjBizAppsSalesDealDigestAudienceType_)
+    async CreatemjBizAppsSalesDealDigestAudienceType(
+        @Arg('input', () => CreatemjBizAppsSalesDealDigestAudienceTypeInput) input: CreatemjBizAppsSalesDealDigestAudienceTypeInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.CreateRecord('MJ_BizApps_Sales: Deal Digest Audience Types', input, provider, userPayload, pubSub)
+    }
+        
+    @Mutation(() => mjBizAppsSalesDealDigestAudienceType_)
+    async UpdatemjBizAppsSalesDealDigestAudienceType(
+        @Arg('input', () => UpdatemjBizAppsSalesDealDigestAudienceTypeInput) input: UpdatemjBizAppsSalesDealDigestAudienceTypeInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.UpdateRecord('MJ_BizApps_Sales: Deal Digest Audience Types', input, provider, userPayload, pubSub);
+    }
+    
+    @Mutation(() => mjBizAppsSalesDealDigestAudienceType_)
+    async DeletemjBizAppsSalesDealDigestAudienceType(@Arg('ID', () => String) ID: string, @Arg('options___', () => DeleteOptionsInput) options: DeleteOptionsInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadWriteProvider(providers);
+        const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
+        return this.DeleteRecord('MJ_BizApps_Sales: Deal Digest Audience Types', key, options, provider, userPayload, pubSub);
+    }
+    
+}
+
+//****************************************************************************
+// ENTITY CLASS for MJ_BizApps_Sales: Deal Digest Recipients
+//****************************************************************************
+@ObjectType({ description: "One person receiving one audience's Lapsed Close Date Digest, for one company or, on a portfolio-wide audience, for all of them. The audience decides what the email contains; this row decides who gets it." })
+export class mjBizAppsSalesDealDigestRecipient_ {
+    @Field() 
+    @MaxLength(36)
+    ID: string;
+        
+    @Field({nullable: true, description: "The audience this person receives."}) 
+    @MaxLength(36)
+    DealDigestAudienceTypeID?: string;
+        
+    @Field({nullable: true, description: "The company the digest covers for this person. Empty on a portfolio-wide audience, and required on any other; the recipient's Save() enforces that pairing."}) 
+    @MaxLength(36)
+    CompanyID?: string;
+        
+    @Field({nullable: true, description: "The employee who receives the digest, at their work email."}) 
+    @MaxLength(36)
+    EmployeeID?: string;
+        
+    @Field(() => Boolean, {nullable: true, description: "Whether this person is sent the digest. Clearing it stops the email without deleting the row."}) 
+    IsActive?: boolean;
+        
+    @Field() 
+    _mj__CreatedAt: Date;
+        
+    @Field() 
+    _mj__UpdatedAt: Date;
+        
+    @Field({nullable: true}) 
+    @MaxLength(100)
+    DealDigestAudienceType?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(50)
+    Company?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(81)
+    Employee?: string;
+        
+    @Field(() => [String], { nullable: true, description: `Field-level security: when non-null, the fields on this entity the calling user may read. Any other field arriving as null was withheld by the server rather than genuinely empty. Null for callers with no field restrictions.` })
+    ReadableFields___?: string[];
+        
+}
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Sales: Deal Digest Recipients
+//****************************************************************************
+@InputType()
+export class CreatemjBizAppsSalesDealDigestRecipientInput {
+    @Field({ nullable: true })
+    ID?: string;
+
+    @Field({ nullable: true })
+    DealDigestAudienceTypeID?: string;
+
+    @Field({ nullable: true })
+    CompanyID: string | null;
+
+    @Field({ nullable: true })
+    EmployeeID?: string;
+
+    @Field(() => Boolean, { nullable: true })
+    IsActive?: boolean;
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Sales: Deal Digest Recipients
+//****************************************************************************
+@InputType()
+export class UpdatemjBizAppsSalesDealDigestRecipientInput {
+    @Field()
+    ID: string;
+
+    @Field({ nullable: true })
+    DealDigestAudienceTypeID?: string;
+
+    @Field({ nullable: true })
+    CompanyID?: string | null;
+
+    @Field({ nullable: true })
+    EmployeeID?: string;
+
+    @Field(() => Boolean, { nullable: true })
+    IsActive?: boolean;
+
+    @Field(() => [KeyValuePairInput], { nullable: true })
+    OldValues___?: KeyValuePairInput[];
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+//****************************************************************************
+// RESOLVER for MJ_BizApps_Sales: Deal Digest Recipients
+//****************************************************************************
+@ObjectType()
+export class RunmjBizAppsSalesDealDigestRecipientViewResult {
+    @Field(() => [mjBizAppsSalesDealDigestRecipient_])
+    Results: mjBizAppsSalesDealDigestRecipient_[];
+
+    @Field(() => String, {nullable: true})
+    UserViewRunID?: string;
+
+    @Field(() => Int, {nullable: true})
+    RowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    TotalRowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    ExecutionTime: number;
+
+    @Field({nullable: true})
+    ErrorMessage?: string;
+
+    @Field(() => Boolean, {nullable: false})
+    Success: boolean;
+}
+
+@Resolver(mjBizAppsSalesDealDigestRecipient_)
+export class mjBizAppsSalesDealDigestRecipientResolver extends ResolverBase {
+    @Query(() => RunmjBizAppsSalesDealDigestRecipientViewResult)
+    async RunmjBizAppsSalesDealDigestRecipientViewByID(@Arg('input', () => RunViewByIDInput) input: RunViewByIDInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByIDGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsSalesDealDigestRecipientViewResult)
+    async RunmjBizAppsSalesDealDigestRecipientViewByName(@Arg('input', () => RunViewByNameInput) input: RunViewByNameInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByNameGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsSalesDealDigestRecipientViewResult)
+    async RunmjBizAppsSalesDealDigestRecipientDynamicView(@Arg('input', () => RunDynamicViewInput) input: RunDynamicViewInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        input.EntityName = 'MJ_BizApps_Sales: Deal Digest Recipients';
+        return super.RunDynamicViewGeneric(input, provider, userPayload, pubSub);
+    }
+    @Query(() => mjBizAppsSalesDealDigestRecipient_, { nullable: true })
+    async mjBizAppsSalesDealDigestRecipient(@Arg('ID', () => String) ID: string, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine): Promise<mjBizAppsSalesDealDigestRecipient_ | null> {
+        this.CheckUserReadPermissions('MJ_BizApps_Sales: Deal Digest Recipients', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsSales', 'vwDealDigestRecipients')} WHERE ${provider.QuoteIdentifier('ID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Sales: Deal Digest Recipients', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.MapFieldNamesToCodeNames('MJ_BizApps_Sales: Deal Digest Recipients', rows && rows.length > 0 ? rows[0] : null, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+    
+    @Mutation(() => mjBizAppsSalesDealDigestRecipient_)
+    async CreatemjBizAppsSalesDealDigestRecipient(
+        @Arg('input', () => CreatemjBizAppsSalesDealDigestRecipientInput) input: CreatemjBizAppsSalesDealDigestRecipientInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.CreateRecord('MJ_BizApps_Sales: Deal Digest Recipients', input, provider, userPayload, pubSub)
+    }
+        
+    @Mutation(() => mjBizAppsSalesDealDigestRecipient_)
+    async UpdatemjBizAppsSalesDealDigestRecipient(
+        @Arg('input', () => UpdatemjBizAppsSalesDealDigestRecipientInput) input: UpdatemjBizAppsSalesDealDigestRecipientInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.UpdateRecord('MJ_BizApps_Sales: Deal Digest Recipients', input, provider, userPayload, pubSub);
+    }
+    
+    @Mutation(() => mjBizAppsSalesDealDigestRecipient_)
+    async DeletemjBizAppsSalesDealDigestRecipient(@Arg('ID', () => String) ID: string, @Arg('options___', () => DeleteOptionsInput) options: DeleteOptionsInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadWriteProvider(providers);
+        const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
+        return this.DeleteRecord('MJ_BizApps_Sales: Deal Digest Recipients', key, options, provider, userPayload, pubSub);
     }
     
 }

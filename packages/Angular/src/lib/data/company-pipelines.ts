@@ -151,6 +151,28 @@ export function PipelineCompanyNames(pipelines: readonly CompanyPipeline[], pipe
     return names.length ? [...new Set(names)].join(', ') : pipeline.Name;
 }
 
+/**
+ * What names each of `shown` where pipelines are hidden and several are in view at once, keyed by
+ * lower-cased pipeline ID (bc-aidp-next-golive#498).
+ *
+ * Each is named by its companies ({@link PipelineCompanyNames}). A company with two pipelines in view
+ * would name both alike, so those, and only those, add the pipeline's own name: "Acme · B2B". Which
+ * names collide is decided among `shown`, so a pipeline shown without its sibling stays "Acme".
+ */
+export function HiddenPipelineLabels(
+    pipelines: readonly CompanyPipeline[],
+    shown: readonly Pick<CompanyPipeline, 'ID' | 'Name'>[],
+): Map<string, string> {
+    const named = shown.map((p) => ({ Pipeline: p, Label: PipelineCompanyNames(pipelines, p) }));
+    const labels = new Map<string, string>();
+    for (const { Pipeline, Label } of named) {
+        const shared = named.some((other) => other.Pipeline !== Pipeline && other.Label === Label);
+        // A pipeline with no named company is already named by itself.
+        labels.set(Pipeline.ID.toLowerCase(), shared && Label !== Pipeline.Name ? `${Label} · ${Pipeline.Name}` : Label);
+    }
+    return labels;
+}
+
 /** Whether `pipelineID` is linked to `companyID`. */
 export function PipelineServesCompany(
     pipelines: readonly CompanyPipeline[],
@@ -213,12 +235,12 @@ export function NoPipelineMessage(state: NoPipelineState): string {
         const name = state.CompanyName?.trim() || 'This company';
         const subject = state.CompanyName?.trim() || 'this company';
         const fix = state.OtherCompanyHasPipeline
-            ? `Choose another company, or ask a Sales admin to link a pipeline to ${subject}.`
-            : `Ask a Sales admin to link a pipeline to ${subject}.`;
+            ? `Choose another company, or please ask a Sales admin to link a pipeline to ${subject}.`
+            : `Please ask a Sales admin to link a pipeline to ${subject}.`;
         return `${name} has no pipeline, so this deal can't be saved. ${fix}`;
     }
     if (!state.CompanyHasPipeline && !state.OtherCompanyHasPipeline) {
-        return 'No company has a pipeline, so deals can\'t be saved. Ask a Sales admin to link a pipeline to a company.';
+        return 'No company has a pipeline, so deals can\'t be saved. Please ask a Sales admin to link a pipeline to a company.';
     }
     if (!state.CompanyID && state.HidePipelines) {
         return 'Choose a company. Its pipeline decides the deal\'s stages.';

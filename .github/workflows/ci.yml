@@ -48,7 +48,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [next]
+    branches: [next, 'lts/**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -58,7 +58,7 @@ jobs:
   build:
     name: vocabulary gate + build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -89,7 +89,11 @@ jobs:
       # postinstall runs scripts/link-local-apps.mjs, which is a clean no-op while .mj-links.json has an
       # empty `links` map. That changes at S2, when the unpublished siblings get linked — at which point
       # this step will need a decision, because CI cannot check out private sibling repos.
-      - run: pnpm install --frozen-lockfile
+      # PRs into next (and next itself) build against MJ next and the sibling apps' next, from
+      # source, in one generated pnpm workspace; release PRs and lts/* lines install the committed
+      # lockfile, i.e. the published versions. See .github/actions/ci-install/action.yml.
+      - name: Install dependencies
+        uses: ./.github/actions/ci-install
 
       # ===================================================================================
       # GATE 1 — the rule the app is built around. Fails the build; not advisory.

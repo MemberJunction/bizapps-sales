@@ -2,7 +2,7 @@ import '@angular/compiler';
 import { describe, expect, it, vi } from 'vitest';
 import type { DraftProductLookup, ProductLookup } from '@mj-biz-apps/sales-entities';
 import { MJSDealLineEditorComponent } from '../lib/form-panels/deal-line-editor.component';
-import { CountDraftMatches, RankDealProducts } from '../lib/form-panels/deal-product-ranking';
+import { CountDraftMatches, KeepDealCompanyProducts, RankDealProducts } from '../lib/form-panels/deal-product-ranking';
 
 /**
  * golive#360: the deal's Add a product was a plain list of every product in the catalogue, with no
@@ -41,6 +41,13 @@ describe('RankDealProducts', () => {
 
     it('returns the lookup rows themselves, not copies', () => {
         expect(RankDealProducts(CATALOG, 'listing', SOUNDPOST)[0]).toBe(CATALOG[2]);
+    });
+
+    it("finds another company's products by that company's name, after name and SKU matches", () => {
+        expect(ids(RankDealProducts(CATALOG, 'betty', SOUNDPOST))).toEqual(['p1', 'p4']);
+        // "Betty.Core" matches by name; "Core Bot" only by its company, so it comes after.
+        expect(ids(RankDealProducts(CATALOG, 'betty.', SOUNDPOST))).toEqual(['p1']);
+        expect(ids(RankDealProducts(CATALOG, 'soundpost', BETTY))).toEqual(['p2', 'p3']);
     });
 });
 
@@ -156,5 +163,38 @@ describe('the note for Draft products the search matches', () => {
 
         expect(e.DraftMatchNote).toBeNull();
         expect(e.PickerResults.length).toBeGreaterThan(0);
+    });
+});
+
+describe('Only selling company products', () => {
+    it("keeps only the deal's company's products", () => {
+        expect(ids(KeepDealCompanyProducts(CATALOG, SOUNDPOST.toUpperCase()))).toEqual(['p2', 'p3']);
+    });
+
+    it('keeps every product when the deal has no company', () => {
+        expect(KeepDealCompanyProducts(CATALOG, null)).toHaveLength(4);
+    });
+
+    function pickerEditor(): MJSDealLineEditorComponent {
+        const e = editor('');
+        e.SellingCompanyOnly = true;
+        e.PickerOpen = true;
+        Object.defineProperty(e, 'draftProducts', { value: [], writable: true, configurable: true });
+        return e;
+    }
+
+    it("offers only the deal's company's products while checked, and counts the matches it hides", () => {
+        const e = pickerEditor();
+        e.OnProductQuery('core');
+        expect(ids(e.PickerResults)).toEqual(['p3', 'p2']);
+        expect(e.PickerHiddenByCompany).toBe(2);
+    });
+
+    it("offers every company's products once unchecked", () => {
+        const e = pickerEditor();
+        e.OnProductQuery('core');
+        e.OnSellingCompanyOnlyChange(false);
+        expect(ids(e.PickerResults)).toEqual(['p3', 'p4', 'p2', 'p1']);
+        expect(e.PickerHiddenByCompany).toBe(0);
     });
 });
