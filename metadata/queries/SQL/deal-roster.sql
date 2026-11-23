@@ -25,6 +25,8 @@
 -- deals its tiles count. The single-value CompanyID, PipelineID and OwnerEmployeeID still work. A list
 -- that is "All" is left out rather than sent empty: `sqlIn` renders an empty list as `(NULL)`, which
 -- matches nothing.
+-- Stage (bc-aidp-next-golive#488) is two lists: StageIDs matches Deal.PipelineStageID, and
+-- UnstagedPipelineIDs matches a deal with no stage in one of those pipelines. A deal matches either.
 --
 -- PRODUCT COMPANIES. A deal's product companies are the distinct companies stamped on its order's
 -- lines (OrderLine.CompanyID, which orders copies from the product). They are returned per row as
@@ -144,6 +146,16 @@ WHERE 1 = 1
   {% endif %}
   {% if PipelineIDs %}
   AND d.PipelineID IN {{ PipelineIDs | sqlIn }}
+  {% endif %}
+  {% if StageIDs or UnstagedPipelineIDs %}
+  AND (1 = 0
+       {% if StageIDs %}
+       OR d.PipelineStageID IN {{ StageIDs | sqlIn }}
+       {% endif %}
+       {% if UnstagedPipelineIDs %}
+       OR (d.PipelineStageID IS NULL AND d.PipelineID IN {{ UnstagedPipelineIDs | sqlIn }})
+       {% endif %}
+      )
   {% endif %}
   {% if OwnerEmployeeID %}
   AND d.OwnerEmployeeID = {{ OwnerEmployeeID | sqlString }}

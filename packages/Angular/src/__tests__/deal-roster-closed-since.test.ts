@@ -35,7 +35,7 @@ describe('LoadRoster', () => {
 
     it("passes ClosedUntil, the Board's period end, with the filter lists (bc-aidp-next-golive#351)", async () => {
         const calls = recordRunQuery({ Success: true, Results: [] });
-        const filters = { CompanyIDs: ['C1'], ProductCompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: [] };
+        const filters = { CompanyIDs: ['C1'], ProductCompanyIDs: [], OwnerEmployeeIDs: [], PipelineIDs: [], StageIDs: [] };
 
         await new DealWorkspaceService().LoadRoster('2026-04-01', filters, '2026-06-30');
 

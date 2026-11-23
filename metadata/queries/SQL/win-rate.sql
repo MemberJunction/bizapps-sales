@@ -37,6 +37,8 @@
 -- Summary`, so the Win rate tile describes the same deals as the tiles beside it. The single-value
 -- CompanyID and PipelineID still work. A list that is "All" is left out rather than sent empty, since
 -- `sqlIn` renders an empty list as `(NULL)`, which matches nothing.
+-- Stage (bc-aidp-next-golive#488) is two lists: StageIDs matches Deal.PipelineStageID, and
+-- UnstagedPipelineIDs matches a deal with no stage in one of those pipelines. A deal matches either.
 --
 -- Product company matches a deal when at least one line of its order belongs to a selected company
 -- (OrderLine.CompanyID). The deal counts once at its full amount; a deal with no lines cannot match.
@@ -81,6 +83,16 @@ WHERE 1 = 1
   {% endif %}
   {% if OwnerEmployeeIDs %}
   AND d.OwnerEmployeeID IN {{ OwnerEmployeeIDs | sqlIn }}
+  {% endif %}
+  {% if StageIDs or UnstagedPipelineIDs %}
+  AND (1 = 0
+       {% if StageIDs %}
+       OR d.PipelineStageID IN {{ StageIDs | sqlIn }}
+       {% endif %}
+       {% if UnstagedPipelineIDs %}
+       OR (d.PipelineStageID IS NULL AND d.PipelineID IN {{ UnstagedPipelineIDs | sqlIn }})
+       {% endif %}
+      )
   {% endif %}
   {% if ProductCompanyIDs %}
   AND EXISTS (SELECT 1 FROM [__mj_BizAppsOrders].OrderLine ol
