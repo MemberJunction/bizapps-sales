@@ -7,7 +7,7 @@
   that is not `mj-page-body-interior`, and the symptom is a page whose layout depends on window height.
 -->
 <mj-page-layout>
-  <mj-page-header [Title]="Title" Icon="fa-solid fa-handshake" [Subtitle]="Subtitle">
+  <mj-page-header [Title]="Title" Icon="fa-solid fa-handshake">
     <div actions>
       <!-- The shape is orders': an icon-only OUTLINE refresh, then ONE primary whose label follows the
            page. Every page here is about deals, so it is always "New deal" — but it is resolved from the
@@ -157,7 +157,7 @@
                        One pipeline picked in the filter bar shows it with no tabs. -->
                   @if (FunnelPipelineOptions.length > 1) {
                     <div class="period__pills funnel__tabs" role="tablist" [attr.aria-label]="HidePipelines ? 'Company' : 'Pipeline'">
-                      @for (pipeline of FunnelPipelineOptions; track pipeline.ID) {
+                      @for (pipeline of FunnelTabs; track pipeline.ID) {
                         <button
                           type="button"
                           role="tab"
@@ -165,7 +165,7 @@
                           [class.period__pill--on]="pipeline.ID === ActiveFunnelPipelineID"
                           [attr.aria-selected]="pipeline.ID === ActiveFunnelPipelineID"
                           (click)="SelectFunnelPipeline(pipeline.ID)">
-                          {{ FunnelTabLabel(pipeline) }}
+                          {{ pipeline.Label }}
                         </button>
                       }
                     </div>
@@ -194,7 +194,7 @@
 
             <div class="dash-split">
               <div class="card">
-                <div class="ch">Needs attention <span class="r">today, whatever the period</span></div>
+                <div class="ch"><span title="Counted as of today. The reporting period does not change these counts.">Needs attention</span></div>
                 <div class="queues">
                   @for (row of Attention; track row.Key) {
                     <button type="button" class="queue" (click)="SetInspect(row.Key)"
@@ -208,7 +208,7 @@
               </div>
 
               <div class="card">
-                <div class="ch">Expected to close <span class="r" title="Next 7 days, Rest of month and Later hold the open deals expected to close in that span and in the selected period. No date lists every open deal with no expected close date.">open deals</span></div>
+                <div class="ch"><span title="Next 7 days, Rest of month and Later hold the open deals expected to close in that span and in the selected period. No date lists every open deal with no expected close date.">Expected to close</span></div>
                 <div class="buckets">
                   @for (b of Buckets; track b.Key) {
                     <button type="button" class="bucket" (click)="SetInspect(b.Key)"
@@ -287,7 +287,6 @@
         <div class="wrap wrap--list" [hidden]="Page !== 'list'">
           <div class="sechead">
             <h2>All deals</h2>
-            <span class="r">Every deal, with the same columns as the dashboard's deal list — grid, cards, or timeline</span>
           </div>
           <!-- The section's filter lists without the period: All Deals lists every deal (bc-aidp-next-golive#453). -->
           @if (Page === 'list') {
@@ -322,7 +321,6 @@
           <div class="wrap wrap--list">
             <div class="sechead">
               <h2>{{ Page === 'accounts' ? 'Accounts' : 'Contacts' }}</h2>
-              <span class="r">{{ Page === 'accounts' ? 'The organizations deals are sold to' : 'The people at those accounts' }}</span>
             </div>
             @if (Page === 'accounts' ? AccountEntityInfo : ContactEntityInfo; as entity) {
               <div class="mjs-viewer-host mjs-viewer-host--page">
@@ -345,7 +343,6 @@
           <div class="wrap wrap--list">
             <div class="sechead">
               <h2>Settings</h2>
-              <span class="r">Applies to everyone using Sales on this site</span>
             </div>
             <mjs-sales-settings-page
               [HidePipelines]="HidePipelines"

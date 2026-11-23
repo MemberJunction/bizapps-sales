@@ -31,11 +31,36 @@ describe('the Settings rail page', () => {
     });
 });
 
-describe('the board with pipelines hidden and one pipeline', () => {
-    it('shows no pipeline or company name in its bar', () => {
-        expect(board).toContain('@let quiet = HidePipelines && tabs.length < 2;');
-        expect(board).toMatch(/@if \(!quiet\) \{\s*<span class="db-bar__label">/);
-        expect(board).toContain('} @else if (tabs.length === 1 && !quiet) {');
+/** The body of the `@if (...) {` block that opens at `opener`, up to its matching closing brace. */
+function blockBody(template: string, opener: string): string {
+    const start = template.indexOf(opener);
+    expect(start, `${opener} is in the template`).toBeGreaterThan(-1);
+    let depth = 0;
+    for (let i = start + opener.length - 1; i < template.length; i++) {
+        if (template[i] === '{' && template[i + 1] !== '{' && template[i - 1] !== '{') depth++;
+        if (template[i] === '}' && template[i + 1] !== '}' && template[i - 1] !== '}' && --depth === 0) {
+            return template.slice(start + opener.length, i);
+        }
+    }
+    throw new Error(`${opener} is never closed`);
+}
+
+describe('the board with pipelines hidden', () => {
+    it('shows no pipeline tabs, pipeline name or company name in its bar', () => {
+        const guarded = blockBody(board, '@if (!HidePipelines) {');
+        const rest = board.replace(guarded, '');
+        for (const part of ['db-bar__label', 'db-pipeline-tabs', 'db-pipeline-all', 'db-pipeline-one', 'TabLabel(']) {
+            expect(guarded, `${part} sits inside the HidePipelines guard`).toContain(part);
+            expect(rest, `${part} is drawn nowhere outside it`).not.toContain(part);
+        }
+    });
+});
+
+describe('the dashboard stage card with pipelines hidden', () => {
+    it('names its tabs through the shared rule, so one company never reads twice alike', () => {
+        expect(section).toContain('@for (pipeline of FunnelTabs; track pipeline.ID) {');
+        expect(section).toContain('{{ pipeline.Label }}');
+        expect(section).not.toContain('FunnelTabLabel(');
     });
 });
 
