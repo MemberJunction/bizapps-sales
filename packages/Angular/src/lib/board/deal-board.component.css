@@ -140,35 +140,10 @@
     border-radius: 5px;
 }
 
-/*
-  Lanes stack; the scroller is as wide as the widest, so every lane scrolls together. Each lane spans
-  the full scroll width so its heading can stay pinned on the left while the columns move.
-*/
+/* The board's one lane spans the scroll width. */
 .db-lane {
     min-width: 100%;
     width: max-content;
-}
-
-.db-scroll .db-lane + .db-lane {
-    margin-top: 1rem;
-}
-
-.db-lane__head {
-    position: sticky;
-    left: 0;
-    width: fit-content;
-    max-width: 48rem;
-    margin: 0 0 0.5rem;
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--mj-text-primary);
-}
-
-.db-lane__count {
-    margin-left: 0.375rem;
-    font-size: 0.75rem;
-    font-weight: 400;
-    color: var(--mj-text-muted);
 }
 
 .db-cols {

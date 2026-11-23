@@ -28,7 +28,8 @@
  *
  * Columns come from `PipelineStage` rows ordered by `DisplayOrder`. Whether a column is a closing column
  * is read from the `DealStatusType.LocksDeal` FLAG its stage points at. No status name, stage name or
- * pipeline name is compared anywhere in this file.
+ * pipeline name is compared anywhere in this file. The All tab joins stages by their `Code`, an
+ * identifier the per-company copies keep, never by a name.
  *
  * ── IT COMPUTES NO MONEY ────────────────────────────────────────────────────────────────────────
  *
@@ -186,7 +187,13 @@ export { DEFAULT_DISPLAY_CURRENCY };
 
 /** One column: a stage, the deals sitting in it, and the two figures its header shows. */
 export interface BoardColumn {
+    /** The column's key and drop-list id: its first stage. */
     StageID: string;
+    /**
+     * Every stage the column stands for. One on a single pipeline; under the All tab, the stage with this
+     * column's code on each pipeline. A card is in the column when its stage is one of these.
+     */
+    StageIDs: string[];
     Label: string;
     /** Set when arriving here would lock the deal — the column refuses drops. */
     IsClosing: boolean;
@@ -222,20 +229,59 @@ export interface BoardColumn {
 }
 
 /**
- * The tab value that shows every allowed pipeline at once, one lane per pipeline. Not a pipeline ID, so
- * it never matches a pipeline; it travels in the URL as the board's `pipeline` like any other choice.
+ * The tab value that shows every allowed pipeline's deals on one board. Not a pipeline ID, so it never
+ * matches a pipeline; it travels in the URL as the board's `pipeline` like any other choice.
  */
 export const ALL_PIPELINES = 'all';
 
 /**
- * One pipeline's slice of the board. Stages belong to a pipeline, so pipelines cannot share columns:
- * the All tab stacks one lane per pipeline instead of merging their stages.
+ * The board's columns and its deals with no stage: one pipeline's, or under the All tab every allowed
+ * pipeline's on one set of columns (`PipelineID` is then {@link ALL_PIPELINES}).
  */
 export interface BoardLane {
     PipelineID: string;
     Columns: BoardColumn[];
-    /** Deals on this pipeline with no stage set. */
+    /** Deals with no stage set. */
     Unstaged: DealRosterRow[];
+}
+
+/** The stages one column of the All tab stands for. */
+export interface StageGroup {
+    Stages: StageLookup[];
+}
+
+/**
+ * Groups several pipelines' stages into the All tab's columns.
+ *
+ * A company's pipeline is a copy of the default pipeline (`Sales.CopyDefaultPipelineToCompanies`), and
+ * its stages keep the default's codes, so stages that share a code are the same step and share a column.
+ * The code is compared ignoring case; a stage with no code gets a column of its own. Columns are ordered
+ * by the lowest `DisplayOrder` among their stages, then by the order the pipelines were given in.
+ */
+export function GroupStagesByCode(stages: readonly StageLookup[], pipelineIDs: readonly string[]): StageGroup[] {
+    const rank = (s: StageLookup): number => pipelineIDs.findIndex((id) => HasID([id], s.PipelineID));
+    const ordered = stages
+        .filter((s) => rank(s) >= 0)
+        .slice()
+        .sort((a, b) => rank(a) - rank(b) || a.DisplayOrder - b.DisplayOrder);
+    const groups: StageGroup[] = [];
+    const byCode = new Map<string, StageGroup>();
+    for (const stage of ordered) {
+        const code = stage.Code?.trim().toLowerCase();
+        const existing = code ? byCode.get(code) : undefined;
+        if (existing) {
+            existing.Stages.push(stage);
+            continue;
+        }
+        const group: StageGroup = { Stages: [stage] };
+        groups.push(group);
+        if (code) {
+            byCode.set(code, group);
+        }
+    }
+    const first = (g: StageGroup): number => Math.min(...g.Stages.map((s) => s.DisplayOrder));
+    // Array sort is stable, so groups with the same order keep the pipelines' order.
+    return groups.sort((a, b) => first(a) - first(b));
 }
 
 /**
@@ -334,7 +380,7 @@ export class DealBoardComponent implements AfterViewChecked {
     /** The All tab's value, for the template. */
     public readonly AllPipelines = ALL_PIPELINES;
 
-    /** True when the All tab is chosen and there is more than one pipeline to show. */
+    /** True when the All tab is chosen and there is more than one pipeline to show on one board. */
     public get ShowingAll(): boolean {
         return this.SelectedPipelineID === ALL_PIPELINES && this.TabPipelines.length > 1;
     }
@@ -345,36 +391,20 @@ export class DealBoardComponent implements AfterViewChecked {
     }
 
     /**
-     * The lanes in view: the active pipeline alone, or under the All tab every allowed pipeline that holds
-     * a deal, in tab order. Pipelines with no deals are left out of All so the page is not mostly empty
-     * columns; picking that pipeline's own tab still shows its stages.
+     * The board in view: the active pipeline, or under the All tab every allowed pipeline's deals on one
+     * set of columns (see {@link GroupStagesByCode}). Empty when there is no pipeline.
      */
     public get Lanes(): BoardLane[] {
-        if (!this.ShowingAll) {
-            const id = this.ActivePipelineID;
-            return id ? [this.laneFor(id)] : [];
+        if (this.ShowingAll) {
+            const ids = this.TabPipelines.map((p) => p.ID);
+            return [{
+                PipelineID: ALL_PIPELINES,
+                Columns: this.columnsOf(GroupStagesByCode(this.Stages, ids)),
+                Unstaged: this.Deals.filter((d) => !d.PipelineStageID && HasID(ids, d.PipelineID)),
+            }];
         }
-        return this.TabPipelines.map((p) => this.laneFor(p.ID))
-            .filter((lane) => lane.Unstaged.length > 0 || lane.Columns.some((c) => c.Cards.length > 0));
-    }
-
-    private laneFor(pipelineID: string): BoardLane {
-        return {
-            PipelineID: pipelineID,
-            Columns: this.ColumnsFor(pipelineID),
-            Unstaged: this.UnstagedFor(pipelineID),
-        };
-    }
-
-    /** A lane's heading under the All tab: the same text its own tab carries. */
-    public LaneLabel(pipelineID: string): string {
-        const pipeline = this.TabPipelines.find((p) => p.ID === pipelineID);
-        return pipeline ? this.TabLabel(pipeline) : this.NameOf(pipelineID);
-    }
-
-    /** How many deals a lane holds, staged or not. */
-    public LaneCount(lane: BoardLane): number {
-        return lane.Unstaged.length + lane.Columns.reduce((n, c) => n + c.Cards.length, 0);
+        const id = this.ActivePipelineID;
+        return id ? [{ PipelineID: id, Columns: this.ColumnsFor(id), Unstaged: this.UnstagedFor(id) }] : [];
     }
 
     /**
@@ -409,20 +439,29 @@ export class DealBoardComponent implements AfterViewChecked {
         if (!pipelineID) {
             return [];
         }
+        const groups = this.Stages.filter((s) => s.PipelineID === pipelineID)
+            .slice()
+            .sort((a, b) => a.DisplayOrder - b.DisplayOrder)
+            .map<StageGroup>((stage) => ({ Stages: [stage] }));
+        return this.columnsOf(groups);
+    }
 
+    /** A column per group of stages; the first stage names the column. */
+    private columnsOf(groups: readonly StageGroup[]): BoardColumn[] {
         const locking = new Set(
             this.DealStatusTypes.filter((s) => s.LocksDeal).map((s) => s.ID),
         );
+        const closing = (s: StageLookup): boolean => !!s.DealStatusTypeID && locking.has(s.DealStatusTypeID);
 
-        return this.Stages.filter((s) => s.PipelineID === pipelineID)
-            .slice()
-            .sort((a, b) => a.DisplayOrder - b.DisplayOrder)
-            .map<BoardColumn>((stage) => {
-                const cards = this.Deals.filter((d) => d.PipelineStageID === stage.ID);
+        return groups.map<BoardColumn>(({ Stages: stages }) => {
+                const stageIDs = stages.map((s) => s.ID);
+                const cards = this.Deals.filter((d) => !!d.PipelineStageID && stageIDs.includes(d.PipelineStageID));
                 return {
-                    StageID: stage.ID,
-                    Label: stage.Name,
-                    IsClosing: !!stage.DealStatusTypeID && locking.has(stage.DealStatusTypeID),
+                    StageID: stageIDs[0],
+                    StageIDs: stageIDs,
+                    Label: stages[0].Name,
+                    // A column refuses drops if any of its stages would lock the deal.
+                    IsClosing: stages.some(closing),
                     Cards: cards,
                     // One pass over the cards. Each deal contributes its own stored amount exactly once.
                     /**
@@ -523,10 +562,7 @@ export class DealBoardComponent implements AfterViewChecked {
         return this.ColumnIDsFor(this.ActivePipelineID, this.Columns);
     }
 
-    /**
-     * {@link ColumnIDs} for one lane. Keyed by pipeline, so under the All tab a card can travel only
-     * between its own pipeline's columns: another pipeline's stage is not a stage this deal can be in.
-     */
+    /** {@link ColumnIDs} for one board, cached per pipeline (or per the All tab). */
     public ColumnIDsFor(pipelineID: string | null, columns: readonly BoardColumn[]): string[] {
         const ids = columns.map((c) => `col-${c.StageID}`);
         const key = ids.join('|');
@@ -621,7 +657,7 @@ export class DealBoardComponent implements AfterViewChecked {
             this.cdr.detectChanges();
             return;
         }
-        if (deal.PipelineStageID === target.StageID) {
+        if (deal.PipelineStageID && target.StageIDs.includes(deal.PipelineStageID)) {
             return;
         }
         if (target.IsClosing) {
@@ -630,8 +666,26 @@ export class DealBoardComponent implements AfterViewChecked {
             this.cdr.detectChanges();
             return;
         }
+        const stageID = this.StageFor(target, deal);
+        if (!stageID) {
+            this.Message = `"${deal.Name}" cannot move to "${target.Label}": its pipeline has no stage with that code.`;
+            this.cdr.detectChanges();
+            return;
+        }
 
-        await this.moveDeal(deal, target);
+        await this.moveDeal(deal, stageID, target.Label);
+    }
+
+    /**
+     * The stage of `column` on the deal's own pipeline, or null when that pipeline has none. Under the All
+     * tab a column holds one stage per pipeline, and a deal can only be in a stage of its own pipeline.
+     */
+    public StageFor(column: BoardColumn, deal: DealRosterRow): string | null {
+        const pipelineID = deal.PipelineID ?? this.ActivePipelineID;
+        return column.StageIDs.find((id) => {
+            const stage = this.Stages.find((s) => s.ID === id);
+            return !!stage && !!pipelineID && HasID([pipelineID], stage.PipelineID);
+        }) ?? null;
     }
 
     /**
@@ -641,10 +695,11 @@ export class DealBoardComponent implements AfterViewChecked {
      * stage is optional, so a won or lost deal can sit in an ordinary column; `IsOpen` decides.
      */
     public MoveTargets(columns: readonly BoardColumn[], deal: DealRosterRow): BoardColumn[] {
-        if (!deal.IsOpen || columns.some((c) => c.IsClosing && c.StageID === deal.PipelineStageID)) {
+        const inColumn = (c: BoardColumn): boolean => !!deal.PipelineStageID && c.StageIDs.includes(deal.PipelineStageID);
+        if (!deal.IsOpen || columns.some((c) => c.IsClosing && inColumn(c))) {
             return [];
         }
-        return columns.filter((c) => !c.IsClosing && c.StageID !== deal.PipelineStageID);
+        return columns.filter((c) => !c.IsClosing && !inColumn(c) && this.StageFor(c, deal) !== null);
     }
 
     /** The stage picked in each card's "Move to stage" control, by deal ID, until it is applied. */
@@ -652,15 +707,16 @@ export class DealBoardComponent implements AfterViewChecked {
 
     /** The keyboard path to a stage change (bizapps-sales#371): the same save as a drop. */
     public async MoveToPicked(deal: DealRosterRow): Promise<void> {
-        // The deal's own pipeline, not the active tab's: under All, every lane's cards offer moves.
-        const target = this.ColumnsFor(deal.PipelineID ?? this.ActivePipelineID)
-            .find((c) => c.StageID === this.PendingMove.get(deal.ID));
-        if (!target || target.IsClosing) {
+        // The picked value is a column's key; the stage saved is that column's stage on the deal's pipeline.
+        const picked = this.PendingMove.get(deal.ID);
+        const target = this.Lanes.flatMap((l) => l.Columns).find((c) => c.StageID === picked);
+        const stageID = target && !target.IsClosing ? this.StageFor(target, deal) : null;
+        if (!target || !stageID) {
             return;
         }
         this.Message = null;
         this.PendingMove.delete(deal.ID);
-        await this.moveDeal(deal, target);
+        await this.moveDeal(deal, stageID, target.Label);
     }
 
     /**
@@ -671,13 +727,13 @@ export class DealBoardComponent implements AfterViewChecked {
      * roster row that the dashboard reads. A failed save puts the original row back and says why. On
      * success the section re-reads the roster as the authority.
      */
-    private async moveDeal(deal: DealRosterRow, target: BoardColumn): Promise<void> {
-        const moved: DealRosterRow = { ...deal, PipelineStageID: target.StageID, PipelineStage: target.Label };
+    private async moveDeal(deal: DealRosterRow, stageID: string, label: string): Promise<void> {
+        const moved: DealRosterRow = { ...deal, PipelineStageID: stageID, PipelineStage: label };
         this.Deals = this.Deals.map((d) => (d.ID === deal.ID ? moved : d));
         this.Moving = true;
         this.cdr.detectChanges();
 
-        const failure = await this.saveStage(deal, target);
+        const failure = await this.saveStage(deal, stageID);
         if (failure) {
             this.Deals = this.Deals.map((d) => (d.ID === deal.ID ? deal : d));
             this.Message = failure;
@@ -697,13 +753,13 @@ export class DealBoardComponent implements AfterViewChecked {
      *
      * @returns why the move failed, or null when it saved.
      */
-    private async saveStage(deal: DealRosterRow, target: BoardColumn): Promise<string | null> {
+    private async saveStage(deal: DealRosterRow, stageID: string): Promise<string | null> {
         try {
             const draft = await this.service.LoadDeal(deal.ID);
             if (!draft) {
                 return `"${deal.Name}" could not be read, so it was not moved.`;
             }
-            draft.PipelineStageID = target.StageID;
+            draft.PipelineStageID = stageID;
             const outcome = await this.service.Save(draft);
             if (!outcome.Success) {
                 return outcome.Validation?.Issues[0]?.Message ?? outcome.ErrorMessage ?? `"${deal.Name}" could not be moved.`;

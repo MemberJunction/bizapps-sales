@@ -16,8 +16,8 @@ import type { StageLookup } from '../lib/workspace/deal-workspace.types';
  */
 
 const STAGES: StageLookup[] = [
-    { ID: 'S1', Name: 'Qualify', PipelineID: 'P', DisplayOrder: 1, Probability: 10, ForecastCategoryTypeID: null, DealStatusTypeID: null, RottingDays: 14 },
-    { ID: 'S2', Name: 'Propose', PipelineID: 'P', DisplayOrder: 2, Probability: 50, ForecastCategoryTypeID: null, DealStatusTypeID: null, RottingDays: null },
+    { ID: 'S1', Name: 'Qualify', Code: 'QUALIFY', PipelineID: 'P', DisplayOrder: 1, Probability: 10, ForecastCategoryTypeID: null, DealStatusTypeID: null, RottingDays: 14 },
+    { ID: 'S2', Name: 'Propose', Code: 'PROPOSE', PipelineID: 'P', DisplayOrder: 2, Probability: 50, ForecastCategoryTypeID: null, DealStatusTypeID: null, RottingDays: null },
 ];
 
 function deal(): DealRosterRow {
