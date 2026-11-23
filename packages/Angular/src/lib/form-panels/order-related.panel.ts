@@ -30,7 +30,6 @@ import type { mjBizAppsOrdersOrderHeaderEntity } from '@mj-biz-apps/orders-entit
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import {
     ContractFileLinksFilter,
-    ContractLookupFilter,
     DealLookupOrderID,
     ExecutedAgreementFileFilter,
     OrderContractChips,
@@ -38,10 +37,10 @@ import {
     OrderRelatedLinksKey,
     ShouldReadAgreement,
     type OrderAgreementFile,
-    type OrderContractRow,
     type OrderContractView,
     type OrderRelatedLinkState,
 } from './order-related-links';
+import { ContractLookupParams, ContractLookupResult } from './executed-agreement-warning';
 
 /** The one row this panel reads: the deal that names this order, its contract id and its status type. */
 interface DealProvenanceRow {
@@ -272,23 +271,16 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
     /**
      * The contract behind the deal and whether the deal is won, in one batch: they are independent.
      *
-     * The contract comes by `Deal.ContractID` or by the close's provenance pair
-     * (`ContractLookupFilter`), newest first, so a deal whose close was re-run shows its latest.
+     * The contract comes through `ContractLookupParams`, the read the deal hero makes too: by
+     * `Deal.ContractID` or by the close's provenance pair, newest first.
      * `ContractRead` is set only when that read answered, so the warning never rests on a refusal.
      * Won is `DealStatusType.IsWon`, never a status name.
      */
     private async readContractAndStatus(state: OrderRelatedLinkState, statusID: string | null): Promise<Partial<OrderRelatedLinkState>> {
-        const filter = ContractLookupFilter(state);
-        if (!filter) return {};
+        const lookup = ContractLookupParams(state);
+        if (!lookup) return {};
         const [contracts, statuses] = await this.runView.RunViews([
-            {
-                EntityName: MJS_FOREIGN_ENTITIES.Contract,
-                Fields: ['ID', 'ContractNumber', 'State', 'IsAwaitingDocument'],
-                ExtraFilter: filter,
-                OrderBy: '__mj_CreatedAt DESC',
-                MaxRows: 1,
-                ResultType: 'simple',
-            },
+            lookup,
             {
                 EntityName: MJS_ENTITIES.DealStatusType,
                 Fields: ['ID', 'IsWon'],
@@ -297,11 +289,9 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
                 ResultType: 'simple',
             },
         ]);
-        const contract = (contracts?.Success ? (contracts.Results?.[0] as OrderContractRow | undefined) : undefined) ?? null;
         const status = statuses?.Success ? (statuses.Results?.[0] as { IsWon?: boolean } | undefined) : undefined;
         return {
-            Contract: contract,
-            ContractRead: contracts?.Success === true,
+            ...ContractLookupResult(contracts),
             DealIsWon: status ? status.IsWon === true : null,
         };
     }
