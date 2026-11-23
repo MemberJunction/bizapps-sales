@@ -756,10 +756,10 @@ export class DealBoardComponent implements AfterViewChecked {
      */
     public PricingNote(column: BoardColumn): string {
         return column.NonePriced
-            ? 'No deal in this stage has been priced by the orders engine. Every figure in this total '
-                + 'was typed by a person.'
-            : `${column.Unpriced} of ${column.Cards.length} deals in this stage were not priced by the `
-                + 'orders engine, so part of this total was typed by a person.';
+            ? 'No deal in this stage has an amount priced by Orders. Every amount in this total was '
+                + 'entered by hand.'
+            : `${column.Unpriced} of ${column.Cards.length} deals in this stage have no amount priced by `
+                + 'Orders, so part of this total was entered by hand or is missing.';
     }
 
     public TrackColumn = (_: number, column: BoardColumn): string => column.StageID;

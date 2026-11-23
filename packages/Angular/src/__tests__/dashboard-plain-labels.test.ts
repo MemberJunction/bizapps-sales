@@ -118,8 +118,8 @@ describe('the dashboard says it in the words the forecast is read in (bc-aidp-ne
         expect(titles).toEqual([
             'Won: deals won in the period, by the day they closed.',
             'Commit: open deals in a Commit forecast category, expected to close in the period.',
-            'Best case: not counting deals already in Commit.',
-            'Pipeline: open deals not in Commit or Best case.',
+            'Best case: open deals in a Best case forecast category, expected to close in the period. Excludes deals already in Commit.',
+            'Pipeline: open deals the forecast counts, expected to close in the period, excluding Commit and Best case.',
         ]);
     });
 

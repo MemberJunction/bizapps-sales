@@ -69,11 +69,12 @@ describe('deal form: the owner picker', () => {
 describe('deal form: the Company field points at the control that changes it', () => {
     const source = readFileSync(new URL('../lib/form-panels/deal-form.panels.ts', import.meta.url), 'utf8');
 
-    it('names the Pipeline panel\'s Company control', () => {
+    it('names the Company control beside the stage', () => {
         const hint = source.match(/data-testid="deal-company-hint">([^<]+)</)?.[1];
         expect(hint, 'a Company hint').toBeDefined();
         // The pipeline no longer sets it: a pipeline can serve several companies.
         expect(hint).not.toMatch(/Set by the pipeline/);
-        expect(hint).toMatch(/Company on the Pipeline panel/);
+        // Not "on the Pipeline panel": that panel is titled Stage when pipelines are hidden.
+        expect(hint).toMatch(/Change it with Company, beside the deal's stage/);
     });
 });

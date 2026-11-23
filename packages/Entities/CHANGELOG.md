@@ -1,5 +1,19 @@
 # @mj-biz-apps/sales-entities
 
+## 6.33.0
+
+### Minor Changes
+
+- 92683d6: A weekly Lapsed Close Date Digest emails each audience the open deals whose expected close date has passed or was never set. Who receives it, and how each email reads, is data: Company Leader, CEO, CFO and CTO audiences carry their own rules (portfolio-wide or per company, a minimum number of days lapsed, whether deals with no close date are listed, whether to send when nothing is lapsed), and recipients are chosen per audience and company. Adds the Deal Digest Audience Types and Deal Digest Recipients entities.
+
+  Emails are sent as the company's default Mailbox identity, display name included, falling back to the `DigestFromAddress` setting. The job's `StartingPayload` fails closed: an absent field takes its default, but a field that is present and unreadable — `{"dryRun": "true"}`, say — ends the run `Failed` without sending, rather than being ignored and mailing the real roster.
+
+- ec48344: Installed databases now get this release's metadata (V202611231318 Metadata_Sync) for the Lapsed Close Date Digest: the four Deal Digest Audience Types (Company Leader, CEO, CFO, CTO), the `Sales — Lapsed Close Date Digest` agent, its weekly job (created Disabled), the three blank Sales settings ExplorerBaseUrl, DigestFromAddress and DigestProvider, and Sales Admin / Sales User permissions on Deal Digest Recipients and Deal Digest Audience Types. Every row is create-only: a host that already has it keeps its own values.
+
+### Patch Changes
+
+- af98090: Accept bizapps-accounting and bizapps-contracts 1.x as well as 0.x. Both apps leave 0.x with their first release-line release (1.0.0), so `mj-app.json`'s `dependencies` on them, and the integration tests' ranges on their packages, are widened from `<1.0.0` to `<2.0.0` with the same floors. No resolved version changes. No published package declares these ranges; the change ships in `mj-app.json`, which the installer reads.
+
 ## 6.32.0
 
 ### Minor Changes
