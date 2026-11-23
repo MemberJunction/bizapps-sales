@@ -183,6 +183,159 @@ export const mjBizAppsSalesDealContactRoleSchema = z.object({
 export type mjBizAppsSalesDealContactRoleEntityType = z.infer<typeof mjBizAppsSalesDealContactRoleSchema>;
 
 /**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Digest Audience Types
+ */
+export const mjBizAppsSalesDealDigestAudienceTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(50)
+        * * Description: Stable identifier the seeds and the digest builder key on. Renaming Name is cosmetic; renaming Code changes an identifier.`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(100)
+        * * Description: Display name of the audience, as shown to the people who administer recipients.`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: What this audience is for and who belongs in it.`),
+    IsPortfolioWide: z.boolean().describe(`
+        * * Field Name: IsPortfolioWide
+        * * Display Name: Is Portfolio Wide
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: When 1, recipients of this audience receive one digest covering every company, and their recipient rows carry no Company. When 0, each recipient row names the company the digest covers. Enforced in the recipient's Save(), not by a CHECK, because it ties a column on this table to one on another.`),
+    MinDaysLapsed: z.number().nullable().describe(`
+        * * Field Name: MinDaysLapsed
+        * * Display Name: Minimum Days Lapsed
+        * * SQL Data Type: int
+        * * Description: A deal appears only once its expected close date is more than this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.`),
+    IncludeMissingCloseDate: z.boolean().describe(`
+        * * Field Name: IncludeMissingCloseDate
+        * * Display Name: Include Missing Close Date
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: When 1, open deals that never had an expected close date are listed too, after the lapsed ones. When 0 only deals whose date has passed appear.`),
+    SendWhenEmpty: z.boolean().describe(`
+        * * Field Name: SendWhenEmpty
+        * * Display Name: Send When Empty
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: When 1, a recipient with nothing lapsed still gets the email, carrying the Empty Message, so silence cannot be mistaken for a missed send. When 0 the email is skipped.`),
+    GroupByCompany: z.boolean().describe(`
+        * * Field Name: GroupByCompany
+        * * Display Name: Group By Company
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: When 1, the digest lists deals under a heading per company. When 0 it is one flat list.`),
+    SubjectTemplate: z.string().nullable().describe(`
+        * * Field Name: SubjectTemplate
+        * * Display Name: Subject Template
+        * * SQL Data Type: nvarchar(255)
+        * * Description: Subject line of the email. Empty means the digest builder's built-in subject.`),
+    IntroTemplate: z.string().nullable().describe(`
+        * * Field Name: IntroTemplate
+        * * Display Name: Intro Template
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Opening text of the email, above the deal list. Empty means the digest builder's built-in introduction.`),
+    EmptyMessage: z.string().nullable().describe(`
+        * * Field Name: EmptyMessage
+        * * Display Name: Empty Message
+        * * SQL Data Type: nvarchar(500)
+        * * Description: Text sent in place of the deal list when nothing is lapsed and Send When Empty is on.`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0
+        * * Description: Order in which audiences are listed and processed; lowest first.`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Whether this audience is sent at all. Clearing it pauses the audience without deleting its recipients.`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesDealDigestAudienceTypeEntityType = z.infer<typeof mjBizAppsSalesDealDigestAudienceTypeSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Digest Recipients
+ */
+export const mjBizAppsSalesDealDigestRecipientSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    DealDigestAudienceTypeID: z.string().describe(`
+        * * Field Name: DealDigestAudienceTypeID
+        * * Display Name: Deal Digest Audience Type
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Digest Audience Types (vwDealDigestAudienceTypes.ID)
+        * * Description: The audience this person receives.`),
+    CompanyID: z.string().nullable().describe(`
+        * * Field Name: CompanyID
+        * * Display Name: Company
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
+        * * Description: The company the digest covers for this person. Empty on a portfolio-wide audience, and required on any other; the recipient's Save() enforces that pairing.`),
+    EmployeeID: z.string().describe(`
+        * * Field Name: EmployeeID
+        * * Display Name: Employee
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)
+        * * Description: The employee who receives the digest, at their work email.`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Whether this person is sent the digest. Clearing it stops the email without deleting the row.`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    DealDigestAudienceType: z.string().describe(`
+        * * Field Name: DealDigestAudienceType
+        * * Display Name: Deal Digest Audience Type
+        * * SQL Data Type: nvarchar(100)`),
+    Company: z.string().nullable().describe(`
+        * * Field Name: Company
+        * * Display Name: Company Name
+        * * SQL Data Type: nvarchar(50)`),
+    Employee: z.string().nullable().describe(`
+        * * Field Name: Employee
+        * * Display Name: Employee Name
+        * * SQL Data Type: nvarchar(81)`),
+});
+
+export type mjBizAppsSalesDealDigestRecipientEntityType = z.infer<typeof mjBizAppsSalesDealDigestRecipientSchema>;
+
+/**
  * zod schema definition for the entity MJ_BizApps_Sales: Deal Payment Schedules
  */
 export const mjBizAppsSalesDealPaymentScheduleSchema = z.object({
@@ -1571,18 +1724,28 @@ export const mjBizAppsSalesPipelineSchema = z.object({
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
         * * Description: Person who receives the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Takes precedence over CloseWonTasks.AssigneeRecordID in Close Won Policy. Empty means that policy value is used, and when both are empty the tasks are created but not assigned.`),
+    CloseWonAssigneeRoleID: z.string().nullable().describe(`
+        * * Field Name: CloseWonAssigneeRoleID
+        * * Display Name: Close Won Assignee Role
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Roles (vwRoles.ID)
+        * * Description: Role whose members all receive the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won: the task is assigned to the role, and everyone who holds it sees it and is notified. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Close Won Assignee (a person) takes precedence when both are set. Empty, with no person, means CloseWonTasks.AssigneeRecordID in Close Won Policy is used, and when that is empty too the tasks are created but not assigned.`),
     DealType: z.string().nullable().describe(`
         * * Field Name: DealType
         * * Display Name: Deal Type
         * * SQL Data Type: nvarchar(200)`),
     DefaultForecastCategoryType: z.string().nullable().describe(`
         * * Field Name: DefaultForecastCategoryType
-        * * Display Name: Default Forecast Category
+        * * Display Name: Default Forecast Category Type
         * * SQL Data Type: nvarchar(200)`),
     CloseWonAssigneePerson: z.string().nullable().describe(`
         * * Field Name: CloseWonAssigneePerson
-        * * Display Name: Close Won Assignee
+        * * Display Name: Close Won Assignee Name
         * * SQL Data Type: nvarchar(250)`),
+    CloseWonAssigneeRole: z.string().nullable().describe(`
+        * * Field Name: CloseWonAssigneeRole
+        * * Display Name: Close Won Assignee Role Name
+        * * SQL Data Type: nvarchar(50)`),
 });
 
 export type mjBizAppsSalesPipelineEntityType = z.infer<typeof mjBizAppsSalesPipelineSchema>;
@@ -1729,6 +1892,13 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Field Name: Status
         * * Display Name: Status
         * * SQL Data Type: nvarchar(50)`),
+    WebsiteDomain: z.string().nullable().describe(`
+        * * Field Name: WebsiteDomain
+        * * Display Name: Website Domain
+        * * SQL Data Type: nvarchar(255)`),
+    Acronym: z.string().nullable().describe(`
+        * * Field Name: Acronym
+        * * SQL Data Type: nvarchar(20)`),
     OwnerEmployee: z.string().nullable().describe(`
         * * Field Name: OwnerEmployee
         * * Display Name: Owner
@@ -1753,9 +1923,6 @@ export const mjBizAppsSalesSalesAccountSchema = z.object({
         * * Field Name: DefaultBillingContact
         * * Display Name: Default Billing Contact
         * * SQL Data Type: nvarchar(753)`),
-    Acronym: z.string().nullable().describe(`
-        * * Field Name: Acronym
-        * * SQL Data Type: nvarchar(20)`),
 });
 
 export type mjBizAppsSalesSalesAccountEntityType = z.infer<typeof mjBizAppsSalesSalesAccountSchema>;
@@ -1882,7 +2049,16 @@ export const mjBizAppsSalesSalesContactSchema = z.object({
     SeniorityLevelID: z.string().nullable().describe(`
         * * Field Name: SeniorityLevelID
         * * Display Name: Seniority
-        * * SQL Data Type: uniqueidentifier`),
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Common: Seniority Levels (vwSeniorityLevels.ID)`),
+    DisplayName: z.string().describe(`
+        * * Field Name: DisplayName
+        * * Display Name: Display Name
+        * * SQL Data Type: nvarchar(250)`),
+    EmailDomain: z.string().nullable().describe(`
+        * * Field Name: EmailDomain
+        * * Display Name: Email Domain
+        * * SQL Data Type: nvarchar(255)`),
     OwnerEmployee: z.string().nullable().describe(`
         * * Field Name: OwnerEmployee
         * * Display Name: Owner
@@ -2271,7 +2447,7 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Deal Contact Roles entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * Influence: Influence score must be between 0 and 100, if specified.
+    * * Influence: Influence score must be between 0 and 100 percent if provided.
     * @public
     * @method
     * @override
@@ -2285,7 +2461,7 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
     }
 
     /**
-    * Influence score must be between 0 and 100, if specified.
+    * Influence score must be between 0 and 100 percent if provided.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -2294,7 +2470,7 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
     	if (this.Influence != null && (this.Influence < 0 || this.Influence > 100)) {
     		result.Errors.push(new ValidationErrorInfo(
     			"Influence",
-    			"Influence score must be between 0 and 100.",
+    			"Influence must be between 0 and 100.",
     			this.Influence,
     			ValidationErrorType.Failure
     		));
@@ -2423,6 +2599,426 @@ export class mjBizAppsSalesDealContactRoleEntity extends BaseEntity<mjBizAppsSal
     */
     get BuyingRoleType(): string | null {
         return this.Get('BuyingRoleType');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Sales: Deal Digest Audience Types - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsSales
+ * * Base Table: DealDigestAudienceType
+ * * Base View: vwDealDigestAudienceTypes
+ * * @description One kind of audience for the Lapsed Close Date Digest (Company Leader, CEO, CFO, CTO). Behaviour comes from the flags on this row, never from the Code or Name: the digest builder reads IsPortfolioWide, MinDaysLapsed, IncludeMissingCloseDate, SendWhenEmpty and GroupByCompany, so adding an audience is a data change with no code impact.
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Digest Audience Types')
+export class mjBizAppsSalesDealDigestAudienceTypeEntity extends BaseEntity<mjBizAppsSalesDealDigestAudienceTypeEntityType> {
+    /**
+    * Loads the MJ_BizApps_Sales: Deal Digest Audience Types record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Deal Digest Audience Types record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsSalesDealDigestAudienceTypeEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * Validate() method override for MJ_BizApps_Sales: Deal Digest Audience Types entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
+    * * MinDaysLapsed: Minimum days lapsed must be zero or a positive number when specified.
+    * @public
+    * @method
+    * @override
+    */
+    public override Validate(): ValidationResult {
+        const result = super.Validate();
+        this.ValidateMinDaysLapsedNonNegative(result);
+        result.Success = result.Success && (result.Errors.length === 0);
+
+        return result;
+    }
+
+    /**
+    * Minimum days lapsed must be zero or a positive number when specified.
+    * @param result - the ValidationResult object to add any errors or warnings to
+    * @public
+    * @method
+    */
+    public ValidateMinDaysLapsedNonNegative(result: ValidationResult): void {
+    	if (this.MinDaysLapsed != null && this.MinDaysLapsed < 0) {
+    		result.Errors.push(new ValidationErrorInfo(
+    			"MinDaysLapsed",
+    			"Minimum days lapsed cannot be negative.",
+    			this.MinDaysLapsed,
+    			ValidationErrorType.Failure
+    		));
+    	}
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: Code
+    * * Display Name: Code
+    * * SQL Data Type: nvarchar(50)
+    * * Description: Stable identifier the seeds and the digest builder key on. Renaming Name is cosmetic; renaming Code changes an identifier.
+    */
+    get Code(): string {
+        return this.Get('Code');
+    }
+    set Code(value: string) {
+        this.Set('Code', value);
+    }
+
+    /**
+    * * Field Name: Name
+    * * Display Name: Name
+    * * SQL Data Type: nvarchar(100)
+    * * Description: Display name of the audience, as shown to the people who administer recipients.
+    */
+    get Name(): string {
+        return this.Get('Name');
+    }
+    set Name(value: string) {
+        this.Set('Name', value);
+    }
+
+    /**
+    * * Field Name: Description
+    * * Display Name: Description
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: What this audience is for and who belongs in it.
+    */
+    get Description(): string | null {
+        return this.Get('Description');
+    }
+    set Description(value: string | null) {
+        this.Set('Description', value);
+    }
+
+    /**
+    * * Field Name: IsPortfolioWide
+    * * Display Name: Is Portfolio Wide
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: When 1, recipients of this audience receive one digest covering every company, and their recipient rows carry no Company. When 0, each recipient row names the company the digest covers. Enforced in the recipient's Save(), not by a CHECK, because it ties a column on this table to one on another.
+    */
+    get IsPortfolioWide(): boolean {
+        return this.Get('IsPortfolioWide');
+    }
+    set IsPortfolioWide(value: boolean) {
+        this.Set('IsPortfolioWide', value);
+    }
+
+    /**
+    * * Field Name: MinDaysLapsed
+    * * Display Name: Minimum Days Lapsed
+    * * SQL Data Type: int
+    * * Description: A deal appears only once its expected close date is more than this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.
+    */
+    get MinDaysLapsed(): number | null {
+        return this.Get('MinDaysLapsed');
+    }
+    set MinDaysLapsed(value: number | null) {
+        this.Set('MinDaysLapsed', value);
+    }
+
+    /**
+    * * Field Name: IncludeMissingCloseDate
+    * * Display Name: Include Missing Close Date
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    * * Description: When 1, open deals that never had an expected close date are listed too, after the lapsed ones. When 0 only deals whose date has passed appear.
+    */
+    get IncludeMissingCloseDate(): boolean {
+        return this.Get('IncludeMissingCloseDate');
+    }
+    set IncludeMissingCloseDate(value: boolean) {
+        this.Set('IncludeMissingCloseDate', value);
+    }
+
+    /**
+    * * Field Name: SendWhenEmpty
+    * * Display Name: Send When Empty
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: When 1, a recipient with nothing lapsed still gets the email, carrying the Empty Message, so silence cannot be mistaken for a missed send. When 0 the email is skipped.
+    */
+    get SendWhenEmpty(): boolean {
+        return this.Get('SendWhenEmpty');
+    }
+    set SendWhenEmpty(value: boolean) {
+        this.Set('SendWhenEmpty', value);
+    }
+
+    /**
+    * * Field Name: GroupByCompany
+    * * Display Name: Group By Company
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    * * Description: When 1, the digest lists deals under a heading per company. When 0 it is one flat list.
+    */
+    get GroupByCompany(): boolean {
+        return this.Get('GroupByCompany');
+    }
+    set GroupByCompany(value: boolean) {
+        this.Set('GroupByCompany', value);
+    }
+
+    /**
+    * * Field Name: SubjectTemplate
+    * * Display Name: Subject Template
+    * * SQL Data Type: nvarchar(255)
+    * * Description: Subject line of the email. Empty means the digest builder's built-in subject.
+    */
+    get SubjectTemplate(): string | null {
+        return this.Get('SubjectTemplate');
+    }
+    set SubjectTemplate(value: string | null) {
+        this.Set('SubjectTemplate', value);
+    }
+
+    /**
+    * * Field Name: IntroTemplate
+    * * Display Name: Intro Template
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: Opening text of the email, above the deal list. Empty means the digest builder's built-in introduction.
+    */
+    get IntroTemplate(): string | null {
+        return this.Get('IntroTemplate');
+    }
+    set IntroTemplate(value: string | null) {
+        this.Set('IntroTemplate', value);
+    }
+
+    /**
+    * * Field Name: EmptyMessage
+    * * Display Name: Empty Message
+    * * SQL Data Type: nvarchar(500)
+    * * Description: Text sent in place of the deal list when nothing is lapsed and Send When Empty is on.
+    */
+    get EmptyMessage(): string | null {
+        return this.Get('EmptyMessage');
+    }
+    set EmptyMessage(value: string | null) {
+        this.Set('EmptyMessage', value);
+    }
+
+    /**
+    * * Field Name: DisplayRank
+    * * Display Name: Display Rank
+    * * SQL Data Type: int
+    * * Default Value: 0
+    * * Description: Order in which audiences are listed and processed; lowest first.
+    */
+    get DisplayRank(): number {
+        return this.Get('DisplayRank');
+    }
+    set DisplayRank(value: number) {
+        this.Set('DisplayRank', value);
+    }
+
+    /**
+    * * Field Name: IsActive
+    * * Display Name: Is Active
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    * * Description: Whether this audience is sent at all. Clearing it pauses the audience without deleting its recipients.
+    */
+    get IsActive(): boolean {
+        return this.Get('IsActive');
+    }
+    set IsActive(value: boolean) {
+        this.Set('IsActive', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Sales: Deal Digest Recipients - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsSales
+ * * Base Table: DealDigestRecipient
+ * * Base View: vwDealDigestRecipients
+ * * @description One person receiving one audience's Lapsed Close Date Digest, for one company or, on a portfolio-wide audience, for all of them. The audience decides what the email contains; this row decides who gets it.
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Sales: Deal Digest Recipients')
+export class mjBizAppsSalesDealDigestRecipientEntity extends BaseEntity<mjBizAppsSalesDealDigestRecipientEntityType> {
+    /**
+    * Loads the MJ_BizApps_Sales: Deal Digest Recipients record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Sales: Deal Digest Recipients record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsSalesDealDigestRecipientEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: DealDigestAudienceTypeID
+    * * Display Name: Deal Digest Audience Type
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Digest Audience Types (vwDealDigestAudienceTypes.ID)
+    * * Description: The audience this person receives.
+    */
+    get DealDigestAudienceTypeID(): string {
+        return this.Get('DealDigestAudienceTypeID');
+    }
+    set DealDigestAudienceTypeID(value: string) {
+        this.Set('DealDigestAudienceTypeID', value);
+    }
+
+    /**
+    * * Field Name: CompanyID
+    * * Display Name: Company
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
+    * * Description: The company the digest covers for this person. Empty on a portfolio-wide audience, and required on any other; the recipient's Save() enforces that pairing.
+    */
+    get CompanyID(): string | null {
+        return this.Get('CompanyID');
+    }
+    set CompanyID(value: string | null) {
+        this.Set('CompanyID', value);
+    }
+
+    /**
+    * * Field Name: EmployeeID
+    * * Display Name: Employee
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)
+    * * Description: The employee who receives the digest, at their work email.
+    */
+    get EmployeeID(): string {
+        return this.Get('EmployeeID');
+    }
+    set EmployeeID(value: string) {
+        this.Set('EmployeeID', value);
+    }
+
+    /**
+    * * Field Name: IsActive
+    * * Display Name: Is Active
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    * * Description: Whether this person is sent the digest. Clearing it stops the email without deleting the row.
+    */
+    get IsActive(): boolean {
+        return this.Get('IsActive');
+    }
+    set IsActive(value: boolean) {
+        this.Set('IsActive', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: DealDigestAudienceType
+    * * Display Name: Deal Digest Audience Type
+    * * SQL Data Type: nvarchar(100)
+    */
+    get DealDigestAudienceType(): string {
+        return this.Get('DealDigestAudienceType');
+    }
+
+    /**
+    * * Field Name: Company
+    * * Display Name: Company Name
+    * * SQL Data Type: nvarchar(50)
+    */
+    get Company(): string | null {
+        return this.Get('Company');
+    }
+
+    /**
+    * * Field Name: Employee
+    * * Display Name: Employee Name
+    * * SQL Data Type: nvarchar(81)
+    */
+    get Employee(): string | null {
+        return this.Get('Employee');
     }
 }
 
@@ -2808,7 +3404,7 @@ export class mjBizAppsSalesDealSequenceEntity extends BaseEntity<mjBizAppsSalesD
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Deal Sequences entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * ID: Ensures that the record ID is restricted to a value of 1, effectively keeping this entity as a single-row configuration or sequence generator.
+    * * ID: The record ID must always be equal to 1 to ensure a singleton pattern or fixed identifier.
     * * NextSequenceNumber: Next sequence number must be greater than zero.
     * @public
     * @method
@@ -2824,7 +3420,7 @@ export class mjBizAppsSalesDealSequenceEntity extends BaseEntity<mjBizAppsSalesD
     }
 
     /**
-    * Ensures that the record ID is restricted to a value of 1, effectively keeping this entity as a single-row configuration or sequence generator.
+    * The record ID must always be equal to 1 to ensure a singleton pattern or fixed identifier.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -2833,7 +3429,7 @@ export class mjBizAppsSalesDealSequenceEntity extends BaseEntity<mjBizAppsSalesD
     	if (this.ID !== 1) {
     		result.Errors.push(new ValidationErrorInfo(
     			"ID",
-    			"The ID for this entity must be 1.",
+    			"ID must be 1.",
     			this.ID,
     			ValidationErrorType.Failure
     		));
@@ -2850,7 +3446,7 @@ export class mjBizAppsSalesDealSequenceEntity extends BaseEntity<mjBizAppsSalesD
     	if (this.NextSequenceNumber != null && this.NextSequenceNumber <= 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"NextSequenceNumber",
-    			"Next sequence number must be greater than 0.",
+    			"Next sequence number must be greater than zero.",
     			this.NextSequenceNumber,
     			ValidationErrorType.Failure
     		));
@@ -2949,7 +3545,7 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Deal Stage Events entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * DaysInPreviousStage: Days in previous stage cannot be negative
+    * * DaysInPreviousStage: Days in previous stage cannot be negative.
     * * ProbabilityAtTransition: Probability at transition must be between 0 and 100 percent, if specified.
     * @public
     * @method
@@ -2957,7 +3553,7 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
     */
     public override Validate(): ValidationResult {
         const result = super.Validate();
-        this.ValidateDaysInPreviousStageGreaterThanOrEqualToZero(result);
+        this.ValidateDaysInPreviousStageNonNegative(result);
         this.ValidateProbabilityAtTransitionRange(result);
         result.Success = result.Success && (result.Errors.length === 0);
 
@@ -2965,16 +3561,16 @@ export class mjBizAppsSalesDealStageEventEntity extends BaseEntity<mjBizAppsSale
     }
 
     /**
-    * Days in previous stage cannot be negative
+    * Days in previous stage cannot be negative.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateDaysInPreviousStageGreaterThanOrEqualToZero(result: ValidationResult) {
+    public ValidateDaysInPreviousStageNonNegative(result: ValidationResult) {
     	if (this.DaysInPreviousStage != null && this.DaysInPreviousStage < 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"DaysInPreviousStage",
-    			"Days in previous stage must be 0 or greater.",
+    			"Days in previous stage must be zero or greater.",
     			this.DaysInPreviousStage,
     			ValidationErrorType.Failure
     		));
@@ -3273,7 +3869,7 @@ export class mjBizAppsSalesDealStatusTypeEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Deal Status Types entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * Table-Level: An entity cannot be marked as both Won and Lost simultaneously.
+    * * Table-Level: A deal stage cannot be marked as both won and lost at the same time.
     * @public
     * @method
     * @override
@@ -3287,7 +3883,7 @@ export class mjBizAppsSalesDealStatusTypeEntity extends BaseEntity<mjBizAppsSale
     }
 
     /**
-    * An entity cannot be marked as both Won and Lost simultaneously.
+    * A deal stage cannot be marked as both won and lost at the same time.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -3296,7 +3892,7 @@ export class mjBizAppsSalesDealStatusTypeEntity extends BaseEntity<mjBizAppsSale
     	if (this.IsWon && this.IsLost) {
     		result.Errors.push(new ValidationErrorInfo(
     			"IsWon",
-    			"An item cannot be marked as both Won and Lost at the same time.",
+    			"A stage cannot be marked as both Won and Lost simultaneously.",
     			this.IsWon,
     			ValidationErrorType.Failure
     		));
@@ -3499,9 +4095,9 @@ export class mjBizAppsSalesDealTeamMemberEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Deal Team Members entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * AttributionPct: Attribution percentage must be between 0 and 100 when provided to ensure valid split calculations.
-    * * Table-Level: Either an Employee or a Person must be specified for the deal role, but not both at the same time.
-    * * Table-Level: End date must be on or after the start date when both dates are provided.
+    * * AttributionPct: Attribution percentage must be between 0 and 100 if specified.
+    * * Table-Level: Each record must be assigned to either an employee or a person, but cannot be assigned to both or neither.
+    * * Table-Level: End date must be on or after start date.
     * @public
     * @method
     * @override
@@ -3517,7 +4113,7 @@ export class mjBizAppsSalesDealTeamMemberEntity extends BaseEntity<mjBizAppsSale
     }
 
     /**
-    * Attribution percentage must be between 0 and 100 when provided to ensure valid split calculations.
+    * Attribution percentage must be between 0 and 100 if specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -3534,27 +4130,27 @@ export class mjBizAppsSalesDealTeamMemberEntity extends BaseEntity<mjBizAppsSale
     }
 
     /**
-    * Either an Employee or a Person must be specified for the deal role, but not both at the same time.
+    * Each record must be assigned to either an employee or a person, but cannot be assigned to both or neither.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateEmployeeIDOrPersonIDExclusive(result: ValidationResult) {
-    	const hasEmployee = this.EmployeeID != null;
-    	const hasPerson = this.PersonID != null;
+    	public ValidateEmployeeIDOrPersonIDExclusive(result: ValidationResult) {
+    		const hasEmployee = this.EmployeeID != null;
+    		const hasPerson = this.PersonID != null;
     
-    	if ((hasEmployee && hasPerson) || (!hasEmployee && !hasPerson)) {
-    		result.Errors.push(new ValidationErrorInfo(
-    			"EmployeeID",
-    			"You must specify either an Employee or a Person, but not both.",
-    			this.EmployeeID,
-    			ValidationErrorType.Failure
-    		));
+    		if ((hasEmployee && hasPerson) || (!hasEmployee && !hasPerson)) {
+    			result.Errors.push(new ValidationErrorInfo(
+    				"EmployeeID",
+    				"Exactly one of Employee or Person must be specified.",
+    				this.EmployeeID,
+    				ValidationErrorType.Failure
+    			));
+    		}
     	}
-    }
 
     /**
-    * End date must be on or after the start date when both dates are provided.
+    * End date must be on or after start date.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -4002,11 +4598,11 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Deals entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * AnnualIncreasePctOverride: The annual increase percentage override must be between 0% and 100% when specified.
-    * * CancellationNoticeDaysOverride: Cancellation notice days override, if specified, must be 0 or greater.
-    * * EstimatedProjectWeeks: Ensures that the estimated project weeks, if specified, is zero or a positive number to accurately reflect project duration.
-    * * Probability: Probability percentage must be between 0 and 100 inclusive, or left empty.
-    * * TermMonths: Ensures that the deal or contract term in months cannot be a negative number.
+    * * AnnualIncreasePctOverride: Annual increase percentage override must be between 0 and 100 percent when specified.
+    * * CancellationNoticeDaysOverride: Cancellation notice days override must be zero or a positive number if specified.
+    * * EstimatedProjectWeeks: Estimated project duration in weeks cannot be negative.
+    * * Probability: Deal probability must be between 0% and 100% when specified.
+    * * TermMonths: Term months must be zero or a positive number if provided.
     * @public
     * @method
     * @override
@@ -4014,17 +4610,17 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     public override Validate(): ValidationResult {
         const result = super.Validate();
         this.ValidateAnnualIncreasePctOverrideRange(result);
-        this.ValidateCancellationNoticeDaysOverrideMin(result);
-        this.ValidateEstimatedProjectWeeksMin(result);
+        this.ValidateCancellationNoticeDaysOverrideNonNegative(result);
+        this.ValidateEstimatedProjectWeeksNonNegative(result);
         this.ValidateProbabilityRange(result);
-        this.ValidateTermMonthsGreaterThanOrEqualToZero(result);
+        this.ValidateTermMonthsNonNegative(result);
         result.Success = result.Success && (result.Errors.length === 0);
 
         return result;
     }
 
     /**
-    * The annual increase percentage override must be between 0% and 100% when specified.
+    * Annual increase percentage override must be between 0 and 100 percent when specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -4041,16 +4637,16 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
-    * Cancellation notice days override, if specified, must be 0 or greater.
+    * Cancellation notice days override must be zero or a positive number if specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateCancellationNoticeDaysOverrideMin(result: ValidationResult) {
+    public ValidateCancellationNoticeDaysOverrideNonNegative(result: ValidationResult): void {
     	if (this.CancellationNoticeDaysOverride != null && this.CancellationNoticeDaysOverride < 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"CancellationNoticeDaysOverride",
-    			"Cancellation notice days override must be greater than or equal to 0.",
+    			"Cancellation notice days override must be zero or greater.",
     			this.CancellationNoticeDaysOverride,
     			ValidationErrorType.Failure
     		));
@@ -4058,12 +4654,12 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
-    * Ensures that the estimated project weeks, if specified, is zero or a positive number to accurately reflect project duration.
+    * Estimated project duration in weeks cannot be negative.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateEstimatedProjectWeeksMin(result: ValidationResult) {
+    public ValidateEstimatedProjectWeeksNonNegative(result: ValidationResult) {
     	if (this.EstimatedProjectWeeks != null && this.EstimatedProjectWeeks < 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"EstimatedProjectWeeks",
@@ -4075,12 +4671,12 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
-    * Probability percentage must be between 0 and 100 inclusive, or left empty.
+    * Deal probability must be between 0% and 100% when specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateProbabilityRange(result: ValidationResult) {
+    public ValidateProbabilityRange(result: ValidationResult): void {
     	if (this.Probability != null && (this.Probability < 0 || this.Probability > 100)) {
     		result.Errors.push(new ValidationErrorInfo(
     			"Probability",
@@ -4092,16 +4688,16 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     }
 
     /**
-    * Ensures that the deal or contract term in months cannot be a negative number.
+    * Term months must be zero or a positive number if provided.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateTermMonthsGreaterThanOrEqualToZero(result: ValidationResult) {
+    public ValidateTermMonthsNonNegative(result: ValidationResult): void {
     	if (this.TermMonths != null && this.TermMonths < 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"TermMonths",
-    			"Term months must be greater than or equal to 0.",
+    			"Term months cannot be negative. Please enter a value of 0 or greater.",
     			this.TermMonths,
     			ValidationErrorType.Failure
     		));
@@ -5181,30 +5777,30 @@ export class mjBizAppsSalesForecastSnapshotEntity extends BaseEntity<mjBizAppsSa
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Forecast Snapshots entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * Table-Level: The period end date must be on or after the period start date to ensure valid reporting and tracking timeframes.
+    * * Table-Level: Period end date must be on or after the period start date.
     * @public
     * @method
     * @override
     */
     public override Validate(): ValidationResult {
         const result = super.Validate();
-        this.ValidatePeriodEndAfterPeriodStart(result);
+        this.ValidatePeriodEndAfterOrEqualPeriodStart(result);
         result.Success = result.Success && (result.Errors.length === 0);
 
         return result;
     }
 
     /**
-    * The period end date must be on or after the period start date to ensure valid reporting and tracking timeframes.
+    * Period end date must be on or after the period start date.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidatePeriodEndAfterPeriodStart(result: ValidationResult) {
-    	if (this.PeriodEnd != null && this.PeriodStart != null && this.PeriodEnd < this.PeriodStart) {
+    public ValidatePeriodEndAfterOrEqualPeriodStart(result: ValidationResult) {
+    	if (this.PeriodStart != null && this.PeriodEnd != null && new Date(this.PeriodEnd).getTime() < new Date(this.PeriodStart).getTime()) {
     		result.Errors.push(new ValidationErrorInfo(
     			"PeriodEnd",
-    			"Period End date must be on or after Period Start date.",
+    			"Period end date must be on or after the period start date.",
     			this.PeriodEnd,
     			ValidationErrorType.Failure
     		));
@@ -5442,30 +6038,30 @@ export class mjBizAppsSalesLeadSourceTypeEntity extends BaseEntity<mjBizAppsSale
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Lead Source Types entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * AttributionWindowDays: Attribution window days must be greater than or equal to zero if specified
+    * * AttributionWindowDays: Attribution window days must be zero or a positive number when specified.
     * @public
     * @method
     * @override
     */
     public override Validate(): ValidationResult {
         const result = super.Validate();
-        this.ValidateAttributionWindowDaysGreaterThanOrEqualToZero(result);
+        this.ValidateAttributionWindowDaysNonNegative(result);
         result.Success = result.Success && (result.Errors.length === 0);
 
         return result;
     }
 
     /**
-    * Attribution window days must be greater than or equal to zero if specified
+    * Attribution window days must be zero or a positive number when specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateAttributionWindowDaysGreaterThanOrEqualToZero(result: ValidationResult) {
+    public ValidateAttributionWindowDaysNonNegative(result: ValidationResult) {
     	if (this.AttributionWindowDays != null && this.AttributionWindowDays < 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"AttributionWindowDays",
-    			"Attribution window days must be greater than or equal to 0.",
+    			"Attribution window days must be zero or greater.",
     			this.AttributionWindowDays,
     			ValidationErrorType.Failure
     		));
@@ -6096,8 +6692,8 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Pipeline Stages entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * Probability: Probability, if provided, must be a percentage value between 0 and 100.
-    * * RottingDays: Rotting days must be a non-negative number if specified.
+    * * Probability: Probability, if provided, must be a value between 0 and 100 percent.
+    * * RottingDays: Rotting days must be zero or a positive number when specified.
     * @public
     * @method
     * @override
@@ -6105,14 +6701,14 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
     public override Validate(): ValidationResult {
         const result = super.Validate();
         this.ValidateProbabilityRange(result);
-        this.ValidateRottingDaysGreaterThanOrEqualToZero(result);
+        this.ValidateRottingDaysNonNegative(result);
         result.Success = result.Success && (result.Errors.length === 0);
 
         return result;
     }
 
     /**
-    * Probability, if provided, must be a percentage value between 0 and 100.
+    * Probability, if provided, must be a value between 0 and 100 percent.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -6129,16 +6725,16 @@ export class mjBizAppsSalesPipelineStageEntity extends BaseEntity<mjBizAppsSales
     }
 
     /**
-    * Rotting days must be a non-negative number if specified.
+    * Rotting days must be zero or a positive number when specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateRottingDaysGreaterThanOrEqualToZero(result: ValidationResult) {
+    public ValidateRottingDaysNonNegative(result: ValidationResult) {
     	if (this.RottingDays != null && this.RottingDays < 0) {
     		result.Errors.push(new ValidationErrorInfo(
     			"RottingDays",
-    			"Rotting days must be greater than or equal to 0.",
+    			"Rotting days cannot be negative.",
     			this.RottingDays,
     			ValidationErrorType.Failure
     		));
@@ -6611,6 +7207,20 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
     }
 
     /**
+    * * Field Name: CloseWonAssigneeRoleID
+    * * Display Name: Close Won Assignee Role
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Roles (vwRoles.ID)
+    * * Description: Role whose members all receive the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won: the task is assigned to the role, and everyone who holds it sees it and is notified. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Close Won Assignee (a person) takes precedence when both are set. Empty, with no person, means CloseWonTasks.AssigneeRecordID in Close Won Policy is used, and when that is empty too the tasks are created but not assigned.
+    */
+    get CloseWonAssigneeRoleID(): string | null {
+        return this.Get('CloseWonAssigneeRoleID');
+    }
+    set CloseWonAssigneeRoleID(value: string | null) {
+        this.Set('CloseWonAssigneeRoleID', value);
+    }
+
+    /**
     * * Field Name: DealType
     * * Display Name: Deal Type
     * * SQL Data Type: nvarchar(200)
@@ -6621,7 +7231,7 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
 
     /**
     * * Field Name: DefaultForecastCategoryType
-    * * Display Name: Default Forecast Category
+    * * Display Name: Default Forecast Category Type
     * * SQL Data Type: nvarchar(200)
     */
     get DefaultForecastCategoryType(): string | null {
@@ -6630,11 +7240,20 @@ export class mjBizAppsSalesPipelineEntity extends BaseEntity<mjBizAppsSalesPipel
 
     /**
     * * Field Name: CloseWonAssigneePerson
-    * * Display Name: Close Won Assignee
+    * * Display Name: Close Won Assignee Name
     * * SQL Data Type: nvarchar(250)
     */
     get CloseWonAssigneePerson(): string | null {
         return this.Get('CloseWonAssigneePerson');
+    }
+
+    /**
+    * * Field Name: CloseWonAssigneeRole
+    * * Display Name: Close Won Assignee Role Name
+    * * SQL Data Type: nvarchar(50)
+    */
+    get CloseWonAssigneeRole(): string | null {
+        return this.Get('CloseWonAssigneeRole');
     }
 }
 
@@ -6671,7 +7290,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
 
     /**
     * Validate() method override for MJ_BizApps_Sales: Sales Accounts entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * ICPFitScore: ICP Fit Score must be a value between 0 and 100, or left blank.
+    * * ICPFitScore: ICP Fit Score must be between 0 and 100 if specified.
     * @public
     * @method
     * @override
@@ -6685,7 +7304,7 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     }
 
     /**
-    * ICP Fit Score must be a value between 0 and 100, or left blank.
+    * ICP Fit Score must be between 0 and 100 if specified.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
@@ -7086,6 +7705,27 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     }
 
     /**
+    * * Field Name: WebsiteDomain
+    * * Display Name: Website Domain
+    * * SQL Data Type: nvarchar(255)
+    */
+    get WebsiteDomain(): string | null {
+        return this.Get('WebsiteDomain');
+    }
+
+    /**
+    * * Field Name: Acronym
+    * * SQL Data Type: nvarchar(20)
+    * * IS-A Source: Inherited from MJ_BizApps_Common: Organizations
+    */
+    get Acronym(): string | null {
+        return this.Get('Acronym');
+    }
+    set Acronym(value: string | null) {
+        this.Set('Acronym', value);
+    }
+
+    /**
     * * Field Name: OwnerEmployee
     * * Display Name: Owner
     * * SQL Data Type: nvarchar(81)
@@ -7137,18 +7777,6 @@ export class mjBizAppsSalesSalesAccountEntity extends BaseEntity<mjBizAppsSalesS
     */
     get DefaultBillingContact(): string | null {
         return this.Get('DefaultBillingContact');
-    }
-
-    /**
-    * * Field Name: Acronym
-    * * SQL Data Type: nvarchar(20)
-    * * IS-A Source: Inherited from MJ_BizApps_Common: Organizations
-    */
-    get Acronym(): string | null {
-        return this.Get('Acronym');
-    }
-    set Acronym(value: string | null) {
-        this.Set('Acronym', value);
     }
 }
 
@@ -7519,6 +8147,7 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
     * * Field Name: SeniorityLevelID
     * * Display Name: Seniority
     * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Common: Seniority Levels (vwSeniorityLevels.ID)
     * * IS-A Source: Inherited from MJ_BizApps_Common: People
     */
     get SeniorityLevelID(): string | null {
@@ -7526,6 +8155,24 @@ export class mjBizAppsSalesSalesContactEntity extends BaseEntity<mjBizAppsSalesS
     }
     set SeniorityLevelID(value: string | null) {
         this.Set('SeniorityLevelID', value);
+    }
+
+    /**
+    * * Field Name: DisplayName
+    * * Display Name: Display Name
+    * * SQL Data Type: nvarchar(250)
+    */
+    get DisplayName(): string {
+        return this.Get('DisplayName');
+    }
+
+    /**
+    * * Field Name: EmailDomain
+    * * Display Name: Email Domain
+    * * SQL Data Type: nvarchar(255)
+    */
+    get EmailDomain(): string | null {
+        return this.Get('EmailDomain');
     }
 
     /**

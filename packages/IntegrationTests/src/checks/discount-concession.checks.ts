@@ -26,16 +26,21 @@ import { Assert, AssertEqual, IntegrationCheckRegistry, type NamedCheck } from '
 import type { mjBizAppsOrdersOrderLineEntity } from '@mj-biz-apps/orders-entities';
 import { OrdersIsInstalled } from '@mj-biz-apps/sales-core-entities-server';
 import {
-    E_ORDERS_PRODUCT,
     ORDER_CONCESSION_ENTITY,
-    ProductFilterFor,
     SalesRecordDiscountConcessionOperation,
-    type DealEntity,
     type SalesRecordDiscountConcessionInput,
     type SalesRecordDiscountConcessionOutput,
 } from '@mj-biz-apps/sales-entities';
 
-import { E_DEAL, InRolledBackTransaction, ProviderOf, ResolveSalesFixture, businessToday, type SalesFixture } from '../fixture.js';
+import {
+    InRolledBackTransaction,
+    NewDeal,
+    ProviderOf,
+    ResolveSalesFixture,
+    SaveOk,
+    SellableProduct,
+    type SalesFixture,
+} from '../fixture.js';
 
 type Ctx = Parameters<NamedCheck['Fn']>[0];
 
@@ -73,9 +78,7 @@ async function isolateConcessionPolicy(ctx: Ctx): Promise<void> {
     );
 }
 
-async function saveOk(entity: BaseEntity, what: string): Promise<void> {
-    Assert(await entity.Save(), `${what} failed: ${entity.LatestResult?.CompleteMessage ?? 'unknown error'}`);
-}
+const saveOk = SaveOk;
 
 async function giveAuthority(ctx: Ctx, maxDiscountPct: number): Promise<void> {
     const authority = await ProviderOf(ctx).GetEntityObject<BaseEntity>(E_SALES_AUTHORITY, ctx.User);
@@ -148,34 +151,15 @@ async function addConcessionRule(ctx: Ctx, approvalRoleID: string): Promise<void
 
 /** A one-time product the picker offers this company, so the line is priced by orders' engine. */
 async function sellableProduct(ctx: Ctx, companyID: string): Promise<string> {
-    const r = await new RunView().RunView<{ ID: string }>(
-        {
-            EntityName: E_ORDERS_PRODUCT,
-            ExtraFilter: `CompanyID = '${companyID.replace(/'/g, "''")}' `
-                + `AND (${ProductFilterFor(await businessToday(ctx))}) AND SubscriptionTypeID IS NULL`,
-            OrderBy: 'Name ASC',
-            ResultType: 'simple',
-            Fields: ['ID'],
-        },
-        ctx.User,
-    );
-    Assert(r.Success, `reading the catalogue failed — ${r.ErrorMessage}`);
-    const id = r.Results?.[0]?.ID;
-    Assert(!!id, 'the catalogue offered no one-time product for this company. Seed one — see scripts/dev/seed-orders-catalog.sql.');
-    return id as string;
+    const p = await SellableProduct(ctx, companyID, 'SubscriptionTypeID IS NULL');
+    return p.ID;
 }
 
 /** A deal with one saved line carrying a 10% discount, returned as that line's ID. */
 async function discountedLine(ctx: Ctx, f: SalesFixture): Promise<string> {
-    const deal = await ProviderOf(ctx).GetEntityObject<DealEntity>(E_DEAL, ctx.User);
-    deal.NewRecord();
-    deal.Name = 'IT discount concession';
-    deal.PipelineID = f.PipelineID;
-    deal.PipelineStageID = f.StageID;
-    deal.DealTypeID = f.DealTypeID;
-    deal.DealStatusTypeID = f.OpenStatusID;
-    deal.AccountID = f.AccountID;
-    deal.CompanyID = f.CompanyID;
+    const deal = await NewDeal(ctx, f, (d) => {
+        d.Name = 'IT discount concession';
+    });
     await saveOk(deal, 'the first save of the deal');
 
     const line = await deal.OrderID_EnsureObject().Lines.Create();

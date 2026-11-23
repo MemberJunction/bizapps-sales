@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Metadata } from '@memberjunction/core';
 import { DiscountNeedsConcession, RecordDiscountConcession } from '../discount-concession';
+import { SalesRecordDiscountConcessionOperation } from '../generated/remote_operations';
+
+/**
+ * MJ 6.2's `BaseRemotableOperation.Execute()` forwards the operation's generated `ContractFingerprint`
+ * to `RouteOperation` as its third argument, where it used to pass `{}`. Read it off the generated
+ * class rather than pasting the hash: the fingerprint is derived from the operation's contract, so a
+ * literal here would have to be re-pasted every time the input or output shape legitimately changes,
+ * and the thing worth asserting is that the caller forwards whatever CodeGen generated.
+ */
+const ROUTE_OPTIONS = { contractFingerprint: new SalesRecordDiscountConcessionOperation().ContractFingerprint };
 
 /**
  * A deal line's discount is a concession orders' confirm gate holds on (golive#305). Sales asks only
@@ -46,7 +56,7 @@ describe('RecordDiscountConcession', () => {
             OrderLineID: LINE,
             ReasonCategory: 'Retention',
             Reason: 'keep the account',
-        }, {});
+        }, ROUTE_OPTIONS);
         expect(outcome).toEqual({ Recorded: true, AwaitingApproval: false });
     });
 
@@ -68,7 +78,7 @@ describe('RecordDiscountConcession', () => {
             ReasonCategory: 'Retention',
             Reason: 'keep the account',
             ConcessionID: clientID,
-        }, {});
+        }, ROUTE_OPTIONS);
         expect(outcome).toEqual({ Recorded: true, AwaitingApproval: true });
     });
 

@@ -32,9 +32,9 @@ covers only what a tester needs afterwards.
 |---|---|---|
 | bizapps-common | `>=5.51.0 <6.0.0` | Accounts and contacts are IS-A children of common's Organization and Person; activities live in common's tables |
 | bizapps-tasks | `>=1.7.0 <2.0.0` | A won close raises the order-review and contract-processing tasks |
-| bizapps-accounting | `>=0.2.0 <1.0.0` | Orders books orders through accounting's engine |
+| bizapps-accounting | `>=0.2.0 <2.0.0` | Orders books orders through accounting's engine |
 | bizapps-orders | `>=5.30.0 <6.0.0` | **A deal cannot be saved without it.** The save provisions the deal's embedded `OrderHeader`, and the deal's lines live on that order |
-| bizapps-contracts | `>=0.1.1 <1.0.0` | A won close on a pipeline whose policy creates a contract (B2B) creates one. Without contracts the close still succeeds and records why no contract was made |
+| bizapps-contracts | `>=0.1.1 <2.0.0` | A won close on a pipeline whose policy creates a contract (B2B) creates one. Without contracts the close still succeeds and records why no contract was made |
 
 ### The workspace CLI rule
 
@@ -88,6 +88,76 @@ provider your account can sign in to.
 **The redirect origin.** MJ's MSAL and Auth0 providers redirect to `window.location.origin`, so the
 identity provider must accept the origin Explorer serves on (`http://localhost:4341` here) as a redirect
 URI. Which origins it accepts is set in the identity provider, not in this repo.
+
+### The lapsed close date digest
+
+A weekly email of open deals whose expected close date has passed or was never set. It **ships inert**:
+no recipients, three blank Application Settings, and a scheduled job that is `Disabled`. Installing or
+upgrading sales therefore changes nothing for a host, and nothing is sent until someone does the steps
+below. They are ordered so that each one is proved before mail can reach a real person.
+
+**Before you start, outside this repo:** a communication provider that is configured and credentialed, and a
+mailbox it is allowed to send as. Sales stores no mail credential and does not check for one, and a dry run
+passes without it, so the first real send is the first proof. Without it the run fails at step 5.
+
+1. **Set the three Application Settings** on the Sales application (`MJ: Application Settings`). All ship
+   with an empty value on purpose: each is the host's own choice, and a blank, or whitespace, means unset.
+
+   | Setting | What it is | When blank |
+   |---|---|---|
+   | `DigestProvider` | The communication provider that sends, spelled exactly as in `MJ: Communication Providers` | A real run stops before sending anything, with one error naming this setting. A dry run does not need it |
+   | `DigestFromAddress` | The fallback sender, used only when a recipient's company has no default Mailbox `CompanySenderIdentity`. An address such as `digest@mail.example.com` | A send to such a recipient fails; the run records that error and carries on with the others |
+   | `ExplorerBaseUrl` | Where this host's Explorer lives, such as `https://explorer.example.com`, so each deal name becomes a link | Deal names are plain text. Nothing fails |
+
+   A company's own Mailbox sender identity wins over `DigestFromAddress`, and portfolio-wide emails always
+   use `DigestFromAddress`, so set it even if every company has an identity. Whichever address is used must
+   be one the provider is permitted to send as; a rejected sender fails that send. A link is only useful to
+   a recipient who can sign in to Explorer.
+2. **Check the business time zone.** `BizApps.BusinessTimeZone` decides which calendar day "lapsed" is judged
+   against. It is separate from the job's cron `Timezone`, which decides when the email arrives; a host can
+   deliver in one zone and judge deals in another.
+3. **Add recipients** (`MJ_BizApps_Sales: Deal Digest Recipients`). Each row is one employee receiving one
+   audience. The four shipped audiences (`COMPANY_LEADER`, `CEO`, `CFO`, `CTO`) differ only in their flags.
+   - A portfolio-wide audience takes no company; any other audience requires one. Save refuses a mismatch,
+     and refuses an employee with no email address.
+   - The address comes from the employee, and an employee who is inactive, or whose address is later
+     blanked, is skipped without anyone editing the recipient row.
+   - The same address twice under one audience and company is mailed once. A person on two audiences gets
+     both emails, since each audience sees a different slice.
+   - A company with two leaders gets two emails, each with its own greeting.
+   - **Do not edit the four shipped audience rows.** A later sales release that changes one can overwrite a
+     host's edit. To change a threshold, add your own audience row; a `MinDaysLapsed` of 30 is one new row.
+4. **Dry run.** Set the job's `Configuration` to
+   `{"AgentID":"<unchanged>","StartingPayload":{"dryRun":true}}`, run the job once by hand, and read the run's
+   result. A dry run renders every email, sends none, and returns each one (recipient, sender, subject, body)
+   as `renderedEmails`. Check the recipients, the senders, the subjects and the lists themselves. An empty
+   `errors` means every recipient resolved a sender.
+5. **Test send.** Change the payload to
+   `{"recipientOverride":{"name":"Your Name","email":"you@example.com"}}` and run once. **Every** email in the
+   run goes to that one address, while subjects still name the real audience and company, so the one test
+   shows the whole Monday in your own inbox. Confirm it arrives. Each send is also a row in
+   `MJ: Communication Logs` — written by the Communication engine, which is what the digest calls (KI-30);
+   the action path that would have written `MJ: Action Execution Logs` cannot send HTML and is not used.
+   That row is where to look later to learn whether a run really sent, and it carries To, From, Subject
+   and both bodies.
+6. **Put the payload back, then enable.** Restore `Configuration` to just the `AgentID`. A leftover `dryRun`
+   would make every Monday succeed and send nothing; a leftover override would send everything to you. Then
+   set the job's `Status` to `Active` and **restart MJAPI**. The scheduler does not notice job rows written
+   out of process, so without the restart the job is not scheduled whatever its `Status` says.
+
+**A payload that cannot be read fails the run; it is never ignored.** The two steps above are typed by
+hand, so `{"dryRun": "true"}` — a string rather than a boolean — is an easy mistake. It ends the run
+`Failed`, naming the field, and sends nothing. The same goes for a `recipientOverride` missing its `name`
+or `email`, and for a payload that is not a JSON object at all (a double-encoded one, say). This is the
+one place the digest is deliberately unhelpful about a typo, because the other reading of a bad value is
+the dangerous one: ignored, a mistyped `dryRun` is a real send to every recipient on the roster, and mail
+cannot be recalled. An ABSENT field still takes its default, so a job with no `StartingPayload` — the
+normal Monday — runs for real, as it should.
+
+The job ships for Monday 09:00 `America/New_York`: a default, not a rule. Set `CronExpression` and
+`Timezone` to when the host wants the email. It will not run twice at once (`Skip`), and a missed week
+yields one catch-up email, not several. A run that cannot do its job ends `Failed` with the reasons in its
+message, so a run that **succeeds with nothing sent** is expected when no company has anything lapsed.
 
 ---
 
@@ -294,7 +364,18 @@ the screen disagree, the spec is the reference.
 4. Pick one of each, save, reopen. ✅ The names show, not IDs. Inline create is not offered on these
    three fields.
 
-### 5.13 Regression sweep
+### 5.13 Lapsed close date digest — set up per §2
+1. With a past-dated open deal and a recipient on a company-leader audience for its company, run the dry run
+   from §2 step 4. ✅ `renderedEmails` holds one email for that recipient listing the deal, with the days
+   lapsed. A deal with no close date is listed as "Not set". A closed deal is never listed, and an On Hold
+   deal is.
+2. Set that deal's expected close date to today. ✅ It is no longer listed: a deal closing today has not lapsed.
+3. Run again with `recipientOverride`. ✅ It arrives at the override address and the real recipient gets
+   nothing. With `DigestProvider` blank, the same run fails once with an error naming it.
+4. A recipient whose company has nothing lapsed gets no email, while a `CEO`, `CFO` or `CTO` recipient gets the
+   all-clear text. ✅ Both are expected, not a defect.
+
+### 5.14 Regression sweep
 - Reload every page — no console errors.
 - At a short window (1100 × 617), the deal's header card shows all of its content after a save and in
   edit mode (`42-hero-short-window`).
@@ -324,7 +405,12 @@ the screen disagree, the spec is the reference.
 8. **The encryption-key warning at startup** means `MJ_BASE_ENCRYPTION_KEY` is unset (§2).
 9. **`ForecastSnapshot` columns are `*Amount`-suffixed** (`CommitAmount`, not `Commit`) — `COMMIT` is
    reserved in T-SQL and Postgres (D6).
-10. **The Playwright specs run slowly** against a development-mode Explorer: the suite takes about 34
+10. **The digest fails rather than mail a list cut off at the row cap.** Past 1,000 lapsed deals (the
+    entity's view cap; 5,000 at most) the run reports `Failed`, because later companies would otherwise
+    vanish silently. Do not file it as a bug: see `docs/KNOWN-ISSUES.md` KI-29.
+11. **The digest's "past expected close" is wider than the dashboard's.** The email also lists On Hold deals
+    and deals with no close date, so a recipient may see a smaller count on the dashboard than in the email.
+12. **The Playwright specs run slowly** against a development-mode Explorer: the suite takes about 34
     minutes at one worker (`test-harnesses/playwright/run-suite.sh`).
 
 ---

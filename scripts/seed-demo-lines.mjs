@@ -32,7 +32,11 @@ import { fileURLToPath } from 'node:url';
 
 import dotenv from 'dotenv';
 import sql from 'mssql';
+import { ShareTestedCheckoutPackages } from '../test-harnesses/one-mj-core.mjs';
+import { importSibling } from '../test-harnesses/sibling-resolve.mjs';
 dotenv.config();
+
+ShareTestedCheckoutPackages();
 
 /**
  * SALES-SERVER IS LOADED FROM ITS BUILD, so an unbuilt checkout is said before the database is touched.
@@ -75,17 +79,22 @@ await import('@mj-biz-apps/sales-server').then((m) => m.LoadBizAppsSalesServer?.
  * `OrderNumber`, the insert dies on a NOT NULL violation inside the save graph, and what surfaces names
  * an entity rather than a missing import. So it is checked rather than discovered.
  */
-// Through `importSibling`, the way the integration runner reaches orders: sales does not declare
-// orders-server, so a plain import only resolves inside a joined pnpm workspace. A host built with the
-// sibling repos checked out next to this one (docs/WORKSPACE-SETUP.md) has it built one directory up.
-const { importSibling } = await import('../test-harnesses/sibling-resolve.mjs');
+// Through `importSibling`, the way the integration runner reaches orders and accounting: works both inside
+// a joined workspace, via IntegrationTests' declared dependencies, and with sibling checkouts beside this repo (#161).
 try {
-    const orders = await importSibling('@mj-biz-apps/orders-server');
-    orders.LoadBizAppsOrdersServer();
+    const common = await importSibling('@mj-biz-apps/common-entities');
+    common.LoadGeneratedEntities?.();
+    const accEntities = await importSibling('@mj-biz-apps/accounting-entities');
+    accEntities.LoadGeneratedEntities?.();
+    await importSibling('@mj-biz-apps/accounting-engine-base');
+    await importSibling('@mj-biz-apps/accounting-core-entities-server');
+    const ordEntities = await importSibling('@mj-biz-apps/orders-entities');
+    ordEntities.LoadGeneratedEntities?.();
+    await importSibling('@mj-biz-apps/orders-core-entities-server');
 } catch (err) {
     console.error(
-        '\n  bizapps-orders is not resolvable from this repo or built beside it, so order lines cannot be seeded.\n' +
-        '  If it is checked out, build orders-server first (docs/WORKSPACE-SETUP.md §5e).\n' +
+        '\n  bizapps-orders / bizapps-accounting is not resolvable from this repo or built beside it, so order lines cannot be seeded.\n' +
+        '  If it is checked out, build orders and accounting server packages first (docs/WORKSPACE-SETUP.md §5e).\n' +
         '  The deals themselves are already seeded by scripts/seed-demo-data.sh; this step adds the\n' +
         '  lines that make Deal.Amount a computed figure rather than a stated one.\n' +
         `  (${err instanceof Error ? err.message : String(err)})\n`,

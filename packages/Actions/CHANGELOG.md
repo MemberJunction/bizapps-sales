@@ -1,5 +1,58 @@
 # @mj-biz-apps/sales-actions
 
+## 6.32.0
+
+### Patch Changes
+
+- Updated dependencies [50d2b85]
+- Updated dependencies [b582eea]
+  - @mj-biz-apps/sales-core-entities-server@6.32.0
+
+## 6.31.1
+
+### Patch Changes
+
+- Updated dependencies [b8bc9c4]
+- Updated dependencies [05f18b5]
+  - @mj-biz-apps/sales-core-entities-server@6.31.1
+
+## 6.31.0
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.31.0
+
+## 6.30.0
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.30.0
+
+## 6.29.0
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.29.0
+
+## 6.28.0
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.28.0
+
+## 6.27.0
+
+### Patch Changes
+
+- @mj-biz-apps/sales-core-entities-server@6.27.0
+
+## 6.26.0
+
+### Patch Changes
+
+- Updated dependencies [a7aff3d]
+  - @mj-biz-apps/sales-core-entities-server@6.26.0
+
 ## 6.25.0
 
 ### Patch Changes

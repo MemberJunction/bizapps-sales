@@ -51,26 +51,27 @@ export function DealPipelineGridState(): { sortSettings: { field: string; dir: '
                     ],
                 },
             },
-            { Name: 'Amount', DisplayName: 'Amount', orderIndex: 6, width: 120, format: { type: 'currency', currencyCode: 'USD', decimals: 0, align: 'right' } },
+            { Name: 'Amount', DisplayName: 'Amount', orderIndex: 6, width: 120, format: { type: 'number', decimals: 0, align: 'right' } },
+            { Name: 'CurrencyID', DisplayName: 'Currency', orderIndex: 7, width: 110 },
             // Stored as 0-100; the grid's percent format divides by 100, so 40 renders "40%" (bizapps-sales#371).
-            { Name: 'Probability', DisplayName: 'Prob', orderIndex: 7, width: 80, format: { type: 'percent', decimals: 0, align: 'right' } },
+            { Name: 'Probability', DisplayName: 'Prob', orderIndex: 8, width: 80, format: { type: 'percent', decimals: 0, align: 'right' } },
             /**
              * TWO DATE COLUMNS, because a grid column binds one field (bizapps-sales#371). A single "Close"
              * column showed the forecast day even on a won or lost deal. "Expected close" is the forecast;
              * "Closed on" is the day a closed deal closed and is empty on an open one.
              */
-            { Name: 'ExpectedCloseDate', DisplayName: 'Expected close', orderIndex: 8, width: 130, format: { type: 'date', dateFormat: GRID_DAY_FORMAT } },
-            { Name: 'ActualCloseDate', DisplayName: 'Closed on', orderIndex: 9, width: 120, format: { type: 'date', dateFormat: GRID_DAY_FORMAT } },
-            { Name: 'OwnerEmployee', DisplayName: 'Owner', orderIndex: 10, width: 140 },
-            { Name: 'ForecastCategoryType', DisplayName: 'Forecast', orderIndex: 11, width: 130 },
-            { Name: 'NextStep', DisplayName: 'Next step', orderIndex: 12, width: 200 },
+            { Name: 'ExpectedCloseDate', DisplayName: 'Expected close', orderIndex: 9, width: 130, format: { type: 'date', dateFormat: GRID_DAY_FORMAT } },
+            { Name: 'ActualCloseDate', DisplayName: 'Closed on', orderIndex: 10, width: 120, format: { type: 'date', dateFormat: GRID_DAY_FORMAT } },
+            { Name: 'OwnerEmployee', DisplayName: 'Owner', orderIndex: 11, width: 140 },
+            { Name: 'ForecastCategoryType', DisplayName: 'Forecast', orderIndex: 12, width: 130 },
+            { Name: 'NextStep', DisplayName: 'Next step', orderIndex: 13, width: 200 },
             /**
              * Hidden, and here only because it is the first sort key (bizapps-sales#371). The grid can
              * show a sort only on one of its columns; with ClosedAt missing, its sort never matched
              * the saved one, it reported the difference as a user's sort, and the viewer then re-sorted
              * by Expected close and rebuilt the columns with the entity's own headers.
              */
-            { Name: 'ClosedAt', DisplayName: 'Closed at', orderIndex: 13, width: 120, hidden: true },
+            { Name: 'ClosedAt', DisplayName: 'Closed at', orderIndex: 14, width: 120, hidden: true },
         ],
     };
 }
@@ -135,6 +136,22 @@ export async function DealPipelineViewWith(
         : ({ ...(template as object) } as MJUserViewEntityExtended);
     if (whereClause != null) {
         copy.WhereClause = whereClause;
+    }
+    return copy;
+}
+
+/**
+ * A copy of `template` with the Pipeline column hidden, for the `HidePipelines` setting. The saved view
+ * is left as it is, so turning the setting off brings the column back.
+ */
+export async function WithoutPipelineColumn(template: MJUserViewEntityExtended): Promise<MJUserViewEntityExtended> {
+    const copy = await DealPipelineViewWith(template);
+    const grid = JSON.parse(copy.GridState || '{}') as { columnSettings?: GridCol[] };
+    grid.columnSettings = (grid.columnSettings ?? []).map((c) => (c.Name === 'Pipeline' ? { ...c, hidden: true } : c));
+    copy.GridState = JSON.stringify(grid);
+    if (!(copy instanceof BaseEntity)) {
+        // The fallback view is a plain object, and the grid reads the parsed state off it directly.
+        Object.assign(copy, { GridStateObject: grid });
     }
     return copy;
 }
@@ -209,10 +226,19 @@ export interface InspectScope {
 export type CriteriaInspectKey = Exclude<InspectKey, 'idle'>;
 
 /**
+ * The filter bar's lists as a filter on the Deals view, for All Deals (bc-aidp-next-golive#453): the
+ * same criteria the Inspect lists apply, with no period. Empty when no list is set, so the grid lists
+ * every deal.
+ */
+export function DealFiltersWhere(filters: DashboardFilters, orderLineTable: SqlTable | null): string {
+    return filterParts(filters, orderLineTable).join(' AND ');
+}
+
+/**
  * The filter bar's lists as criteria on the Deals view, the same rule each dashboard query applies.
  * Product company keeps a deal when one line of its order belongs to a selected company.
  */
-function filterParts(filters: DashboardFilters, tables: InspectTables): string[] {
+function filterParts(filters: DashboardFilters, orderLineTable: SqlTable | null | undefined): string[] {
     const parts: string[] = [];
     if (filters.CompanyIDs.length) parts.push(`CompanyID IN ${sqlList(filters.CompanyIDs)}`);
     if (filters.OwnerEmployeeIDs.length) parts.push(`OwnerEmployeeID IN ${sqlList(filters.OwnerEmployeeIDs)}`);
@@ -220,8 +246,8 @@ function filterParts(filters: DashboardFilters, tables: InspectTables): string[]
     if (filters.ProductCompanyIDs.length) {
         // Without the order-line table no deal can be shown to match, so the list says so by matching
         // none rather than ignoring the filter and listing deals the figure did not count.
-        parts.push(tables.OrderLine
-            ? `OrderID IN (SELECT OrderHeaderID FROM ${tableRef(tables.OrderLine)} WHERE CompanyID IN ${sqlList(filters.ProductCompanyIDs)})`
+        parts.push(orderLineTable
+            ? `OrderID IN (SELECT OrderHeaderID FROM ${tableRef(orderLineTable)} WHERE CompanyID IN ${sqlList(filters.ProductCompanyIDs)})`
             : '1 = 0');
     }
     return parts;
@@ -260,14 +286,14 @@ export function InspectCriteriaWhere(
     const bounded = PERIOD_BOUND_KEYS.includes(key) ? scope.Window : undefined;
     const status = (flag: string): string => `DealStatusTypeID IN (SELECT ID FROM ${tableRef(tables.Status)} WHERE ${flag} = 1)`;
     if (key === 'won' || key === 'closed') {
-        return [status(key === 'won' ? 'IsWon' : 'IsClosed'), ...windowParts('ActualCloseDate', bounded), ...filterParts(filters, tables)].join(' AND ');
+        return [status(key === 'won' ? 'IsWon' : 'IsClosed'), ...windowParts('ActualCloseDate', bounded), ...filterParts(filters, tables.OrderLine)].join(' AND ');
     }
     const open = [
         status('IsOpen'),
         // Naming pipelines in the filter includes them, as the summary query's PipelineIDs does.
         ...(filters.PipelineIDs.length ? [] : [`PipelineID IN (SELECT ID FROM ${tableRef(tables.Pipeline)} WHERE IncludeInForecast = 1)`]),
     ];
-    return [...open, ...sliceParts(key, tables, today, scope.Arg ?? null), ...windowParts('ExpectedCloseDate', bounded), ...filterParts(filters, tables)]
+    return [...open, ...sliceParts(key, tables, today, scope.Arg ?? null), ...windowParts('ExpectedCloseDate', bounded), ...filterParts(filters, tables.OrderLine)]
         .join(' AND ');
 }
 

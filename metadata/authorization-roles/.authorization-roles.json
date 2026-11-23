@@ -1,0 +1,32 @@
+[
+  {
+    "fields": {
+      "AuthorizationID": "@lookup:MJ: Authorizations.Name=MJ.BizApps.Sales.Deal.DeleteOwn",
+      "RoleID": "@lookup:MJ: Roles.Name=Sales User",
+      "Type": "Allow"
+    },
+    "primaryKey": {
+      "ID": "A9451D94-6ACD-42A4-9ED7-EDED5CEAD908"
+    }
+  },
+  {
+    "fields": {
+      "AuthorizationID": "@lookup:MJ: Authorizations.Name=MJ.BizApps.Sales.Deal.Delete",
+      "RoleID": "@lookup:MJ: Roles.Name=Sales Admin",
+      "Type": "Allow"
+    },
+    "primaryKey": {
+      "ID": "9B449DB6-0523-4D1C-8895-936B02AA0DDD"
+    }
+  },
+  {
+    "fields": {
+      "AuthorizationID": "@lookup:MJ: Authorizations.Name=MJ.BizApps.Sales.Deal.Delete",
+      "RoleID": "@lookup:MJ: Roles.Name=Developer",
+      "Type": "Allow"
+    },
+    "primaryKey": {
+      "ID": "205AD288-BA07-4F72-81D9-A84821DE5A2A"
+    }
+  }
+]

@@ -1,0 +1,18 @@
+[
+  {
+    "_comments": [
+      "Ships as \"false\", so installing or upgrading Sales changes nothing. An administrator turns it on",
+      "per instance by setting Value to \"true\" on this row in MJ's Application Settings. The primary key is",
+      "fixed so that change updates THIS row rather than creating a second one."
+    ],
+    "fields": {
+      "ApplicationID": "@lookup:MJ: Applications.Name=Sales",
+      "Name": "HidePipelines",
+      "Value": "false",
+      "Comments": "\"true\" runs every deal on its company's default pipeline and hides pipelines across the Sales app: choosing a deal's company chooses its pipeline, which the rep cannot change; the board and the stage card name companies instead of pipelines; and the Pipeline filter and column are gone. A company's default pipeline is the first one linked to it: the pipeline marked IsDefault when it is linked, otherwise the lowest DisplayRank. \"false\" (the default) shows pipelines as before."
+    },
+    "primaryKey": {
+      "ID": "39E2F5E0-6FA2-44AC-BCCA-568C062C27CB"
+    }
+  }
+]

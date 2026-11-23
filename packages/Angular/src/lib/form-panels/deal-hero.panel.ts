@@ -28,6 +28,7 @@ import { DealCloseDay } from './deal-close-day';
 import { IsFieldReadable } from './field-readable';
 import { WeightedAmount } from './deal-weighted-amount';
 import { FormatDealMoney, RefreshDealCurrencyCodes } from './deal-money';
+import { SalesSettings } from '../data/sales-settings';
 
 
 /**
@@ -81,6 +82,11 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
         slot: 'before-fields',
         sortKey: 100,
         contributionKey: 'header',
+        // Hides the generated field list: the Deal panels draw every field. The claim sits on the
+        // hero, not on Overview, because MJ 6.2 files a panel that replaces the Details tab inside
+        // Details, so an Overview holding it became a "Details" item at the end of the rail. The
+        // hero is not a rail item, so claiming here empties Details and Overview leads.
+        replacesSectionKey: 'details',
     },
 })
 @Component({
@@ -195,7 +201,11 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Account</span>
                         @if (Record.AccountID && AccountName) {
-                            <button type="button" class="mjs-deal-hero__stat-val is-link" (click)="OpenAccount($event)">{{ AccountName }}</button>
+                            <button type="button" class="mjs-deal-hero__stat-val is-link"
+                                [mjRecordLink]="Record"
+                                FieldName="AccountID"
+                                [HandleClick]="false"
+                                (click)="OpenAccount($event)">{{ AccountName }}</button>
                         } @else {
                             <span class="mjs-deal-hero__stat-val">{{ AccountName || '—' }}</span>
                         }
@@ -203,7 +213,11 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Owner</span>
                         @if (Record.OwnerEmployeeID && OwnerName) {
-                            <button type="button" class="mjs-deal-hero__stat-val is-link" (click)="OpenOwner($event)">{{ OwnerName }}</button>
+                            <button type="button" class="mjs-deal-hero__stat-val is-link"
+                                [mjRecordLink]="Record"
+                                FieldName="OwnerEmployeeID"
+                                [HandleClick]="false"
+                                (click)="OpenOwner($event)">{{ OwnerName }}</button>
                         } @else {
                             <span class="mjs-deal-hero__stat-val">{{ OwnerName || 'No owner' }}</span>
                         }
@@ -233,10 +247,19 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
                         <span class="mjs-deal-hero__stat-label">{{ CloseStatLabel }}</span>
                         <span class="mjs-deal-hero__stat-val">{{ CloseStatValue }}</span>
                     </div>
-                    <div class="mjs-deal-hero__stat">
-                        <span class="mjs-deal-hero__stat-label">Pipeline</span>
-                        <span class="mjs-deal-hero__stat-val">{{ PipelineName || '—' }}</span>
-                    </div>
+                    <!-- With pipelines hidden (the HidePipelines setting) the company stands in for the
+                         pipeline: choosing it is what chose the pipeline. -->
+                    @if (HidePipelines) {
+                        <div class="mjs-deal-hero__stat">
+                            <span class="mjs-deal-hero__stat-label">Company</span>
+                            <span class="mjs-deal-hero__stat-val">{{ CompanyName || '—' }}</span>
+                        </div>
+                    } @else {
+                        <div class="mjs-deal-hero__stat">
+                            <span class="mjs-deal-hero__stat-label">Pipeline</span>
+                            <span class="mjs-deal-hero__stat-val">{{ PipelineName || '—' }}</span>
+                        </div>
+                    }
                     <div class="mjs-deal-hero__stat">
                         <span class="mjs-deal-hero__stat-label">Type</span>
                         <span class="mjs-deal-hero__stat-val">{{ TypeName || '—' }}</span>
@@ -270,12 +293,13 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
             box-shadow: var(--mj-shadow-md, 0 4px 16px rgba(0, 0, 0, .08));
             position: relative; overflow: hidden;
             container-type: inline-size; container-name: mjs-deal-hero;
-            /* NEVER SHRINKS. MJ's slot host and this panel's host are display:contents, so this div
-               is the flex item in the form's fixed-height column, and MJ's flex-shrink: 0 on that
-               column's direct children does not reach it. With overflow hidden its minimum height is
-               0, so on a short window with tall panels below it was squeezed to the title row and
-               clipped the Name editor and the summary (bc-aidp-next-golive#287). */
-            flex-shrink: 0;
+            /* NEVER SHRINKS, AND SITS ABOVE SIBLING PANELS (#287, #397). MJ's slot host and this
+               panel's host are display:contents, so this div is the flex item in the form's
+               fixed-height column, and MJ's flex-shrink: 0 on that column's direct children does not
+               reach it. With overflow hidden its minimum height is 0, so on a short or narrow window
+               with tall panels below it was squeezed to the title row and the Pipeline panel covered
+               the Name editor. */
+            flex-shrink: 0; z-index: 1;
         }
         .mjs-deal-hero::before {
             content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3.5px;
@@ -416,8 +440,8 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
         .mjs-deal-hero--collapsed > .mjs-flag { margin-top: var(--mj-space-3); }
         .mjs-deal-hero--collapsed .mjs-deal-hero__avatar { width: 42px; height: 42px; border-radius: var(--mj-radius-md, 10px); font-size: 1.05rem; }
         .mjs-deal-hero--collapsed .mjs-deal-hero__name { font-size: 1.15rem; }
-        @media (max-width: 720px) {
-            .mjs-deal-hero__identity { align-items: flex-start; }
+        @media (max-width: 1024px) {
+            .mjs-deal-hero__identity { align-items: flex-start; flex-wrap: wrap; }
             .mjs-deal-hero__summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
     `],
@@ -435,6 +459,8 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     /** Whether the PERSISTED status is a WIN — its own flag, never `!IsLost`. Decides the Order and
      *  Contract chips (golive#226); the Overview's outcome tiles read it too (golive#231). */
     public IsWon = false;
+    /** Whether the PERSISTED status carries `IsOpen` (#460), so `StatusTone` never reads a status name. */
+    public IsOpen = false;
 
     /** The links last published to the chip row, and the state they were built from. */
     private relatedFor: string | null = null;
@@ -463,6 +489,8 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     }
     public LockNotice: string | null = null;
     public StaleAmountNotice: string | null = null;
+    /** The `HidePipelines` setting, read in `ngOnInit`. */
+    public HidePipelines = false;
 
     public async ngOnInit(): Promise<void> {
         const raw = UserInfoEngine.Instance.GetSetting(COLLAPSE_SETTING);
@@ -482,7 +510,11 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
          * `sales-ng` is lazily loaded, so the boot sequence is not relied on — the Overview panel does
          * the same. Marked for check because nothing else repaints the stat when it lands.
          */
-        await BusinessTimeZoneEngine.Instance.Config(false);
+        const [, hidePipelines] = await Promise.all([
+            BusinessTimeZoneEngine.Instance.Config(false),
+            SalesSettings.LoadHidePipelines(),
+        ]);
+        this.HidePipelines = hidePipelines;
         this.cdr?.markForCheck();
     }
 
@@ -643,6 +675,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     public get OwnerName(): string { return String(this.Record?.OwnerEmployee ?? this.Record?.Get?.('OwnerEmployee') ?? ''); }
     public get StageName(): string { return String(this.Record?.PipelineStage ?? this.Record?.Get?.('PipelineStage') ?? ''); }
     public get PipelineName(): string { return String(this.Record?.Pipeline ?? this.Record?.Get?.('Pipeline') ?? ''); }
+    public get CompanyName(): string { return String(this.Record?.Company ?? this.Record?.Get?.('Company') ?? ''); }
     public get TypeName(): string { return String(this.Record?.DealType ?? this.Record?.Get?.('DealType') ?? ''); }
 
     /**
@@ -698,10 +731,9 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         return money(WeightedAmount(this.Record?.Amount, this.Record?.Probability), this.Record?.CurrencyID);
     }
     public get StatusTone(): 'success' | 'warning' | 'muted' {
-        const s = this.StatusName.toLowerCase();
-        if (!s) return 'muted';
-        if (s.includes('won') || s === 'open' || s.includes('active')) return 'success';
-        if (s.includes('lost') || s.includes('dead') || s.includes('disqual') || this.IsLocked) return 'warning';
+        if (!this.StatusName) return 'muted';
+        if (this.IsWon || this.IsOpen) return 'success';
+        if (this.IsLost || this.IsLocked) return 'warning';
         return 'muted';
     }
 
@@ -764,6 +796,7 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         this.IsLocked = lock.IsLocked;
         this.IsLost = lock.IsLost;
         this.IsWon = lock.IsWon;
+        this.IsOpen = lock.IsOpen;
         this.LockNotice = lock.Notice;
     }
 

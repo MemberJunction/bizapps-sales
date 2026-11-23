@@ -23,7 +23,7 @@ const TOKENS_PATH = 'packages/Angular/Generic/shared/src/lib/_tokens.scss';
 function readMjVersion() {
     const pkg = JSON.parse(readFileSync(join(ROOT, 'packages/Angular/package.json'), 'utf8'));
     const version = pkg.devDependencies?.['@memberjunction/core'];
-    if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
+    if (!version || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
         throw new Error(`packages/Angular devDependencies has no exact @memberjunction/core anchor (found "${version}")`);
     }
     return version;

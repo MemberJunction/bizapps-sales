@@ -27,6 +27,7 @@ import { LoadLogActivityAction } from './custom/log-activity.action.js';
 import { LoadDetectWonDealsWithUnconfirmedOrdersAction } from './custom/won-deal-order-detector.action.js';
 import { LoadRelinkWonDealOrdersToContractsAction } from './custom/contract-order-relink.action.js';
 import { LoadLinkDefaultPipelineToCompaniesAction } from './custom/link-default-pipeline.action.js';
+import { LoadLapsedCloseDateDigestAgent } from './custom/lapsed-close-date-digest.agent.js';
 
 // Import generated GraphQL resolvers
 import './generated/generated.js';
@@ -102,6 +103,7 @@ export function LoadBizAppsSalesServer(): void {
     LoadDetectWonDealsWithUnconfirmedOrdersAction();
     LoadRelinkWonDealOrdersToContractsAction();
     LoadLinkDefaultPipelineToCompaniesAction();
+    LoadLapsedCloseDateDigestAgent();
 
     // Referenced so the manifest import is not elided; MJ reads it during registration.
     void CLASS_REGISTRATIONS;

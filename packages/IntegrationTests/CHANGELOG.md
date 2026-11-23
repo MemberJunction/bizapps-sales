@@ -1,5 +1,95 @@
 # @mj-biz-apps/sales-integration-tests
 
+## 6.32.0
+
+### Minor Changes
+
+- b582eea: Post-go-live sales consolidation:
+  - Enforce single-holder (`AllowsMultiplePerDeal = 0`) and employee-only owner (`IsOwnerRole = 1`) rules on `DealTeamMember` saves, and clear `Deal.OwnerEmployeeID` when the owner row is deactivated.
+  - Record deal close and reopen transitions in the activity timeline, verify `DealID` existence in `ActivityWriterService.LogActivity`, and refusal-check `PeriodEnd < PeriodStart` in `RunSalesForecastSnapshotAction`.
+  - Show `WeightedAmount` on open deals and hide it on closed deals, differentiate close-stamp refusal hints (`ActualCloseDate` vs `ClosedAt`/`ClosedByUserID`), preserve the current inactive closing status in the status dropdown, and lock non-carve-out fields across all form panels when a deal is closed.
+  - Align dashboard, win-rate, bookings, forecast, involvement, and unconfirmed-won-order queries on `CalendarDayIn` (`BusinessTimeZone()`) and `DealStatusType` flags, format pipeline view `Amount` as currency, and compare board idle days by calendar day.
+  - Auto-number `DealPaymentSchedule.DisplayOrder` on insert, guard `MJSDealSchedulePanel.readRows` against out-of-order replies, and flag discounted line cards as `Discount not covered` when an earlier approval covers less than orders' current priced discount.
+
+### Patch Changes
+
+- Updated dependencies [2565036]
+- Updated dependencies [50d2b85]
+- Updated dependencies [483cb76]
+- Updated dependencies [b582eea]
+  - @mj-biz-apps/sales-entities@6.32.0
+  - @mj-biz-apps/sales-core-entities-server@6.32.0
+  - @mj-biz-apps/sales-server@6.32.0
+
+## 6.31.1
+
+### Patch Changes
+
+- Updated dependencies [b8bc9c4]
+- Updated dependencies [05f18b5]
+  - @mj-biz-apps/sales-core-entities-server@6.31.1
+  - @mj-biz-apps/sales-entities@6.31.1
+  - @mj-biz-apps/sales-server@6.31.1
+
+## 6.31.0
+
+### Patch Changes
+
+- Updated dependencies [99e202b]
+- Updated dependencies [4cb29a0]
+- Updated dependencies [37983bb]
+  - @mj-biz-apps/sales-entities@6.31.0
+  - @mj-biz-apps/sales-core-entities-server@6.31.0
+  - @mj-biz-apps/sales-server@6.31.0
+
+## 6.30.0
+
+### Patch Changes
+
+- Updated dependencies [11e699f]
+  - @mj-biz-apps/sales-entities@6.30.0
+  - @mj-biz-apps/sales-core-entities-server@6.30.0
+  - @mj-biz-apps/sales-server@6.30.0
+
+## 6.29.0
+
+### Patch Changes
+
+- Updated dependencies [00c22d3]
+  - @mj-biz-apps/sales-entities@6.29.0
+  - @mj-biz-apps/sales-core-entities-server@6.29.0
+  - @mj-biz-apps/sales-server@6.29.0
+
+## 6.28.0
+
+### Patch Changes
+
+- Updated dependencies [8be0442]
+- Updated dependencies [acb1c0a]
+  - @mj-biz-apps/sales-entities@6.28.0
+  - @mj-biz-apps/sales-core-entities-server@6.28.0
+  - @mj-biz-apps/sales-server@6.28.0
+
+## 6.27.0
+
+### Patch Changes
+
+- Updated dependencies [edf5a94]
+  - @mj-biz-apps/sales-entities@6.27.0
+  - @mj-biz-apps/sales-core-entities-server@6.27.0
+  - @mj-biz-apps/sales-server@6.27.0
+
+## 6.26.0
+
+### Patch Changes
+
+- Updated dependencies [a7aff3d]
+- Updated dependencies [ede0517]
+- Updated dependencies [24c0b46]
+  - @mj-biz-apps/sales-core-entities-server@6.26.0
+  - @mj-biz-apps/sales-entities@6.26.0
+  - @mj-biz-apps/sales-server@6.26.0
+
 ## 6.25.0
 
 ### Patch Changes

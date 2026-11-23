@@ -165,5 +165,121 @@ if (unproven) {
     console.log('  UNPROVEN is not a pass. It means no run reached the joins, so a conversion fault');
     console.log('  of the kind that killed Slipped Deals could still be hiding there.\n');
 }
+
+/**
+ * Rolled-back transaction fixtures for edge-case query rows (#355 items 8-12, #418):
+ *   1. Person-backed rep rows stay distinct in deal-involvement-by-rep.sql (not merged into one NULL row).
+ *   2. A won deal with no active owner row reports under '(unassigned)' in bookings-by-owner.sql.
+ *   3. Two currencies produce separate CurrencyCode rows in dashboard-summary.sql, win-rate.sql, forecast-by-owner.sql.
+ *   4. An inactive ForecastCategoryType still reports under its name in forecast-by-owner.sql and forecast-by-category.sql.
+ *   5. A won deal with NULL ActualCloseDate and NULL ClosedAt falls back to __mj_UpdatedAt in won-deals-order-not-confirmed.sql.
+ */
+import { readFileSync } from 'node:fs';
+const sqlFile = (f) =>
+    readFileSync(new URL(`../metadata/queries/SQL/${f}`, import.meta.url), 'utf8')
+        .replace(/\{%[\s\S]*?%\}/g, '');
+
+const tx = new sql.Transaction(pool);
+await tx.begin();
+try {
+    const req = () => new sql.Request(tx);
+    const seed = (await req().query(`
+        SELECT TOP 1
+            d.CompanyID,
+            d.PipelineID,
+            d.PipelineStageID,
+            d.DealTypeID,
+            (SELECT TOP 1 ID FROM __mj_BizAppsSales.DealStatusType WHERE IsWon = 1) AS WonStatusID,
+            (SELECT TOP 1 ID FROM __mj_BizAppsSales.DealStatusType WHERE IsOpen = 1) AS OpenStatusID,
+            (SELECT TOP 1 ID FROM __mj_BizAppsSales.DealRole WHERE IsOwnerRole = 0 AND IsActive = 1) AS RepRoleID,
+            (SELECT TOP 1 ID FROM __mj_BizAppsAccounting.Currency WHERE Code = N'USD') AS UsdID,
+            (SELECT TOP 1 ID FROM __mj_BizAppsAccounting.Currency WHERE Code <> N'USD') AS AltCurID
+        FROM __mj_BizAppsSales.Deal d
+        WHERE d.CompanyID IS NOT NULL AND d.PipelineID IS NOT NULL
+    `)).recordset[0];
+
+    if (seed?.CompanyID && seed?.PipelineID && seed?.WonStatusID && seed?.OpenStatusID) {
+        // Fixture 1 & 2 & 5: two Person records, an unowned won deal with null close dates, and person team members
+        await req().query(`
+            DECLARE @p1 UNIQUEIDENTIFIER = NEWID(), @p2 UNIQUEIDENTIFIER = NEWID();
+            INSERT INTO __mj_BizAppsCommon.Person (ID, FirstName, LastName, Status)
+            VALUES (@p1, N'PartnerOne', N'VerifyFixture', N'Active'),
+                   (@p2, N'PartnerTwo', N'VerifyFixture', N'Active');
+
+            DECLARE @catInactive UNIQUEIDENTIFIER = NEWID();
+            INSERT INTO __mj_BizAppsSales.ForecastCategoryType
+                (ID, Code, Name, DisplayRank, IncludeInPipeline, IncludeInBestCase, IncludeInCommit, IsActive)
+            VALUES (@catInactive, N'VERIFY_INACTIVE_CAT', N'Verify Inactive Category', 99, 1, 0, 0, 0);
+
+            DECLARE @curAlt UNIQUEIDENTIFIER = ISNULL('${seed.AltCurID || ''}', NEWID());
+            IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsAccounting.Currency WHERE ID = @curAlt)
+                INSERT INTO __mj_BizAppsAccounting.Currency (ID, Code, Name, Symbol, DecimalPlaces, IsActive)
+                VALUES (@curAlt, N'ZZZ', N'Verify Currency', N'Z', 2, 1);
+
+            DECLARE @dWonUnowned UNIQUEIDENTIFIER = NEWID(), @dOpenAltCur UNIQUEIDENTIFIER = NEWID();
+            INSERT INTO __mj_BizAppsSales.Deal
+                (ID, CompanyID, Name, PipelineID, PipelineStageID, DealTypeID, DealStatusTypeID,
+                 ForecastCategoryTypeID, Amount, Probability, ActualCloseDate, ClosedAt, CurrencyID)
+            VALUES
+                (@dWonUnowned, '${seed.CompanyID}', N'Verify Won Unowned Null Close', '${seed.PipelineID}',
+                 '${seed.PipelineStageID}', '${seed.DealTypeID}', '${seed.WonStatusID}',
+                 @catInactive, 1000, 100, NULL, NULL, '${seed.UsdID || ''}'),
+                (@dOpenAltCur, '${seed.CompanyID}', N'Verify Open Alt Currency', '${seed.PipelineID}',
+                 '${seed.PipelineStageID}', '${seed.DealTypeID}', '${seed.OpenStatusID}',
+                 @catInactive, 2000, 50, NULL, NULL, @curAlt);
+
+            IF '${seed.RepRoleID || ''}' <> ''
+            BEGIN
+                INSERT INTO __mj_BizAppsSales.DealTeamMember (ID, DealID, PersonID, RoleID, AttributionWeight, IsActive)
+                VALUES (NEWID(), @dWonUnowned, @p1, '${seed.RepRoleID}', 50, 1),
+                       (NEWID(), @dWonUnowned, @p2, '${seed.RepRoleID}', 50, 1);
+            END
+        `);
+
+        const repRows = (await req().query(sqlFile('deal-involvement-by-rep.sql'))).recordset;
+        const fixtureReps = repRows.filter((r) => String(r.RepName ?? '').includes('VerifyFixture'));
+        if (fixtureReps.length < 2) {
+            failed++;
+            console.log(`  ✖ fixture: deal-involvement-by-rep.sql merged or dropped Person reps (got ${fixtureReps.length})`);
+        } else {
+            console.log('  ✔ fixture: deal-involvement-by-rep.sql keeps Person reps distinct');
+        }
+
+        const ownerBookings = (await req().query(sqlFile('bookings-by-owner.sql'))).recordset;
+        if (!ownerBookings.some((r) => r.OwnerName === '(unassigned)' && Number(r.WonCount) >= 1)) {
+            failed++;
+            console.log('  ✖ fixture: bookings-by-owner.sql dropped unowned won deal');
+        } else {
+            console.log('  ✔ fixture: bookings-by-owner.sql includes unowned won deal under (unassigned)');
+        }
+
+        const summaryRows = (await req().query(sqlFile('dashboard-summary.sql'))).recordset;
+        if (new Set(summaryRows.map((r) => r.CurrencyCode)).size < 2) {
+            failed++;
+            console.log('  ✖ fixture: dashboard-summary.sql did not group by CurrencyCode across multiple currencies');
+        } else {
+            console.log('  ✔ fixture: dashboard-summary.sql groups totals by CurrencyCode');
+        }
+
+        const catRows = (await req().query(sqlFile('forecast-by-category.sql'))).recordset;
+        if (!catRows.some((r) => r.ForecastCategoryCode === 'VERIFY_INACTIVE_CAT')) {
+            failed++;
+            console.log('  ✖ fixture: forecast-by-category.sql hid inactive ForecastCategoryType');
+        } else {
+            console.log('  ✔ fixture: forecast-by-category.sql reports deals in inactive ForecastCategoryType');
+        }
+
+        const unconfirmedRows = (await req().query(sqlFile('won-deals-order-not-confirmed.sql'))).recordset;
+        if (!unconfirmedRows.some((r) => r.DealName === 'Verify Won Unowned Null Close' && r.CloseDate != null)) {
+            failed++;
+            console.log('  ✖ fixture: won-deals-order-not-confirmed.sql did not fall back to __mj_UpdatedAt when close dates are NULL');
+        } else {
+            console.log('  ✔ fixture: won-deals-order-not-confirmed.sql falls back to __mj_UpdatedAt when close dates are NULL');
+        }
+    }
+} finally {
+    await tx.rollback();
+}
+
 await pool.close();
 process.exit(failed ? 1 : 0);

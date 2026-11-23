@@ -44,10 +44,13 @@ import {
     BaseEntity,
     BaseEntityResult,
     DatabaseProviderBase,
+    EntityDeleteOptions,
+    EntityPermissionType,
     EntitySaveOptions,
     IMetadataProvider,
     IRunViewProvider,
     LogError,
+    type RemoteOpServerContext,
 } from '@memberjunction/core';
 import { createHash } from 'node:crypto';
 
@@ -77,6 +80,14 @@ import { SALES_SCHEMA, getNextDealNumber } from './SequenceService.js';
 import { FindUnansweredSubscriptionLines } from './subscription-choice.js';
 import { KeptOnDealNote, SendDealScheduleToOrder, StatusIsWon } from './deal-schedule-to-order.js';
 import { OrdersIsInstalled } from './orders-availability.js';
+import { CheckTeamGraphRoleRules } from './team-role-rules.js';
+import { VetoReader } from './veto-reader.js';
+import {
+    DealDeleteRefusal,
+    DeleteDealChildRows,
+    ReadDealDeleteFacts,
+    type DealDeleteSubject,
+} from './deal-delete.js';
 
 const DEAL_ENTITY = 'MJ_BizApps_Sales: Deals';
 
@@ -599,6 +610,16 @@ export class DealEntityServer extends DealEntity {
             return this.refuseSave(partyRefusal);
         }
 
+        let teamRoleRefusal: string | null;
+        try {
+            teamRoleRefusal = await this.teamRoleRulesRefusal();
+        } catch (err) {
+            return this.refuseSave(`could not check the deal's team against role rules: ${err}`);
+        }
+        if (teamRoleRefusal) {
+            return this.refuseSave(teamRoleRefusal);
+        }
+
         let companyRefusal: string | null;
         try {
             companyRefusal = await this.companyLinkedToPipelineRefusal();
@@ -945,9 +966,10 @@ export class DealEntityServer extends DealEntity {
      */
     private async runStatusTransition(plan: ActionableStatusTransition): Promise<boolean> {
         const { CloseDealOperation, ReopenDealOperation } = await import('./CloseDealOperation.js');
-        const context = {
+        const context: RemoteOpServerContext = {
             provider: this.ProviderToUse as unknown as IMetadataProvider,
             user: this.ContextCurrentUser,
+            emitProgress: () => undefined,
         };
 
         const result =
@@ -959,7 +981,7 @@ export class DealEntityServer extends DealEntity {
                           LossReasonID: this.LossReasonID ?? null,
                           LossNotes: this.LossNotes ?? null,
                       },
-                      context as never,
+                      context,
                   )
                 : await new ReopenDealOperation().ExecuteServer(
                       {
@@ -969,7 +991,7 @@ export class DealEntityServer extends DealEntity {
                           Reason: 'Reopened by setting the deal status back to an open status.',
                           DealStatusTypeID: plan.TargetStatusID,
                       },
-                      context as never,
+                      context,
                   );
 
         const output = result.Output as { Success?: boolean; Issues?: { Message: string }[] } | undefined;
@@ -1450,6 +1472,9 @@ export class DealEntityServer extends DealEntity {
          * trap, and testing the FK here would walk straight back into it.
          */
         if (this.OrderID_Object?.IsSaved) {
+            return;
+        }
+        if (this.IsSaved && this.GetFieldByName('OrderID')?.Dirty && !this.OrderID) {
             return;
         }
         if (!this.CompanyID) {
@@ -2168,7 +2193,7 @@ export class DealEntityServer extends DealEntity {
         this._orderStatusWarnings.push(
             `The deal moved stage, but its order stayed ${from}: ${labels.length === 1 ? 'line' : 'lines'} ` +
             `${labels.join(', ')} ${labels.length === 1 ? 'is' : 'are'} for a product the customer already holds. ` +
-            'Open each one and choose whether it is the next term of that subscription or a new subscription, ' +
+            'Open each one and choose whether it renews that subscription or creates a new one, ' +
             'then confirm the order. The stage change was kept.',
         );
         return true;
@@ -3683,11 +3708,16 @@ export class DealEntityServer extends DealEntity {
      * Stamps `Deal.CreationDate` from the server's clock on create when the caller did not supply one (#532).
      *
      * `EntityField`'s constructor evaluates `DefaultValue = 'getutcdate()'` during `NewRecord()`, setting
-     * `Value = new Date()` at construction time while leaving `_NeverSet = true`. Any explicit assignment
+     * `Value = new Date()` at construction time while leaving `NeverSet = true`. Any explicit assignment
      * by a caller (an importer setting a historical creation date, or a check supplying a specific instant)
-     * flips `_NeverSet` to `false`.
+     * flips `NeverSet` to `false`.
      *
-     * Re-stamping here when `_NeverSet` is still `true` (or when a caller cleared `CreationDate` to null
+     * READ IT THROUGH THE PUBLIC `NeverSet` ACCESSOR, never the backing field. This used to reach for a
+     * private `_NeverSet` through a cast; MJ 6.2.0 renamed the backing field to `_neverSet` and exposed the
+     * public getter, so the cast silently read `undefined` and the re-stamp below stopped firing — every new
+     * deal kept its `NewRecord()` instant instead of the save clock, and only `save-deal.SD45` noticed.
+     *
+     * Re-stamping here when `NeverSet` is still `true` (or when a caller cleared `CreationDate` to null
      * before saving) ensures that:
      *   1. A deal created without an explicit `CreationDate` gets the server's save-time clock rather than
      *      the instant `NewRecord()` happened to run (or failing `Validate()` when `CreationDate` was nulled).
@@ -3699,8 +3729,8 @@ export class DealEntityServer extends DealEntity {
         if (this.IsSaved) {
             return;
         }
-        const field = this.GetFieldByName('CreationDate') as unknown as { _NeverSet?: boolean } | undefined;
-        if (!this.CreationDate || field?._NeverSet === true) {
+        const field = this.GetFieldByName('CreationDate');
+        if (!this.CreationDate || field?.NeverSet === true) {
             this.CreationDate = new Date();
         }
     }
@@ -3864,13 +3894,188 @@ export class DealEntityServer extends DealEntity {
         return typeof id === 'string' && id.trim().length > 0 ? id : null;
     }
 
+    /**
+     * Delete an open deal that was never closed, with its child rows and its unconfirmed order, in one
+     * transaction (golive#429). Who may delete which deal, and why the child rows go by SQL, is in
+     * `deal-delete.ts`.
+     *
+     * Without this the base delete removed only the deal row, which every saved deal's team row blocks
+     * with a foreign key, so the user saw a generic failure. Now a refused delete says why.
+     */
+    public override async Delete(options?: EntityDeleteOptions): Promise<boolean> {
+        if (!this.IsSaved) {
+            return super.Delete(options);
+        }
+        if (!this.CheckPermissions(EntityPermissionType.Delete, false)) {
+            return this.refuseDelete(`${this.dealLabel()} was not deleted: your roles do not allow deleting deals.`);
+        }
+        const provider = this.ProviderToUse as unknown as IMetadataProvider;
+        let refusal: string | null;
+        try {
+            const facts = await ReadDealDeleteFacts(this.dealDeleteSubject(), provider, this.ContextCurrentUser);
+            refusal = DealDeleteRefusal(facts, this.Name ?? '');
+        } catch (err) {
+            return this.refuseDelete(
+                `${this.dealLabel()} was not deleted, because it could not be checked: ${err instanceof Error ? err.message : String(err)}`,
+            );
+        }
+        return refusal ? this.refuseDelete(refusal) : this.deleteWithChildrenAndOrder(options);
+    }
+
+    /** The persisted values, so an unsaved edit cannot change what the check sees. */
+    private dealDeleteSubject(): DealDeleteSubject {
+        const old = (field: string) => (this.GetFieldByName(field)?.OldValue as string | null | undefined) ?? null;
+        return {
+            DealID: this.ID,
+            DealName: this.Name ?? '',
+            StatusID: old('DealStatusTypeID'),
+            OwnerEmployeeID: old('OwnerEmployeeID'),
+            OrderID: old('OrderID'),
+        };
+    }
+
+    /** Child rows, then the deal, then its order (the deal references the order), all or none. */
+    private async deleteWithChildrenAndOrder(options?: EntityDeleteOptions): Promise<boolean> {
+        const orderID = this.dealDeleteSubject().OrderID;
+        const provider = this.ProviderToUse as unknown as DatabaseProviderBase;
+        const scope = await provider.BeginEntityTransaction();
+        try {
+            await DeleteDealChildRows(this.ID, provider as unknown as IMetadataProvider, this.ContextCurrentUser);
+            if (!(await super.Delete(options))) {
+                await scope.Rollback();
+                return false;
+            }
+            const orderRefusal = orderID ? await this.deleteEmbeddedOrder(orderID) : null;
+            if (orderRefusal) {
+                await scope.Rollback();
+                return this.refuseDelete(`${this.dealLabel()} was not deleted, because its order could not be deleted: ${orderRefusal}`);
+            }
+            await scope.Commit();
+            return true;
+        } catch (err) {
+            try {
+                await scope.Rollback();
+            } catch (rollbackErr) {
+                LogError(`DealEntityServer.Delete: rollback failed: ${rollbackErr}`);
+            }
+            return this.refuseDelete(`${this.dealLabel()} was not deleted: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+
+    /**
+     * Delete the order through orders' own entity, which refuses a booked order. Null on success.
+     *
+     * Loaded as the system user, so orders' delete of the order's lines, charges and schedule runs as
+     * that user too. The caller's right to delete this deal was already checked; giving the Sales roles
+     * delete on the order entities instead would let them delete rows of a booked order directly.
+     */
+    private async deleteEmbeddedOrder(orderID: string): Promise<string | null> {
+        const provider = this.ProviderToUse as unknown as IMetadataProvider;
+        const order = await provider.GetEntityObject<mjBizAppsOrdersOrderHeaderEntity>(ORDER_HEADER_ENTITY, VetoReader(this.ContextCurrentUser));
+        if (!(await order.Load(orderID))) {
+            return `order ${orderID} could not be read`;
+        }
+        if (await order.Delete()) {
+            return null;
+        }
+        return order.LatestResult?.CompleteMessage || order.LatestResult?.Message || 'the order refused the delete';
+    }
+
+    private dealLabel(): string {
+        return this.Name ? `Deal "${this.Name}"` : 'This deal';
+    }
+
+    /** Log it, register a failed delete result, return false — the delete twin of `refuseSave`. */
+    private refuseDelete(message: string): false {
+        LogError(`DealEntityServer.Delete refused: ${message}`);
+        const failed = new BaseEntityResult();
+        failed.Success = false;
+        failed.Type = 'delete';
+        failed.Message = message;
+        failed.StartedAt = new Date();
+        failed.EndedAt = new Date();
+        failed.OriginalValues = this.Fields.map((f) => ({ FieldName: f.CodeName, Value: f.OldValue }));
+        this.RegisterResultHistoryEntry(failed);
+        return false;
+    }
+
     private async stampOwnerFromTeam(): Promise<void> {
         if (!this.RosterDrivesThisSave) {
             return; // the roster is not part of this save; leave the stamp alone
         }
 
         const ownerRoleID = await this.ResolveOwnerRoleID();
-        const owner = this.Team.Items.find((m) => m.DealRoleID === ownerRoleID);
+        const owner = this.Team.Items.find((m) => HoldsOwnerSeat(m, ownerRoleID));
         this.OwnerEmployeeID = owner?.EmployeeID ?? null;
     }
+
+    /**
+     * Enforces single-holder (`AllowsMultiplePerDeal = 0`) and employee-only owner (`IsOwnerRole = 1`)
+     * rules on team rows saved as part of this deal's graph.
+     */
+    private async teamRoleRulesRefusal(): Promise<string | null> {
+        if (!this.RosterDrivesThisSave || this.Team.Items.length === 0) {
+            return null;
+        }
+        const view = this.ProviderToUse as unknown as IRunViewProvider;
+        return CheckTeamGraphRoleRules({
+            dealID: this.ID,
+            dealIsSaved: this.IsSaved,
+            teamIsLoaded: this.Team.IsLoaded,
+            items: this.Team.Items,
+            view,
+            user: this.ContextCurrentUser,
+        });
+    }
+
+    /**
+     * The refusal when taking team row `memberID` out of the owner seat would leave this deal with no
+     * owner, or null when another row still holds the seat (sales#568).
+     *
+     * `after` is what the row will be once the edit lands: null for a delete or a move to another deal,
+     * otherwise its new role and active flag. Asked of the deal, and answered with
+     * {@link HoldsOwnerSeat}, so this guard and `stampOwnerFromTeam` cannot disagree about who owns it.
+     *
+     * Only a row edited or deleted ON ITS OWN asks this (`DealTeamMemberEntityServer`). An owner swap
+     * through `SetOwner` is a graph save of the deal, which removes and adds in one save; the row's
+     * overrides skip the question there (`PartOfGraphSave`). Throws when the owner role or the team
+     * cannot be read; the caller refuses on that, because an unread team cannot show that another owner
+     * remains.
+     */
+    public async LastOwnerSeatRefusal(memberID: string, after: OwnerSeatCandidate | null): Promise<string | null> {
+        const ownerRoleID = await this.ResolveOwnerRoleID();
+        if (after && HoldsOwnerSeat(after, ownerRoleID)) {
+            return null;
+        }
+        await this.Team.Load();
+        const leaving = this.Team.Items.find((m) => UUIDsEqual(m.ID, memberID));
+        if (!leaving || !HoldsOwnerSeat(leaving, ownerRoleID)) {
+            return null;
+        }
+        const another = this.Team.Items.some((m) => !UUIDsEqual(m.ID, memberID) && HoldsOwnerSeat(m, ownerRoleID));
+        if (another) {
+            return null;
+        }
+        return (
+            `Deal ${this.DealNumber ?? this.Name ?? this.ID} would have no owner. Choose the new owner in the `
+            + 'Owner field instead; that replaces this row in one save.'
+        );
+    }
+}
+
+/** The team-row fields that decide whether a row holds the deal's owner seat. */
+export interface OwnerSeatCandidate {
+    DealRoleID: string | null;
+    IsActive: boolean | null;
+}
+
+/**
+ * Whether a team row is the deal's owner: an active row in the owner role. The ONE predicate for it,
+ * read by `stampOwnerFromTeam` to set `OwnerEmployeeID` and by `LastOwnerSeatRefusal` to refuse
+ * removing the last such row, so the stamp and the guard answer the same question.
+ *
+ * An inactive owner row no longer owns the deal; `IsActive` null (never set) counts as active.
+ */
+export function HoldsOwnerSeat(member: OwnerSeatCandidate, ownerRoleID: string): boolean {
+    return member.IsActive !== false && UUIDsEqual(member.DealRoleID, ownerRoleID);
 }

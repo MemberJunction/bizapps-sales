@@ -37,6 +37,10 @@ contains a given metadata record — that proof is a clean install from migratio
 
 ## The release, end to end
 
+> **Release lines.** `version.yml` no longer runs on `next`: it runs on pushes to `lts/X.Y`, and the
+> newest line (`lts/6.2`) releases through `main`. Until `lts/6.2` is cut, nothing versions. Backports, line gates and the cut are in
+> [guides/RELEASE_LINES.md](../guides/RELEASE_LINES.md).
+
 `next` is the integration branch; **never commit to `main` directly**. The release is one
 machine-opened PR into `main`, and merging it is the release trigger. There is no hand-opened
 next -> main PR and no dispatch-driven publish.
@@ -47,12 +51,12 @@ next -> main PR and no dispatch-driven publish.
 #    `migration changeset` check refuses a PR into next that carries only a patch changeset.
 pnpm run change
 
-# 2. Merge the feature branch into next through a PR as usual. changes.yml (migration checks),
+# 2. Merge the feature branch into next through a PR as usual, with a `backport lts/6.2` label. changes.yml (migration checks),
 #    build.yml (build + tests), CI and the distribution gate run there.
 ```
 
-3. Every push to `next` runs `.github/workflows/version.yml`, which keeps ONE **"Version Packages"**
-   PR open (head `changeset-release/main`, base `main`). It runs `pnpm run version:prepare` —
+3. Every push to the newest line (`lts/6.2`) runs `.github/workflows/version.yml`, which keeps ONE
+   **"Version Packages"** PR open (head `changeset-release/main`, base `main`). It runs `pnpm run version:prepare` —
    `changeset version`, `ci/sync-mj-app-version.mjs` (syncs `mj-app.json`'s `version` and
    `mjVersionRange` from `packages/Entities/package.json`) and a lockfile refresh.
 4. That PR is the release. PRs into `main` run `release-readiness.yml` (the `rr:` checks: nothing pending, bump level,
@@ -62,7 +66,7 @@ pnpm run change
 5. Merging it pushes `main`, which starts `.github/workflows/publish.yml`: it validates the
    lockfile, migration filenames, npm package existence, `repository.url` and package `files`,
    builds, publishes to npm via OIDC (no token), tags `vX.Y.Z` only if something shipped, then opens
-   and merges a `release-back-merge/vX.Y.Z` PR into `next`.
+   and merges a `release-back-merge/vX.Y.Z` PR into the line (`lts/6.2`), never `next`.
 
 ### After it finishes
 

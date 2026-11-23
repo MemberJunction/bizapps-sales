@@ -43,17 +43,24 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CompositeKey, LogError, Metadata, type EntityInfo } from '@memberjunction/core';
+import {
+    MJSPromotePartyDialog,
+    type PromoteKind,
+} from '../form-panels/promote-party-dialog.component';
+import { CanCreateEntity } from '../data/promote-party';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseResourceComponent, NavigationService } from '@memberjunction/ng-shared';
 import { SharedGenericModule } from '@memberjunction/ng-shared-generic';
 import { EntityViewerModule, type RecordOpenedEvent, type ViewRelatedRecordNavigation } from '@memberjunction/ng-entity-viewer';
 import type { MJUserViewEntityExtended } from '@memberjunction/core-entities';
 import {
+    DealFiltersWhere,
     DealInListWhere,
     DealPipelineViewWith,
     InspectCriteriaWhere,
     LoadDealPipelineViewTemplate,
     RelatedRecordTarget,
+    WithoutPipelineColumn,
     type InspectTables,
 } from '../pages/deal-views';
 import {
@@ -82,6 +89,7 @@ import {
     PrimaryActionFor,
     SecondaryActionFor,
     SubPagesFor,
+    type SalesNavAudience,
     type SalesNavBadges,
     type SalesPrimaryAction,
 } from '../nav/sales-nav.model';
@@ -141,9 +149,11 @@ import {
     type DashboardFilters,
     type FilterOption,
 } from '../pages/dashboard-filters';
-import { PipelineCompanies, PipelineLabel } from '../data/company-pipelines';
+import { HiddenPipelineLabels, PipelineCompanies, PipelineLabel } from '../data/company-pipelines';
+import { SalesSettings } from '../data/sales-settings';
 import { WatchDealSaves } from '../data/deal-saves';
 import { MJSSalesFilterBarComponent, type FilterKind, type SalesFilterBarState } from './sales-filter-bar.component';
+import { MJSSalesSettingsPageComponent } from './sales-settings-page.component';
 
 /**
  * The account entity, for opening a customer as its own Explorer tab.
@@ -156,7 +166,8 @@ const E_ACCOUNT = 'MJ_BizApps_Sales: Sales Accounts';
 const E_DEAL = 'MJ_BizApps_Sales: Deals';
 const E_CONTACT = 'MJ_BizApps_Sales: Sales Contacts';
 /** The entity each header action creates. */
-const CREATES: Record<SalesPrimaryAction['Creates'], string> = { deal: E_DEAL, account: E_ACCOUNT, contact: E_CONTACT };
+/** Only the CREATING actions map to an entity; the promote kinds open a dialog instead. */
+const CREATES: Record<'deal' | 'account' | 'contact', string> = { deal: E_DEAL, account: E_ACCOUNT, contact: E_CONTACT };
 const E_DEAL_STATUS_TYPE = 'MJ_BizApps_Sales: Deal Status Types';
 const E_PIPELINE = 'MJ_BizApps_Sales: Pipelines';
 const E_FORECAST_CATEGORY_TYPE = 'MJ_BizApps_Sales: Forecast Category Types';
@@ -219,7 +230,9 @@ interface AttentionRow {
         MJLeftNavComponent,
         MJLeftNavContentComponent,
         MJButtonDirective,
+        MJSPromotePartyDialog,
         MJSSalesFilterBarComponent,
+        MJSSalesSettingsPageComponent,
         DealBoardComponent,
         EntityViewerModule,
     ],
@@ -365,6 +378,7 @@ export class MJSSalesSectionComponent implements OnInit {
     public WinRateByValue: number | null = null;
     public WinClosedCount = 0;
     public WinWonCount = 0;
+    public WinRateMixedCurrencies = false;
     /**
      * The win rate query did not run. The tile then shows "figures unavailable", as the others do,
      * rather than "0 won / 0 closed", which reads as nothing having closed.
@@ -376,6 +390,8 @@ export class MJSSalesSectionComponent implements OnInit {
     public ContactEntityInfo: EntityInfo | null = null;
     public InspectView: MJUserViewEntityExtended | null = null;
     public AllDealsView: MJUserViewEntityExtended | null = null;
+    /** Identifies the newest All Deals view, so a slower superseded one cannot apply late. */
+    private allDealsToken = 0;
     /**
      * The shared pipeline view, read once per `Refresh()`. Both grids, and every deal list click, take a
      * copy of it instead of reading it again (bizapps-sales#261). Null when the Deals entity is not in
@@ -406,6 +422,12 @@ export class MJSSalesSectionComponent implements OnInit {
      * on every reload and page switch. Which pipelines it may be is the filter bar's (#351).
      */
     public BoardPipelineID: string | null = null;
+
+    /**
+     * The `HidePipelines` setting, read at the start of each load. While on, the Pipeline filter and grid
+     * column are gone, and the board and stage card name pipelines by their companies.
+     */
+    public HidePipelines = false;
 
     public async ngOnInit(): Promise<void> {
         // The URL's state is in place BEFORE the first load, so the period and filters it names are read.
@@ -484,7 +506,7 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private pageOrDefault(page: string | null): string {
-        return page && SubPagesFor(this.Section).some((p) => p.Id === page) ? page : DefaultPageFor(this.Section);
+        return page && SubPagesFor(this.Section, this.navAudience).some((p) => p.Id === page) ? page : DefaultPageFor(this.Section);
     }
 
     /** Applies a URL (back/forward, or a link opened into a mounted tab). Writes nothing back. */
@@ -506,6 +528,9 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Period = period;
         this.CustomStart = url.PeriodStart;
         this.CustomEnd = url.PeriodEnd;
+        if (filtersChanged) {
+            this.reloadAllDeals();
+        }
         if (filtersChanged || periodChanged) {
             // The figures re-read also re-reads the Board's deals and re-filters the deal list.
             void this.reloadFigures();
@@ -540,7 +565,7 @@ export class MJSSalesSectionComponent implements OnInit {
     // ── Chrome ─────────────────────────────────────────────────────────────────
 
     public get NavSections(): MJLeftNavSection[] {
-        return BuildLeftNavSections(SubPagesFor(this.Section), this.Badges);
+        return BuildLeftNavSections(SubPagesFor(this.Section, this.navAudience), this.Badges);
     }
 
     public get PrimaryAction(): SalesPrimaryAction | null {
@@ -548,15 +573,19 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     public get SecondaryAction(): SalesPrimaryAction | null {
-        return SecondaryActionFor(this.Page);
+        const action = SecondaryActionFor(this.Page);
+        if (!action) return null;
+        // "Add existing" opens the promote dialog, which promotes or creates. Hide it from a user who
+        // may do neither, rather than sending them to a server refusal (D-PR4: promotion rides on the
+        // create permission instead of carrying one of its own). The CREATING actions are left alone —
+        // MJ's own New affordances already answer for those.
+        if (action.Creates === 'promote-account' && !CanCreateEntity(E_ACCOUNT)) return null;
+        if (action.Creates === 'promote-contact' && !CanCreateEntity(E_CONTACT)) return null;
+        return action;
     }
 
     public get Title(): string {
         return 'Sales';
-    }
-
-    public get Subtitle(): string {
-        return 'Deals, the lines they carry, and the terms they are signed on';
     }
 
     public OnNav(item: MJLeftNavItem): void {
@@ -571,9 +600,38 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Start(this.PrimaryAction ?? { Label: '', Icon: '', Creates: 'deal' });
     }
 
-    /** Opens a new record of what the action creates, as an Explorer tab. */
+    /**
+     * Opens a new record of what the action creates, as an Explorer tab — or, for the promote kinds,
+     * the promote dialog, because that record already exists and only its sales half is missing.
+     */
     public Start(action: SalesPrimaryAction): void {
+        if (action.Creates === 'promote-account' || action.Creates === 'promote-contact') {
+            this.PromoteKind = action.Creates === 'promote-account' ? 'Account' : 'Contact';
+            this.PromoteOpen = true;
+            return;
+        }
         this.nav.OpenNewEntityRecord(CREATES[action.Creates]);
+    }
+
+    // ── Promoting an existing Organization or Person (D-PR3) ───────────────────
+
+    /** Which promotion the dialog is doing. Meaningless while `PromoteOpen` is false. */
+    public PromoteKind: PromoteKind = 'Account';
+    public PromoteOpen = false;
+
+    public ClosePromote(): void {
+        this.PromoteOpen = false;
+    }
+
+    /**
+     * The promoted record's ID IS its Organization's or Person's ID (IsA), so this opens the record
+     * the rep just created rather than hunting for it. D-PR1 leaves everything but the account type
+     * blank, so landing on the form is where the work continues.
+     */
+    public OnPromoted(id: string): void {
+        const entity = this.PromoteKind === 'Account' ? E_ACCOUNT : E_CONTACT;
+        this.PromoteOpen = false;
+        this.nav.OpenEntityRecord(entity, CompositeKey.FromID(id));
     }
 
     /** A row on the Accounts or Contacts page: opens that record as an Explorer tab. */
@@ -660,6 +718,7 @@ export class MJSSalesSectionComponent implements OnInit {
         // The business zone is loaded before anything asks what day it is (bc-aidp-next-golive#168):
         // the engine fails open to UTC when it has not been configured, silently the old behaviour.
         await BusinessTimeZoneEngine.Instance.Config(false);
+        this.applyHidePipelines(await SalesSettings.LoadHidePipelines());
 
         // The fiscal start is read BEFORE the windowed queries: it is what the window is computed from.
         this.FiscalStart = await this.service.LoadFiscalYearStart();
@@ -711,6 +770,29 @@ export class MJSSalesSectionComponent implements OnInit {
         return { Detail: this.loadDetail(detail, figures, token) };
     }
 
+    /**
+     * Takes the `HidePipelines` setting. Turning it on drops a Pipeline filter carried in from the URL,
+     * which the bar would no longer show and so could not be cleared.
+     */
+    /** Who the rail is for, read once: the Settings page is listed only for those who may change it. */
+    private get navAudience(): SalesNavAudience {
+        this.audience ??= { CanChangeSettings: SalesSettings.CanChange };
+        return this.audience;
+    }
+    private audience: SalesNavAudience | null = null;
+
+    /** The Settings page saved Hide pipelines: re-read everything with the new value. */
+    public async OnHidePipelinesChanged(): Promise<void> {
+        await this.Refresh(true);
+    }
+
+    private applyHidePipelines(hide: boolean): void {
+        this.HidePipelines = hide;
+        if (hide && this.Filters.PipelineIDs.length) {
+            this.Filters = { ...this.Filters, PipelineIDs: [] };
+        }
+    }
+
     /** The pipelines, stages, statuses and companies the board's columns and the filter lists are built from. */
     private applyLookups(lookups: Settled<DealWorkspaceLookups>): void {
         this.LookupsError = lookups.Error;
@@ -737,7 +819,7 @@ export class MJSSalesSectionComponent implements OnInit {
         this.ViewError = pipelineView.Error;
         // Without the history no deal is flagged idle; the failure is logged below rather than shown.
         this.StageEnteredOn = entries.Value ?? new Map();
-        this.pipelineView = pipelineView.Value;
+        this.pipelineView = this.HidePipelines && pipelineView.Value ? await WithoutPipelineColumn(pipelineView.Value) : pipelineView.Value;
         this.cdr.detectChanges();
         await Promise.all([this.refreshInspectView(), this.refreshAllDealsView()]);
         for (const failed of [winRate.Error, pipelineView.Error, entries.Error]) {
@@ -822,9 +904,14 @@ export class MJSSalesSectionComponent implements OnInit {
 
     // ── Reporting period ───────────────────────────────────────────────────────
 
+    /** When exactly one selling company is selected, its ID so `BusinessToday` uses its time zone. */
+    private get singleCompanyID(): string | null {
+        return this.Filters.CompanyIDs.length === 1 ? this.Filters.CompanyIDs[0] : null;
+    }
+
     /** The resolved bounds of the selected period. Recomputed rather than cached — it is arithmetic. */
     public get Window(): PeriodWindow {
-        return ResolvePeriod(this.Period, this.FiscalStart.Start, BusinessToday(), { Start: this.CustomStart, End: this.CustomEnd });
+        return ResolvePeriod(this.Period, this.FiscalStart.Start, BusinessToday(this.singleCompanyID), { Start: this.CustomStart, End: this.CustomEnd });
     }
 
     /**
@@ -833,7 +920,7 @@ export class MJSSalesSectionComponent implements OnInit {
      * Board's header and its cards agree; another period reads its own (bc-aidp-next-golive#351).
      */
     public get BoardClosedWindow(): PeriodWindow {
-        return ResolvePeriod('quarter', this.FiscalStart.Start, BusinessToday());
+        return ResolvePeriod('quarter', this.FiscalStart.Start, BusinessToday(this.singleCompanyID));
     }
 
     /** What the Board's columns hold, for its header: open deals, and the period's closed ones. */
@@ -1018,8 +1105,11 @@ export class MJSSalesSectionComponent implements OnInit {
                 PipelineIDs: this.PipelineOptions,
                 OwnerEmployeeIDs: this.OwnerOptions,
             },
+            // All Deals lists every deal, so it has no period, and the summary's no-lines count is the period's.
+            HidePeriod: this.Page === 'list',
+            HiddenKinds: this.HidePipelines ? ['PipelineIDs'] : [],
             MyEmployeeID: this.MyEmployeeID,
-            NoLinesLeftOut: this.NoLinesLeftOut,
+            NoLinesLeftOut: this.Page === 'list' ? 0 : this.NoLinesLeftOut,
         };
     }
 
@@ -1050,6 +1140,7 @@ export class MJSSalesSectionComponent implements OnInit {
         this.Filters = filters;
         this.emitUrlState();
         void this.reloadFigures();
+        this.reloadAllDeals();
     }
 
     /**
@@ -1064,7 +1155,9 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** Money for a tile, or pending while a period or filter change is in flight. */
     private tileMoney(value: number): string {
-        return this.PeriodLoading ? '…' : this.money(value);
+        if (this.PeriodLoading) return '…';
+        if (this.summary?.MixedCurrencies) return '—';
+        return this.money(value, this.summary?.CurrencyCode);
     }
 
     /**
@@ -1084,15 +1177,21 @@ export class MJSSalesSectionComponent implements OnInit {
     }
 
     private wonTile(s: DealDashboardSummary): SalesKpi {
+        const mixed = s.MixedCurrencies ? ' · mixed currencies' : '';
         return {
             ...KPI_SHELLS[0],
             Value: this.tileMoney(s.WonAmount),
-            Footnote: this.PeriodLoading ? 'counting…' : `${deals(s.WonCount)} won · ${this.PeriodPhrase}`,
+            Footnote: this.PeriodLoading ? 'counting…' : `${deals(s.WonCount)} won · ${this.PeriodPhrase}${mixed}`,
         };
     }
 
     private commitTile(s: DealDashboardSummary): SalesKpi {
-        return { ...KPI_SHELLS[1], Value: this.tileMoney(s.CommitAmount), Footnote: this.PeriodLoading ? 'counting…' : `${s.CommitCount} Commit ${s.CommitCount === 1 ? 'deal' : 'deals'}` };
+        const mixed = s.MixedCurrencies ? ' · mixed currencies' : '';
+        return {
+            ...KPI_SHELLS[1],
+            Value: this.tileMoney(s.CommitAmount),
+            Footnote: this.PeriodLoading ? 'counting…' : `${s.CommitCount} Commit ${s.CommitCount === 1 ? 'deal' : 'deals'}${mixed}`,
+        };
     }
 
     /**
@@ -1102,31 +1201,38 @@ export class MJSSalesSectionComponent implements OnInit {
      */
     private pipelineTile(s: DealDashboardSummary): SalesKpi {
         const pipelineCount = s.OpenCount - (s.OpenOmittedCount ?? 0);
-        const statedNote = s.OpenStatedAmount === 0
+        const mixed = s.MixedCurrencies ? ' · mixed currencies' : '';
+        const statedNote = s.MixedCurrencies || s.OpenStatedAmount === 0
             ? ''
             : s.OpenPricedAmount === 0
                 ? ' · all entered by hand'
-                : ` · ${this.money(s.OpenStatedAmount)} entered by hand`;
+                : ` · ${this.money(s.OpenStatedAmount, s.CurrencyCode)} entered by hand`;
         return {
             ...KPI_SHELLS[2],
             Value: this.tileMoney(s.OpenAmount),
-            Footnote: this.PeriodLoading ? 'counting…' : `${pipelineCount} open ${pipelineCount === 1 ? 'deal' : 'deals'}${statedNote}`,
+            Footnote: this.PeriodLoading ? 'counting…' : `${pipelineCount} open ${pipelineCount === 1 ? 'deal' : 'deals'}${statedNote}${mixed}`,
             // Every open deal in the period, Omitted ones included; the money leaves those out, so say how many.
             Footnote2: s.OpenOmittedCount && !this.PeriodLoading ? `${s.OpenCount} total · ${s.OpenOmittedCount} excluded from the forecast` : undefined,
         };
     }
 
     private weightedTile(s: DealDashboardSummary): SalesKpi {
-        return { ...KPI_SHELLS[3], Value: this.tileMoney(s.WeightedAmount), Footnote: 'each deal at its probability' };
+        const mixed = s.MixedCurrencies ? ' · mixed currencies' : '';
+        return {
+            ...KPI_SHELLS[3],
+            Value: this.tileMoney(s.WeightedAmount),
+            Footnote: `each deal at its probability${mixed}`,
+        };
     }
 
     /** By value, with the counts in the footnote. Pending while its own read is still out. */
     private winRateTile(): SalesKpi {
         const pending = this.PeriodLoading || this.DetailLoading;
+        const mixed = this.WinRateMixedCurrencies ? ' · mixed currencies' : '';
         return {
             ...KPI_SHELLS[4],
-            Value: pending ? '…' : this.Pct(this.WinRateByValue),
-            Footnote: pending ? 'counting…' : this.WinRateUnavailable ? 'figures unavailable' : `${this.WinWonCount} won / ${this.WinClosedCount} closed`,
+            Value: pending ? '…' : this.Pct(this.WinRateMixedCurrencies ? this.WinRateByCount : this.WinRateByValue),
+            Footnote: pending ? 'counting…' : this.WinRateUnavailable ? 'figures unavailable' : `${this.WinWonCount} won / ${this.WinClosedCount} closed${mixed}`,
         };
     }
 
@@ -1142,7 +1248,7 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** The default list: open deals expected to close in the next 30 days, soonest first. */
     public get ClosingSoon(): DealRosterRow[] {
-        return ClosingSoon(this.dashboardDeals, BusinessToday());
+        return ClosingSoon(this.dashboardDeals, BusinessToday(this.singleCompanyID));
     }
 
     /**
@@ -1153,7 +1259,7 @@ export class MJSSalesSectionComponent implements OnInit {
         if (this.InspectFilter === 'won' || this.InspectFilter === 'closed') {
             return [];
         }
-        return FilterInspect(this.dashboardDeals, this.InspectFilter, BusinessToday(), this.Window, this.InspectArg, this.IdleIDs);
+        return FilterInspect(this.dashboardDeals, this.InspectFilter, BusinessToday(this.singleCompanyID), this.Window, this.InspectArg, this.IdleIDs);
     }
 
     /** How many deals the list shows: the figure's own count where the query reports one. */
@@ -1182,7 +1288,7 @@ export class MJSSalesSectionComponent implements OnInit {
             case 'slipped': return 'Open deals past their expected close date';
             case 'noowner': return 'Open deals with no owner';
             case 'nodate': return 'Open deals with no expected close date';
-            case 'idle': return 'Open deals idle past their stage limit';
+            case 'idle': return 'Open deals stalled in their stage';
             case 'won': return 'Won deals';
             case 'closed': return 'Closed deals, won and lost';
             case 'week': return 'Expected to close in the next 7 days';
@@ -1260,7 +1366,7 @@ export class MJSSalesSectionComponent implements OnInit {
             // to the roster's IDs, which the filter bar has already narrowed.
             return key === 'won' || key === 'closed' ? '1 = 0' : DealInListWhere(this.InspectRows.map((d) => d.ID));
         }
-        return InspectCriteriaWhere(key, tables, BusinessToday(), { Window: this.Window, Filters: this.Filters, Arg: this.InspectArg });
+        return InspectCriteriaWhere(key, tables, BusinessToday(this.singleCompanyID), { Window: this.Window, Filters: this.Filters, Arg: this.InspectArg });
     }
 
     /**
@@ -1277,14 +1383,28 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /**
      * All deals takes the saved view's sort: open deals first (no ClosedAt), then soonest expected close
-     * (bizapps-sales#371).
+     * (bizapps-sales#371), narrowed by the filter bar's lists and never by the period
+     * (bc-aidp-next-golive#453). With no list set it keeps the saved view's own filter.
      */
     private async refreshAllDealsView(): Promise<void> {
+        const token = ++this.allDealsToken;
         try {
-            this.AllDealsView = this.pipelineView ? await DealPipelineViewWith(this.pipelineView) : null;
+            const where = DealFiltersWhere(this.Filters, tableOf(E_ORDER_LINE)) || undefined;
+            const view = this.pipelineView ? await DealPipelineViewWith(this.pipelineView, where) : null;
+            // Two filter changes in quick succession: only the latest one's view is shown.
+            if (token === this.allDealsToken) {
+                this.AllDealsView = view;
+            }
         } catch (e) {
-            this.ViewError = reasonOf(e);
+            if (token === this.allDealsToken) {
+                this.ViewError = reasonOf(e);
+            }
         }
+    }
+
+    /** Re-derives All Deals for a filter change, then re-renders. */
+    private reloadAllDeals(): void {
+        void this.refreshAllDealsView().then(() => this.cdr.detectChanges());
     }
 
     public OnAllDealsOpened(event: RecordOpenedEvent): void {
@@ -1358,6 +1478,17 @@ export class MJSSalesSectionComponent implements OnInit {
         return (picked ?? options[0])?.ID ?? null;
     }
 
+    /**
+     * The stage card's tabs. Each reads as its pipeline, or with pipelines hidden as the companies it
+     * serves, plus the pipeline where two tabs would otherwise read alike (bc-aidp-next-golive#498).
+     * See {@link HiddenPipelineLabels}.
+     */
+    public get FunnelTabs(): { ID: string; Label: string }[] {
+        const options = this.FunnelPipelineOptions;
+        const hidden = this.HidePipelines ? HiddenPipelineLabels(this.Pipelines, options) : null;
+        return options.map((p) => ({ ID: p.ID, Label: hidden?.get(p.ID.toLowerCase()) ?? p.Name }));
+    }
+
     public SelectFunnelPipeline(id: string): void {
         this.FunnelPipelineID = id;
         this.cdr.detectChanges();
@@ -1380,7 +1511,7 @@ export class MJSSalesSectionComponent implements OnInit {
 
     /** Expected to close: the dated buckets follow the period; No date lists every undated open deal. */
     public get Buckets(): CloseBucket[] {
-        return CloseBuckets(this.dashboardDeals, BusinessToday(), this.Window);
+        return CloseBuckets(this.dashboardDeals, BusinessToday(this.singleCompanyID), this.Window);
     }
 
     /** Commit by deal owner, for the period. */
@@ -1398,7 +1529,7 @@ export class MJSSalesSectionComponent implements OnInit {
      * the stage history the Board reads. Lower-cased IDs.
      */
     public get IdleIDs(): ReadonlySet<string> {
-        const today = BusinessToday();
+        const today = BusinessToday(this.singleCompanyID);
         const limits = new Map(this.Stages.map((s) => [s.ID.toLowerCase(), s.RottingDays]));
         const ids = new Set<string>();
         for (const d of this.dashboardDeals) {
@@ -1418,9 +1549,9 @@ export class MJSSalesSectionComponent implements OnInit {
         const s = this.summary;
         return [
             { Key: 'slipped', Icon: 'fa-calendar-xmark', Label: 'Past close date', Note: 'Open deals past their expected close date', Tooltip: 'Open deals whose expected close date is before today', Count: s?.PastExpectedCloseCount ?? null },
-            { Key: 'noowner', Icon: 'fa-user-slash', Label: 'No owner', Note: 'Open deals with no employee in the owner role', Tooltip: 'Open deals where no employee on the deal team holds the owner role. A person who is not an employee in that role does not count as the owner', Count: s?.NoOwnerCount ?? null },
+            { Key: 'noowner', Icon: 'fa-user-slash', Label: 'No owner', Note: 'Open deals with no employee in the owner role', Tooltip: 'Open deals with no employee as owner on the deal team', Count: s?.NoOwnerCount ?? null },
             { Key: 'nodate', Icon: 'fa-calendar', Label: 'No close date', Note: 'Open deals with no expected close date', Tooltip: 'Open deals that cannot be placed in any period until someone sets an expected close date', Count: s?.NoCloseDateCount ?? null },
-            { Key: 'idle', Icon: 'fa-hourglass-half', Label: 'Idle past stage limit', Note: 'Open deals in their stage longer than it allows', Tooltip: 'Open deals that have sat in their current stage longer than the stage\'s day limit', Count: this.DetailLoading ? null : this.IdleIDs.size },
+            { Key: 'idle', Icon: 'fa-hourglass-half', Label: 'Stalled in stage', Note: 'Open deals past their stage\'s day limit', Tooltip: 'Open deals that have sat in their current stage longer than the stage\'s day limit', Count: this.DetailLoading ? null : this.IdleIDs.size },
         ];
     }
 
@@ -1432,12 +1563,17 @@ export class MJSSalesSectionComponent implements OnInit {
             this.WinWonCount = 0;
             this.WinRateByCount = null;
             this.WinRateByValue = null;
+            this.WinRateMixedCurrencies = false;
             return;
         }
         const num = (v: unknown): number => {
             const n = Number(v);
             return Number.isFinite(n) ? n : 0;
         };
+        const currencies = new Set(
+            rows.map((r) => String(r['CurrencyCode'] ?? '').trim() || DEFAULT_DISPLAY_CURRENCY),
+        );
+        this.WinRateMixedCurrencies = currencies.size > 1;
         let closed = 0;
         let won = 0;
         let closedAmt = 0;
@@ -1445,13 +1581,15 @@ export class MJSSalesSectionComponent implements OnInit {
         for (const r of rows) {
             closed += num(r['ClosedCount']);
             won += num(r['WonCount']);
-            closedAmt += num(r['WonAmount']) + num(r['LostAmount']);
-            wonAmt += num(r['WonAmount']);
+            if (!this.WinRateMixedCurrencies) {
+                closedAmt += num(r['WonAmount']) + num(r['LostAmount']);
+                wonAmt += num(r['WonAmount']);
+            }
         }
         this.WinClosedCount = closed;
         this.WinWonCount = won;
         this.WinRateByCount = closed > 0 ? won / closed : null;
-        this.WinRateByValue = closedAmt > 0 ? wonAmt / closedAmt : null;
+        this.WinRateByValue = !this.WinRateMixedCurrencies && closedAmt > 0 ? wonAmt / closedAmt : null;
     }
 
     // ── Display helpers ────────────────────────────────────────────────────────
@@ -1462,7 +1600,7 @@ export class MJSSalesSectionComponent implements OnInit {
      * COERCE BEFORE FORMATTING, because `toLocaleString` fails SILENTLY on a string: a value arriving as
      * "27480.0000" would render as `27480.0000` with no symbol and no error.
      */
-    private money(value: number | string | null | undefined): string {
+    private money(value: number | string | null | undefined, currencyCode: string = DEFAULT_DISPLAY_CURRENCY): string {
         const n = Number(value);
         if (!Number.isFinite(n)) {
             // Never render NaN as money. An em dash is the same "no figure" the roster already uses.
@@ -1470,7 +1608,7 @@ export class MJSSalesSectionComponent implements OnInit {
         }
         return n.toLocaleString(undefined, {
             style: 'currency',
-            currency: DEFAULT_DISPLAY_CURRENCY,
+            currency: currencyCode || DEFAULT_DISPLAY_CURRENCY,
             maximumFractionDigits: 0,
         });
     }
@@ -1511,7 +1649,7 @@ const KPI_SHELLS: readonly Omit<SalesKpi, 'Value' | 'Footnote'>[] = [
     { Label: 'Commit', Tooltip: 'Open deals in a Commit forecast category, expected to close in the period.', Filter: 'commit' },
     { Label: 'Open pipeline', Tooltip: 'Open deals expected to close in the period, not counting deals left out of the forecast.', Filter: 'pipe' },
     { Label: 'Weighted pipeline', Tooltip: 'The open pipeline with each deal counted at its probability of closing.', Filter: 'weighted' },
-    { Label: 'Win rate', Tooltip: 'Share of closed deal value that was won, over deals closed in the period.', Filter: 'closed' },
+    { Label: 'Win rate', Tooltip: 'Share of closed deal value that was won, over deals closed in the period. With more than one currency, shows the share of closed deals won.', Filter: 'closed' },
 ];
 
 /** A read that settled: its value, or why it failed. */
@@ -1595,7 +1733,8 @@ export class SalesDealsSectionResource extends BaseResourceComponent implements 
     }
 
     private parseUrl(params: Record<string, string>): SalesUrlState {
-        return ParseSalesUrlState(params, SubPagesFor('deals').map((p) => p.Id));
+        // Every page the URL may name; the section falls back to the dashboard for one the user cannot see.
+        return ParseSalesUrlState(params, SubPagesFor('deals', { CanChangeSettings: true }).map((p) => p.Id));
     }
 
     public override async GetResourceDisplayName(_d: ResourceData): Promise<string> {
