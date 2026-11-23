@@ -59,7 +59,7 @@ import { FromCalendarDay, ToCalendarDay } from '@mj-biz-apps/common-entities';
 import { DealWorkspaceService, DEFAULT_DISPLAY_CURRENCY, type DealRosterRow } from '../workspace/deal-workspace.service';
 import { BusinessToday, DayLabel, UtcDatePart } from '../pages/dashboard-dates';
 import type { DealStatusLookup, PipelineLookup, StageLookup } from '../workspace/deal-workspace.types';
-import { DistinctPipelines, OrderPipelinesByCompany, PipelineCompanyNames, PipelineLabel, type CompanyPipeline } from '../data/company-pipelines';
+import { DistinctPipelines, HiddenPipelineLabels, OrderPipelinesByCompany, PipelineCompanyNames, PipelineLabel, type CompanyPipeline } from '../data/company-pipelines';
 import { HasID } from '../pages/dashboard-filters';
 
 /**
@@ -233,6 +233,8 @@ export const ALL_PIPELINES = 'all';
  */
 export interface BoardLane {
     PipelineID: string;
+    /** The lane's heading, shown when more than one lane is in view. See {@link DealBoardComponent.Lanes}. */
+    Label: string;
     Columns: BoardColumn[];
     /** Deals on this pipeline with no stage set. */
     Unstaged: DealRosterRow[];
@@ -300,8 +302,9 @@ export class DealBoardComponent implements AfterViewChecked {
     @Output() public readonly SelectedPipelineIDChange = new EventEmitter<string | null>();
 
     /**
-     * The `HidePipelines` setting, read by the section. The tabs stay one per pipeline, since a pipeline
-     * still decides the columns, but each is named by the companies it serves.
+     * The `HidePipelines` setting, read by the section. While on, the Board has no pipeline tabs and shows
+     * every pipeline the filter bar allows, one lane each, since a pipeline still decides the columns.
+     * Each lane is headed by the companies its pipeline serves.
      */
     @Input() public HidePipelines = false;
     /** Shown verbatim. A refused or failed move must say why rather than silently snapping back. */
@@ -334,42 +337,52 @@ export class DealBoardComponent implements AfterViewChecked {
     /** The All tab's value, for the template. */
     public readonly AllPipelines = ALL_PIPELINES;
 
-    /** True when the All tab is chosen and there is more than one pipeline to show. */
+    /**
+     * True when every allowed pipeline is in view, one lane each, and there is more than one to show:
+     * under the All tab, and always while pipelines are hidden, since there is then no tab to pick one
+     * with (bc-aidp-next-golive#498).
+     */
     public get ShowingAll(): boolean {
-        return this.SelectedPipelineID === ALL_PIPELINES && this.TabPipelines.length > 1;
-    }
-
-    /** The All tab's text: the board names pipelines by company when pipelines are hidden. */
-    public get AllLabel(): string {
-        return this.HidePipelines ? 'All companies' : 'All pipelines';
+        return (this.HidePipelines || this.SelectedPipelineID === ALL_PIPELINES) && this.TabPipelines.length > 1;
     }
 
     /**
-     * The lanes in view: the active pipeline alone, or under the All tab every allowed pipeline that holds
-     * a deal, in tab order. Pipelines with no deals are left out of All so the page is not mostly empty
-     * columns; picking that pipeline's own tab still shows its stages.
+     * The lanes in view: the active pipeline alone, or when {@link ShowingAll} every allowed pipeline that
+     * holds a deal, in tab order. Pipelines with no deals are left out so the page is not mostly empty
+     * columns. With pipelines shown, picking such a pipeline's own tab still shows its stages; with them
+     * hidden there is no tab, and its stages are in view only once the filters leave it alone.
      */
     public get Lanes(): BoardLane[] {
+        // Read once: this getter runs on every change detection, and the tabs are a sort and a filter.
+        const tabs = this.TabPipelines;
         if (!this.ShowingAll) {
             const id = this.ActivePipelineID;
-            return id ? [this.laneFor(id)] : [];
+            return id ? [this.laneFor(id, tabs)] : [];
         }
-        return this.TabPipelines.map((p) => this.laneFor(p.ID))
+        const lanes = tabs.map((p) => this.laneFor(p.ID, tabs))
             .filter((lane) => lane.Unstaged.length > 0 || lane.Columns.some((c) => c.Cards.length > 0));
+        return this.HidePipelines ? this.withPipelineOnSharedLabels(lanes) : lanes;
     }
 
-    private laneFor(pipelineID: string): BoardLane {
+    private laneFor(pipelineID: string, tabs: readonly PipelineLookup[]): BoardLane {
+        const pipeline = tabs.find((p) => p.ID === pipelineID);
         return {
             PipelineID: pipelineID,
+            Label: pipeline ? this.TabLabel(pipeline) : this.NameOf(pipelineID),
             Columns: this.ColumnsFor(pipelineID),
             Unstaged: this.UnstagedFor(pipelineID),
         };
     }
 
-    /** A lane's heading under the All tab: the same text its own tab carries. */
-    public LaneLabel(pipelineID: string): string {
-        const pipeline = this.TabPipelines.find((p) => p.ID === pipelineID);
-        return pipeline ? this.TabLabel(pipeline) : this.NameOf(pipelineID);
+    /**
+     * With pipelines hidden a lane is headed by its company, so a company with two pipelines in view
+     * would head two lanes alike (bc-aidp-next-golive#498). Those lanes, and only those, add the
+     * pipeline's name. See {@link HiddenPipelineLabels}.
+     */
+    private withPipelineOnSharedLabels(lanes: BoardLane[]): BoardLane[] {
+        const shown = lanes.map((lane) => ({ ID: lane.PipelineID, Name: this.NameOf(lane.PipelineID) }));
+        const labels = HiddenPipelineLabels(this.Pipelines, shown);
+        return lanes.map((lane) => ({ ...lane, Label: labels.get(lane.PipelineID.toLowerCase()) ?? lane.Label }));
     }
 
     /** How many deals a lane holds, staged or not. */
@@ -756,10 +769,10 @@ export class DealBoardComponent implements AfterViewChecked {
      */
     public PricingNote(column: BoardColumn): string {
         return column.NonePriced
-            ? 'No deal in this stage has been priced by the orders engine. Every figure in this total '
-                + 'was typed by a person.'
-            : `${column.Unpriced} of ${column.Cards.length} deals in this stage were not priced by the `
-                + 'orders engine, so part of this total was typed by a person.';
+            ? 'No deal in this stage has an amount priced by Orders. Every amount in this total was '
+                + 'entered by hand.'
+            : `${column.Unpriced} of ${column.Cards.length} deals in this stage have no amount priced by `
+                + 'Orders, so part of this total was entered by hand or is missing.';
     }
 
     public TrackColumn = (_: number, column: BoardColumn): string => column.StageID;
