@@ -18,6 +18,8 @@ import { LinkDirectivesModule } from '@memberjunction/ng-link-directives';
 import { mjBizAppsSalesAccountTypeFormComponent } from "./Entities/mjBizAppsSalesAccountType/mjbizappssalesaccounttype.form.component";
 import { mjBizAppsSalesBuyingRoleTypeFormComponent } from "./Entities/mjBizAppsSalesBuyingRoleType/mjbizappssalesbuyingroletype.form.component";
 import { mjBizAppsSalesDealContactRoleFormComponent } from "./Entities/mjBizAppsSalesDealContactRole/mjbizappssalesdealcontactrole.form.component";
+import { mjBizAppsSalesDealDigestAudienceTypeFormComponent } from "./Entities/mjBizAppsSalesDealDigestAudienceType/mjbizappssalesdealdigestaudiencetype.form.component";
+import { mjBizAppsSalesDealDigestRecipientFormComponent } from "./Entities/mjBizAppsSalesDealDigestRecipient/mjbizappssalesdealdigestrecipient.form.component";
 import { mjBizAppsSalesDealFormComponent } from "./Entities/mjBizAppsSalesDeal/mjbizappssalesdeal.form.component";
 import { mjBizAppsSalesDealPaymentScheduleFormComponent } from "./Entities/mjBizAppsSalesDealPaymentSchedule/mjbizappssalesdealpaymentschedule.form.component";
 import { mjBizAppsSalesDealRoleFormComponent } from "./Entities/mjBizAppsSalesDealRole/mjbizappssalesdealrole.form.component";
@@ -187,6 +189,7 @@ export class GeneratedForms_SubModule_12 { }
 
 @NgModule({
 declarations: [
+    mjBizAppsSalesDealDigestRecipientFormComponent,
     mjBizAppsSalesSalesAccountFormComponent
 ],
 imports: [
@@ -241,7 +244,8 @@ export class GeneratedForms_SubModule_18 { }
 
 @NgModule({
 declarations: [
-    mjBizAppsSalesDealContactRoleFormComponent
+    mjBizAppsSalesDealContactRoleFormComponent,
+    mjBizAppsSalesDealDigestAudienceTypeFormComponent
 ],
 imports: [
     CommonModule,

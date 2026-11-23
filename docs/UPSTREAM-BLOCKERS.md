@@ -13,6 +13,13 @@ Filed from this file on 2026-10-11:
   linked package whose `dist` is missing or older than its `src`. Until then, build every member before
   starting Explorer.
 
+Filed from this file on 2026-11-18:
+
+- [MJ#6761](https://github.com/MemberJunction/MJ/issues/6761): the core `Send Single Message` action has
+  no HTML body parameter, so any HTML passed to it is delivered as plain text. The digest calls
+  `CommunicationEngine.SendSingleMessage` directly instead — see KI-30 in
+  [`KNOWN-ISSUES.md`](./KNOWN-ISSUES.md).
+
 The ask that Communication's received messages carry a direction and Bcc is drafted in
 [`upstream/MJ-communication-message-no-bcc-no-direction.md`](upstream/MJ-communication-message-no-bcc-no-direction.md).
 
