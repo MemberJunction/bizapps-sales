@@ -22,7 +22,7 @@
     @if (tabs.length > 1) {
       @let all = ShowingAll;
       <div class="db-bar__pipes" role="tablist" [attr.aria-label]="HidePipelines ? 'Company' : 'Pipeline'" data-testid="db-pipeline-tabs">
-        <!-- Every allowed pipeline at once, one lane each: stages belong to a pipeline, so they are not merged. -->
+        <!-- Every allowed pipeline's deals on one board; stages with the same code share a column. -->
         <button
           type="button"
           role="tab"
@@ -62,11 +62,7 @@
   @let lanes = Lanes;
   @if (lanes.length === 0) {
     <p class="db-empty" data-testid="db-empty">
-      @if (ShowingAll) {
-        No deals match these filters.
-      } @else {
-        {{ HidePipelines ? 'No stages are set up for this company yet.' : 'This pipeline has no stages yet.' }}
-      }
+      {{ HidePipelines ? 'No stages are set up for this company yet.' : 'This pipeline has no stages yet.' }}
     </p>
   } @else {
     <!-- A second horizontal bar above the columns, kept in step with the board's own (see the component).
@@ -78,11 +74,6 @@
       @for (lane of lanes; track lane.PipelineID) {
         @let columns = lane.Columns;
         <div class="db-lane" [attr.data-pipeline]="lane.PipelineID">
-          @if (ShowingAll) {
-            <h3 class="db-lane__head" data-testid="db-lane-head">
-              {{ LaneLabel(lane.PipelineID) }} <span class="db-lane__count">{{ LaneCount(lane) }}</span>
-            </h3>
-          }
           @if (columns.length === 0) {
             <p class="db-empty">{{ HidePipelines ? 'No stages are set up for this company yet.' : 'This pipeline has no stages yet.' }}</p>
           } @else {

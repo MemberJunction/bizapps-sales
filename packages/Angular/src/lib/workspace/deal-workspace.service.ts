@@ -307,7 +307,7 @@ export interface DealSaveOutcome {
 
 /** Row shapes as they come back from RunView with `ResultType: 'simple'`. */
 interface PipelineRow { ID: string; Name: string; Code: string; IsDefault: boolean; DisplayRank: number }
-interface StageRow { ID: string; Name: string; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null; DealStatusTypeID: string | null; RottingDays: number | null }
+interface StageRow { ID: string; Name: string; Code: string | null; PipelineID: string; DisplayOrder: number; Probability: number | null; ForecastCategoryTypeID: string | null; DealStatusTypeID: string | null; RottingDays: number | null }
 interface NamedRow { ID: string; Name: string }
 /** A stage event, as {@link DealWorkspaceService.LoadStageEntries} reads it. */
 export interface StageEventRow { DealID: string; ToStageID: string | null; ChangedAt: string | Date }
@@ -446,10 +446,10 @@ const LOOKUP_READS: Record<LookupKey, LookupRead> = {
         },
     ),
     Stages: lookupRead<StageRow>(
-        { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID', 'RottingDays'] },
+        { EntityName: E_STAGE, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayOrder ASC', ResultType: 'simple', Fields: ['ID', 'Name', 'Code', 'PipelineID', 'DisplayOrder', 'Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID', 'RottingDays'] },
         (rows, into) => {
             into.Stages = rows.map<StageLookup>((s) => ({
-                ID: s.ID, Name: s.Name, PipelineID: s.PipelineID, DisplayOrder: s.DisplayOrder,
+                ID: s.ID, Name: s.Name, Code: s.Code ?? null, PipelineID: s.PipelineID, DisplayOrder: s.DisplayOrder,
                 Probability: s.Probability, ForecastCategoryTypeID: s.ForecastCategoryTypeID,
                 DealStatusTypeID: s.DealStatusTypeID ?? null,
                 RottingDays: s.RottingDays == null ? null : Number(s.RottingDays),

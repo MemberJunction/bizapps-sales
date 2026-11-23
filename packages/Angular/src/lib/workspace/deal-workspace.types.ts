@@ -33,6 +33,11 @@ export interface PipelineLookup extends DealLookup, CompanyPipeline {}
 /** Stages are filtered by pipeline, so the pipeline has to travel with them. */
 export interface StageLookup extends DealLookup {
     PipelineID: string;
+    /**
+     * The stage's code. A company's pipeline is a copy of the default pipeline, and its stages keep the
+     * default's codes, so the Board's All tab puts stages with the same code in one column.
+     */
+    Code: string | null;
     DisplayOrder: number;
     Probability: number | null;
     ForecastCategoryTypeID: string | null;
