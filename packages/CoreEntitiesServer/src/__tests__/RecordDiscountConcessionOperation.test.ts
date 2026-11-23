@@ -33,16 +33,20 @@ function concession(saved: boolean, decidedBy: string | null, completeMessage = 
     } as Record<string, unknown>;
 }
 
-/** An earlier concession on the line; `withdrawable` is what orders' `Delete` guard answers. */
+/** An earlier concession on the line; `withdrawable` is what orders answers when it is set to Withdrawn. */
 function earlier(id: string, withdrawable: boolean, log: string[]) {
-    return {
+    const row = {
         ID: id,
-        Delete: vi.fn(async () => {
-            log.push(`delete ${id}`);
+        Status: 'Approved',
+        Save: vi.fn(async () => {
+            log.push(`withdraw ${id} (${row.Status})`);
             return withdrawable;
         }),
-        LatestResult: { CompleteMessage: withdrawable ? '' : 'This concession is Approved.' },
+        LatestResult: {
+            CompleteMessage: withdrawable ? '' : 'This concession was approved on an order that is confirmed, so it cannot be withdrawn.',
+        },
     };
+    return row;
 }
 
 function providerReturning(entity: Record<string, unknown>, existing: Array<Record<string, unknown>> = [], log: string[] = []) {
@@ -116,7 +120,7 @@ describe('Sales.RecordDiscountConcession', () => {
         expect(get).not.toHaveBeenCalled();
     });
 
-    it('refuses a line ID that is not a UUID before reading or deleting anything', async () => {
+    it('refuses a line ID that is not a UUID before reading or withdrawing anything', async () => {
         const { provider, get, runView } = providerReturning(concession(true, null));
         expect(await run({ OrderLineID: "x' OR '1'='1" }, provider)).toMatchObject({ Success: false });
         expect(runView).not.toHaveBeenCalled();
@@ -141,33 +145,39 @@ describe('Sales.RecordDiscountConcession', () => {
     });
 
     describe('a raised discount on a line that already has a concession', () => {
-        it('withdraws the earlier one before recording, in one committed transaction', async () => {
+        it('withdraws the earlier one (status Withdrawn, not deleted) before recording, in one committed transaction', async () => {
             const log: string[] = [];
             const { provider, runView } = providerReturning(concession(true, null), [earlier('A', true, log)], log);
             expect(await run({}, provider)).toMatchObject({ Success: true });
-            expect(log).toEqual(['begin', 'delete A', 'save new', 'commit']);
+            expect(log).toEqual(['begin', 'withdraw A (Withdrawn)', 'save new', 'commit']);
             expect(runView).toHaveBeenCalledWith(
                 expect.objectContaining({
                     EntityName: 'MJ_BizApps_Orders: Order Concessions',
-                    ExtraFilter: `OrderLineID = '${LINE}' AND DeliveryForm IN ('Price', 'Scope') AND SubscriptionTermID IS NULL`,
+                    ExtraFilter:
+                        `OrderLineID = '${LINE}' AND DeliveryForm IN ('Price', 'Scope') AND SubscriptionTermID IS NULL ` +
+                        `AND Status IN ('Pending', 'Approved')`,
                     ResultType: 'entity_object',
                 }),
                 USER,
             );
         });
 
-        it('keeps one orders will not withdraw, and still records the new one', async () => {
+        it('refuses the recording and rolls back when orders will not withdraw an earlier one, giving orders\' reason', async () => {
             const log: string[] = [];
-            const { provider } = providerReturning(concession(true, 'user-1'), [earlier('decided', false, log), earlier('B', true, log)], log);
-            expect(await run({}, provider)).toMatchObject({ Success: true });
-            expect(log).toEqual(['begin', 'delete decided', 'delete B', 'save new', 'commit']);
+            const entity = concession(true, 'user-1');
+            const { provider, commit } = providerReturning(entity, [earlier('B', true, log), earlier('confirmed', false, log)], log);
+            const out = await run({}, provider);
+            expect(out).toMatchObject({ Success: false, ConcessionID: null });
+            expect(out.Message).toContain('order that is confirmed');
+            expect(log).toEqual(['begin', 'withdraw B (Withdrawn)', 'withdraw confirmed (Withdrawn)', 'rollback']);
+            expect(commit).not.toHaveBeenCalled();
         });
 
         it('rolls the withdrawal back when orders refuses the new one', async () => {
             const log: string[] = [];
             const { provider, commit } = providerReturning(concession(false, null, 'no tier'), [earlier('A', true, log)], log);
             expect(await run({}, provider)).toMatchObject({ Success: false, Message: 'no tier' });
-            expect(log).toEqual(['begin', 'delete A', 'save new', 'rollback']);
+            expect(log).toEqual(['begin', 'withdraw A (Withdrawn)', 'save new', 'rollback']);
             expect(commit).not.toHaveBeenCalled();
         });
 
@@ -214,7 +224,7 @@ describe('Sales.RecordDiscountConcession', () => {
                 Message: null,
             });
             expect(log).toEqual(['begin', 'commit']);
-            expect(alreadyRecorded.Delete).not.toHaveBeenCalled();
+            expect(alreadyRecorded.Save).not.toHaveBeenCalled();
             expect(get).not.toHaveBeenCalled();
         });
 
