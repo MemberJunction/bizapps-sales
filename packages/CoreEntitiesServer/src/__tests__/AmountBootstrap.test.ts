@@ -29,10 +29,12 @@ function amountMayHaveMoved(s: {
     amount?: number | null;
     /** The persisted status locks the deal: this save is a permitted edit to a closed deal. */
     locked?: boolean;
+    /** This save closes or reopens the deal (a status write or a declared transition, #643). */
+    closesOrReopens?: boolean;
 }): boolean {
     const orderID = s.orderID ?? s.hasOrder;
     return !s.locked && ((!!s.hasOrder && (!!s.orderDirty || !!s.linesDirty))
-        || (!!orderID && (s.amountIsComputed === true || (s.amount ?? null) === null)));
+        || (!!orderID && (s.amountIsComputed === true || (s.amount ?? null) === null || !!s.closesOrReopens)));
 }
 
 describe('when a deal re-reads its order total', () => {
@@ -80,6 +82,16 @@ describe('when a deal re-reads its order total', () => {
         expect(amountMayHaveMoved({ locked: true, hasOrder: false, orderID: true, amount: 229, amountIsComputed: true })).toBe(false);
         expect(amountMayHaveMoved({ locked: true, hasOrder: true, amount: null })).toBe(false);
         expect(amountMayHaveMoved({ locked: true, hasOrder: true, amount: 5000, linesDirty: true })).toBe(false);
+        expect(amountMayHaveMoved({ locked: true, orderID: true, hasOrder: false, amount: 5000, closesOrReopens: true })).toBe(false);
+    });
+
+    /**
+     * A TYPED AMOUNT IS RE-READ ON THE CLOSE AND THE REOPEN (#643). Its order's lines can be edited from
+     * the order form, which never saves the deal, so the close is the last chance before the lock.
+     */
+    it('re-reads a typed amount on the save that closes or reopens the deal', () => {
+        expect(amountMayHaveMoved({ hasOrder: false, orderID: true, amount: 5000, amountIsComputed: false, closesOrReopens: true })).toBe(true);
+        expect(amountMayHaveMoved({ hasOrder: false, orderID: false, amount: 5000, closesOrReopens: true })).toBe(false);
     });
 });
 
@@ -104,6 +116,7 @@ describe('the table describes the code that actually runs', () => {
             'this.Amount === null',
             'this.OrderID',   // the state tests must ask the FK, not the in-memory object
             '!this._lockedAtSave &&',   // #351: a locked deal's amount is frozen
+            'closesOrReopens',   // #643: a close or reopen re-reads a typed amount
         ]) {
             expect(expr, `the guard no longer tests ${term}`).toContain(term);
         }
@@ -113,6 +126,6 @@ describe('the table describes the code that actually runs', () => {
     it('adds the bootstrap without dropping what was there', () => {
         const at = SOURCE.indexOf('const amountMayHaveMoved =');
         const expr = SOURCE.slice(at, SOURCE.indexOf(';', at));
-        expect((expr.match(/\|\|/g) ?? []).length, 'dirtiness pair, state pair, joined').toBe(3);
+        expect((expr.match(/\|\|/g) ?? []).length, 'dirtiness pair, state triple, joined').toBe(4);
     });
 });

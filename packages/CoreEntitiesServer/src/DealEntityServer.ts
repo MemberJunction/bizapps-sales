@@ -766,9 +766,23 @@ export class DealEntityServer extends DealEntity {
          * stage writers below; the close and the reopen both save while the persisted status is open,
          * so they still refresh.
          */
+        /**
+         * ── AND ON EVERY CLOSE AND REOPEN, TYPED AMOUNT OR NOT (#643) ───────────────────────────────
+         *
+         * A typed amount (`AmountIsComputed` false, `Amount` non-null) on a deal whose lines were edited
+         * from the order form matches none of the tests above, so it closed with the typed figure and
+         * the lock then froze it. The close is the last save before that freeze, so it reads the order
+         * once. A status write (`transition`) and `Sales.CloseDeal` / `Sales.ReopenDeal`
+         * (`_declaredTransition`) are the two ways a save says it closes or reopens. This is one read per
+         * close or reopen, not polling: an ordinary save is unaffected. A header-only deal keeps its typed
+         * figure, because `refreshAmountFromOrder` leaves the columns alone when the order has no total.
+         * The status-write reopen's own save is still locked, so it does not refresh; the
+         * `Sales.ReopenDeal` save it runs does.
+         */
+        const closesOrReopens = transition !== null || this._declaredTransition !== null;
         const amountMayHaveMoved = !this._lockedAtSave && (
             (!!order && (order.Dirty || order.Lines.Dirty))
-            || (!!this.OrderID && (this.AmountIsComputed === true || this.Amount === null)));
+            || (!!this.OrderID && (this.AmountIsComputed === true || this.Amount === null || closesOrReopens)));
 
         // The stage's forecast defaults, on the same trigger as the three above. Read here, applied
         // inside the scope, for the same reason the others are: work that might not be needed should not
