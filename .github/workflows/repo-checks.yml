@@ -5,20 +5,42 @@ name: Repo checks
 # (bizapps-issues) and must stay identical across the open apps.
 on:
   pull_request:
-    branches: [main]
+    branches: [next, main, 'lts/**']
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
 
 jobs:
+  repo-guards:
+    name: 'repo: guards'
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The release-line model relies on `mj migrate` refusing an out-of-order migration. Through
+      # `mj app install` / `upgrade` that check is always on, but the CLI path passes
+      # mj.config.cjs `outOfOrder` straight to Skyway, and `true` switches it off. Keep it unset.
+      - name: mj.config.cjs does not turn on out-of-order migrations
+        run: |
+          if grep -nE '^\s*[^/]*outOfOrder\s*:\s*true' mj.config.cjs; then
+            echo "::error file=mj.config.cjs::outOfOrder: true lets 'mj migrate' apply a migration older than one the database already ran. Release lines depend on that refusal; remove the setting."
+            exit 1
+          fi
+          echo "outOfOrder is not enabled"
+
   # The old publish.yml ran this before publishing. On the release PR into main it fails the
   # release before the merge instead of after it. It checks that every metadata record is written
   # by a shipped migration, that @file: query SQL matches the latest seed, and that nothing changed
   # since the latest Metadata_Sync (bizapps-sales#137). No database needed.
   release-seed:
     name: 'repo: release seed'
-    if: github.event.pull_request.draft == false
+    # A release PR: into `main`, or a line's own Version Packages PR (changeset-release/lts/X.Y).
+    if: >-
+      github.event.pull_request.draft == false
+      && (github.base_ref == 'main' || startsWith(github.head_ref, 'changeset-release/'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

@@ -106,7 +106,7 @@ import {
     MJOLinePricePickerComponent,
     type MJOExistingHolding,
 } from '@mj-biz-apps/orders-ng';
-import { CountDraftMatches, RankDealProducts } from './deal-product-ranking';
+import { CountDraftMatches, KeepDealCompanyProducts, RankDealProducts } from './deal-product-ranking';
 import type { DealEntity } from '@mj-biz-apps/sales-entities';
 import {
     DiscountAmountToPercent,
@@ -130,6 +130,8 @@ import {
 } from '@mj-biz-apps/sales-entities';
 import { DealWorkspaceService } from '../workspace/deal-workspace.service';
 import { FormatDealMoney } from './deal-money';
+import { MJSFieldHelpComponent } from './field-help.component';
+import { DEAL_LINE_HELP } from './deal-field-help';
 
 /** `<input type="date">` wants `yyyy-MM-dd`, and nothing else renders; `mjoDate` reads the same day value. */
 function toDateInput(d: Date | string | null | undefined): string | null {
@@ -188,7 +190,7 @@ interface RemoteOperationRouter {
 @Component({
     selector: 'mjs-deal-line-editor',
     standalone: true,
-    imports: [CommonModule, FormsModule, A11yModule, MJOLinePricePickerComponent, MJODatePipe],
+    imports: [CommonModule, FormsModule, A11yModule, MJOLinePricePickerComponent, MJODatePipe, MJSFieldHelpComponent],
     template: `
         <div class="mjs-le__scrim" (click)="Cancel()"></div>
         <!-- Keyboard (#371 item 3): focus is trapped inside while open, Escape cancels, the first
@@ -210,7 +212,20 @@ interface RemoteOperationRouter {
             } @else {
                 <div class="mjs-le__body">
                     <div class="mjs-le__field">
-                        <label class="mjs-le__label" for="mjs-le-product">Product</label>
+                        <div class="mjs-le__label-row">
+                            <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-product">Product</label><mjs-field-help [Text]="Help.Product" Label="Product"></mjs-field-help></span>
+                            <!-- mousedown is cancelled so the product box keeps focus and an open list
+                                 re-filters in place instead of closing. -->
+                            <label class="mjs-le__company-only" data-testid="line-product-company-only"
+                                   [class.is-disabled]="!Deal?.CompanyID"
+                                   [attr.title]="Deal?.CompanyID ? null : 'Set the deal\\'s company to narrow the list to its products'"
+                                   (mousedown)="$event.preventDefault()">
+                                <input type="checkbox" [ngModel]="SellingCompanyOnly"
+                                       (ngModelChange)="OnSellingCompanyOnlyChange($event)"
+                                       [disabled]="!Deal?.CompanyID || IsLocked || ProductLockedByPrice" />
+                                Only selling company products
+                            </label>
+                        </div>
                         <!-- A type-ahead over the catalogue, ranked by orders' RankCatalogMatches: a name that
                              starts with the text, then a SKU that does, then either containing it, with the
                              DEAL's company first within each (golive#360). Filtered by ProductFilterFor to
@@ -223,7 +238,7 @@ interface RemoteOperationRouter {
                         <input id="mjs-le-product" data-testid="line-product" type="text" autocomplete="off"
                                role="combobox" aria-autocomplete="list" aria-controls="mjs-le-product-list"
                                [attr.aria-expanded]="PickerOpen" [attr.data-product-id]="Working.ProductID || null"
-                               placeholder="Type a name or SKU…"
+                               placeholder="Type a name, SKU or company…"
                                [ngModel]="ProductQuery" (ngModelChange)="OnProductQuery($event)"
                                (focus)="OnPickerFocus($event)" (click)="OpenPicker()" (blur)="ClosePicker()" (keydown)="OnPickerKey($event)"
                                [disabled]="IsLocked || ProductLockedByPrice"
@@ -250,7 +265,15 @@ interface RemoteOperationRouter {
                                     </button>
                                 } @empty {
                                     <div class="mjs-le__pick-empty">
-                                        {{ Products.length ? 'No product matches that.' : 'No products to offer.' }}
+                                        {{ !Products.length ? 'No products to offer.'
+                                            : PickerHiddenByCompany ? 'No product from this deal\\'s company matches that.'
+                                            : 'No product matches that.' }}
+                                    </div>
+                                }
+                                @if (PickerHiddenByCompany > 0) {
+                                    <div class="mjs-le__pick-empty" data-testid="line-product-other-companies" role="status">
+                                        <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                                        {{ PickerHiddenByCompany }} more from other companies. Uncheck "Only selling company products" to see them.
                                     </div>
                                 }
                                 @if (PickerHidden > 0) {
@@ -278,25 +301,28 @@ interface RemoteOperationRouter {
                     </div>
 
                     <div class="mjs-le__row">
-                        <label class="mjs-le__field">
-                            <span class="mjs-le__label">Quantity</span>
+                        <div class="mjs-le__field">
+                            <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-quantity">Quantity</label><mjs-field-help [Text]="Help.Quantity" Label="Quantity"></mjs-field-help></span>
                             <!-- min="1", NOT 0: orders' CK_OrderLine_Quantity is 'Quantity <> 0', so a
                                  floor of zero offers the one value the database forbids. Negative is
                                  legal to orders as its reversal mechanism, but a reversal is not
                                  something a deal line expresses. -->
-                            <input type="number" data-testid="line-quantity" min="1" step="1" [ngModel]="Working.Quantity"
+                            <input id="mjs-le-quantity" type="number" data-testid="line-quantity" min="1" step="1" [ngModel]="Working.Quantity"
                                    (ngModelChange)="SetQuantity($event)"
                                    [disabled]="IsLocked" [title]="BlockedReason" />
                             @if (QuantityInvalid) {
                                 <span class="mjs-le__error" data-testid="line-quantity-error">{{ QuantityInvalidMessage }}</span>
                             }
-                        </label>
+                        </div>
 
                         <div class="mjs-le__field">
                             <div class="mjs-le__label-row">
-                                <label class="mjs-le__label" [for]="DiscountUnit === 'Percent' ? 'mjs-le-discount' : 'mjs-le-discount-amount'">
-                                    Discount {{ DiscountUnit === 'Percent' ? '%' : '$' }}
-                                </label>
+                                <span class="mjs-le__labelled">
+                                    <label class="mjs-le__label" [for]="DiscountUnit === 'Percent' ? 'mjs-le-discount' : 'mjs-le-discount-amount'">
+                                        Discount {{ DiscountUnit === 'Percent' ? '%' : '$' }}
+                                    </label>
+                                    <mjs-field-help [Text]="Help.Discount" Label="Discount"></mjs-field-help>
+                                </span>
                                 <!-- The rep states the discount in whichever unit the signed form uses.
                                      A dollar amount is converted to the percent the line stores. -->
                                 <div class="mjs-le__unit" role="group" aria-label="Discount unit">
@@ -343,32 +369,32 @@ interface RemoteOperationRouter {
                          the moment the line is saved. -->
                     @if (NeedsDiscountReason) {
                         <div class="mjs-le__row">
-                            <label class="mjs-le__field">
-                                <span class="mjs-le__label">Discount reason category</span>
-                                <select data-testid="line-discount-category" [(ngModel)]="DiscountCategory"
+                            <div class="mjs-le__field">
+                                <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-discount-category">Discount reason category</label><mjs-field-help [Text]="Help.DiscountReasonCategory" Label="Discount reason category"></mjs-field-help></span>
+                                <select id="mjs-le-discount-category" data-testid="line-discount-category" [(ngModel)]="DiscountCategory"
                                         [disabled]="IsLocked">
                                     <option [ngValue]="null" disabled>Choose one</option>
                                     @for (c of ReasonCategories; track c) {
                                         <option [ngValue]="c">{{ c }}</option>
                                     }
                                 </select>
-                            </label>
-                            <label class="mjs-le__field">
-                                <span class="mjs-le__label">Discount reason</span>
-                                <textarea data-testid="line-discount-reason" rows="2" [(ngModel)]="DiscountReason"
+                            </div>
+                            <div class="mjs-le__field">
+                                <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-discount-reason">Discount reason</label><mjs-field-help [Text]="Help.DiscountReason" Label="Discount reason"></mjs-field-help></span>
+                                <textarea id="mjs-le-discount-reason" data-testid="line-discount-reason" rows="2" [(ngModel)]="DiscountReason"
                                           [disabled]="IsLocked"
                                           placeholder="Why value is given away on this line"></textarea>
-                            </label>
+                            </div>
                         </div>
                         <small class="mjs-le__hint">
-                            Inside your Sales Authority the discount is approved when you save. Outside it, the
-                            order cannot be confirmed until an approver approves it.
+                            A discount within your Sales Authority is usually approved when you save. Any other
+                            discount goes to an approver, and the order cannot be confirmed until it is approved.
                         </small>
                     }
 
                     @if (ShowPricePicker) {
                         <div class="mjs-le__field">
-                            <span class="mjs-le__label">Price</span>
+                            <span class="mjs-le__labelled"><span class="mjs-le__label">Price</span><mjs-field-help [Text]="Help.Price" Label="Price"></mjs-field-help></span>
                             <!-- Orders' named prices, plus a typed custom amount for an OverrideAny
                                  holder (D-DL2, revised). The picker withholds the custom row from
                                  OverrideList holders and asks for a reason on any pick off the default. -->
@@ -391,19 +417,19 @@ interface RemoteOperationRouter {
                                  whatever the line states, so the start it will use is shown, not offered.
                                  The line's own start is kept for a switch back to a new subscription. -->
                             <div class="mjs-le__field" data-testid="line-term-start-continuation">
-                                <span class="mjs-le__label">Term start</span>
+                                <span class="mjs-le__labelled"><span class="mjs-le__label">Term start</span><mjs-field-help [Text]="Help.TermStartRenewal" Label="Term start"></mjs-field-help></span>
                                 <span class="mjs-le__ro-val">{{ HoldingContinuationStart | mjoDate }}</span>
                                 <small class="mjs-le__hint">next term of {{ holding.SubscriptionNumber }}</small>
                             </div>
                         } @else {
-                            <label class="mjs-le__field">
-                                <span class="mjs-le__label">Term start</span>
-                                <input type="date" data-testid="line-term-start" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
+                            <div class="mjs-le__field">
+                                <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-term-start">Term start</label><mjs-field-help [Text]="Help.TermStart" Label="Term start"></mjs-field-help></span>
+                                <input id="mjs-le-term-start" type="date" data-testid="line-term-start" [ngModel]="TermStartInput" (ngModelChange)="SetTermStart($event)"
                                        [disabled]="IsLocked" [title]="BlockedReason" />
                                 @if (!HasExplicitTermStart) {
                                     <small class="mjs-le__hint">order date</small>
                                 }
-                            </label>
+                            </div>
                         }
                     }
 
@@ -413,18 +439,18 @@ interface RemoteOperationRouter {
                     @if (ShowServicePeriod) {
                         <div class="mjs-le__field" role="group" aria-label="Service period" data-testid="line-service-period">
                             <div class="mjs-le__row">
-                                <label class="mjs-le__field">
-                                    <span class="mjs-le__label">Service start</span>
-                                    <input type="date" data-testid="line-service-start" [ngModel]="ServicePeriodInput('Start')"
+                                <div class="mjs-le__field">
+                                    <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-service-start">Service start</label><mjs-field-help [Text]="Help.ServiceStart" Label="Service start"></mjs-field-help></span>
+                                    <input id="mjs-le-service-start" type="date" data-testid="line-service-start" [ngModel]="ServicePeriodInput('Start')"
                                            (ngModelChange)="SetServicePeriod('Start', $event)"
                                            [disabled]="IsLocked" [title]="BlockedReason" />
-                                </label>
-                                <label class="mjs-le__field">
-                                    <span class="mjs-le__label">Service end</span>
-                                    <input type="date" data-testid="line-service-end" [ngModel]="ServicePeriodInput('End')"
+                                </div>
+                                <div class="mjs-le__field">
+                                    <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-service-end">Service end</label><mjs-field-help [Text]="Help.ServiceEnd" Label="Service end"></mjs-field-help></span>
+                                    <input id="mjs-le-service-end" type="date" data-testid="line-service-end" [ngModel]="ServicePeriodInput('End')"
                                            (ngModelChange)="SetServicePeriod('End', $event)"
                                            [disabled]="IsLocked" [title]="BlockedReason" />
-                                </label>
+                                </div>
                             </div>
                             @if (ServicePeriodBackwards) {
                                 <small class="mjs-le__error">The service end is before the start.</small>
@@ -435,15 +461,15 @@ interface RemoteOperationRouter {
                     }
 
                     <!-- The customer already holds this product (golive #318): the same question the
-                         order line asks. Unanswered, Close Won refuses the deal, except on a renewal
-                         deal, which adds the line as the next term. -->
+                         order line asks, in the same words (golive #480). Unanswered, Close Won
+                         refuses the deal, except on a renewal deal, which adds the line as the next term. -->
                     @if (Holding; as holding) {
                         <div class="mjs-le__field" role="group" data-testid="line-subscription-choice"
                              [attr.aria-label]="'Existing subscription ' + holding.SubscriptionNumber">
-                            <span class="mjs-le__label">Existing subscription</span>
+                            <span class="mjs-le__labelled"><span class="mjs-le__label">Existing subscription</span><mjs-field-help [Text]="Help.ExistingSubscription" Label="Existing subscription"></mjs-field-help></span>
                             <span class="mjs-le__muted">
-                                The customer already holds {{ holding.SubscriptionNumber }} for this product
-                                @if (HoldingCoverageEnd) { (covered through {{ HoldingCoverageEnd | mjoDate }}) }.
+                                This customer already has this product on {{ holding.SubscriptionNumber }}@if (HoldingCoverageEnd) {, which runs through {{ HoldingCoverageEnd | mjoDate }}}.
+                                Is this line a renewal of that subscription, or a new one?
                             </span>
                             <div class="mjs-le__choices">
                                 <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-extend"
@@ -451,7 +477,7 @@ interface RemoteOperationRouter {
                                         [attr.aria-pressed]="Working.SubscriptionAction === 'ExtendExisting'"
                                         [disabled]="IsLocked" [title]="BlockedReason"
                                         (click)="SetSubscriptionAction('ExtendExisting')">
-                                    Add as next term
+                                    Renew {{ holding.SubscriptionNumber }}
                                     @if (HoldingContinuationStart) { (starts {{ HoldingContinuationStart | mjoDate }}) }
                                 </button>
                                 <button type="button" class="mjs-le__btn mjs-le__choice" data-testid="line-subscription-new"
@@ -459,14 +485,17 @@ interface RemoteOperationRouter {
                                         [attr.aria-pressed]="Working.SubscriptionAction === 'CreateNew'"
                                         [disabled]="IsLocked" [title]="BlockedReason"
                                         (click)="SetSubscriptionAction('CreateNew')">
-                                    New subscription (keeps this line's dates)
+                                    Create new subscription
+                                    @if (HasExplicitTermStart) { (starts {{ TermStartInput | mjoDate }}) } @else { (keeps this line's dates) }
                                 </button>
                             </div>
                             <small class="mjs-le__hint" [class.mjs-le__error]="!Working.SubscriptionAction">
                                 @if (Working.SubscriptionAction === 'CreateNew') {
-                                    Starts a separate subscription on this line's term start.
+                                    Creates a new subscription for this customer, separate from
+                                    {{ holding.SubscriptionNumber }}, on this line's term start.
                                 } @else if (Working.SubscriptionAction === 'ExtendExisting') {
-                                    Adds a term to {{ holding.SubscriptionNumber }}, starting the day after its coverage ends.
+                                    Adds this line to {{ holding.SubscriptionNumber }} as its next term, starting the day
+                                    after its coverage ends.
                                 } @else {
                                     Not chosen. Close Won asks for this, unless the deal is a renewal, which adds it as the next term.
                                 }
@@ -478,11 +507,11 @@ interface RemoteOperationRouter {
                          sales states intent, orders states price. -->
                     <div class="mjs-le__readonly">
                         <div>
-                            <span class="mjs-le__label">Unit price</span>
+                            <span class="mjs-le__labelled"><span class="mjs-le__label">Unit price</span><mjs-field-help [Text]="Help.UnitPrice" Label="Unit price"></mjs-field-help></span>
                             <span class="mjs-le__ro-val">{{ Pricing ? '…' : Money(DisplayUnitPrice) }}</span>
                         </div>
                         <div>
-                            <span class="mjs-le__label">Line total</span>
+                            <span class="mjs-le__labelled"><span class="mjs-le__label">Line total</span><mjs-field-help [Text]="Help.LineTotal" Label="Line total"></mjs-field-help></span>
                             <span class="mjs-le__ro-val">{{ Pricing ? '…' : Money(DisplayLineTotal) }}</span>
                         </div>
                         <p class="mjs-le__muted">
@@ -642,7 +671,14 @@ interface RemoteOperationRouter {
             background: var(--mj-status-error, #b3261e); color: #fff; border-color: transparent;
         }
         .mjs-le__confirm { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+        .mjs-le__labelled { display: inline-flex; align-items: center; }
         .mjs-le__label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .mjs-le__company-only {
+            display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+            font-size: var(--mj-text-xs); color: var(--mj-text-secondary); cursor: pointer; user-select: none;
+        }
+        .mjs-le__field .mjs-le__company-only input { padding: 0; margin: 0; width: auto; cursor: inherit; }
+        .mjs-le__company-only.is-disabled { color: var(--mj-text-muted); cursor: not-allowed; }
         .mjs-le__unit {
             display: inline-flex; border: 1px solid var(--mj-border-default);
             border-radius: var(--mj-radius-md, 8px); overflow: hidden;
@@ -664,6 +700,9 @@ interface RemoteOperationRouter {
     `],
 })
 export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDestroy {
+    /** What the help icon beside each label says. */
+    public readonly Help = DEAL_LINE_HELP;
+
     /**
      * The DEAL whose order this line belongs to.
      *
@@ -713,6 +752,13 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     public PickerResults: ProductLookup[] = [];
     /** How many matches are past the list's cap — named so the rep knows to keep typing. */
     public PickerHidden = 0;
+    /**
+     * "Only selling company products". Checked on open, so a rep sees the deal's company's catalogue
+     * first; unchecking it offers every company's products for a multi-company deal.
+     */
+    public SellingCompanyOnly = true;
+    /** Search matches the checkbox hides, so the list can say they exist. Zero with nothing typed. */
+    public PickerHiddenByCompany = 0;
     /** How many Draft products match the search; the picker hides them, and the note says so (golive#433). */
     public DraftMatches = 0;
     /** Orders' Draft products, matched against the search for {@link DraftMatches}; never offered. */
@@ -949,8 +995,12 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
 
     /* ── The product type-ahead (golive#360) ───────────────────────────────────── */
 
-    /** Rows the list shows at once. The catalogue runs to hundreds; past this the rep narrows by typing. */
-    private static readonly PickerLimit = 50;
+    /**
+     * Rows the list shows at once; past this the rep narrows by typing. Sized to hold the whole active
+     * catalogue: at 50, the selling company's own products filled the list (Blue Cypress Consulting
+     * alone has 44), so other companies' products, a bundle's among them, sat below the cut.
+     */
+    private static readonly PickerLimit = 250;
 
     /** The catalog price beside a product in the list, when orders has one. */
     public PriceLabel(p: ProductLookup): string | null {
@@ -1032,8 +1082,21 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.cdr.detectChanges();
     }
 
+    public OnSellingCompanyOnlyChange(checked: boolean): void {
+        this.SellingCompanyOnly = checked;
+        if (this.PickerOpen) this.rankPicker(this.rankedQuery);
+    }
+
     private rankPicker(query: string): void {
-        const ranked = RankDealProducts(this.Products, query, this.Deal?.CompanyID ?? null);
+        const dealCompanyID = this.Deal?.CompanyID ?? null;
+        const offered = this.SellingCompanyOnly ? KeepDealCompanyProducts(this.Products, dealCompanyID) : this.Products;
+        const ranked = RankDealProducts(offered, query, dealCompanyID);
+        // Counted only for a typed search: with nothing typed, "N other products" says nothing about
+        // what the rep is looking for.
+        this.PickerHiddenByCompany =
+            query.trim() && offered.length < this.Products.length
+                ? RankDealProducts(this.Products, query, null).length - ranked.length
+                : 0;
         this.PickerResults = ranked.slice(0, MJSDealLineEditorComponent.PickerLimit);
         this.PickerHidden = ranked.length - this.PickerResults.length;
         this.rankedQuery = query;
@@ -1113,9 +1176,10 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         if (product) {
             this.Working.CompanyID = product.CompanyID;
         }
-        // The previous product's default, named prices and subscription answer say nothing about this one.
+        // The previous product's default, named prices, holding and subscription answer say nothing about this one (#355).
         this.EngineDefault = undefined;
         this.Applicable = [];
+        this.Holding = null;
         this.Working.SubscriptionAction = null;
         this.pendingConcessionID = null;
         void this.refreshApplicable();
@@ -1154,11 +1218,14 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         return this.ProductLockedByPrice ? null : this.DisplayUnitPrice;
     }
 
+    private applicableToken = 0;
+
     /**
      * The product's applicable named prices, asked of orders with the order's own parties and date —
      * the same context the order line's picker uses, so the two list the same rules.
      */
     private async refreshApplicable(): Promise<void> {
+        const token = (this.applicableToken = (this.applicableToken ?? 0) + 1);
         const line = this.Working;
         const order = this.Deal?.OrderID_Object;
         const user = Metadata.Provider.CurrentUser;
@@ -1169,6 +1236,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         // Not asked for a quantity the rep has not entered; Save is blocked until they do.
         if (this.QuantityInvalid) return;
         const productID = String(line.ProductID);
+        const quantity = Number(line.Quantity ?? 0);
         try {
             await LoadOrdersEngine(Metadata.Provider, user);
             const product = OrdersEngine.Instance.ProductByID(productID);
@@ -1179,7 +1247,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
                     ProductID: productID,
                     ProductCategoryID: product?.ProductCategoryID ?? null,
                     CompanyID: companyID,
-                    Quantity: Number(line.Quantity ?? 0),
+                    Quantity: quantity,
                     AsOf: AsDateValue(order.OrderDate) ?? TodayAsDateValue(),
                     OrganizationID: order.BillToOrganizationID ?? null,
                     PersonID: order.BillToPersonID ?? null,
@@ -1201,10 +1269,18 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
                 Metadata.Provider,
                 user,
             );
-            // A reply for a product the rep has since moved off is dropped rather than shown.
-            if (this.Working?.ProductID === productID) this.Applicable = applicable;
+            // A reply for a product or quantity the rep has since moved off is dropped rather than shown (#355).
+            if (
+                token === this.applicableToken &&
+                this.Working?.ProductID === productID &&
+                Number(this.Working?.Quantity ?? 0) === quantity
+            ) {
+                this.Applicable = applicable;
+            }
         } catch {
-            this.Applicable = [];
+            if (token === this.applicableToken) {
+                this.Applicable = [];
+            }
         } finally {
             this.cdr.detectChanges();
         }
@@ -1294,6 +1370,9 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      * carries a `SubscriptionTypeID`, which is what decides whether confirm builds a term for the line.
      */
     public get ShowTermStart(): boolean {
+        // A line the rep dates shows this same column as Service start. A stored start is otherwise
+        // offered whatever the product, which gave such a line a second box for the one date.
+        if (this.ShowServicePeriod) return false;
         return ShouldOfferTermStart(
             !!this.Working?.ProductID,
             this.SelectedProduct,
@@ -1390,12 +1469,15 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
 
     /* ── The customer already holds this product (golive #318) ─────────────────────── */
 
+    private holdingToken = 0;
+
     /**
      * The subscription this line would extend at confirm, read with orders' rule so the deal and the
      * order screen ask about the same lines. Renewal lines and one-time products are not asked. A failed
      * read hides the question; Close Won still asks, because it reads the same rule on the server.
      */
     private async refreshHolding(): Promise<void> {
+        const token = (this.holdingToken = (this.holdingToken ?? 0) + 1);
         const line = this.Working;
         const subscriber = line ? HoldingSubscriberFor(line, this.Deal?.OrderID_Object ?? null) : null;
         if (!line?.ProductID || line.RenewsSubscriptionID || !this.SelectedProduct?.SubscriptionTypeID || !subscriber) {
@@ -1404,9 +1486,17 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             return;
         }
         const productID = String(line.ProductID);
-        const holding = await GetExistingHolding(productID, subscriber.OrganizationID, subscriber.PersonID);
-        // A reply for a product the rep has since moved off is dropped rather than shown.
-        if (this.Working?.ProductID === productID) this.Holding = holding;
+        try {
+            const holding = await GetExistingHolding(productID, subscriber.OrganizationID, subscriber.PersonID);
+            // A reply for a product the rep has since moved off is dropped rather than shown.
+            if (token === this.holdingToken && this.Working?.ProductID === productID) {
+                this.Holding = holding;
+            }
+        } catch {
+            if (token === this.holdingToken) {
+                this.Holding = null;
+            }
+        }
         this.cdr.detectChanges();
     }
 
@@ -1421,7 +1511,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     }
 
     /**
-     * Whether Term start shows the continuation start instead of an input: "Add as next term" is
+     * Whether Term start shows the continuation start instead of an input: "Renew" is
      * chosen and the start is known. Orders' `SubscriptionBehavior.Decide` starts an extension at the
      * end of the existing coverage over any stated start, so an editable date here would be ignored.
      */
@@ -1465,6 +1555,8 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     private pricePending = false;
     public PricingNote: string | null = null;
     private priceTimer: ReturnType<typeof setTimeout> | null = null;
+    private priceToken = 0;
+    private inFlightPrice: Promise<void> | null = null;
 
     /** Orders' answer when there is one, otherwise whatever the saved line already carries. */
     public get DisplayUnitPrice(): number | null {
@@ -1547,87 +1639,105 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
      * because a pricing call timed out would not be.
      */
     private async refreshPrice(): Promise<void> {
-        const line = this.Working;
-        const companyID = this.Deal?.CompanyID as string | null | undefined;
-        const order = this.Deal?.OrderID_Object;
-        if (!line?.ProductID || !companyID) {
-            this.pricedUnit = null;
-            this.pricedTotal = null;
-            this.pricedDiscount = null;
-            this.EngineDefault = undefined;
+        const token = (this.priceToken = (this.priceToken ?? 0) + 1);
+        const run = async (): Promise<void> => {
+            const line = this.Working;
+            const companyID = this.Deal?.CompanyID as string | null | undefined;
+            const order = this.Deal?.OrderID_Object;
+            if (!line?.ProductID || !companyID) {
+                this.pricedUnit = null;
+                this.pricedTotal = null;
+                this.pricedDiscount = null;
+                this.EngineDefault = undefined;
+                this.PricingNote = null;
+                this.pricePending = false;
+                this.cdr.detectChanges();
+                return;
+            }
+            // No price for a quantity the rep did not enter: never a one-unit figure in its place.
+            if (this.QuantityInvalid) {
+                this.pricedUnit = null;
+                this.pricedTotal = null;
+                this.EngineDefault = undefined;
+                this.PricingNote = this.QuantityInvalidMessage;
+                this.cdr.detectChanges();
+                return;
+            }
+
+            this.Pricing = true;
             this.PricingNote = null;
-            this.pricePending = false;
             this.cdr.detectChanges();
-            return;
-        }
-        // No price for a quantity the rep did not enter: never a one-unit figure in its place.
-        if (this.QuantityInvalid) {
-            this.pricedUnit = null;
-            this.pricedTotal = null;
-            this.EngineDefault = undefined;
-            this.PricingNote = this.QuantityInvalidMessage;
-            this.cdr.detectChanges();
-            return;
-        }
+            try {
+                const router = Metadata.Provider as unknown as RemoteOperationRouter;
+                const envelope = await router.RouteOperation<PriceOrderInput, PriceOrderOutput>(
+                    'Orders.PriceOrder',
+                    {
+                        CompanyID: companyID,
+                        // The buyer and the date steer which rule is the default, so they are sent: without
+                        // them the picker's Default row could name a different rule than the order's save.
+                        BillToPersonID: order?.BillToPersonID ?? null,
+                        BillToOrganizationID: order?.BillToOrganizationID ?? null,
+                        OrderDate: this.IsoOrNull(order?.OrderDate),
+                        Lines: [{
+                            ProductID: String(line.ProductID),
+                            Quantity: Number(line.Quantity),
+                            // A picked price PINS the line, as it will on the order's save; otherwise orders
+                            // resolves it.
+                            UnitPrice: IsLinePriceOverridden(line, this.EngineDefault) ? Number(line.UnitPrice) : null,
+                            DiscountPct: (line.DiscountPct as number | null | undefined) ?? null,
+                            ServicePeriodStart: this.IsoOrNull(line.ServicePeriodStart),
+                            ServicePeriodEnd: this.IsoOrNull(line.ServicePeriodEnd),
+                        }],
+                    },
+                );
 
-        this.Pricing = true;
-        this.PricingNote = null;
-        this.cdr.detectChanges();
-        try {
-            const router = Metadata.Provider as unknown as RemoteOperationRouter;
-            const envelope = await router.RouteOperation<PriceOrderInput, PriceOrderOutput>(
-                'Orders.PriceOrder',
-                {
-                    CompanyID: companyID,
-                    // The buyer and the date steer which rule is the default, so they are sent: without
-                    // them the picker's Default row could name a different rule than the order's save.
-                    BillToPersonID: order?.BillToPersonID ?? null,
-                    BillToOrganizationID: order?.BillToOrganizationID ?? null,
-                    OrderDate: this.IsoOrNull(order?.OrderDate),
-                    Lines: [{
-                        ProductID: String(line.ProductID),
-                        Quantity: Number(line.Quantity),
-                        // A picked price PINS the line, as it will on the order's save; otherwise orders
-                        // resolves it.
-                        UnitPrice: IsLinePriceOverridden(line, this.EngineDefault) ? Number(line.UnitPrice) : null,
-                        DiscountPct: (line.DiscountPct as number | null | undefined) ?? null,
-                        ServicePeriodStart: this.IsoOrNull(line.ServicePeriodStart),
-                        ServicePeriodEnd: this.IsoOrNull(line.ServicePeriodEnd),
-                    }],
-                },
-            );
+                // Drop stale replies superseded by a newer pricing request (#355).
+                if (token !== this.priceToken) return;
 
-            /**
-             * TWO LAYERS OF SUCCESS. The envelope says the operation RAN; `Output.Success` says pricing
-             * worked. Checking only the outer one is a mistake this repo has already made once, on the
-             * contracts seam, where it reported a contract that was never written.
-             */
-            const priced = envelope.Success ? envelope.Output : null;
-            const row = priced?.Success ? priced.Lines?.[0] : null;
-            if (!row) {
+                /**
+                 * TWO LAYERS OF SUCCESS. The envelope says the operation RAN; `Output.Success` says pricing
+                 * worked. Checking only the outer one is a mistake this repo has already made once, on the
+                 * contracts seam, where it reported a contract that was never written.
+                 */
+                const priced = envelope.Success ? envelope.Output : null;
+                const row = priced?.Success ? priced.Lines?.[0] : null;
+                if (!row) {
+                    this.pricedUnit = null;
+                    this.pricedTotal = null;
+                    this.pricedDiscount = null;
+                    this.EngineDefault = undefined;
+                    this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
+                    return;
+                }
+                this.pricedUnit = row.UnitPrice;
+                this.pricedTotal = row.LineTotalNet;
+                this.pricedDiscount = row.DiscountAmount ?? 0;
+                this.EngineDefault = row.Default;
+                this.applyDiscountAmount();
+            } catch {
+                if (token !== this.priceToken) return;
                 this.pricedUnit = null;
                 this.pricedTotal = null;
                 this.pricedDiscount = null;
                 this.EngineDefault = undefined;
                 this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
-                return;
+            } finally {
+                if (token === this.priceToken) {
+                    this.Pricing = false;
+                    // A reprice scheduled while this one was in flight is still pending.
+                    this.pricePending = this.priceTimer != null;
+                    this.cdr.detectChanges();
+                }
             }
-            this.pricedUnit = row.UnitPrice;
-            this.pricedTotal = row.LineTotalNet;
-            this.pricedDiscount = row.DiscountAmount ?? 0;
-            this.EngineDefault = row.Default;
-            this.applyDiscountAmount();
-        } catch {
-            this.pricedUnit = null;
-            this.pricedTotal = null;
-            this.pricedDiscount = null;
-            this.EngineDefault = undefined;
-            this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
+        };
+        const p = run();
+        this.inFlightPrice = p;
+        try {
+            await p;
         } finally {
-            this.Pricing = false;
-            // A reprice scheduled while this one was in flight is still pending.
-            this.pricePending = this.priceTimer !== null;
-            this.cdr.detectChanges();
+            if (this.inFlightPrice === p) {
+                this.inFlightPrice = null;
+            }
         }
     }
 
@@ -1788,7 +1898,23 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
     }
 
     public async Save(): Promise<void> {
-        if (!this.Working || !this.CanSave) return;
+        if (!this.Working) return;
+        // Flush any debounced or in-flight reprice before checking CanSave (#509): raising quantity on a
+        // discounted line raises the dollar discount above its covered concession value only once Orders
+        // has priced the new quantity, so saving during the 350ms debounce must wait for that answer first.
+        if (this.priceTimer != null || this.pricePending) {
+            if (this.priceTimer != null) {
+                clearTimeout(this.priceTimer);
+                this.priceTimer = null;
+            }
+            await this.refreshPrice();
+        } else if (this.inFlightPrice != null) {
+            await this.inFlightPrice;
+        }
+        if (!this.Working || !this.CanSave) {
+            this.cdr.detectChanges();
+            return;
+        }
         this.Saving = true;
         this.Error = null;
         this.cdr.detectChanges();

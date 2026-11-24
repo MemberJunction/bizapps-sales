@@ -74,7 +74,18 @@ export function DefaultPipeline<T extends CompanyPipeline>(pipelines: readonly T
     return pipelines.find((p) => p.IsDefault) ?? null;
 }
 
-/** The first company the default pipeline serves: the company a new deal starts in. */
+/**
+ * The order `PipelineCompany` rows are read in: oldest link first. {@link DefaultCompanyID} takes the
+ * default pipeline's first row, so once that pipeline is linked to every company the company it was
+ * first linked to stays the one a new deal starts in, rather than whichever link the database returns
+ * first.
+ */
+export const PIPELINE_LINK_ORDER = '__mj_CreatedAt ASC, ID ASC';
+
+/**
+ * The first company the default pipeline serves: the company a new deal starts in. Relies on the links
+ * being read in {@link PIPELINE_LINK_ORDER}.
+ */
 export function DefaultCompanyID(pipelines: readonly CompanyPipeline[]): string | null {
     return DefaultPipeline(pipelines)?.CompanyID ?? OrderPipelinesByCompany(pipelines)[0]?.CompanyID ?? null;
 }
@@ -121,6 +132,47 @@ export function PipelinesForCompany<T extends CompanyPipeline>(pipelines: readon
     return companyID ? ordered.filter((p) => sameID(p.CompanyID, companyID)) : DistinctPipelines(ordered);
 }
 
+/**
+ * The company's default pipeline: the first of its pipelines in picker order, so the `IsDefault`
+ * pipeline when it is linked to the company, else the lowest `DisplayRank`. Null when none is linked.
+ */
+export function CompanyDefaultPipeline<T extends CompanyPipeline>(pipelines: readonly T[], companyID: string | null): T | null {
+    return companyID ? (PipelinesForCompany(pipelines, companyID)[0] ?? null) : null;
+}
+
+/**
+ * The names of the companies a pipeline is linked to, joined: what names a pipeline where pipelines are
+ * hidden. Falls back to the pipeline's own name when it has no named company.
+ */
+export function PipelineCompanyNames(pipelines: readonly CompanyPipeline[], pipeline: Pick<CompanyPipeline, 'ID' | 'Name'>): string {
+    const names = OrderPipelinesByCompany(pipelines.filter((p) => sameID(p.ID, pipeline.ID)))
+        .map((p) => p.CompanyName)
+        .filter((name): name is string => !!name);
+    return names.length ? [...new Set(names)].join(', ') : pipeline.Name;
+}
+
+/**
+ * What names each of `shown` where pipelines are hidden and several are in view at once, keyed by
+ * lower-cased pipeline ID (bc-aidp-next-golive#498).
+ *
+ * Each is named by its companies ({@link PipelineCompanyNames}). A company with two pipelines in view
+ * would name both alike, so those, and only those, add the pipeline's own name: "Acme · B2B". Which
+ * names collide is decided among `shown`, so a pipeline shown without its sibling stays "Acme".
+ */
+export function HiddenPipelineLabels(
+    pipelines: readonly CompanyPipeline[],
+    shown: readonly Pick<CompanyPipeline, 'ID' | 'Name'>[],
+): Map<string, string> {
+    const named = shown.map((p) => ({ Pipeline: p, Label: PipelineCompanyNames(pipelines, p) }));
+    const labels = new Map<string, string>();
+    for (const { Pipeline, Label } of named) {
+        const shared = named.some((other) => other.Pipeline !== Pipeline && other.Label === Label);
+        // A pipeline with no named company is already named by itself.
+        labels.set(Pipeline.ID.toLowerCase(), shared && Label !== Pipeline.Name ? `${Label} · ${Pipeline.Name}` : Label);
+    }
+    return labels;
+}
+
 /** Whether `pipelineID` is linked to `companyID`. */
 export function PipelineServesCompany(
     pipelines: readonly CompanyPipeline[],
@@ -146,4 +198,52 @@ export function PipelineLabel(pipeline: Pick<CompanyPipeline, 'Name' | 'CompanyN
 /** The company's display name, falling back to a placeholder rather than an id. */
 export function CompanyLabel(company: PipelineCompany): string {
     return company.CompanyName ?? 'Unnamed company';
+}
+
+/** Whether `companyID` has at least one pipeline linked to it. */
+export function CompanyHasPipeline(pipelines: readonly CompanyPipeline[], companyID: string | null): boolean {
+    return !!companyID && pipelines.some((p) => sameID(p.CompanyID, companyID));
+}
+
+/** What {@link NoPipelineMessage} needs to say why a deal has no pipeline. */
+export interface NoPipelineState {
+    /** The `HidePipelines` setting: the rep cannot choose a pipeline, only a company. */
+    HidePipelines: boolean;
+    /** The deal's company, or null when it has none. */
+    CompanyID: string | null;
+    /** The company's name, or null when it is not known. */
+    CompanyName: string | null;
+    /** Whether the deal's company has a pipeline linked to it. */
+    CompanyHasPipeline: boolean;
+    /** Whether any company other than the deal's has a pipeline linked to it. */
+    OtherCompanyHasPipeline: boolean;
+}
+
+/** The generic refusal, for a rep who can see the Pipeline field and has a pipeline to choose. */
+export const CHOOSE_PIPELINE_MESSAGE = 'Choose a pipeline. It determines the stages and the selling company.';
+
+/**
+ * Why a deal with no pipeline cannot be saved, and what to do about it.
+ *
+ * `Deal.PipelineID` is NOT NULL, and a deal can only sit in a pipeline linked to its company. A company
+ * with no linked pipeline therefore leaves the deal unsaveable, and "Choose a pipeline" names a choice
+ * that does not exist — with pipelines hidden, a field the rep cannot even see. This names the company
+ * and the fix: another company, or an admin linking a pipeline to this one.
+ */
+export function NoPipelineMessage(state: NoPipelineState): string {
+    if (state.CompanyID && !state.CompanyHasPipeline) {
+        const name = state.CompanyName?.trim() || 'This company';
+        const subject = state.CompanyName?.trim() || 'this company';
+        const fix = state.OtherCompanyHasPipeline
+            ? `Choose another company, or please ask a Sales admin to link a pipeline to ${subject}.`
+            : `Please ask a Sales admin to link a pipeline to ${subject}.`;
+        return `${name} has no pipeline, so this deal can't be saved. ${fix}`;
+    }
+    if (!state.CompanyHasPipeline && !state.OtherCompanyHasPipeline) {
+        return 'No company has a pipeline, so deals can\'t be saved. Please ask a Sales admin to link a pipeline to a company.';
+    }
+    if (!state.CompanyID && state.HidePipelines) {
+        return 'Choose a company. Its pipeline decides the deal\'s stages.';
+    }
+    return CHOOSE_PIPELINE_MESSAGE;
 }

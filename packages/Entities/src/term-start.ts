@@ -17,12 +17,11 @@
  *
  * ── AND WHAT IT DEPENDS ON ──────────────────────────────────────────────────────────────────────────
  *
- * As of this writing orders OVERWRITES the column at confirm:
- * `OrderEntityServer.materializeSubscriptions` ends with "the line's stored service period reflects the
- * TERM, not what a user typed" and assigns `line.ServicePeriodStart = term.StartDate`, where the term
- * start comes from `SubscriptionBehavior.ComputeStartDate`. The companion orders issue changes that hook
- * to honour an explicitly-set value. Until it lands, everything in this module works and survives save
- * and reload, and the confirmed term still starts on the order date.
+ * Orders reads the column at confirm as the term start the line asks for. A stated date is used as
+ * given. With none, the term starts on the order date, or later where the product's subscription type
+ * defers the start or anchors it to a calendar date. A line that renews an existing subscription
+ * starts the day after that subscription's coverage ends, whatever the line states. After confirm,
+ * orders writes the settled term back to the line, so a confirmed line always carries a start.
  *
  * @module @mj-biz-apps/sales-entities
  */

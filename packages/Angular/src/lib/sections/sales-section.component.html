@@ -7,7 +7,7 @@
   that is not `mj-page-body-interior`, and the symptom is a page whose layout depends on window height.
 -->
 <mj-page-layout>
-  <mj-page-header [Title]="Title" Icon="fa-solid fa-handshake" [Subtitle]="Subtitle">
+  <mj-page-header [Title]="Title" Icon="fa-solid fa-handshake">
     <div actions>
       <!-- The shape is orders': an icon-only OUTLINE refresh, then ONE primary whose label follows the
            page. Every page here is about deals, so it is always "New deal" — but it is resolved from the
@@ -121,19 +121,19 @@
                       @if (Stack.BestOnly > 0) {
                         <button type="button" class="stack__seg stack__seg--best" [style.width]="StackPct(Stack.BestOnly)"
                                 [class.is-selected]="IsSelected('best')" [attr.aria-pressed]="IsSelected('best')" [attr.aria-label]="'Best case ' + Money(Stack.BestOnly)"
-                                (click)="SetInspect('best')" title="Best case: not counting deals already in Commit.">{{ Money(Stack.BestOnly) }}</button>
+                                (click)="SetInspect('best')" title="Best case: open deals in a Best case forecast category, expected to close in the period. Excludes deals already in Commit.">{{ Money(Stack.BestOnly) }}</button>
                       }
                       @if (Stack.PipeOnly > 0) {
                         <button type="button" class="stack__seg stack__seg--pipe" [style.width]="StackPct(Stack.PipeOnly)"
                                 [class.is-selected]="IsSelected('remainder')" [attr.aria-pressed]="IsSelected('remainder')" [attr.aria-label]="'Pipeline ' + Money(Stack.PipeOnly)"
-                                (click)="SetInspect('remainder')" title="Pipeline: open deals not in Commit or Best case.">{{ Money(Stack.PipeOnly) }}</button>
+                                (click)="SetInspect('remainder')" title="Pipeline: open deals the forecast counts, expected to close in the period, excluding Commit and Best case.">{{ Money(Stack.PipeOnly) }}</button>
                       }
                     </div>
                     <div class="legend">
                       <span title="Deals won in the period, by the day they closed."><i class="swatch swatch--closed"></i>Won {{ Money(Stack.Closed) }}</span>
                       <span title="Open deals in a Commit forecast category, expected to close in the period."><i class="swatch swatch--commit"></i>Commit {{ Money(Stack.Commit) }}</span>
-                      <span title="Not counting deals already in Commit."><i class="swatch swatch--best"></i>Best case {{ Money(Stack.BestOnly) }}</span>
-                      <span title="Open deals not in Commit or Best case."><i class="swatch swatch--pipe"></i>Pipeline {{ Money(Stack.PipeOnly) }}</span>
+                      <span title="Open deals in a Best case forecast category, expected to close in the period. Excludes deals already in Commit."><i class="swatch swatch--best"></i>Best case {{ Money(Stack.BestOnly) }}</span>
+                      <span title="Open deals the forecast counts, expected to close in the period, excluding Commit and Best case."><i class="swatch swatch--pipe"></i>Pipeline {{ Money(Stack.PipeOnly) }}</span>
                     </div>
                   }
                   @if (NoCloseDateCount && Period !== 'alltime') {
@@ -151,13 +151,13 @@
                 <div class="funnel-pad">
                   @if (LookupsError) {
                     <!-- The stage names and pipeline tabs come from the lookups; the counts below do not. -->
-                    <p class="part-note" role="status">Pipeline names could not be loaded: {{ LookupsError }}</p>
+                    <p class="part-note" role="status">{{ HidePipelines ? 'Company' : 'Pipeline' }} names could not be loaded: {{ LookupsError }}</p>
                   }
                   <!-- One pipeline at a time: each numbers its own stages, and two may share a stage name.
                        One pipeline picked in the filter bar shows it with no tabs. -->
                   @if (FunnelPipelineOptions.length > 1) {
-                    <div class="period__pills funnel__tabs" role="tablist" aria-label="Pipeline">
-                      @for (pipeline of FunnelPipelineOptions; track pipeline.ID) {
+                    <div class="period__pills funnel__tabs" role="tablist" [attr.aria-label]="HidePipelines ? 'Company' : 'Pipeline'">
+                      @for (pipeline of FunnelTabs; track pipeline.ID) {
                         <button
                           type="button"
                           role="tab"
@@ -165,7 +165,7 @@
                           [class.period__pill--on]="pipeline.ID === ActiveFunnelPipelineID"
                           [attr.aria-selected]="pipeline.ID === ActiveFunnelPipelineID"
                           (click)="SelectFunnelPipeline(pipeline.ID)">
-                          {{ pipeline.Name }}
+                          {{ pipeline.Label }}
                         </button>
                       }
                     </div>
@@ -194,7 +194,7 @@
 
             <div class="dash-split">
               <div class="card">
-                <div class="ch">Needs attention <span class="r">today, whatever the period</span></div>
+                <div class="ch"><span title="Counted as of today. The reporting period does not change these counts.">Needs attention</span></div>
                 <div class="queues">
                   @for (row of Attention; track row.Key) {
                     <button type="button" class="queue" (click)="SetInspect(row.Key)"
@@ -208,7 +208,7 @@
               </div>
 
               <div class="card">
-                <div class="ch">Expected to close <span class="r" title="Next 7 days, Rest of month and Later hold the open deals expected to close in that span and in the selected period. No date lists every open deal with no expected close date.">open deals</span></div>
+                <div class="ch"><span title="Next 7 days, Rest of month and Later hold the open deals expected to close in that span and in the selected period. No date lists every open deal with no expected close date.">Expected to close</span></div>
                 <div class="buckets">
                   @for (b of Buckets; track b.Key) {
                     <button type="button" class="bucket" (click)="SetInspect(b.Key)"
@@ -287,8 +287,11 @@
         <div class="wrap wrap--list" [hidden]="Page !== 'list'">
           <div class="sechead">
             <h2>All deals</h2>
-            <span class="r">Every deal, with the same columns as the dashboard's deal list — grid, cards, or timeline</span>
           </div>
+          <!-- The section's filter lists without the period: All Deals lists every deal (bc-aidp-next-golive#453). -->
+          @if (Page === 'list') {
+            <ng-container *ngTemplateOutlet="filterBar"></ng-container>
+          }
 
           @if (Loading || DetailLoading) {
             <mj-loading></mj-loading>
@@ -318,7 +321,6 @@
           <div class="wrap wrap--list">
             <div class="sechead">
               <h2>{{ Page === 'accounts' ? 'Accounts' : 'Contacts' }}</h2>
-              <span class="r">{{ Page === 'accounts' ? 'The organizations deals are sold to' : 'The people at those accounts' }}</span>
             </div>
             @if (Page === 'accounts' ? AccountEntityInfo : ContactEntityInfo; as entity) {
               <div class="mjs-viewer-host mjs-viewer-host--page">
@@ -332,6 +334,19 @@
             } @else {
               <div class="empty">{{ Page === 'accounts' ? 'Account' : 'Contact' }} entity metadata is not loaded.</div>
             }
+          </div>
+        }
+
+        <!-- ═════════════════════════ SETTINGS ═════════════════════════ -->
+        <!-- Listed only for users who may change Application Settings; see SalesSettings.CanChange. -->
+        @if (Page === 'settings') {
+          <div class="wrap wrap--list">
+            <div class="sechead">
+              <h2>Settings</h2>
+            </div>
+            <mjs-sales-settings-page
+              [HidePipelines]="HidePipelines"
+              (HidePipelinesChange)="OnHidePipelinesChanged()"></mjs-sales-settings-page>
           </div>
         }
 
@@ -373,6 +388,7 @@
               [CompanyIDs]="Filters.CompanyIDs"
               [PipelineIDs]="Filters.PipelineIDs"
               [SelectedPipelineID]="BoardPipelineID"
+              [HidePipelines]="HidePipelines"
               (SelectedPipelineIDChange)="OnBoardPipeline($event)"
               (DealOpened)="OpenDeal($event)"
               (StageMoved)="RefreshAfterSave()"></mjs-deal-board>
@@ -416,3 +432,12 @@
     </mj-left-nav-content>
   </mj-page-body>
 </mj-page-layout>
+
+<!-- Promoting an existing Organization or Person (D-PR3). Mounted with @if, like the line editor:
+     the dialog reads nothing until it is on screen. -->
+@if (PromoteOpen) {
+  <mjs-promote-party-dialog
+      [PromoteKind]="PromoteKind"
+      (PartyChosen)="OnPromoted($event)"
+      (Closed)="ClosePromote()"></mjs-promote-party-dialog>
+}

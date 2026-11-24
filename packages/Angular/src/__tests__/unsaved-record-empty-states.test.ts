@@ -45,7 +45,7 @@ const PANELS: Panel[] = [
         message: 'Save the deal first. Team members are recorded against it once it exists.',
     },
     {
-        label: 'Buying team',
+        label: 'Customer contacts',
         source: DEAL,
         anchor: 'SectionKey="buying-team"',
         message: 'Save the deal first. Contacts are linked to it once it exists.',
@@ -168,5 +168,69 @@ describe('a record that has not been saved is told why a related panel is empty'
                 ).toBe(true);
             }
         }
+    });
+});
+
+/**
+ * golive#428: reps read "Buying team" as "people with a buying role only" and had nowhere to put
+ * anyone else, although the role on a row has always been optional. The section is renamed, says so,
+ * shows the deal's primary and billing contacts above its grid, and Account & people points to it.
+ *
+ * These read the template with its HTML comments removed, so a sentence quoted in a comment cannot
+ * stand in for one the page renders. What the summary line prints is tested in
+ * deal-contacts-summary.test.ts.
+ */
+describe('the deal Customer contacts section', () => {
+    const withoutComments = (source: string): string => source.replace(/<!--[\s\S]*?-->/g, '');
+    const start = DEAL.indexOf('SectionKey="buying-team"');
+    const end = DEAL.indexOf('export class MJSDealBuyingTeamPanel', start);
+    const panel = withoutComments(DEAL.slice(start, end));
+    const saved = panel.indexOf('@if (Record.IsSaved)');
+    const grid = panel.indexOf('<mj-explorer-entity-data-grid');
+    /** True when `text` sits in the saved-deal branch, above the grid. */
+    const aboveGrid = (text: string): boolean => {
+        const found = panel.indexOf(text);
+        return found > saved && found < grid;
+    };
+
+    it('is named for everyone on the customer side, not for buying roles', () => {
+        expect(start).toBeGreaterThan(-1);
+        expect(end).toBeGreaterThan(start);
+        expect(saved).toBeGreaterThan(-1);
+        expect(grid).toBeGreaterThan(saved);
+        expect(panel).toContain('SectionName="Customer contacts"');
+    });
+
+    it('says a buying role is optional, above the grid of a saved deal', () => {
+        expect(aboveGrid('>Add anyone else involved on the customer side. A buying role is optional.</p>')).toBe(true);
+    });
+
+    it('shows the contacts summary above the grid, only when there is one, and where they are set', () => {
+        expect(aboveGrid('@if (ContactsSummary; as summary) {')).toBe(true);
+        expect(aboveGrid('>{{ summary }}. Set them under Account &amp; people.</p>')).toBe(true);
+    });
+
+    it('never reads a contact name in the template, where field security could not be checked first', () => {
+        expect(panel).not.toContain('Record.PrimaryContact');
+        expect(panel).not.toContain('Record.BillingContact');
+    });
+
+    it('styles the lines it adds', () => {
+        expect(panel).toContain('class="mjs-deal-hint"');
+        expect(panel).toMatch(/styles: \[[^\]]*CONTACTS_HINT_STYLES[^\]]*\]/);
+        expect(DEAL).toMatch(/const CONTACTS_HINT_STYLES =\s*'\.mjs-deal-hint \{/);
+    });
+
+    it('is where Account & people sends a rep with more people to add, once the deal is saved', () => {
+        const partyStart = DEAL.indexOf('SectionKey="party"');
+        const party = withoutComments(DEAL.slice(partyStart, DEAL.indexOf('export class MJSDealPartyPanel', partyStart)));
+        expect(partyStart).toBeGreaterThan(-1);
+        const pointer = party.indexOf('>Add more customer contacts under Customer contacts. Add colleagues under Internal team.</small>');
+        expect(pointer).toBeGreaterThan(-1);
+        // Inside the field grid, and inside its own saved-deal guard: the last one opened before it.
+        expect(pointer).toBeGreaterThan(party.indexOf('<div class="mjs-fields">'));
+        expect(party.lastIndexOf('@if (', pointer)).toBe(party.lastIndexOf('@if (ShowsMorePeoplePointer) {', pointer));
+        expect(DEAL).toMatch(/get ShowsMorePeoplePointer\(\): boolean \{\s*return this\.Record\?\.IsSaved === true;/);
+        expect(party.slice(party.lastIndexOf('<small', pointer), pointer)).toContain('mjs-field--span');
     });
 });

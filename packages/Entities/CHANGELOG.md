@@ -1,5 +1,93 @@
 # @mj-biz-apps/sales-entities
 
+## 6.32.0
+
+### Minor Changes
+
+- 483cb76: Installed databases now get this release's metadata (V202611182210 Metadata_Sync): the new SQL of seven dashboard and reporting queries with their new and updated fields, the B2B pipeline's close-won contract type as the code `ORDER_FORM`, the Sales: Pipeline view's Amount and Currency columns, the Close Deal and Reopen Deal type definitions, and Deals' three predicted-win fields taken off the generated form and default views. A host that changed the pipeline policy or the view layout keeps its own.
+- b582eea: Post-go-live sales consolidation:
+  - Enforce single-holder (`AllowsMultiplePerDeal = 0`) and employee-only owner (`IsOwnerRole = 1`) rules on `DealTeamMember` saves, and clear `Deal.OwnerEmployeeID` when the owner row is deactivated.
+  - Record deal close and reopen transitions in the activity timeline, verify `DealID` existence in `ActivityWriterService.LogActivity`, and refusal-check `PeriodEnd < PeriodStart` in `RunSalesForecastSnapshotAction`.
+  - Show `WeightedAmount` on open deals and hide it on closed deals, differentiate close-stamp refusal hints (`ActualCloseDate` vs `ClosedAt`/`ClosedByUserID`), preserve the current inactive closing status in the status dropdown, and lock non-carve-out fields across all form panels when a deal is closed.
+  - Align dashboard, win-rate, bookings, forecast, involvement, and unconfirmed-won-order queries on `CalendarDayIn` (`BusinessTimeZone()`) and `DealStatusType` flags, format pipeline view `Amount` as currency, and compare board idle days by calendar day.
+  - Auto-number `DealPaymentSchedule.DisplayOrder` on insert, guard `MJSDealSchedulePanel.readRows` against out-of-order replies, and flag discounted line cards as `Discount not covered` when an earlier approval covers less than orders' current priced discount.
+
+### Patch Changes
+
+- 2565036: The refusal for a discount typed between 0 and 1 now names a rounded percent ("7%") instead of floating-point noise ("7.000000000000001%"). Fixes #295.
+
+## 6.31.1
+
+## 6.31.0
+
+### Minor Changes
+
+- 99e202b: A pipeline can route its close-won tasks to a role: the new `Pipeline.CloseWonAssigneeRoleID` (Close Won Assignee Role) assigns each Order Review and Contract Processing task to that MJ role, so every holder of the role sees it. When a pipeline has both a Close Won Assignee person and a role, the person gets the task.
+- 4cb29a0: `V202611121753__v6.31.x__ISA_Parent_Computed_Columns.sql` and its PostgreSQL counterpart bring three
+  inherited parent COMPUTED columns into this app's IS-A views, which CodeGen emits but no migration
+  carried: `Organization.WebsiteDomain` onto `vwSalesAccounts`, and `Person.DisplayName` and
+  `Person.EmailDomain` onto `vwSalesContactsGenerated` (the app-owned `vwSalesContacts` wrapper is
+  `SELECT g.*`, and CodeGen's own `sp_refreshview` call carries them through to it). MJ's
+  `InheritedParentColumns` selects a parent field that is `IsVirtual` AND `IsComputed`, because such a
+  column lives on the parent table; the IS-A parent-field sync that MJ Setup runs skips virtual fields,
+  so these three were absent from the views with no field row and no failure to show it. Captured from a
+  single CodeGen pass against MJ core v6.2.1; a second pass emitted nothing, and applying the migration
+  to a clean pre-drift database and regenerating emitted no SQL at all.
+
+  `metadata/entity-fields/.sales-contact-name-field.json` clears `IsNameField` and
+  `AutoUpdateIsNameField` on `Sales Contacts.FirstName`, so the pinned `DisplayNameAndEmail` stays the
+  only flagged name field. CodeGen picks one name field per entity and clears the others, but only those
+  with `AutoUpdateIsNameField = 1` — a pinned field is never touched in either direction. The pinned
+  field here is also ineligible to win, because `isFieldEligibleForNameField` rejects any `IsVirtual`
+  field that is not an inherited IS-A column and `DisplayNameAndEmail` is a sales-only concat in
+  `vwSalesContactsGenerated` rather than a column on `Person`. So on the pass that added the two
+  inherited Person columns, the reconciler fell through to its AI-ranked candidates, picked `FirstName`,
+  and could not clear the pinned one — leaving two fields flagged, with the view generator taking the
+  lower `Sequence`. Every denormalized contact-name column in the schema was then regenerated to join
+  `FirstName` — `SalesContact` on Deal Contact Roles, `PrimaryContact`/`BillingContact` on Deals,
+  `DefaultPrimaryContact`/`DefaultBillingContact` on Sales Accounts — narrowing `nvarchar(753)` to
+  `nvarchar(100)` and showing a bare first name on every deal and account surface. It also inverted
+  golive#259, whose picker fix is built by subtracting the name field from the column plan.
+
+  Also fixes `DealEntityServer.defaultCreationDateOnCreate()`, which read a private `_NeverSet` through
+  a cast; MJ 6.2.0 renamed that backing field and exposed a public `NeverSet` getter, so the cast read
+  `undefined` and every new deal silently kept its `NewRecord()` instant instead of the server save
+  clock (#532).
+
+- 37983bb: Installed databases now get the two promote-picker queries ("Sales: Party Lookup Promotable Accounts" and "Sales: Party Lookup Promotable Contacts") and Sales Contacts' FirstName marked as not a name field, with auto-update off (V202611131630 Metadata_Sync). Without the queries the promote dialog finds nothing; without the name-field change CodeGen can flag FirstName as a second name field and deal and account screens show a bare first name.
+
+## 6.30.0
+
+### Minor Changes
+
+- 11e699f: The v6.28.x Metadata_Sync resolves each query field's `SourceEntityFieldID` on the target database from its source entity and field name, with the shipped ID first, and leaves it NULL when the field is not there. It wrote the build database's entity field IDs as literals, which differ between databases, so the install failed on `FK_QueryField_SourceEntityField`. The migration has not been applied anywhere, so it is corrected in place, Postgres counterpart included.
+
+## 6.29.0
+
+### Minor Changes
+
+- 00c22d3: The v6.28.x Metadata_Sync resolves the "Sales: Confirmed Orders Missing Agreement" query's category to this app's own Sales category (its ID first, then by name). It looked the category up by name alone, which fails with "Subquery returned more than 1 value" on a database holding two categories named Sales, so 6.28.0 could not install there. The migration has not been applied anywhere, so it is corrected in place. The Postgres counterpart gets the same lookup.
+
+## 6.28.0
+
+### Minor Changes
+
+- 8be0442: Add the `Sales: Confirmed Orders Missing Agreement` query: confirmed orders with no deal, no contract, no signed date, or no file in the Executed Agreement category, one row per order with a flag for each check. Web orders, returns, subscription auto-renewals and migrated orders are left out; Payment Link orders are checked for a deal only (golive #388).
+- acb1c0a: Release seed for the confirmed-orders check: `V…__v6.28.x__Metadata_Sync` creates the `Sales: Confirmed Orders Missing Agreement` query with its fields, parameters and query entities, and sets its approved fingerprint while it has none. Every record is create-only, guarded on its ID or key, so a host that already has the query keeps its copy. It has a Postgres counterpart.
+
+## 6.27.0
+
+### Minor Changes
+
+- edf5a94: Release seed for the deal-delete permission model: `V…__v6.27.x__Metadata_Sync` creates the `MJ.BizApps.Sales.Deal.Delete` and `.DeleteOwn` authorizations, the Sales User and Sales Admin roles, their read and delete permissions on Deals, and the grants (Sales User → DeleteOwn; Sales Admin and Developer → Delete). Every record is create-only, guarded on its ID or natural key, so a host's existing roles and later changes are kept. Assigning users to the roles is left to each host.
+
+## 6.26.0
+
+### Minor Changes
+
+- ede0517: Move to MemberJunction's 6.2 LTS line: every `@memberjunction/*` range and the core/global overrides are `^6.2.1` (exact `6.2.1` devDependency anchors), and `mjVersionRange` is `>=6.2.1 <7.0.0`. Hosts must run MJ 6.2.1 or later to install this release.
+- 24c0b46: The 6.26 Metadata_Sync ships the HidePipelines Sales application setting ("false"), so a host that upgrades by migration gets it as one that ran `mj sync push` does. It is create-only: a host that already has the setting keeps its value. It has a Postgres counterpart.
+
 ## 6.25.0
 
 ### Minor Changes

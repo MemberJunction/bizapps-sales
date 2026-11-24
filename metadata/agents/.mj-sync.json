@@ -1,0 +1,15 @@
+{
+  "entity": "MJ: AI Agents",
+  "filePattern": ".*.json",
+  "pull": {
+    "createNewFileIfNotFound": true,
+    "newFileName": ".sales-agents.json",
+    "appendRecordsToExistingFile": true,
+    "updateExistingRecords": true,
+    "ignoreNullFields": true,
+    "ignoreVirtualFields": true,
+    "lookupFields": {
+      "TypeID": { "entity": "MJ: AI Agent Types", "field": "Name" }
+    }
+  }
+}

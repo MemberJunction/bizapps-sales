@@ -373,8 +373,8 @@ describe('creating a deal, on the section it opens on', () => {
 /**
  * THE RAIL ITEMS THAT SHOWED NOTHING AT ALL.
  *
- * On a new deal, selecting "What's being sold", "Internal team" or "Buying team" rendered a blank
- * page — just the hero. Each panel already had an @else branch explaining that the deal must be saved
+ * On a new deal, selecting "What's being sold", "Internal team" or "Buying team" (now "Customer contacts")
+ * rendered a blank page — just the hero. Each panel already had an @else branch explaining that the deal must be saved
  * first, and none of it was reachable: all three carry [DefaultExpanded]="false", and a collapsed
  * panel in left-nav renders no body, so the explanation existed and could not be read.
  *
@@ -389,7 +389,7 @@ describe('the related sections on a new deal', () => {
     it.each([
         ["What's being sold", 'lines'],
         ['Internal team', 'internal-team'],
-        ['Buying team', 'buying-team'],
+        ['Customer contacts', 'buying-team'],
     ])('%s opens on a new deal, so its explanation can be read', (_label, key) => {
         const at = PANELS.indexOf(`SectionKey="${key}"`);
         expect(at, `the ${key} panel must exist`).toBeGreaterThan(-1);

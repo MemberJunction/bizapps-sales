@@ -38,6 +38,16 @@
 import { EscapeSQLString } from '@memberjunction/global';
 import type { BizAppsRelatedLink, ResolvedRelatedChip } from '@mj-biz-apps/common-ng';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
+import { NoExecutedAgreementWarning, type OrderAgreementWarning, type OrderContractRow } from './executed-agreement-warning';
+
+/* The contract lookup and the warning rule moved to `executed-agreement-warning.ts` (golive #490) so
+ * the deal hero uses the same ones. Re-exported so this module's callers and tests keep one import. */
+export {
+    ContractLookupFilter,
+    NoExecutedAgreementWarning,
+    type OrderAgreementWarning,
+    type OrderContractRow,
+} from './executed-agreement-warning';
 
 /**
  * What the rule needs to know about the deal behind an order, as the deal row holds it.
@@ -57,7 +67,7 @@ export interface OrderRelatedLinkState {
     ContractID?: string | null;
     /**
      * The contract row the panel read (golive#445): `Deal.ContractID`'s, or the one found by
-     * {@link ContractLookupFilter}'s fallback. Absent when no read was made, the read failed, or no
+     * `ContractLookupFilter`'s fallback. Absent when no read was made, the read failed, or no
      * contract exists. When present, the panel draws the contract chip itself, with number and status.
      */
     Contract?: OrderContractRow | null;
@@ -80,19 +90,6 @@ export interface OrderRelatedLinkState {
     OrderVoided?: boolean;
 }
 
-/** The columns of `vwContracts` the order header shows. */
-export interface OrderContractRow {
-    ID: string;
-    ContractNumber: string | null;
-    /** `vwContracts.State`: Draft, Executed, Active, Expired, Superseded or Terminated. */
-    State: string | null;
-    /**
-     * `vwContracts.IsAwaitingDocument`: the contract's type requires executed paper and no file in the
-     * Executed Agreement category is linked. Always false for a type that needs no paper (Payment Link).
-     */
-    IsAwaitingDocument: boolean | null;
-}
-
 /** The `MJ: Files` row that holds a contract's executed agreement. */
 export interface OrderAgreementFile {
     ID: string;
@@ -106,9 +103,6 @@ export interface OrderAgreementFile {
  * spelling is repeated here and pinned by a test.
  */
 export const EXECUTED_AGREEMENT_FILE_CATEGORY = 'Executed Agreement';
-
-/** The entity name contracts stamps in `CreatingEntityID` for a contract a deal's close created. */
-const DEAL_ENTITY_NAME = MJS_ENTITIES.Deal;
 
 /** `true` for a value that actually names a record. */
 function holds(id: string | null | undefined): id is string {
@@ -213,25 +207,6 @@ export function OrderRelatedLinksKey(recordID: string | null | undefined, state:
     ].join(':');
 }
 
-/**
- * The filter that finds the contract behind a deal (golive#445).
- *
- * `Deal.ContractID` first: it is the link the close wrote. When it is empty, the contract the deal's
- * close created is still findable by its polymorphic provenance pair, `CreatingEntity` = Deals and
- * `CreatingRecordID` = the deal (`LiveContractsSeam` stamps both). An empty `ContractID` with a contract
- * behind it is a deal whose link was never written, which is the case the issue suspects for
- * ORD-004297. `null` when there is no deal to look by.
- */
-export function ContractLookupFilter(deal: { DealID?: string | null; ContractID?: string | null }): string | null {
-    if (holds(deal.ContractID)) {
-        return `ID = '${EscapeSQLString(deal.ContractID)}'`;
-    }
-    if (!holds(deal.DealID)) {
-        return null;
-    }
-    return `CreatingEntity = '${EscapeSQLString(DEAL_ENTITY_NAME)}' AND CreatingRecordID = '${EscapeSQLString(deal.DealID)}'`;
-}
-
 /** The filter on `MJ: File Entity Record Links` that lists the files linked to one contract. */
 export function ContractFileLinksFilter(contractID: string): string {
     return `Entity = '${EscapeSQLString(MJS_FOREIGN_ENTITIES.Contract)}' AND RecordID = '${EscapeSQLString(contractID)}'`;
@@ -268,12 +243,6 @@ export interface OrderContractView {
     Warning: OrderAgreementWarning | null;
 }
 
-/** The warning chip's text and its longer explanation. */
-export interface OrderAgreementWarning {
-    Label: string;
-    Detail: string;
-}
-
 /** The contract chip's text: its number and status, e.g. `CTR-000123 · Active`. */
 export function ContractChipName(contract: OrderContractRow): string {
     return [contract.ContractNumber, contract.State].filter(holds).join(' · ');
@@ -306,43 +275,6 @@ export function OrderContractChips(state: OrderRelatedLinkState): OrderContractV
     }
     const awaiting = contract.IsAwaitingDocument === true && !agreement && !warning;
     return { Chips: chips, AwaitingNote: awaiting ? 'Awaiting signed agreement' : null, Warning: warning };
-}
-
-/**
- * The "No executed agreement" warning (bc-aidp-next-golive#443, g443.1 A: warn, sending unchanged).
- *
- * The finance report of orders missing a deal, contract or executed agreement is a sales query of
- * its own (bc-aidp-next-golive#388); this chip is the order form's half of the same control.
- *
- * - ONLY FOR AN ORDER A WON DEAL NAMES (g443.2 A). The panel only finds a deal through `Deal.OrderID`,
- *   so renewals, checkout orders and conversions never reach this. An open or lost deal has no
- *   agreement to expect yet. A reversal reaches the deal through the order it reverses and is
- *   skipped: the deal names the original order, and the warning belongs there.
- * - NOT FOR A VOIDED ORDER, which sends no invoice, so "Invoices still send" would be untrue.
- * - THE GAP is no contract, or a contract `vwContracts` reports as awaiting its executed agreement. A
- *   contract type that needs no paper (`RequiresExecutedDocument = 0`, Payment Link) never reports
- *   awaiting, so it counts as covered.
- * - SILENT WHEN UNSURE. A deal status or contract lookup that did not answer produces no warning: a
- *   chip saying "no contract" because a read was refused would be a false alarm finance learns to skip.
- *
- * Apart from voided, the order's status is not consulted: the chip also warns on a draft order of a
- * won deal, which is when the gap can still be closed before sending.
- */
-export function NoExecutedAgreementWarning(state: OrderRelatedLinkState): OrderAgreementWarning | null {
-    if (!holds(state.DealID) || state.DealIsWon !== true || state.ContractRead !== true) {
-        return null;
-    }
-    if (state.ViaReversedOrder === true || state.OrderVoided === true) {
-        return null;
-    }
-    const contract = state.Contract;
-    if (!contract) {
-        return { Label: 'No executed agreement', Detail: 'This order comes from a won deal with no contract. Invoices still send.' };
-    }
-    if (contract.IsAwaitingDocument === true) {
-        return { Label: 'No executed agreement', Detail: 'The contract has no file marked as its executed agreement. Invoices still send.' };
-    }
-    return null;
 }
 
 function chip(key: string, label: string, name: string, icon: string, entityName: string, recordID: string): ResolvedRelatedChip {
