@@ -117,7 +117,10 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
         } catch (err) {
             // Fail closed on a READ failure, the same way the stage/pipeline check does: a lookup that
             // errored proves nothing, and the message names the lookup rather than the row.
-            return this.refuseSave(`could not check this row's role against the deal's team: ${err}`);
+            return this.refuseSave(
+                `This team member's role could not be checked against the rest of the deal team, so ` +
+                    `nothing was saved. Try again. Details: ${err}`,
+            );
         }
         if (refusal) {
             return this.refuseSave(refusal);
