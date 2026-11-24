@@ -46,11 +46,11 @@
     "@memberjunction/generic-database-provider": "^6.3.0-edge.1",
     "@memberjunction/global": "^6.3.0-edge.1",
     "@memberjunction/sqlserver-dataprovider": "^6.3.0-edge.1",
-    "@mj-biz-apps/common-activity-sync": "^5.67.2",
-    "@mj-biz-apps/common-entities": "^5.67.2",
-    "@mj-biz-apps/orders-entities": "^5.40.0",
-    "@mj-biz-apps/tasks-core": "^1.7.0",
-    "@mj-biz-apps/tasks-entities": "^1.7.0"
+    "@mj-biz-apps/common-activity-sync": ">=5.67.2 <7.0.0",
+    "@mj-biz-apps/common-entities": ">=5.67.2 <7.0.0",
+    "@mj-biz-apps/orders-entities": ">=5.40.0 <7.0.0",
+    "@mj-biz-apps/tasks-core": ">=1.7.0 <7.0.0",
+    "@mj-biz-apps/tasks-entities": ">=1.7.0 <7.0.0"
   },
   "repository": {
     "type": "git",
