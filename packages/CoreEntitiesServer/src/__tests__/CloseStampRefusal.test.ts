@@ -205,6 +205,7 @@ describe('golive#306 — filling a blank AccountID on a closed deal', () => {
             AccountID: newAccount,
             Fields: fields,
             Companions: [],
+            Team: { Items: [], Removed: [] },
             RosterDrivesThisSave: false,
             _orderStatusWarnings: [] as string[],
             GetFieldByName: (name: string) => fields.find((f) => f.Name === name),

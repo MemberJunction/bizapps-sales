@@ -168,6 +168,21 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
         // row is removed from the deal it is on in the database, not one an unsaved edit points at.
         const dealID = this.priorSnapshot().dealID;
 
+        /**
+         * NO ONE IS REMOVED FROM A CLOSED DEAL'S TEAM (bc-aidp-next-golive#465) — the deal decides,
+         * through `DealEntityServer.StandaloneTeamRemovalRefusal`, so this path and the deal's own save
+         * cannot disagree about what "closed" means.
+         *
+         * Only a row deleted ON ITS OWN is checked here (the Internal team grid, an API call). A removal
+         * staged on the deal's `Team` collection — including `SetOwner`'s owner swap — reaches this
+         * override inside the deal's graph save (`PartOfGraphSave`), and `DealEntityServer.checkCloseLock`
+         * has already ruled on it there, owner swap included.
+         */
+        const refusal = PartOfGraphSave(options) ? null : await this.closedDealRefusal(dealID);
+        if (refusal) {
+            return this.refuseSave(refusal, 'delete');
+        }
+
         // A deal is never left without an owner by deleting its last owner row (sales#568).
         const lastOwner = PartOfGraphSave(options) ? null : await this.lastOwnerRefusal(dealID, null);
         if (lastOwner) {
@@ -235,6 +250,29 @@ export class DealTeamMemberEntityServer extends DealTeamMemberEntity {
             view,
             user: this.ContextCurrentUser,
         });
+    }
+
+    /**
+     * The refusal when the deal this row is on is closed, or null when it is open or there is no deal.
+     * Fails closed: a deal that cannot be read cannot be shown to be open.
+     */
+    private async closedDealRefusal(dealID: string | null): Promise<string | null> {
+        if (!dealID) {
+            return null;
+        }
+        try {
+            const provider = this.ProviderToUse as unknown as IMetadataProvider;
+            const deal = await provider.GetEntityObject<DealEntityServer>(DEAL_ENTITY, this.ContextCurrentUser);
+            if (!(await deal.Load(dealID))) {
+                return `Deal ${dealID} could not be read to check whether it is closed, so no one was removed from its team.`;
+            }
+            return await deal.StandaloneTeamRemovalRefusal();
+        } catch (err) {
+            return (
+                `Deal ${dealID} could not be checked for being closed, so no one was removed from its team. ` +
+                (err instanceof Error ? err.message : String(err))
+            );
+        }
     }
 
     /**

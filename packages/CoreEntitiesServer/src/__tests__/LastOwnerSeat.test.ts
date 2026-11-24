@@ -102,6 +102,8 @@ describe('DealEntityServer.LastOwnerSeatRefusal', () => {
 type MemberOpts = {
     /** What the deal answers; `throw` makes the check itself fail. */
     dealAnswer?: string | null | 'throw';
+    /** What the deal answers to the closed-deal removal check; null (open) by default. */
+    closedAnswer?: string | null;
     loadFails?: boolean;
     dirty?: string[];
     current?: { DealID?: string; DealRoleID?: string; IsActive?: boolean };
@@ -136,6 +138,7 @@ function member(opts: MemberOpts) {
             Load: async () => !opts.loadFails,
             Team: { Load: async () => true },
             Save: async () => { savedDeals.push(DEAL_A); return true; },
+            StandaloneTeamRemovalRefusal: async () => opts.closedAnswer ?? null,
             LastOwnerSeatRefusal: async (memberID: string, after: OwnerSeatCandidate | null) => {
                 asked.push({ memberID, after });
                 if (opts.dealAnswer === 'throw') throw new Error('owner role unreadable');
@@ -188,7 +191,17 @@ describe('deleting a team row on its own', () => {
         const m = member({ loadFails: true });
         const { result } = await withBase(m.instance, 'Delete', () => m.instance.Delete());
         expect(result).toBe(false);
-        expect(m.refusals[0].Message).toContain('could not be read to check that it keeps an owner');
+        // The closed-deal check loads the deal first, so its sentence is the one that reports the failure.
+        expect(m.refusals[0].Message).toContain('could not be read to check');
+    });
+
+    it('is refused on a closed deal before the owner seat is asked', async () => {
+        const m = member({ closedAnswer: 'This deal is closed.', dealAnswer: null });
+        const { result, baseCalls } = await withBase(m.instance, 'Delete', () => m.instance.Delete());
+        expect(result).toBe(false);
+        expect(baseCalls).toBe(0);
+        expect(m.refusals).toEqual([expect.objectContaining({ Message: 'This deal is closed.', Type: 'delete' })]);
+        expect(m.asked).toEqual([]);
     });
 });
 
@@ -232,6 +245,15 @@ describe('editing a team row on its own', () => {
  */
 describe('a team row saved or deleted as part of the deal\'s graph save', () => {
     const graphOptions = { GraphVisited: new Set<string>() };
+
+    it('skips the closed-deal check on delete; the deal\'s own save rules on a staged removal', async () => {
+        const m = member({ closedAnswer: 'This deal is closed.', dealAnswer: null });
+        const { result, baseCalls } = await withBase(m.instance, 'Delete', () =>
+            (m.instance as unknown as { Delete(o: object): Promise<boolean> }).Delete(graphOptions));
+        expect(result).toBe(true);
+        expect(baseCalls).toBe(1);
+        expect(m.refusals).toEqual([]);
+    });
 
     it('is not asked about the owner seat on delete', async () => {
         const m = member({ dealAnswer: MESSAGE });
