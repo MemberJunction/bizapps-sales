@@ -74,7 +74,9 @@ function hasKind(value: unknown, kind: ValueKind): boolean {
 /** The first problem with one block's keys, or null. `where` names the block in the message. */
 function keyProblem(block: Record<string, unknown>, keys: Record<string, PolicyKey>, where: string): string | null {
     for (const [name, value] of Object.entries(block)) {
-        const rule = keys[name];
+        // Own keys only: `keys[name]` on a plain object finds built-ins such as `constructor` or `toString`,
+        // and `__proto__` (an ordinary key once JSON.parse has run) would skip this check (#474).
+        const rule = Object.hasOwn(keys, name) ? keys[name] : undefined;
         if (!rule) {
             return `${where} has a setting the close does not use: "${name}". Allowed: ${Object.keys(keys).join(', ')}.`;
         }
