@@ -27,7 +27,7 @@ export interface PartyChoice {
 }
 
 /**
- * The account, primary contact, billing contact and buying team as one list, one line per record.
+ * The account, primary contact, billing contact and the deal's other contacts as one list, one line per record.
  *
  * Only the account and primary contact start ticked: those are what a plain log linked before #408, so
  * not touching the list writes the same links as before.
@@ -48,7 +48,7 @@ export function DealPartyChoices(deal: DealPartyFields | null, team: readonly Bu
     add('Person', deal?.PrimaryContactID ?? null, deal?.PrimaryContact ?? null, 'Primary contact', true);
     add('Person', deal?.BillingContactID ?? null, deal?.BillingContact ?? null, 'Billing contact', false);
     for (const member of team) {
-        add('Person', member.SalesContactID, member.SalesContact, member.BuyingRoleType || 'Buying team', false);
+        add('Person', member.SalesContactID, member.SalesContact, member.BuyingRoleType || 'Customer contact', false);
     }
     return list;
 }
