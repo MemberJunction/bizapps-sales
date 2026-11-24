@@ -15,23 +15,23 @@
   "mjVersionRange": ">=6.3.0-edge.1 <7.0.0",
   "dependencies": {
     "mj-bizapps-common": {
-      "version": ">=5.67.2 <6.0.0",
+      "version": ">=5.67.2 <7.0.0",
       "repository": "https://github.com/MemberJunction/bizapps-common"
     },
     "mj-bizapps-tasks": {
-      "version": ">=1.7.0 <2.0.0",
+      "version": ">=1.7.0 <7.0.0",
       "repository": "https://github.com/MemberJunction/bizapps-tasks"
     },
     "mj-bizapps-accounting": {
-      "version": ">=0.2.0 <2.0.0",
+      "version": ">=0.2.0 <7.0.0",
       "repository": "https://github.com/MemberJunction/bizapps-accounting"
     },
     "mj-bizapps-orders": {
-      "version": ">=5.39.0 <6.0.0",
+      "version": ">=5.39.0 <7.0.0",
       "repository": "https://github.com/MemberJunction/bizapps-orders"
     },
     "mj-bizapps-contracts": {
-      "version": ">=0.1.1 <2.0.0",
+      "version": ">=0.1.1 <7.0.0",
       "repository": "https://github.com/MemberJunction/bizapps-contracts"
     }
   },
