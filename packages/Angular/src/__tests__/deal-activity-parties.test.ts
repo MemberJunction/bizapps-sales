@@ -36,7 +36,7 @@ describe('the compose checklist', () => {
         ]);
         const pat = list.filter((p) => p.Kind === 'Person');
         expect(pat).toHaveLength(1);
-        expect(pat[0]).toMatchObject({ Checked: true, Labels: ['Primary contact', 'Billing contact', 'Buying team'] });
+        expect(pat[0]).toMatchObject({ Checked: true, Labels: ['Primary contact', 'Billing contact', 'Customer contact'] });
     });
 
     it('skips what the deal does not have', () => {
