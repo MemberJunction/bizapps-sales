@@ -536,8 +536,8 @@ describe('the status hints point at this control, not away from it', () => {
     })();
     const hints = [...statusField.matchAll(/class="mjs-field__hint">([^<]+)</g)].map((m) => m[1].trim());
 
-    it('has one hint for each side of the lock, one for an unsaved deal, and one for a status that no longer exists', () => {
-        expect(hints.length, 'an unsaved-deal hint, a missing-status hint, a closed-deal hint and an open-deal hint').toBe(4);
+    it('has one hint for each side of the lock and one for a status that no longer exists', () => {
+        expect(hints.length, 'a missing-status hint, a closed-deal hint and an open-deal hint').toBe(3);
     });
 
     it('tells a deal whose status is gone how to repair it from here (#402)', () => {
@@ -552,14 +552,15 @@ describe('the status hints point at this control, not away from it', () => {
          * first save. The open-deal hint said both "Open." and "use Close on the Close panel" to it.
          * The unsaved branch has to come first, or the open-deal hint still wins on a new deal.
          */
-        const unsaved = hints.find((h) => h.startsWith('No status yet.'));
-        expect(unsaved, 'an unsaved-deal hint').toBeDefined();
-        expect(unsaved).toMatch(/saves as open/);
-        expect(unsaved).toMatch(/after saving/);
-        const unsavedAt = statusField.indexOf('@if (!Record.IsSaved)');
-        const openAt = statusField.indexOf('Open. Pick a closing status');
-        expect(unsavedAt, 'the unsaved branch').toBeGreaterThan(-1);
-        expect(unsavedAt, 'the unsaved branch is checked before the open-deal hint').toBeLessThan(openAt);
+        // The unsaved deal gets no hint at all: every hint sits inside the saved-deal block.
+        expect(hints.find((h) => h.startsWith('No status yet.')), 'the unsaved-deal hint is gone').toBeUndefined();
+        const savedAt = statusField.indexOf('@if (Record.IsSaved) {');
+        expect(savedAt, 'the saved-deal block').toBeGreaterThan(-1);
+        for (const opening of ['Missing.', 'Closed.', 'Open.']) {
+            const at = statusField.indexOf(`class="mjs-field__hint">${opening}`);
+            expect(at, `the "${opening}" hint is inside the saved-deal block`).toBeGreaterThan(savedAt);
+        }
+        expect(statusField.slice(0, savedAt), 'no hint is rendered before the saved-deal block').not.toMatch(/mjs-field__hint/);
     });
 
     it('tells an OPEN deal it can close from here', () => {

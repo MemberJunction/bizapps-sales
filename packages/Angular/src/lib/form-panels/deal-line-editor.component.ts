@@ -455,7 +455,7 @@ interface RemoteOperationRouter {
                             @if (ServicePeriodBackwards) {
                                 <small class="mjs-le__error">The service end is before the start.</small>
                             } @else if (ServicePeriodMissing) {
-                                <small class="mjs-le__hint">Both dates are needed before the order can be confirmed.</small>
+                                <small class="mjs-le__hint">Both dates are required before the order can be confirmed.</small>
                             }
                         </div>
                     }
@@ -517,10 +517,8 @@ interface RemoteOperationRouter {
                         <p class="mjs-le__muted">
                             @if (PricingNote) {
                                 {{ PricingNote }}
-                            } @else if (ShowPricePicker) {
-                                Priced by Orders. Choose another of the product's prices above, or record a discount.
                             } @else {
-                                Priced by Orders. Change the price with a discount — it is recorded as one.
+                                <span data-testid="line-price-source">{{ PriceSourceNote }}</span>
                             }
                         </p>
                     </div>
@@ -1212,6 +1210,23 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
             'back on Default before the product can be changed.';
     }
 
+    /**
+     * What the note under Unit price says about where the figure came from. It follows the line:
+     * a price moved off its default and a discount each change the sentence, so the note never
+     * says "calculated" about a price somebody set.
+     */
+    public get PriceSourceNote(): string {
+        const discounted = this.DiscountPercent > 0;
+        if (this.ProductLockedByPrice) {
+            const restore = this.ShowPricePicker ? ' To restore the calculated price, select the default price above.' : '';
+            return (discounted ? 'Price overridden, less the discount.' : 'Price overridden.') + restore;
+        }
+        if (discounted) return 'Calculated from the product\'s pricing, less the discount.';
+        return this.ShowPricePicker
+            ? 'Calculated from the product\'s pricing. To change it, select another price above or apply a discount.'
+            : 'Calculated from the product\'s pricing. To change it, apply a discount.';
+    }
+
     /** The default unit price: orders' answer when it has given one, else the unpinned priced figure. */
     public get DefaultUnit(): number | null {
         if (this.EngineDefault !== undefined) return this.EngineDefault?.UnitPrice ?? null;
@@ -1706,7 +1721,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
                     this.pricedTotal = null;
                     this.pricedDiscount = null;
                     this.EngineDefault = undefined;
-                    this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
+                    this.PricingNote = 'This line could not be priced yet. It is priced on save.';
                     return;
                 }
                 this.pricedUnit = row.UnitPrice;
@@ -1720,7 +1735,7 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
                 this.pricedTotal = null;
                 this.pricedDiscount = null;
                 this.EngineDefault = undefined;
-                this.PricingNote = 'Orders could not price this line yet. It is priced on save.';
+                this.PricingNote = 'This line could not be priced yet. It is priced on save.';
             } finally {
                 if (token === this.priceToken) {
                     this.Pricing = false;

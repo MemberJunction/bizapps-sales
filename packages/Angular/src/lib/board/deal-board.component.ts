@@ -217,8 +217,10 @@ export interface BoardColumn {
      * vocabulary rather than growing a second.
      */
     Unpriced: number;
-    /** True when NOTHING in the column was priced, so the footnote can say so rather than count to N. */
-    NonePriced: boolean;
+    /** Deals whose amount was typed on the deal: an amount is there, and it was not calculated from product lines. */
+    EnteredManually: number;
+    /** Deals with no amount at all. They add nothing to the total, which is a different caveat from a typed amount. */
+    NoAmount: number;
 }
 
 /**
@@ -255,6 +257,35 @@ export function BoardPipelines<T extends CompanyPipeline>(
     );
     // A pipeline appears once per linked company; it is one tab.
     return DistinctPipelines(allowed);
+}
+
+/** What a column's amount caveat needs: how many amounts were typed in, how many are absent, out of how many. */
+export type StagePricingCounts = Pick<BoardColumn, 'EnteredManually' | 'NoAmount'> & { Cards: readonly unknown[] };
+
+/**
+ * The tooltip on a stage total that is not wholly calculated. Two different caveats, each said on
+ * its own: an amount someone typed on the deal, and a deal with no amount, which adds nothing to
+ * the total.
+ */
+export function StagePricingNote(column: StagePricingCounts): string {
+    if (column.Cards.length > 0 && column.EnteredManually === column.Cards.length) {
+        return 'All amounts were entered manually.';
+    }
+    const sentences: string[] = [];
+    if (column.EnteredManually === 1) sentences.push('1 deal has an amount entered manually.');
+    if (column.EnteredManually > 1) sentences.push(`${column.EnteredManually} deals have amounts entered manually.`);
+    if (column.NoAmount === 1) sentences.push('1 deal has no amount set.');
+    if (column.NoAmount > 1) sentences.push(`${column.NoAmount} deals have no amount set.`);
+    return sentences.join(' ');
+}
+
+/** The few words shown beside the total; the tooltip carries the sentences. */
+export function StagePricingLabel(column: StagePricingCounts): string {
+    if (column.Cards.length > 0 && column.EnteredManually === column.Cards.length) return 'all entered manually';
+    const parts: string[] = [];
+    if (column.EnteredManually > 0) parts.push(`${column.EnteredManually} entered manually`);
+    if (column.NoAmount > 0) parts.push(`${column.NoAmount} not set`);
+    return parts.join(', ');
 }
 
 @Component({
@@ -488,7 +519,7 @@ export class DealBoardComponent implements AfterViewChecked {
                      * The one honest caveat: on this host every deal carries `AmountIsComputed = 0`, so
                      * this total is currently a sum of HAND-TYPED figures. That is a labelling problem
                      * rather than an arithmetic one, and it is already disclosed -- `Unpriced`,
-                     * `NonePriced` and `PricingNote` exist for exactly that.
+                     * `EnteredManually`, `NoAmount` and `PricingNote` exist for exactly that.
                      */
                     Total: cards.reduce((sum, d) => sum + (d.Amount ?? 0), 0),   // money-grep-allow: a rollup of stored answers for display -- never stored, never sent. The same SUM runs in dashboard-summary.sql:41; moving it into a query is blocked on pipeline-summary.sql:36 being open-deals-only. See the note above.
                     Currency: SingleCurrencyOf(cards),
@@ -499,7 +530,8 @@ export class DealBoardComponent implements AfterViewChecked {
                      * would otherwise trust. Never a comparison on any status or stage name.
                      */
                     Unpriced: cards.filter((d) => !d.AmountIsComputed).length,
-                    NonePriced: cards.length > 0 && cards.every((d) => !d.AmountIsComputed),
+                    EnteredManually: cards.filter((d) => !d.AmountIsComputed && d.Amount != null).length,
+                    NoAmount: cards.filter((d) => !d.AmountIsComputed && d.Amount == null).length,
                 };
             });
     }
@@ -768,11 +800,12 @@ export class DealBoardComponent implements AfterViewChecked {
      * a ternary inside a binding is unreadable in both places at once.
      */
     public PricingNote(column: BoardColumn): string {
-        return column.NonePriced
-            ? 'No deal in this stage has an amount priced by Orders. Every amount in this total was '
-                + 'entered by hand.'
-            : `${column.Unpriced} of ${column.Cards.length} deals in this stage have no amount priced by `
-                + 'Orders, so part of this total was entered by hand or is missing.';
+        return StagePricingNote(column);
+    }
+
+    /** The short visible form of the same caveat, beside the column total. */
+    public PricingLabel(column: BoardColumn): string {
+        return StagePricingLabel(column);
     }
 
     public TrackColumn = (_: number, column: BoardColumn): string => column.StageID;

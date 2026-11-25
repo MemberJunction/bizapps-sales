@@ -146,18 +146,14 @@
                     </span>
                     @if (column.Unpriced > 0) {
                       <!--
-                        SAYS WHICH OF THE TWO IT IS. A total nobody priced and a total that is only partly
-                        priced are different claims, and collapsing them is how a stated figure passes for an
-                        authoritative one. The wording lives in PricingNote() -- a template expression cannot
-                        hold a sentence without becoming unreadable.
+                        SAYS WHICH AMOUNTS WERE NOT CALCULATED. An amount typed in and a deal with no amount
+                        are different caveats on the total, so they are counted apart. The wording lives in
+                        PricingLabel() and PricingNote() -- a template expression cannot hold a sentence
+                        without becoming unreadable.
                       -->
                       <span class="db-col__partial" [title]="PricingNote(column)">
                         <i class="fa-solid fa-pen-nib" aria-hidden="true"></i>
-                        @if (column.NonePriced) {
-                          stated, not priced
-                        } @else {
-                          {{ column.Unpriced }} of {{ column.Cards.length }} stated
-                        }
+                        {{ PricingLabel(column) }}
                       </span>
                     }
                   </header>
@@ -193,7 +189,7 @@
                         <div class="db-card__figures">
                           <span class="db-card__amount">
                             @if (deal.Amount === null) {
-                              <span class="db-card__noamount" title="No amount recorded yet">—</span>
+                              <span class="db-card__noamount" title="Amount not set">—</span>
                             } @else {
                               {{ deal.Amount | currency:deal.CurrencyCode:'symbol':'1.0-0' }}
                             }
@@ -208,11 +204,11 @@
                               @if (deal.AmountIsComputed) {
                                 <i class="fa-solid fa-calculator db-card__computed"
                                    aria-hidden="true"
-                                   title="Priced by Orders"></i>
+                                   title="Calculated automatically"></i>
                               } @else {
                                 <i class="fa-solid fa-pen-nib db-card__stated"
                                    aria-hidden="true"
-                                   title="Entered manually rather than priced by Orders"></i>
+                                   title="Entered manually"></i>
                               }
                             }
                           </span>

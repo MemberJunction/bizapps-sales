@@ -1573,8 +1573,8 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
         return p == null ? '—' : `${p}%`;
     }
     public get Provenance(): string {
-        if (this.Record?.Amount == null) return 'No amount yet';
-        return this.Record.AmountIsComputed ? 'Priced by Orders' : 'Entered manually';
+        if (this.Record?.Amount == null) return 'Amount not set';
+        return this.Record.AmountIsComputed ? 'Calculated automatically' : 'Entered manually';
     }
     public DateLabel(d: Date | string | null | undefined): string {
         if (!d) return '—';
@@ -1905,11 +1905,6 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                 }
                             </select>
                         </div>
-                        <!-- A company with no pipeline is left out of the list, so say so: a rep
-                             looking for one learns why it is missing and whom to ask. -->
-                        <div class="mjs-hint" data-testid="deal-company-picker-note">
-                            Only companies with a pipeline are listed. Please ask a Sales admin to link a pipeline to a missing company.
-                        </div>
                     </div>
                 }
                 <!-- Says why the deal has no pipeline and what to do, before a save refuses it. The
@@ -2088,17 +2083,17 @@ export class MJSDealOverviewPanel extends BaseFormPanel<DealEntity> {
                                  A CLOSING STATUS, never a list of names: a deployment can rename Won,
                                  and this one already has TWO losing statuses.
 
-                                 AN UNSAVED DEAL GETS ITS OWN HINT: it has no status yet, the server
-                                 gives it an open one on save, and the Close panel offers Close only
-                                 after that first save. -->
-                            @if (!Record.IsSaved) {
-                                <small class="mjs-field__hint">No status yet. The deal saves as open; close it after saving.</small>
-                            } @else if (StatusIsMissing) {
-                                <small class="mjs-field__hint">Missing. This deal's status no longer exists. Pick an open status and save to repair it.</small>
-                            } @else if (CurrentStatusIsClosing && !PendingReopenStatusID) {
-                                <small class="mjs-field__hint">Closed. Pick an open status to reopen it, or use Reopen on the Close panel.</small>
-                            } @else if (!CurrentStatusIsClosing) {
-                                <small class="mjs-field__hint">Open. Pick a closing status to close the deal, or use Close on the Close panel.</small>
+                                 AN UNSAVED DEAL GETS NO HINT: it has no status yet, and the open-deal
+                                 hint would call it open and point at a Close it cannot have before its
+                                 first save. So every hint sits inside the saved-deal block. -->
+                            @if (Record.IsSaved) {
+                                @if (StatusIsMissing) {
+                                    <small class="mjs-field__hint">Missing. This deal's status no longer exists. Pick an open status and save to repair it.</small>
+                                } @else if (CurrentStatusIsClosing && !PendingReopenStatusID) {
+                                    <small class="mjs-field__hint">Closed. Pick an open status to reopen it, or use Reopen on the Close panel.</small>
+                                } @else if (!CurrentStatusIsClosing) {
+                                    <small class="mjs-field__hint">Open. Pick a closing status to close the deal, or use Close on the Close panel.</small>
+                                }
                             }
                         } @else {
                             <div class="mj-forms-field-value">{{ CurrentStatusName || '—' }}</div>

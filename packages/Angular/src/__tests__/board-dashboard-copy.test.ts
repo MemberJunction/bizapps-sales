@@ -1,6 +1,10 @@
+// The board component's import graph reaches Angular injectables that fall back to JIT.
+import '@angular/compiler';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { OwnerCoverage } from '../lib/pages/dashboard-inspect';
+import { StagePricingLabel, StagePricingNote } from '../lib/board/deal-board.component';
+import { MJSDealOverviewPanel } from '../lib/form-panels/deal-form.panels';
 import type { DealRosterRow } from '../lib/workspace/deal-workspace.service';
 
 /**
@@ -29,19 +33,51 @@ const BOARD = readFileSync(new URL('../lib/board/deal-board.component.html', imp
 const tooltips = [...BOARD.matchAll(/title="([^"]*)"/g)].map((m) => m[1]);
 
 describe('the pipeline board speaks the same language as the deal form', () => {
-    it('says "Priced by Orders", the wording #207 settled on', () => {
-        expect(tooltips).toContain('Priced by Orders');
-        expect(tooltips, 'the orders ENGINE is an implementation detail').not.toContain(
-            'Priced by the orders engine',
-        );
+    it('says a calculated amount was calculated automatically, without naming the app that did it', () => {
+        expect(tooltips).toContain('Calculated automatically');
+        expect(tooltips.filter((t) => /priced by/i.test(t)), 'which app calculated it is an implementation detail').toHaveLength(0);
     });
 
-    it('says a manual amount was entered manually, not "stated by a person"', () => {
-        expect(tooltips).toContain('Entered manually rather than priced by Orders');
+    it('says a typed amount was entered manually, not "stated by a person"', () => {
+        expect(tooltips).toContain('Entered manually');
         expect(
             tooltips.filter((t) => t.includes('Stated by a person')),
             'the deal form dropped this phrase; the board kept it',
         ).toHaveLength(0);
+    });
+
+    it('uses the same two phrases for the deal form\'s Amount caption', () => {
+        const caption = (Amount: number | null, AmountIsComputed: boolean): string => {
+            const panel = Object.create(MJSDealOverviewPanel.prototype) as MJSDealOverviewPanel;
+            Object.defineProperty(panel, 'Record', { value: { Amount, AmountIsComputed } });
+            return panel.Provenance;
+        };
+        expect(caption(1000, true)).toBe('Calculated automatically');
+        expect(caption(1000, false)).toBe('Entered manually');
+        expect(caption(null, false)).toBe('Amount not set');
+    });
+});
+
+describe('a stage total says which of its amounts were not calculated', () => {
+    const column = (EnteredManually: number, NoAmount: number, cards: number) => ({ EnteredManually, NoAmount, Cards: new Array(cards).fill(null) });
+
+    it('says so in one sentence when every amount was typed in', () => {
+        expect(StagePricingNote(column(4, 0, 4))).toBe('All amounts were entered manually.');
+        expect(StagePricingLabel(column(4, 0, 4))).toBe('all entered manually');
+    });
+
+    it('counts typed amounts and deals with no amount separately, without the stage size', () => {
+        expect(StagePricingNote(column(3, 1, 8))).toBe('3 deals have amounts entered manually. 1 deal has no amount set.');
+        expect(StagePricingLabel(column(3, 1, 8))).toBe('3 entered manually, 1 not set');
+    });
+
+    it('uses the singular for one deal', () => {
+        expect(StagePricingNote(column(1, 0, 5))).toBe('1 deal has an amount entered manually.');
+        expect(StagePricingNote(column(0, 2, 5))).toBe('2 deals have no amount set.');
+    });
+
+    it('does not say every amount was entered manually when some deals have no amount', () => {
+        expect(StagePricingNote(column(2, 1, 3))).toBe('2 deals have amounts entered manually. 1 deal has no amount set.');
     });
 });
 

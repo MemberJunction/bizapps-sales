@@ -50,7 +50,7 @@ const DEAL_FIELD_HELP: Readonly<Record<string, string>> = {
 
     // Commercial
     Amount:
-        'The deal\'s total value. Once the deal has products, Orders calculates the amount and replaces any typed value. Type an amount only on a deal without products.',
+        'The deal\'s total value. Once the deal has products, the amount is calculated automatically and replaces any typed value. Type an amount only on a deal without products.',
     CurrencyID:
         'The currency of the deal\'s amounts. Defaults to the selling company\'s currency.',
     TermMonths:
@@ -58,9 +58,9 @@ const DEAL_FIELD_HELP: Readonly<Record<string, string>> = {
     EstimatedProjectWeeks:
         'The estimated project length in weeks, per the statement of work. For reference only. Does not affect terms or renewal dates.',
     MRR:
-        'Monthly recurring revenue. You enter it; Orders does not calculate it.',
+        'Monthly recurring revenue. Entered manually, not calculated.',
     ARR:
-        'Annual recurring revenue. You enter it; Orders does not calculate it.',
+        'Annual recurring revenue. Entered manually, not calculated.',
     StartDate:
         'The expected service start. For reference only. A subscription starts on its product line\'s Term start, not on this date.',
     ExecutionDate:
@@ -120,7 +120,7 @@ export const DEAL_LINE_HELP = {
     Product:
         'The product or service sold. Lists only active products currently available for sale.',
     Quantity:
-        'The number of units sold, such as seats or licenses. Orders multiplies it by the unit price. Some products change price at higher quantities.',
+        'The number of units sold, such as seats or licenses. The line total is the quantity times the unit price. Some products change price at higher quantities.',
     Discount:
         'A discount on this line, as a percent or a dollar amount. Adding or raising a discount requires a reason, and the order cannot be confirmed until the discount is approved.',
     DiscountReasonCategory:
@@ -140,7 +140,7 @@ export const DEAL_LINE_HELP = {
     ExistingSubscription:
         'The customer already has a subscription for this product. Choose whether this line renews it or starts a separate subscription. Unless the deal is a renewal, you must choose before closing it as won.',
     UnitPrice:
-        'The price of one unit, calculated by Orders. To change it, choose another price or add a discount.',
+        'The price of one unit, calculated from the product\'s pricing. To change it, select another price or apply a discount.',
     LineTotal:
-        'Quantity times unit price, less any discount. Calculated by Orders.',
+        'Quantity times unit price, less any discount.',
 } as const;

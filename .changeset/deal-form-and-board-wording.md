@@ -1,0 +1,5 @@
+---
+"@mj-biz-apps/sales-ng": patch
+---
+
+Wording on the Deal form and the Board. Two lines of explanatory text are gone from the Deal form: the note under the Selling company list that only companies with a pipeline are listed, and the Status hint on a deal that has not been saved yet. A deal whose company has no pipeline still says why it cannot be saved and whom to ask. In the line editor, the service period hint says both dates are required, and the note under Unit price no longer says "Priced by Orders": it says the price is calculated from the product's pricing and how to change it, and it follows the line, saying the price was overridden once it is off the default and mentioning a discount once one is applied. Where a deal's amount comes from reads "Calculated automatically", "Entered manually" or "Amount not set" on the Deal form and the Board cards, and "entered manually" on the dashboard pipeline tile. A Board stage total says how many of its deals have an amount entered manually and how many have no amount set. Help text for Amount, MRR, ARR and Quantity no longer names the Orders app.

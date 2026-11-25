@@ -1205,8 +1205,8 @@ export class MJSSalesSectionComponent implements OnInit {
         const statedNote = s.MixedCurrencies || s.OpenStatedAmount === 0
             ? ''
             : s.OpenPricedAmount === 0
-                ? ' · all entered by hand'
-                : ` · ${this.money(s.OpenStatedAmount, s.CurrencyCode)} entered by hand`;
+                ? ' · all entered manually'
+                : ` · ${this.money(s.OpenStatedAmount, s.CurrencyCode)} entered manually`;
         return {
             ...KPI_SHELLS[2],
             Value: this.tileMoney(s.OpenAmount),
