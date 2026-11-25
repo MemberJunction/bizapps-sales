@@ -27,8 +27,8 @@ import { SalesSettings } from '../data/sales-settings';
                 <div class="setting__text">
                     <label class="setting__name" for="sales-hide-pipelines">Hide pipelines</label>
                     <p class="setting__help">
-                        Every deal runs on its company's default pipeline. The Pipeline field on the deal form, the
-                        Pipeline filter and the Pipeline column are hidden; choosing a deal's company chooses its pipeline.
+                        Each deal uses its company's default pipeline. Sales hides the Pipeline field, filter and
+                        column, and the Board's pipeline tabs.
                     </p>
                 </div>
                 <mj-switch

@@ -53,7 +53,7 @@
   }
   @if (State.NoLinesLeftOut) {
     <span class="filterbar__chip" data-testid="sales-filter-no-lines"
-          title="A deal matches a product company through the products on its lines. These deals have no products yet.">
+          title="These deals have no products yet, so the Product company filter leaves them out.">
       {{ State.NoLinesLeftOut }} {{ State.NoLinesLeftOut === 1 ? 'deal' : 'deals' }} with no products left out
     </span>
   }
