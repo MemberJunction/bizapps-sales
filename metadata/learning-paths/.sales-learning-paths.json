@@ -15,13 +15,13 @@
       "ID": "A3F7B6AD-34E4-4BF8-9C49-03912955BF38"
     },
     "relatedEntities": {
-      "MJ: Learning Path Tours": [
+      "MJ: Tour Learning Path Tour Links": [
         {
           "fields": {
-            "LearningPathID": "@parent:ID",
             "TourID": "@lookup:MJ: Tours.TourKey=core.welcome",
             "Sequence": 1,
-            "IsRequired": false
+            "IsRequired": false,
+            "TourLearningPathID": "@parent:ID"
           },
           "primaryKey": {
             "ID": "C5FB7987-306B-4EC8-B6AB-3E2A8F0974CC"
@@ -29,10 +29,10 @@
         },
         {
           "fields": {
-            "LearningPathID": "@parent:ID",
             "TourID": "@lookup:MJ: Tours.TourKey=sales.pipeline-deals",
             "Sequence": 2,
-            "IsRequired": true
+            "IsRequired": true,
+            "TourLearningPathID": "@parent:ID"
           },
           "primaryKey": {
             "ID": "235AB33D-4ABD-4219-B176-5A1FF7EB734A"
@@ -40,10 +40,10 @@
         },
         {
           "fields": {
-            "LearningPathID": "@parent:ID",
             "TourID": "@lookup:MJ: Tours.TourKey=sales.accounts-buying-roles",
             "Sequence": 3,
-            "IsRequired": true
+            "IsRequired": true,
+            "TourLearningPathID": "@parent:ID"
           },
           "primaryKey": {
             "ID": "8F367B09-D172-406B-B80D-155DCF12640A"
@@ -51,10 +51,10 @@
         },
         {
           "fields": {
-            "LearningPathID": "@parent:ID",
             "TourID": "@lookup:MJ: Tours.TourKey=sales.close-won-forecasting",
             "Sequence": 4,
-            "IsRequired": true
+            "IsRequired": true,
+            "TourLearningPathID": "@parent:ID"
           },
           "primaryKey": {
             "ID": "8B1992DC-C361-4FBD-B45B-085434A184F7"
@@ -62,10 +62,10 @@
         },
         {
           "fields": {
-            "LearningPathID": "@parent:ID",
             "TourID": "@lookup:MJ: Tours.TourKey=contracts.lifecycle",
             "Sequence": 5,
-            "IsRequired": false
+            "IsRequired": false,
+            "TourLearningPathID": "@parent:ID"
           },
           "primaryKey": {
             "ID": "ECF42D92-9CDD-404F-995F-A3FEF7A9C6D0"
@@ -73,10 +73,10 @@
         },
         {
           "fields": {
-            "LearningPathID": "@parent:ID",
             "TourID": "@lookup:MJ: Tours.TourKey=orders.order-to-cash",
             "Sequence": 6,
-            "IsRequired": false
+            "IsRequired": false,
+            "TourLearningPathID": "@parent:ID"
           },
           "primaryKey": {
             "ID": "11050952-C671-4741-ACA9-87378C0429CB"
