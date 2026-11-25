@@ -3605,6 +3605,77 @@ export const CloseDealChecks: NamedCheck[] = [
                 Assert(reopened.ClosedByUserID === null, 'reopen cleared ClosedByUserID');
             }),
     },
+    {
+        Id: 'close-deal.CD45',
+        Name: 'CD45: a typed amount takes the order total when the deal closes and when it reopens, and stays frozen while locked (#643, #351)',
+        RequiresMutation: true,
+        Fn: async (ctx) =>
+            InRolledBackTransaction(ctx, async () => {
+                /**
+                 * A deal whose Amount was typed and whose lines were then edited from the order form is
+                 * never saved with a dirty order, so no ordinary save re-reads the total. The typed state
+                 * is written with raw SQL after the line exists, which is exactly what the order-form edit
+                 * leaves behind: a priced order, and a deal still holding a typed, uncomputed figure.
+                 * A one-time product keeps the close off the next-term question (#426).
+                 */
+                const f = await ResolveSalesFixture(ctx);
+                const product = await TxOne<{ ID: string }>(
+                    ctx,
+                    `SELECT TOP 1 CAST(p.ID AS nvarchar(50)) AS ID FROM ${ORDERS_SCHEMA}.Product p
+                       LEFT JOIN ${ORDERS_SCHEMA}.ProductType t ON t.ID = p.ProductTypeID
+                      WHERE p.CompanyID = '${f.OrderOnlyPolicyCompanyID}' AND p.Status = 'Active'
+                        AND p.SubscriptionTypeID IS NULL AND t.DefaultSubscriptionTypeID IS NULL
+                        AND (p.AvailableFrom IS NULL OR p.AvailableFrom <= CAST(GETUTCDATE() AS date))
+                        AND (p.AvailableTo IS NULL OR p.AvailableTo >= CAST(GETUTCDATE() AS date))
+                      ORDER BY p.Name`,
+                );
+                const { DealID: dealID } = await dealWithLine(ctx, f, 'CD45 typed amount at close', product.ID);
+                const order = await TxOne<{ OrderID: string; TotalGross: number | null }>(
+                    ctx,
+                    `SELECT CAST(d.OrderID AS nvarchar(50)) AS OrderID, o.TotalGross
+                       FROM ${SALES_SCHEMA}.Deal d JOIN ${ORDERS_SCHEMA}.OrderHeader o ON o.ID = d.OrderID
+                      WHERE d.ID = '${dealID}'`,
+                );
+                Assert(order.TotalGross !== null, 'setup: the order has a total');
+                const total = Number(order.TotalGross);
+                const typed = total + 1000;
+
+                const typeAmount = (label: string) => TxExec(
+                    ctx,
+                    `UPDATE ${SALES_SCHEMA}.Deal
+                        SET Amount = ${typed}, AmountIsComputed = 0, AmountComputedAt = NULL, AmountSourceHash = NULL
+                      WHERE ID = '${dealID}'`,
+                    `CD45: ${label}`,
+                );
+                const stored = () => TxOne<{ Amount: number; AmountIsComputed: boolean }>(
+                    ctx, `SELECT Amount, AmountIsComputed FROM ${SALES_SCHEMA}.Deal WHERE ID = '${dealID}'`,
+                );
+                const md = new Metadata();
+
+                await typeAmount('a typed amount over a priced order');
+                const closing = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await closing.Load(dealID), 'the open deal loads');
+                closing.DealStatusTypeID = f.WonStatusID;
+                Assert(await closing.Save(), `the close must succeed: ${closing.LatestResult?.CompleteMessage ?? ''}`);
+                const afterClose = await stored();
+                AssertEqual(Number(afterClose.Amount), total, 'the close replaced the typed amount with the order total');
+                Assert(afterClose.AmountIsComputed === true, 'and marked it computed');
+
+                // #351: a permitted edit on the locked deal leaves even a stale figure alone.
+                await typeAmount('a figure that differs from the order on the locked deal');
+                const edit = await md.GetEntityObject<mjBizAppsSalesDealEntity>(E_DEAL, ctx.User);
+                Assert(await edit.Load(dealID), 'the closed deal loads');
+                edit.Description = 'CD45 permitted edit';
+                Assert(await edit.Save(), `the permitted edit must succeed: ${edit.LatestResult?.CompleteMessage ?? ''}`);
+                AssertEqual(Number((await stored()).Amount), typed, 'a permitted edit does not refresh a locked deal');
+
+                const out = await reopen(ctx, { DealID: dealID, Reason: 'CD45: reopen refreshes the amount.' });
+                Assert(out.Success, `the reopen failed — ${JSON.stringify(out.Issues)}`);
+                const afterReopen = await stored();
+                AssertEqual(Number(afterReopen.Amount), total, 'the reopen replaced the typed amount with the order total');
+                Assert(afterReopen.AmountIsComputed === true, 'and marked it computed');
+            }),
+    },
 ];
 
 /** An open deal on the order-only pipeline with one line for `productID`, saved; its ID and the line's. */
