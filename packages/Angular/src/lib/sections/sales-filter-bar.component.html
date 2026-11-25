@@ -3,7 +3,7 @@
   the Period dropdown's tooltip, because a period whose boundaries are invisible is a figure that looks
   settled while meaning something else.
 -->
-<div class="filterbar" role="group" aria-label="Sales filters">
+<div class="filterbar" role="group" aria-label="Sales filters" data-mj-tour-anchor="sales.filters.bar">
   <!-- All Deals lists every deal, so it shows no period (bc-aidp-next-golive#453). -->
   @if (!State.HidePeriod) {
     <label class="filterbar__period" [title]="State.PeriodTooltip">

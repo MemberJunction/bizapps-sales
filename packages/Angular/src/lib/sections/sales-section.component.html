@@ -79,7 +79,7 @@
             <ng-container *ngTemplateOutlet="loadFailed"></ng-container>
           } @else {
             <!-- Five tiles, every one bounded by the period and listing its deals below when clicked. -->
-            <div class="kpis">
+            <div class="kpis" data-mj-tour-anchor="sales.dashboard.kpis">
               @for (kpi of Kpis; track kpi.Label) {
                 <button type="button" class="kpi" (click)="SetInspect(kpi.Filter)" [title]="kpi.Tooltip"
                         [class.is-selected]="IsSelected(kpi.Filter)" [attr.aria-pressed]="IsSelected(kpi.Filter)">
@@ -97,7 +97,7 @@
             }
 
             <div class="dash-split">
-              <div class="card">
+              <div class="card" data-mj-tour-anchor="sales.dashboard.forecast">
                 <div class="ch">
                   Forecast
                   <span class="r">{{ StackNote }}</span>

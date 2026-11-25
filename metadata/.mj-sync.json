@@ -98,7 +98,10 @@
     "user-views",
     "entity-relationships",
     "entity-permissions",
-    "authorization-roles"
+    "authorization-roles",
+    "tours",
+    "learning-paths",
+    "tour-publications"
   ],
   "sqlLogging": {
     "enabled": true,
