@@ -1,0 +1,590 @@
+[
+  {
+    "fields": {
+      "Name": "Sales Pipeline, Funnel Board & Deal Velocity",
+      "TourKey": "sales.pipeline-deals",
+      "Description": "Explore Sales KPIs, reporting period filters, stacked forecast bars, open-deal stage funnels, and the drag-and-drop deal board.",
+      "ApplicationID": "@lookup:MJ: Applications.Name=Sales",
+      "RunInAuthenticatedHosts": true,
+      "Status": "Draft",
+      "EstimatedMinutes": 3,
+      "Priority": 100,
+      "DefaultGuideMode": "Visual",
+      "AllowAgentActions": false,
+      "Goal": {
+        "Type": "Navigation",
+        "AppName": "Sales",
+        "Description": "User understands SalesDealsSectionResource KPIs, forecast stack, stage funnel, filter bar, and deal board."
+      },
+      "StartLocation": {
+        "Application": "Sales",
+        "NavItem": "SalesDealsSectionResource"
+      }
+    },
+    "primaryKey": {
+      "ID": "97E58ACD-CE90-4C1B-8562-932FFA843A97"
+    },
+    "relatedEntities": {
+      "MJ: Tour Steps": [
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "sales-pipeline-welcome",
+            "Sequence": 1,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Modal",
+            "Title": "Deal Pipeline & Velocity in BizApps Sales",
+            "Body": "Sales records deal intent — accounts, buying teams, stages, and deal lines priced by BizApps Orders — so a closed deal becomes a contract and an order in one atomic step.",
+            "Configuration": {
+              "Variant": "welcome",
+              "PrimaryButtonText": "Explore Pipeline",
+              "ShowProgress": true
+            },
+            "Placement": "Center",
+            "Mode": "Show",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "E2B4D51C-6F0E-4E51-80B1-5BCB0B8A7962"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "sales-kpis-filters",
+            "Sequence": 2,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Spotlight",
+            "Title": "KPI Tiles, Forecast Stack & Period Filters",
+            "Body": "In **Deals** (`SalesDealsSectionResource`), slice your pipeline by reporting period, Selling Company, Product Company, and **My deals** in the filter bar, then click any **KPI tile** or **Forecast** segment (Won, Commit, Best case, Pipeline) to inspect its underlying deals.",
+            "Configuration": {
+              "ShowProgress": true
+            },
+            "Anchor": {
+              "Strategy": "Registered",
+              "Key": "sales.dashboard.kpis"
+            },
+            "Placement": "Bottom",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "584A68FF-853A-4F4A-92C2-79290778A4B4"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "sales-board-funnel",
+            "Sequence": 3,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Spotlight",
+            "Title": "Stage Funnel & Drag-and-Drop Deal Board",
+            "Body": "Switch to **Board** to drag open deals across pipeline stages. Closing columns remain locked against accidental drags — closing always runs explicitly through the deal form's **Close Deal** flow.",
+            "Configuration": {
+              "ShowProgress": true
+            },
+            "Anchor": {
+              "Strategy": "Registered",
+              "Key": "sales.board.funnel"
+            },
+            "Placement": "Bottom",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "8803A054-9000-4B53-B437-D60F4802C2D8"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "sales-pipeline-summary",
+            "Sequence": 4,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Modal",
+            "Title": "Next: Accounts, Buying Roles & Deal Quotes",
+            "Body": "Next, learn how **Promote Party**, stakeholder **Buying Roles**, and Orders-priced deal lines prepare a deal for close.",
+            "Configuration": {
+              "Variant": "summary",
+              "PrimaryButtonText": "Finish",
+              "NextTourKey": "sales.accounts-buying-roles",
+              "ShowProgress": true
+            },
+            "Placement": "Center",
+            "Mode": "Show",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "381E511A-337D-4B57-A727-16F1F43654FB"
+          }
+        }
+      ],
+      "MJ: Tour Triggers": [
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "TriggerType": "FirstVisit",
+            "Configuration": {
+              "Application": "Sales"
+            },
+            "Delivery": "Offer",
+            "CooldownDays": 30,
+            "Priority": 100,
+            "Status": "Active"
+          },
+          "primaryKey": {
+            "ID": "D0830876-AF82-4807-ACD1-0055B4412E56"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "fields": {
+      "Name": "Party Promotion, Buying Roles & Deal Quotes",
+      "TourKey": "sales.accounts-buying-roles",
+      "Description": "Promote existing Organizations or People into Sales Accounts and Contacts, assign stakeholder Buying Roles, and price deal quote lines via Orders.",
+      "ApplicationID": "@lookup:MJ: Applications.Name=Sales",
+      "RunInAuthenticatedHosts": true,
+      "Status": "Draft",
+      "EstimatedMinutes": 3,
+      "Priority": 90,
+      "DefaultGuideMode": "Visual",
+      "AllowAgentActions": false,
+      "Goal": {
+        "Type": "Navigation",
+        "AppName": "Sales",
+        "Description": "User understands party promotion via MJSPromotePartyDialog, buying roles, and Orders-backed deal line pricing."
+      },
+      "StartLocation": {
+        "Application": "Sales",
+        "NavItem": "SalesDealsSectionResource"
+      }
+    },
+    "primaryKey": {
+      "ID": "D65B5F67-6921-4FA2-B6DE-BEA4205250F9"
+    },
+    "relatedEntities": {
+      "MJ: Tour Steps": [
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "accounts-welcome",
+            "Sequence": 1,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Modal",
+            "Title": "Accounts, Buying Committees & Deal Lines",
+            "Body": "Sales builds on **BizApps Common** parties and **BizApps Orders** pricing — no duplicate directory records and no re-implemented money math.",
+            "Configuration": {
+              "Variant": "welcome",
+              "PrimaryButtonText": "Explore Accounts & Quotes",
+              "ShowProgress": true
+            },
+            "Placement": "Center",
+            "Mode": "Show",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "B7D37A12-3F71-4887-9230-230246D6E4B3"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "accounts-promote-roles",
+            "Sequence": 2,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Spotlight",
+            "Title": "Promote Parties & Assign Buying Roles",
+            "Body": "Use **Promote Party** (`MJSPromotePartyDialog`) on Accounts or Contacts to promote an existing Common **Organization** or **Person** into Sales without creating duplicates, then assign stakeholder **Buying Roles** on each deal.",
+            "Configuration": {
+              "ShowProgress": true
+            },
+            "Anchor": {
+              "Strategy": "Registered",
+              "Key": "sales.filters.bar"
+            },
+            "Placement": "Bottom",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "DAB20D99-8DCC-4658-AF89-190011B4CBCE"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "accounts-deal-quotes",
+            "Sequence": 3,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Spotlight",
+            "Title": "Price Deal Quote Lines Through Orders",
+            "Body": "Inside the deal line editor, product lines delegate pricing to **BizApps Orders** (`Orders.PriceOrder`) and record requested discount concessions via `Sales.RecordDiscountConcession` — so every quote figure matches what Orders will actually bill.",
+            "Configuration": {
+              "ShowProgress": true
+            },
+            "Anchor": {
+              "Strategy": "Registered",
+              "Key": "sales.dashboard.forecast"
+            },
+            "Placement": "Bottom",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "313E4BE1-5AD7-4C44-A038-697C42D3B36B"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "accounts-summary",
+            "Sequence": 4,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Modal",
+            "Title": "Next: Close-Won Handoff & Forecasting",
+            "Body": "Once stakeholders and priced lines are ready, continue to **Close-Won Handoff & Revenue Forecasting** to see how `Sales.CloseDeal` hands deals off to Contracts and Orders.",
+            "Configuration": {
+              "Variant": "summary",
+              "PrimaryButtonText": "Finish",
+              "NextTourKey": "sales.close-won-forecasting",
+              "ShowProgress": true
+            },
+            "Placement": "Center",
+            "Mode": "Show",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "EE5A2619-FD2F-40B6-9D7A-4739C032F12C"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "fields": {
+      "Name": "Close-Won Handoff & Revenue Forecasting",
+      "TourKey": "sales.close-won-forecasting",
+      "Description": "Follow the atomic Sales.CloseDeal handoff into Contracts and Orders, and capture pipeline forecast snapshots.",
+      "ApplicationID": "@lookup:MJ: Applications.Name=Sales",
+      "RunInAuthenticatedHosts": true,
+      "Status": "Draft",
+      "EstimatedMinutes": 4,
+      "Priority": 85,
+      "DefaultGuideMode": "Visual",
+      "AllowAgentActions": false,
+      "Goal": {
+        "Type": "Navigation",
+        "AppName": "Sales",
+        "Description": "User understands Sales.CloseDeal atomic handoff to Contracts vs direct Orders and forecast snapshots."
+      },
+      "StartLocation": {
+        "Application": "Sales",
+        "NavItem": "SalesDealsSectionResource"
+      }
+    },
+    "primaryKey": {
+      "ID": "7015FF1F-18DD-4496-83D5-D8589182E0A8"
+    },
+    "relatedEntities": {
+      "MJ: Tour Steps": [
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "closewon-welcome",
+            "Sequence": 1,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Modal",
+            "Title": "Close-Won Handoff & Revenue Forecasting",
+            "Body": "Closing a deal in Sales executes inside one all-or-none transaction — validating readiness, locking the deal, and handing off to Contracts and Orders.",
+            "Configuration": {
+              "Variant": "welcome",
+              "PrimaryButtonText": "Explore Close-Won",
+              "ShowProgress": true
+            },
+            "Placement": "Center",
+            "Mode": "Show",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "DB2B4F5C-126A-4F23-9606-48B6886181BB"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "closewon-atomic-action",
+            "Sequence": 2,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Spotlight",
+            "Title": "Atomic Deal Close via Sales.CloseDeal",
+            "Body": "`Sales.CloseDeal` resolves the pipeline's `CloseWonPolicy` and `DealStatusType` flags (`IsWon`, `IsLost`, `LocksDeal`) in one transaction. If a locked deal ever needs revision, `Sales.ReopenDeal` records a mandatory reason and stage audit event.",
+            "Configuration": {
+              "ShowProgress": true
+            },
+            "Anchor": {
+              "Strategy": "Registered",
+              "Key": "sales.dashboard.forecast"
+            },
+            "Placement": "Bottom",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "CC3CBECA-7A50-4D7B-A4B8-D00739EFE12F"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "closewon-branch",
+            "Sequence": 3,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Choice",
+            "Title": "Choose Your Close-Won Handoff Path",
+            "Body": "Depending on your pipeline's `CloseWonPolicy`, closing creates contract paper plus billing schedules or transitions a direct order and locks forecast history.",
+            "Configuration": {
+              "Question": "Which close-won handoff path would you like to inspect?",
+              "Options": [
+                {
+                  "Key": "contract-paper",
+                  "Label": "Contracted Enterprise Deal",
+                  "Description": "Generate executed contract paper + downstream billing schedule."
+                },
+                {
+                  "Key": "direct-order",
+                  "Label": "Direct Order & Forecast Capture",
+                  "Description": "Create immediate order header and lock pipeline forecast snapshot."
+                }
+              ]
+            },
+            "Placement": "Center",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "08DE397B-4255-481F-88C2-87475D422799"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "closewon-contract-paper",
+            "Sequence": 4,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Spotlight",
+            "Title": "Handoff: Contract Generation & Lineage",
+            "Body": "When `CloseWonPolicy` requires legal paper, `Sales.CloseDeal` provisions a linked **Contract** (`CreatingEntityID` / `CreatingRecordID` provenance pointing back to the deal) and queues follow-up tasks alongside the downstream billing schedule.",
+            "Configuration": {
+              "ShowProgress": true
+            },
+            "Anchor": {
+              "Strategy": "Registered",
+              "Key": "sales.dashboard.kpis"
+            },
+            "Placement": "Bottom",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "6EF01FBE-F531-49EE-A8BD-CA94CE278253"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "closewon-direct-order",
+            "Sequence": 5,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Spotlight",
+            "Title": "Handoff: Direct Order & Forecast Snapshots",
+            "Body": "For direct-order pipelines, `Sales.CloseDeal` advances the linked **Order Header** according to `PipelineStage.OrderStatusOnEntry` while **Forecast Snapshots** preserve point-in-time Commit, Best case, and Won rollups.",
+            "Configuration": {
+              "ShowProgress": true
+            },
+            "Anchor": {
+              "Strategy": "Registered",
+              "Key": "sales.board.funnel"
+            },
+            "Placement": "Bottom",
+            "Mode": "Guide",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "DF6E4E50-6D8A-4069-AE1E-FB19448F9222"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "StepKey": "closewon-summary",
+            "Sequence": 6,
+            "StepTypeID": "@lookup:MJ: Tour Step Types.Name=Modal",
+            "Title": "Next: Follow the Order-to-Cash Ledger",
+            "Body": "Your deal is closed and handed off cleanly. Continue into **BizApps Orders** to watch the order confirm, collect payment, and post balanced accounting journals.",
+            "Configuration": {
+              "Variant": "summary",
+              "PrimaryButtonText": "Finish",
+              "NextTourKey": "orders.order-to-cash",
+              "ShowProgress": true
+            },
+            "Placement": "Center",
+            "Mode": "Show",
+            "Completion": {
+              "Type": "NextButton"
+            },
+            "OnMissing": "Center",
+            "IsOptional": false
+          },
+          "primaryKey": {
+            "ID": "5E49E165-B52F-4226-8932-8F882444FA09"
+          }
+        }
+      ],
+      "MJ: Tour Step Paths": [
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "FromStepID": "08DE397B-4255-481F-88C2-87475D422799",
+            "ToStepID": "6EF01FBE-F531-49EE-A8BD-CA94CE278253",
+            "Condition": "Choice:contract-paper",
+            "Label": "Contracted Enterprise Deal",
+            "Priority": 100,
+            "Sequence": 1,
+            "IsDefault": false
+          },
+          "primaryKey": {
+            "ID": "9B88204A-EAEA-42A6-B5E0-2FE2BD7AE117"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "FromStepID": "08DE397B-4255-481F-88C2-87475D422799",
+            "ToStepID": "DF6E4E50-6D8A-4069-AE1E-FB19448F9222",
+            "Condition": "Choice:direct-order",
+            "Label": "Direct Order & Forecast Capture",
+            "Priority": 90,
+            "Sequence": 2,
+            "IsDefault": false
+          },
+          "primaryKey": {
+            "ID": "6060C1F7-9A80-42F4-A611-2391208C5EFD"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "FromStepID": "08DE397B-4255-481F-88C2-87475D422799",
+            "ToStepID": "6EF01FBE-F531-49EE-A8BD-CA94CE278253",
+            "Condition": null,
+            "Label": "Default Path",
+            "Priority": 0,
+            "Sequence": 3,
+            "IsDefault": true
+          },
+          "primaryKey": {
+            "ID": "1566D00B-E7F3-4C0D-B914-9D27EBA8BC16"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "FromStepID": "6EF01FBE-F531-49EE-A8BD-CA94CE278253",
+            "ToStepID": "5E49E165-B52F-4226-8932-8F882444FA09",
+            "Condition": null,
+            "Label": "To Summary",
+            "Priority": 10,
+            "Sequence": 1,
+            "IsDefault": true
+          },
+          "primaryKey": {
+            "ID": "16441B0B-0A0D-482C-91C3-864F3071519D"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "FromStepID": "DF6E4E50-6D8A-4069-AE1E-FB19448F9222",
+            "ToStepID": "5E49E165-B52F-4226-8932-8F882444FA09",
+            "Condition": null,
+            "Label": "To Summary",
+            "Priority": 10,
+            "Sequence": 1,
+            "IsDefault": true
+          },
+          "primaryKey": {
+            "ID": "42824A47-9648-43A8-8290-15F766809BA4"
+          }
+        }
+      ],
+      "MJ: Tour Prerequisites": [
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "PrerequisiteType": "Tour",
+            "RequiredTourID": "@lookup:MJ: Tours.TourKey=contracts.lifecycle",
+            "Strength": "Recommended",
+            "Sequence": 1
+          },
+          "primaryKey": {
+            "ID": "18D70A51-9326-47BC-8496-64E40FA74ECB"
+          }
+        },
+        {
+          "fields": {
+            "TourID": "@parent:ID",
+            "PrerequisiteType": "Tour",
+            "RequiredTourID": "@lookup:MJ: Tours.TourKey=orders.order-to-cash",
+            "Strength": "Recommended",
+            "Sequence": 2
+          },
+          "primaryKey": {
+            "ID": "3D3FC985-FB2A-41D1-828F-9C4A84DDC061"
+          }
+        }
+      ]
+    }
+  }
+]
