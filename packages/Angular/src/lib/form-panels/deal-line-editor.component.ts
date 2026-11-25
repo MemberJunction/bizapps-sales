@@ -302,11 +302,15 @@ interface RemoteOperationRouter {
 
                     <!-- The line's own wording, for a product whose name does not say what was sold.
                          It is the order line's Description: the deal's lines are the order's lines, so
-                         nothing copies it at close, and the invoice prints it after the product name. -->
+                         nothing copies it at close, and the invoice prints it after the product name.
+                         Stored when the field loses focus, not on each key: the stored text is trimmed,
+                         and writing it back mid-typing would delete the space the rep just reached by
+                         backspacing and move the cursor. Blur comes before the Save click. -->
                     <div class="mjs-le__field">
                         <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-description">Description</label><mjs-field-help [Text]="Help.Description" Label="Description"></mjs-field-help></span>
                         <textarea id="mjs-le-description" data-testid="line-description" rows="2" [attr.maxlength]="DescriptionMaxLength"
                                   [ngModel]="Working.Description ?? ''" (ngModelChange)="SetDescription($event)"
+                                  [ngModelOptions]="{ updateOn: 'blur' }"
                                   [disabled]="IsLocked" [title]="IsLocked ? BlockedReason : ''"></textarea>
                     </div>
 
