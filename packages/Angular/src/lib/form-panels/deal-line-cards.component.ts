@@ -58,6 +58,7 @@ const LINE_FIELDS = [
     'ID',
     'ProductID',
     'Product',
+    'Description',
     'CompanyID',
     'Company',
     'Quantity',
@@ -78,6 +79,7 @@ export interface DealLineCardRow {
     ID: string;
     ProductID: string;
     Product: string | null;
+    Description: string | null;
     CompanyID: string;
     Company: string | null;
     Quantity: number;
@@ -165,6 +167,9 @@ function DayOf(value: Date | string | null | undefined): string | null {
                             <div class="mjs-lc-card__id">
                                 <div class="mjs-lc-card__name">{{ line.Product || 'Product' }}</div>
                                 <div class="mjs-lc-card__meta">{{ MetaFor(line) }}</div>
+                                @if (line.Description) {
+                                    <div class="mjs-lc-card__desc" data-testid="deal-line-description">{{ line.Description }}</div>
+                                }
                             </div>
 
                             <!-- Visible captions (#371 item 9): three bare figures in a row did not say
@@ -306,6 +311,7 @@ function DayOf(value: Date | string | null | undefined): string | null {
         .mjs-lc-iconbtn:hover { background: var(--mj-bg-surface-hover); color: var(--mj-text-link); }
 
         .mjs-lc-card__chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: var(--mj-space-2); }
+        .mjs-lc-card__desc { margin-top: 2px; font-size: var(--mj-text-sm); color: var(--mj-text-primary); line-height: 1.35; overflow-wrap: anywhere; }
         .mjs-lc-card__why { margin-top: 6px; font-size: var(--mj-text-xs); color: var(--mj-text-secondary); line-height: 1.35; }
 
         .mjs-lc-conc {
