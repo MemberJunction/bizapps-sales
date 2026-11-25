@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { DealEntityServer } from '../DealEntityServer.js';
 
 /**
- * A CUSTOMER OR CONTACT THE DATABASE DOES NOT HOLD IS REFUSED, AND THE MESSAGE SAYS WHICH CASE IT IS.
+ * A CUSTOMER, PRIMARY CONTACT OR BILLING CONTACT THE DATABASE DOES NOT HOLD IS REFUSED, AND THE MESSAGE
+ * SAYS WHICH CASE IT IS.
  *
  * An Organization or Person with no Sales Account / Sales Contact row is "not set up" (the Deals panel
  * on their forms pre-fills their own ID); a party whose parent is gone too was a stale pick. The ID goes
@@ -37,6 +38,7 @@ function deal(opts: {
     saved: boolean;
     accountID?: string | null;
     contactID?: string | null;
+    billingContactID?: string | null;
     dirty?: string[];
     failReads?: boolean;
     failParentReads?: boolean;
@@ -60,6 +62,7 @@ function deal(opts: {
         IsSaved: opts.saved,
         AccountID: opts.accountID ?? null,
         PrimaryContactID: opts.contactID ?? null,
+        BillingContactID: opts.billingContactID ?? null,
         ContextCurrentUser: { ID: 'u1' },
         GetFieldByName: (name: string) => ({ Dirty: dirty.has(name) }),
         ProviderToUse: { RunViews: runViews },
@@ -108,6 +111,36 @@ describe('a deal save naming a customer or contact that is missing', () => {
         expect(refusal).not.toContain('customer');
     });
 
+    it('refuses a new deal whose billing contact is gone, naming it', async () => {
+        const d = deal({ saved: false, accountID: LIVE_ACCOUNT, contactID: LIVE_CONTACT, billingContactID: GONE_CONTACT });
+        const refusal = await d.missingPartyRefusal();
+
+        expect(refusal).toContain('billing contact no longer exists');
+        expect(refusal).not.toContain('primary contact');
+        expect(refusal).not.toContain(GONE_CONTACT);
+    });
+
+    it('refuses a changed billing contact that is gone', async () => {
+        const d = deal({ saved: true, billingContactID: GONE_CONTACT, dirty: ['BillingContactID'] });
+        expect(await d.missingPartyRefusal()).toContain('billing contact');
+    });
+
+    it('says a billing contact person is not set up as a sales contact', async () => {
+        const refusal = await deal({
+            saved: false, accountID: LIVE_ACCOUNT, contactID: LIVE_CONTACT, billingContactID: PERSON_ONLY,
+        }).missingPartyRefusal();
+
+        expect(refusal).toContain('billing contact is not set up as a sales contact');
+        expect(refusal).not.toContain('primary contact');
+    });
+
+    it('lets an empty billing contact through, since it means the primary contact is billed', async () => {
+        const d = deal({ saved: false, accountID: LIVE_ACCOUNT, contactID: LIVE_CONTACT, billingContactID: null });
+
+        expect(await d.missingPartyRefusal()).toBeNull();
+        expect(d.ViewCalls).toHaveLength(2);
+    });
+
     it('names both when both are gone', async () => {
         const refusal = await deal({ saved: false, accountID: GONE_ACCOUNT, contactID: GONE_CONTACT }).missingPartyRefusal();
 
@@ -140,11 +173,12 @@ describe('a deal save naming a customer or contact that is missing', () => {
     });
 
     it('reads the sales account and sales contact entities', async () => {
-        const d = deal({ saved: false, accountID: LIVE_ACCOUNT, contactID: LIVE_CONTACT });
+        const d = deal({ saved: false, accountID: LIVE_ACCOUNT, contactID: LIVE_CONTACT, billingContactID: LIVE_CONTACT });
         await d.missingPartyRefusal();
 
         expect(d.ViewCalls.map((c) => c.EntityName)).toEqual([
             'MJ_BizApps_Sales: Sales Accounts',
+            'MJ_BizApps_Sales: Sales Contacts',
             'MJ_BizApps_Sales: Sales Contacts',
         ]);
     });
