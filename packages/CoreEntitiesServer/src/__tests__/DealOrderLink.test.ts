@@ -30,7 +30,13 @@ const { DealOrderLink, FindRegisterOrderDealLink, LoadDealOrderLink, ORDER_DEAL_
 type Seam = import('../DealOrderLink.js').DealOrderLinkSeam;
 const OrdersEntities = await import('@mj-biz-apps/orders-entities');
 
-const ORDER = 'oooooooo-0000-4000-8000-000000000001';
+/**
+ * REAL HEX, because `SafeID` now validates the SHAPE of an id rather than only escaping quotes. The
+ * readable placeholder this replaced ('oooooooo-...') is not a valid UUID, and the validator rejects
+ * it before it reaches a filter. The deal ids below are only ever read back out of a result, never
+ * put into a filter, so they stay as they were.
+ */
+const ORDER = '0cde0000-0000-4000-8000-000000000001';
 const DEAL_A = 'aaaaaaaa-0000-4000-8000-000000000001';
 const DEAL_B = 'bbbbbbbb-0000-4000-8000-000000000002';
 const USER = { ID: 'user-1' } as never;
@@ -86,10 +92,14 @@ describe('the deal for an order', () => {
         expect(runView.mock.calls[0][1]).toBeUndefined();
     });
 
-    it('escapes a quote in the order id rather than building broken SQL', async () => {
-        deals([]);
-        await new DealOrderLink().DealForOrder("x' OR 1=1 --", USER);
-        expect(runView.mock.calls[0][0].ExtraFilter).toBe("OrderID = 'x'' OR 1=1 --'");
+    /**
+     * This used to assert the quote was DOUBLED and the read went ahead. An id that is not a UUID now
+     * never reaches a filter at all: the link throws, which is the same answer it already gives for an
+     * empty id and what the seam asks for when it cannot tell. Failing closed beats querying with it.
+     */
+    it('throws on an order id that is not a UUID, instead of escaping it into a filter', async () => {
+        await expect(new DealOrderLink().DealForOrder("x' OR 1=1 --", USER)).rejects.toThrow(/not a usable record id/);
+        expect(runView, 'and no read was attempted with it').not.toHaveBeenCalled();
     });
 });
 
