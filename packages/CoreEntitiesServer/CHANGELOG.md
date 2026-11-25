@@ -1,5 +1,12 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.34.0
+
+### Patch Changes
+
+- Updated dependencies [7846ada]
+  - @mj-biz-apps/sales-entities@6.34.0
+
 ## 6.33.0
 
 ### Minor Changes
