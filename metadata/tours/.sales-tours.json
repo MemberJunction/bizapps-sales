@@ -488,7 +488,16 @@
             "TourID": "@parent:ID",
             "FromStepID": "08DE397B-4255-481F-88C2-87475D422799",
             "ToStepID": "6EF01FBE-F531-49EE-A8BD-CA94CE278253",
-            "Condition": "Choice:contract-paper",
+            "Condition": {
+              "logic": "and",
+              "filters": [
+                {
+                  "field": "lastChoiceKey",
+                  "operator": "eq",
+                  "value": "contract-paper"
+                }
+              ]
+            },
             "Label": "Contracted Enterprise Deal",
             "Priority": 100,
             "Sequence": 1,
@@ -503,7 +512,16 @@
             "TourID": "@parent:ID",
             "FromStepID": "08DE397B-4255-481F-88C2-87475D422799",
             "ToStepID": "DF6E4E50-6D8A-4069-AE1E-FB19448F9222",
-            "Condition": "Choice:direct-order",
+            "Condition": {
+              "logic": "and",
+              "filters": [
+                {
+                  "field": "lastChoiceKey",
+                  "operator": "eq",
+                  "value": "direct-order"
+                }
+              ]
+            },
             "Label": "Direct Order & Forecast Capture",
             "Priority": 90,
             "Sequence": 2,
