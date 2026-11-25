@@ -4,6 +4,7 @@ import {
     DefaultCompanyID,
     DistinctPipelines,
     ExpandPipelinesByCompany,
+    HiddenPipelineLabels,
     InitialCompanyID,
     OrderPipelinesByCompany,
     PipelineCompanies,
@@ -148,5 +149,31 @@ describe('labels', () => {
     it('shows the bare name when the company has none', () => {
         expect(PipelineLabel({ Name: 'B2B', CompanyName: null })).toBe('B2B');
         expect(CompanyLabel({ CompanyID: 'x', CompanyName: null })).toBe('Unnamed company');
+    });
+});
+
+/**
+ * bc-aidp-next-golive#498: with pipelines hidden, a pipeline is named by its company, so a company with
+ * two pipelines in view read twice with nothing to tell them apart.
+ */
+describe('names for pipelines in view while pipelines are hidden', () => {
+    const shown = (...ids: string[]): CompanyPipeline[] => ids.map((id) => PIPELINES.find((p) => p.ID === id)!);
+
+    it("adds the pipeline's name only where two in view share a company", () => {
+        const labels = HiddenPipelineLabels(PIPELINES, shown('acme-b2b', 'acme-legacy', 'beta-b2b'));
+        expect(labels.get('acme-b2b')).toBe('Acme · B2B');
+        expect(labels.get('acme-legacy')).toBe('Acme · Acme Legacy');
+        expect(labels.get('beta-b2b')).toBe('Beta');
+    });
+
+    it('names a pipeline by its company alone when its sibling is not in view', () => {
+        expect(HiddenPipelineLabels(PIPELINES, shown('acme-b2b', 'beta-b2b')).get('acme-b2b')).toBe('Acme');
+    });
+
+    it('keys by lower-cased ID and does not repeat the name of a pipeline with no named company', () => {
+        const bare = [pipeline({ ID: 'P-ONE', CompanyID: 'x', CompanyName: null }), pipeline({ ID: 'P-TWO', CompanyID: 'y', CompanyName: null })];
+        const labels = HiddenPipelineLabels(bare, bare);
+        expect(labels.get('p-one')).toBe('B2B');
+        expect(labels.get('p-two')).toBe('B2B');
     });
 });

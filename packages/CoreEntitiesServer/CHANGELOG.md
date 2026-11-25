@@ -1,5 +1,13 @@
 # @mj-biz-apps/sales-core-entities-server
 
+## 6.34.1
+
+### Patch Changes
+
+- 6116bc5: A pipeline's Close Won Policy check now refuses keys named after built-in object properties (`constructor`, `toString`, `hasOwnProperty`, `__proto__`) with the normal "has a setting the close does not use" message. Before, `{"constructor": null}` saved as valid and `{"constructor": 1}` failed with "must be a undefined" (#474).
+- da7a6b0: A deal now takes its order's total when it closes or reopens, even when its amount was typed before the order had lines (#643). Before, a deal whose lines were edited from the order form kept the typed figure through the close, and the close lock then froze it. A locked deal's amount still does not change on a permitted edit (#351).
+  - @mj-biz-apps/sales-entities@6.34.1
+
 ## 6.34.0
 
 ### Patch Changes

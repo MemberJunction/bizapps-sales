@@ -40,7 +40,7 @@
   ],
   "bundles": {
     "save-deal": { "count": 45, "requires": "orders", "ids": "SD1-SD3, SD6-SD11, SD13-SD15, SD17-SD49" },
-    "close-deal": { "count": 44, "requires": "orders", "ids": "CD1-CD44" },
+    "close-deal": { "count": 45, "requires": "orders", "ids": "CD1-CD45" },
     "product-picker": { "count": 5, "requires": "orders", "ids": "PP1-PP5" },
     "close-won-order": { "count": 6, "requires": "orders", "ids": "CO1-CO6" },
     "close-won-schedule": { "count": 5, "requires": "orders", "ids": "CS1-CS5 — a deal's payment schedule reaches its order at Close Won and after (golive #290)" },

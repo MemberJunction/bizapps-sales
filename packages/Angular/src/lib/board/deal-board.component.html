@@ -8,45 +8,47 @@
 <div class="db">
 
   <!--
-    Pipeline switcher. A pipeline defines the stages, so the Board shows one at a time. Which pipelines
-    are tabs is the filter bar's (bc-aidp-next-golive#351); with only one allowed there is nothing to
-    switch, and its name is shown instead.
+    Pipeline switcher. A pipeline defines the stages, so the Board shows one at a time, or all of them
+    under the All tab. Which pipelines are tabs is the filter bar's (bc-aidp-next-golive#351); with only
+    one allowed there is nothing to switch, and its name is shown instead.
+
+    With the Hide pipelines setting on there is no switcher (bc-aidp-next-golive#498): its tabs could only
+    be named by company, which repeated a company with two pipelines, and the filter bar's Selling company
+    and Product company lists already choose the companies. The Board then shows every allowed pipeline.
   -->
   <div class="db-bar">
     @let tabs = TabPipelines;
-    <!-- With pipelines hidden and one pipeline in play, its tab would only list every company: show nothing. -->
-    @let quiet = HidePipelines && tabs.length < 2;
-    @if (!quiet) {
-      <span class="db-bar__label">{{ HidePipelines ? 'Company' : 'Pipeline' }}</span>
-    }
-    @if (tabs.length > 1) {
-      @let all = ShowingAll;
-      <div class="db-bar__pipes" role="tablist" [attr.aria-label]="HidePipelines ? 'Company' : 'Pipeline'" data-testid="db-pipeline-tabs">
-        <!-- Every allowed pipeline at once, one lane each: stages belong to a pipeline, so they are not merged. -->
-        <button
-          type="button"
-          role="tab"
-          class="db-pipe"
-          data-testid="db-pipeline-all"
-          [class.db-pipe--on]="all"
-          [attr.aria-selected]="all"
-          (click)="SelectPipeline(AllPipelines)">
-          {{ AllLabel }}
-        </button>
-        @for (pipeline of tabs; track pipeline.ID) {
+    @if (!HidePipelines) {
+      <span class="db-bar__label">Pipeline</span>
+      @if (tabs.length > 1) {
+        @let all = ShowingAll;
+        <div class="db-bar__pipes" role="tablist" aria-label="Pipeline" data-testid="db-pipeline-tabs">
+          <!-- Every allowed pipeline at once, one lane each: stages belong to a pipeline, so they are not merged. -->
           <button
             type="button"
             role="tab"
             class="db-pipe"
-            [class.db-pipe--on]="!all && pipeline.ID === ActivePipelineID"
-            [attr.aria-selected]="!all && pipeline.ID === ActivePipelineID"
-            (click)="SelectPipeline(pipeline.ID)">
-            {{ TabLabel(pipeline) }}
+            data-testid="db-pipeline-all"
+            [class.db-pipe--on]="all"
+            [attr.aria-selected]="all"
+            (click)="SelectPipeline(AllPipelines)">
+            All pipelines
           </button>
-        }
-      </div>
-    } @else if (tabs.length === 1 && !quiet) {
-      <span class="db-bar__one" data-testid="db-pipeline-one">{{ HidePipelines ? TabLabel(tabs[0]) : tabs[0].Name }}</span>
+          @for (pipeline of tabs; track pipeline.ID) {
+            <button
+              type="button"
+              role="tab"
+              class="db-pipe"
+              [class.db-pipe--on]="!all && pipeline.ID === ActivePipelineID"
+              [attr.aria-selected]="!all && pipeline.ID === ActivePipelineID"
+              (click)="SelectPipeline(pipeline.ID)">
+              {{ TabLabel(pipeline) }}
+            </button>
+          }
+        </div>
+      } @else if (tabs.length === 1) {
+        <span class="db-bar__one" data-testid="db-pipeline-one">{{ tabs[0].Name }}</span>
+      }
     }
     @if (Moving) {
       <span class="db-bar__busy"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Moving…</span>
@@ -80,7 +82,7 @@
         <div class="db-lane" [attr.data-pipeline]="lane.PipelineID">
           @if (ShowingAll) {
             <h3 class="db-lane__head" data-testid="db-lane-head">
-              {{ LaneLabel(lane.PipelineID) }} <span class="db-lane__count">{{ LaneCount(lane) }}</span>
+              {{ lane.Label }} <span class="db-lane__count">{{ LaneCount(lane) }}</span>
             </h3>
           }
           @if (columns.length === 0) {
@@ -234,7 +236,7 @@
                                the only signal, and the words are what a screen reader reads. -->
                           <div class="db-card__idle" [title]="idle.Label">
                             <i class="fa-solid fa-hourglass-end" aria-hidden="true"></i>
-                            <span>Idle {{ idle.Days }} days (limit {{ idle.Limit }})</span>
+                            <span>Stalled {{ idle.Days }} days (limit {{ idle.Limit }})</span>
                           </div>
                         }
 
