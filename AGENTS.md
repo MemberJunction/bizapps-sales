@@ -37,6 +37,16 @@ All code across `packages/Entities`, `packages/Angular`, `packages/CoreEntitiesS
 5. **Use RLS-safe two-step entity reads — never `vw*` subqueries in `ExtraFilter`.**
    - Resolve filter IDs via `SalesEngineBase` or an explicit `RunView`/`RunViews` call under `contextUser`, then pass the resolved IDs to the target entity's `ExtraFilter`. Never write raw `SELECT ... FROM [schema].[vw*]` subqueries in `ExtraFilter`.
 
+## MJ Docs (`MJ: Artifacts`) vs. `MJ: Comments` vs. Quick Notes Rubric
+
+Full living specification: [`.mj/specs/mj-docs-deal-proposal-integration.md`](.mj/specs/mj-docs-deal-proposal-integration.md).
+
+1. **MJ Docs (`MJ: Artifacts`)**: Use for **Customer Proposals**, **Executive Deal Briefs**, and **Mutual Action Plans** — rich, versioned deliverables supporting version pinning (`MJ: Artifact Versions`), external sharing via `ArtifactGuestShareLink`, and delegated permissions (`DelegateEntityID` / `DelegateRecordID`), linked from `[__mj_BizAppsSales].[Deal].[ProposalArtifactID]` (`UNIQUEIDENTIFIER NULL FK -> [__mj].[Artifact]([ID])`).
+2. **`MJ: Comments`**: Use for threaded collaborative discussion, deal-desk review commentary, `@mentions`, and field suggestions attached to records.
+3. **Quick Notes / Lightweight Relational Rows**: Keep `DealStageEvent` provenance, quick call/activity logs (`Common.Activity`), and close-reason / follow-up notes (`Deal.LossNotes`, `Deal.Description`, `Deal.NextStep`) as lightweight relational columns/rows for fast filtering, close-lock auditing, and reporting.
+4. **Strict `PUBLISH_NO_BREAK_POLICY.md` & Dual-DBMS Parity**: All schema changes are strictly additive (nullable or defaulted columns only; never drop/rename/narrow). Pair every 4-part T-SQL migration in `migrations/` with a deterministic PostgreSQL `.pg.sql` in `migrations-pg/` produced via `mj migrate convert --split --bake-codegen` and stamped on line 1 with `-- @mj-pg-provenance: split-bake v1`.
+5. **`@memberjunction/ng-artifacts` (`@memberjunction/*@6.3.0-edge.1`) UI Rules**: Add as caret peer `^6.3.0-edge.1` + exact devDep `6.3.0-edge.1` in `packages/Angular/package.json`; require `ChangeDetectionStrategy.OnPush`, request-token/`switchMap` async race guards on rapid Deal switching, semantic `--mj-*` tokens only (zero raw color literals), `UserInfoEngine.Instance` (zero `localStorage`), Dual Form Registration Parity anchored in `LoadBizAppsSalesClient()`, and zero `window.print()`.
+
 ## Required Verification Before Opening a PR
 
 Run from the repository root:

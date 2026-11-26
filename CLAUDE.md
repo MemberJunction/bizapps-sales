@@ -497,6 +497,23 @@ Every data-access path in `bizapps-sales` — across `@mj-biz-apps/sales-entitie
 - Always resolve filter IDs via `SalesEngineBase` (for reference tables) or an explicit first-step `RunView` / `RunViews` (which enforces RLS for `contextUser`), then pass the resolved IDs into a clean `IN (...)` filter on the target entity (e.g., `LoadLapsedDeals` resolving non-closed status IDs and excluded pipeline IDs before querying `Deals`).
 - Use denormalized view fields already projected on the entity view (e.g., `Deal.Pipeline`, `Deal.PipelineStage`, `Deal.DealStatusType`) instead of extra round-trip lookups.
 
+---
+
+## MJ Docs (`MJ: Artifacts`) vs. `MJ: Comments` vs. Quick Notes Rubric
+
+Before adding any narrative field, attachment table, or note surface in `bizapps-sales`, choose the storage primitive using this 3-way rubric (full specification: [`.mj/specs/mj-docs-deal-proposal-integration.md`](.mj/specs/mj-docs-deal-proposal-integration.md)):
+
+| Storage Primitive | Use For in BizApps Sales | Key Capabilities & Wiring |
+|---|---|---|
+| **MJ Docs (`MJ: Artifacts`)** | **Customer Proposals**, **Executive Deal Briefs**, and **Mutual Action Plans** — rich, multi-section, customer- or leadership-facing deliverables | Full immutable version history (`MJ: Artifact Versions`), version pinning, external sharing via `ArtifactGuestShareLink` (`[__mj].[ArtifactGuestShareLink]`), delegated host-record permissions (`Artifact.DelegateEntityID` / `DelegateRecordID`), and inline rendering via `@memberjunction/ng-artifacts`. Primary Deal deliverable links via nullable `[__mj_BizAppsSales].[Deal].[ProposalArtifactID]` (`UNIQUEIDENTIFIER NULL FK -> [__mj].[Artifact]([ID])`). |
+| **`MJ: Comments`** | Threaded collaborative discussion, deal-desk Q&A, review commentary, `@mentions`, and field suggestions attached to records | Anchored conversations (`MJ: Comments` IS-A `MJ: Conversations`) with automatic RLS and two-stage FLS — never invent a bespoke comment table. |
+| **Quick Notes / Lightweight Relational Rows** | **`DealStageEvent`** provenance, quick call/activity logs (**`Common.Activity`**), and close-reason / follow-up notes (`Deal.LossNotes`, `Deal.Description`, `Deal.NextStep`) | Structured, low-latency relational columns/rows optimized for pipeline filtering, close-lock auditing, and SQL reporting — never migrate these into `MJ: Artifacts`. |
+
+### Additive Schema, Dual-DBMS Parity & `@memberjunction/ng-artifacts` Rules
+- **Strict `PUBLISH_NO_BREAK_POLICY.md` compliance**: Schema changes within the published `6.x` era are **additive only** (nullable columns or columns with database defaults, new tables, new indexes/FKs — never drop, rename, narrow, or add `NOT NULL` columns without a default).
+- **4-part T-SQL + deterministic PostgreSQL split-bake parity**: Author new SQL Server migrations in `migrations/` using the 4-part structure (hand-written additive DDL → 50+ blank lines → CodeGen banner → CodeGen-emitted `EntityField`/view/CRUD SPs/triggers). Generate the matching PostgreSQL file in `migrations-pg/` strictly via `mj migrate convert --split --bake-codegen` (using bounded `.needs-hand` + `mj migrate rebake --capture-only` only when required; never freehand LLM SQL or legacy `mj sql-convert`) and stamp line 1 with `-- @mj-pg-provenance: split-bake v1`.
+- **`@memberjunction/ng-artifacts` (`@memberjunction/*@6.3.0-edge.1`) integration**: Declare `@memberjunction/ng-artifacts` as a caret peer (`^6.3.0-edge.1`) and exact devDep (`6.3.0-edge.1`) in `packages/Angular/package.json`. Proposal preview components must use `ChangeDetectionStrategy.OnPush`, guard async artifact/version loads against stale responses on rapid Deal switching (request token or `switchMap`), render exclusively with semantic `--mj-*` CSS tokens (`pnpm run test:token-gate`, zero raw `#hex`/`rgb`/`hsl`), persist preferences via `UserInfoEngine.Instance` (zero `localStorage`), preserve Dual Form Registration Parity (`BaseFormComponent` + `BaseFormPanel` anchored in `LoadBizAppsSalesClient()`), and never call `window.print()`.
+
 **VERY IMPORTANT** Whenever you need to spin up tasks — if they do not require interaction with the
 user and are not interdependent — ALWAYS spin up multiple parallel tasks. **NEVER** process
 parallelizable tasks sequentially.

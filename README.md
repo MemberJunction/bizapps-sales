@@ -76,6 +76,13 @@ release, cut by `.github/workflows/publish.yml` when `next` is merged to `main`
   `Disabled`. A host turns it on by the sequence in [`docs/QA-GUIDE.md`](docs/QA-GUIDE.md) §2.
 - **In MJExplorer**, the Sales application opens on a Deals section with Dashboard, All deals and Board
   views, beside the generated forms for every entity.
+- **MJ Docs (`MJ: Artifacts`) Deal Proposals & Executive Briefs.** Rich, versioned sales deliverables —
+  Customer Proposals, Executive Deal Briefs, and Mutual Action Plans — live in `MJ: Artifacts` (with
+  version pinning and external sharing via `ArtifactGuestShareLink`) and link optionally from
+  `Deal.ProposalArtifactID` (`UNIQUEIDENTIFIER NULL FK -> [__mj].[Artifact]([ID])`), while threaded
+  discussions use `MJ: Comments` and structured provenance/activity notes (`DealStageEvent`,
+  `Common.Activity`, close reasons) remain lightweight relational rows. See
+  [`.mj/specs/mj-docs-deal-proposal-integration.md`](.mj/specs/mj-docs-deal-proposal-integration.md).
 
 Three rules govern the code, and `CLAUDE.md` states them in full: sales never computes money; domain
 vocabulary (statuses, stages, roles, categories) is data in type tables, never a string compared in
@@ -184,7 +191,11 @@ communication providers, which the host configures; sales stores no mail credent
 ## Documentation
 
 - [`docs/README.md`](docs/README.md) — every doc in this repo, and whether it is current or history.
-- [`CLAUDE.md`](CLAUDE.md) — the rules for working in this repo.
+- [`CLAUDE.md`](CLAUDE.md) — the rules for working in this repo, including the MJ Docs vs. `MJ: Comments` vs. Quick Notes rubric.
+- [`AGENTS.md`](AGENTS.md) — critical agent guardrails, 5-Rule performance standard, and MJ Docs architecture rubric.
+- [`.mj/specs/mj-docs-deal-proposal-integration.md`](.mj/specs/mj-docs-deal-proposal-integration.md) — living specification for the MJ Docs (`MJ: Artifacts`) Deal Proposal & Executive Brief integration (`Deal.ProposalArtifactID`, dual-DBMS parity, and `@memberjunction/ng-artifacts` UI contract).
+- [`packages/Entities/README.md`](packages/Entities/README.md) — `@mj-biz-apps/sales-entities` entity subclasses, `SalesEngineBase`, close-lock rules, and `Deal.ProposalArtifactID` contract.
+- [`packages/Angular/README.md`](packages/Angular/README.md) — `@mj-biz-apps/sales-ng` OpenApp client bootstrap, `MJSDealProposalPanel` / `DealProposalPreviewComponent` (`@memberjunction/ng-artifacts`), and UI hygiene standards.
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — the rulings that govern the app, with their reasoning.
 - [`docs/QA-GUIDE.md`](docs/QA-GUIDE.md) — standing the app up, including turning on the lapsed close date digest.
 - The original specification, `plans/bizapps-sales-master.md`, is on the

@@ -2678,6 +2678,10 @@ export class mjBizAppsSalesDeal_ {
     @Field({nullable: true, description: "Date and Time the Deal was created, defaulted to the record creation date but editable by the User. Used for deal aging."}) 
     CreationDate?: Date;
         
+    @Field({nullable: true, description: "Optional foreign key referencing the MJ Docs (MJ: Artifacts) record for this Deal (Customer Proposal, Executive Deal Brief, or Mutual Action Plan)."}) 
+    @MaxLength(36)
+    ProposalArtifactID?: string;
+        
     @Field({nullable: true}) 
     @MaxLength(200)
     Pipeline?: string;
@@ -2733,6 +2737,10 @@ export class mjBizAppsSalesDeal_ {
     @Field({nullable: true}) 
     @MaxLength(40)
     Order?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(255)
+    ProposalArtifact?: string;
         
     @Field(() => Int, {nullable: true}) 
     WinOutcome?: number;
@@ -2918,6 +2926,9 @@ export class CreatemjBizAppsSalesDealInput {
     @Field({ nullable: true })
     CreationDate?: Date;
 
+    @Field({ nullable: true })
+    ProposalArtifactID: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -3077,6 +3088,9 @@ export class UpdatemjBizAppsSalesDealInput {
 
     @Field({ nullable: true })
     CreationDate?: Date;
+
+    @Field({ nullable: true })
+    ProposalArtifactID?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

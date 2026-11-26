@@ -180,7 +180,31 @@ jobs:
       - name: Playwright teardown (sqlcmd runs with QUOTED_IDENTIFIER on)
         run: npm run test:cleanup-harness
 
-      # Unit tests run in the shared build.yml (`pnpm run test`, the root vitest suite).
+      # Unit tests run both here and in build.yml so this workflow enforces build, static gates,
+      # unit tests, and PostgreSQL migration parity together on PRs.
+      - name: Unit tests
+        env:
+          TZ: America/Los_Angeles
+        run: pnpm run test:unit
+
+      # PostgreSQL migration parity: every newly added SQL Server migration in migrations/*.sql
+      # must have a paired migrations-pg/*.pg.sql counterpart stamped with split-bake v1 provenance.
+      - name: PostgreSQL migration parity gate
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PG_COUNTERPART_LEVEL: error
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          ./.github/scripts/check-pg-counterpart.sh FETCH_HEAD HEAD
+          added_pg=$(git diff --name-only --diff-filter=A FETCH_HEAD HEAD -- 'migrations-pg/*.pg.sql' || true)
+          for pg_file in $added_pg; do
+            first_line=$(head -n 1 "$pg_file")
+            if ! printf '%s' "$first_line" | grep -qE '^-- @mj-pg-provenance: split-bake v1 '; then
+              echo "::error file=$pg_file::New PostgreSQL migration must carry '-- @mj-pg-provenance: split-bake v1 ...' on line 1."
+              exit 1
+            fi
+          done
 
       # Advisory, matching the sibling repo's judgement. migrations/_README.md requires a changeset on
       # any PR touching a migration, and that rule sat unenforced through several schema changes there.

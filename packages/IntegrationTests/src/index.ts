@@ -106,6 +106,7 @@ import './checks/party-lookup.checks.js';
 import './checks/discount-concession.checks.js';
 import './checks/sales-isa.checks.js';
 import './checks/deal-delete.checks.js';
+import './checks/deal-proposal-artifact.checks.js';
 
 export { SaveDealChecks } from './checks/save-deal.checks.js';
 export { CloseDealChecks } from './checks/close-deal.checks.js';
@@ -115,6 +116,7 @@ export { PipelineLinkChecks } from './checks/pipeline-link.checks.js';
 export { PartyLookupChecks } from './checks/party-lookup.checks.js';
 export { DiscountConcessionChecks } from './checks/discount-concession.checks.js';
 export { DealDeleteChecks } from './checks/deal-delete.checks.js';
+export { DealProposalArtifactChecks } from './checks/deal-proposal-artifact.checks.js';
 export { CloseWonOrderChecks } from './checks/close-won-order.checks.js';
 export { CloseWonScheduleChecks } from './checks/close-won-schedule.checks.js';
 export { CloseWonContractChecks } from './checks/close-won-contract.checks.js';

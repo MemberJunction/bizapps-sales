@@ -45,6 +45,7 @@
  * scan this file, which is how the list stayed wrong through the work that settled it.
  */
 export * from './DealEntityServer.js';
+export * from './DealArtifactPermissionDelegate.js';
 export * from './DealTeamMemberEntityServer.js';
 export * from './team-role-rules.js';
 export * from './DealPaymentScheduleEntityServer.js';
@@ -147,6 +148,7 @@ export * from './pipelines/LinkDefaultPipeline.js';
 
 import { LoadActivitySyncEngine } from '@mj-biz-apps/common-activity-sync';
 import { DealEntityServer } from './DealEntityServer.js';
+import { DealArtifactPermissionDelegate } from './DealArtifactPermissionDelegate.js';
 import { DealTeamMemberEntityServer } from './DealTeamMemberEntityServer.js';
 import { DealPaymentScheduleEntityServer } from './DealPaymentScheduleEntityServer.js';
 import { PipelineStageEntityServer } from './PipelineStageEntityServer.js';
@@ -170,7 +172,7 @@ import { OwnedAccountsConsentSource } from './activities/OwnedAccountsConsentSou
 export function LoadSalesCoreEntitiesServer(): void {
     LoadActivitySyncEngine();
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer, DealTeamMemberEntityServer, DealPaymentScheduleEntityServer, PipelineStageEntityServer, PipelineEntityServer, DealStageEventEntityServer, DealDigestRecipientEntityServer, CloseDealOperation, ReopenDealOperation, RecordDiscountConcessionOperation, DealLinkerExtension, OwnedAccountsConsentSource];
+    const anchors: ReadonlyArray<abstract new (...args: never[]) => object> = [DealEntityServer, DealArtifactPermissionDelegate, DealTeamMemberEntityServer, DealPaymentScheduleEntityServer, PipelineStageEntityServer, PipelineEntityServer, DealStageEventEntityServer, DealDigestRecipientEntityServer, CloseDealOperation, ReopenDealOperation, RecordDiscountConcessionOperation, DealLinkerExtension, OwnedAccountsConsentSource];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }

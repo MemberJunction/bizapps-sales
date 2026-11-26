@@ -1,0 +1,21 @@
+[
+  {
+    "fields": {
+      "DisplayName": "Proposal Artifact",
+      "AutoUpdateDisplayName": false
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ProposalArtifact"
+    }
+  },
+  {
+    "fields": {
+      "DisplayName": "Proposal Artifact",
+      "AutoUpdateDisplayName": false,
+      "Description": "Optional foreign key referencing the MJ Docs (MJ: Artifacts) record for this Deal (Customer Proposal, Executive Deal Brief, or Mutual Action Plan)."
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Fields.Entity=MJ_BizApps_Sales: Deals&Name=ProposalArtifactID"
+    }
+  }
+]

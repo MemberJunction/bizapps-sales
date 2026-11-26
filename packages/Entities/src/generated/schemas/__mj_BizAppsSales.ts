@@ -1,0 +1,2092 @@
+import { z } from "zod";
+
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Account Types
+ */
+export const mjBizAppsSalesAccountTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    IsCustomer: z.boolean().describe(`
+        * * Field Name: IsCustomer
+        * * Display Name: Is Customer
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    IsProspect: z.boolean().describe(`
+        * * Field Name: IsProspect
+        * * Display Name: Is Prospect
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    IsPartner: z.boolean().describe(`
+        * * Field Name: IsPartner
+        * * Display Name: Is Partner
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesAccountTypeEntityType = z.infer<typeof mjBizAppsSalesAccountTypeSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Buying Role Types
+ */
+export const mjBizAppsSalesBuyingRoleTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    IsDecisionMaker: z.boolean().describe(`
+        * * Field Name: IsDecisionMaker
+        * * Display Name: Is Decision Maker
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    IsBlocker: z.boolean().describe(`
+        * * Field Name: IsBlocker
+        * * Display Name: Is Blocker
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    InfluenceWeight: z.number().nullable().describe(`
+        * * Field Name: InfluenceWeight
+        * * Display Name: Influence Weight
+        * * SQL Data Type: decimal(5, 2)`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesBuyingRoleTypeEntityType = z.infer<typeof mjBizAppsSalesBuyingRoleTypeSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Contact Roles
+ */
+export const mjBizAppsSalesDealContactRoleSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    DealID: z.string().describe(`
+        * * Field Name: DealID
+        * * Display Name: Deal ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deals (vwDeals.ID)`),
+    SalesContactID: z.string().describe(`
+        * * Field Name: SalesContactID
+        * * Display Name: Sales Contact ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)`),
+    BuyingRoleTypeID: z.string().nullable().describe(`
+        * * Field Name: BuyingRoleTypeID
+        * * Display Name: Buying Role Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Buying Role Types (vwBuyingRoleTypes.ID)`),
+    Influence: z.number().nullable().describe(`
+        * * Field Name: Influence
+        * * Display Name: Influence
+        * * SQL Data Type: decimal(5, 2)
+        * * Description: How much this contact sways the buying decision, from 0 (none) to 100 (decides alone). Up to two decimal places.`),
+    Notes: z.string().nullable().describe(`
+        * * Field Name: Notes
+        * * Display Name: Notes
+        * * SQL Data Type: nvarchar(MAX)`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Deal: z.string().describe(`
+        * * Field Name: Deal
+        * * Display Name: Deal
+        * * SQL Data Type: nvarchar(500)`),
+    SalesContact: z.string().describe(`
+        * * Field Name: SalesContact
+        * * Display Name: Sales Contact
+        * * SQL Data Type: nvarchar(753)`),
+    BuyingRoleType: z.string().nullable().describe(`
+        * * Field Name: BuyingRoleType
+        * * Display Name: Buying Role
+        * * SQL Data Type: nvarchar(200)`),
+});
+
+export type mjBizAppsSalesDealContactRoleEntityType = z.infer<typeof mjBizAppsSalesDealContactRoleSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Digest Audience Types
+ */
+export const mjBizAppsSalesDealDigestAudienceTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(50)
+        * * Description: Stable identifier the seeds and the digest builder key on. Renaming Name is cosmetic; renaming Code changes an identifier.`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(100)
+        * * Description: Display name of the audience, as shown to the people who administer recipients.`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: What this audience is for and who belongs in it.`),
+    IsPortfolioWide: z.boolean().describe(`
+        * * Field Name: IsPortfolioWide
+        * * Display Name: Is Portfolio Wide
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: When 1, recipients of this audience receive one digest covering every company, and their recipient rows carry no Company. When 0, each recipient row names the company the digest covers. Enforced in the recipient's Save(), not by a CHECK, because it ties a column on this table to one on another.`),
+    MinDaysLapsed: z.number().nullable().describe(`
+        * * Field Name: MinDaysLapsed
+        * * Display Name: Minimum Days Lapsed
+        * * SQL Data Type: int
+        * * Description: A deal appears only once its expected close date is more than this many days past. Empty means no minimum: any deal whose date has passed appears. Never negative.`),
+    IncludeMissingCloseDate: z.boolean().describe(`
+        * * Field Name: IncludeMissingCloseDate
+        * * Display Name: Include Missing Close Date
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: When 1, open deals that never had an expected close date are listed too, after the lapsed ones. When 0 only deals whose date has passed appear.`),
+    SendWhenEmpty: z.boolean().describe(`
+        * * Field Name: SendWhenEmpty
+        * * Display Name: Send When Empty
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: When 1, a recipient with nothing lapsed still gets the email, carrying the Empty Message, so silence cannot be mistaken for a missed send. When 0 the email is skipped.`),
+    GroupByCompany: z.boolean().describe(`
+        * * Field Name: GroupByCompany
+        * * Display Name: Group By Company
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: When 1, the digest lists deals under a heading per company. When 0 it is one flat list.`),
+    SubjectTemplate: z.string().nullable().describe(`
+        * * Field Name: SubjectTemplate
+        * * Display Name: Subject Template
+        * * SQL Data Type: nvarchar(255)
+        * * Description: Subject line of the email. Empty means the digest builder's built-in subject.`),
+    IntroTemplate: z.string().nullable().describe(`
+        * * Field Name: IntroTemplate
+        * * Display Name: Intro Template
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Opening text of the email, above the deal list. Empty means the digest builder's built-in introduction.`),
+    EmptyMessage: z.string().nullable().describe(`
+        * * Field Name: EmptyMessage
+        * * Display Name: Empty Message
+        * * SQL Data Type: nvarchar(500)
+        * * Description: Text sent in place of the deal list when nothing is lapsed and Send When Empty is on.`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0
+        * * Description: Order in which audiences are listed and processed; lowest first.`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Whether this audience is sent at all. Clearing it pauses the audience without deleting its recipients.`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesDealDigestAudienceTypeEntityType = z.infer<typeof mjBizAppsSalesDealDigestAudienceTypeSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Digest Recipients
+ */
+export const mjBizAppsSalesDealDigestRecipientSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    DealDigestAudienceTypeID: z.string().describe(`
+        * * Field Name: DealDigestAudienceTypeID
+        * * Display Name: Deal Digest Audience Type
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Digest Audience Types (vwDealDigestAudienceTypes.ID)
+        * * Description: The audience this person receives.`),
+    CompanyID: z.string().nullable().describe(`
+        * * Field Name: CompanyID
+        * * Display Name: Company
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
+        * * Description: The company the digest covers for this person. Empty on a portfolio-wide audience, and required on any other; the recipient's Save() enforces that pairing.`),
+    EmployeeID: z.string().describe(`
+        * * Field Name: EmployeeID
+        * * Display Name: Employee
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)
+        * * Description: The employee who receives the digest, at their work email.`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Whether this person is sent the digest. Clearing it stops the email without deleting the row.`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    DealDigestAudienceType: z.string().describe(`
+        * * Field Name: DealDigestAudienceType
+        * * Display Name: Deal Digest Audience Type
+        * * SQL Data Type: nvarchar(100)`),
+    Company: z.string().nullable().describe(`
+        * * Field Name: Company
+        * * Display Name: Company Name
+        * * SQL Data Type: nvarchar(50)`),
+    Employee: z.string().nullable().describe(`
+        * * Field Name: Employee
+        * * Display Name: Employee Name
+        * * SQL Data Type: nvarchar(81)`),
+});
+
+export type mjBizAppsSalesDealDigestRecipientEntityType = z.infer<typeof mjBizAppsSalesDealDigestRecipientSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Payment Schedules
+ */
+export const mjBizAppsSalesDealPaymentScheduleSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    DealID: z.string().describe(`
+        * * Field Name: DealID
+        * * Display Name: Deal ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deals (vwDeals.ID)`),
+    PaymentDate: z.date().nullable().describe(`
+        * * Field Name: PaymentDate
+        * * Display Name: Payment Date
+        * * SQL Data Type: date`),
+    Amount: z.number().nullable().describe(`
+        * * Field Name: Amount
+        * * Display Name: Amount
+        * * SQL Data Type: decimal(19, 4)
+        * * Description: The instalment amount as agreed. Can be negative for a refund or credit.`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(1000)`),
+    DisplayOrder: z.number().describe(`
+        * * Field Name: DisplayOrder
+        * * Display Name: Display Order
+        * * SQL Data Type: int
+        * * Default Value: 0
+        * * Description: Position of the instalment in the schedule, for instalments that share a date or have none yet.`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Deal: z.string().describe(`
+        * * Field Name: Deal
+        * * Display Name: Deal
+        * * SQL Data Type: nvarchar(500)`),
+});
+
+export type mjBizAppsSalesDealPaymentScheduleEntityType = z.infer<typeof mjBizAppsSalesDealPaymentScheduleSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Roles
+ */
+export const mjBizAppsSalesDealRoleSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    IsOwnerRole: z.boolean().describe(`
+        * * Field Name: IsOwnerRole
+        * * Display Name: Is Owner Role
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: Marks the role that owns the deal. Only one team member per deal can hold it, and that person is shown as the deal's owner.`),
+    AllowsMultiplePerDeal: z.boolean().describe(`
+        * * Field Name: AllowsMultiplePerDeal
+        * * Display Name: Allows Multiple Per Deal
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Whether more than one person can hold this role on the same deal, for example two sales engineers.`),
+    DefaultAttributionPct: z.number().nullable().describe(`
+        * * Field Name: DefaultAttributionPct
+        * * Display Name: Default Attribution Pct
+        * * SQL Data Type: decimal(5, 2)`),
+    IsQuotaCarrying: z.boolean().describe(`
+        * * Field Name: IsQuotaCarrying
+        * * Display Name: Is Quota Carrying
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesDealRoleEntityType = z.infer<typeof mjBizAppsSalesDealRoleSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Sequences
+ */
+export const mjBizAppsSalesDealSequenceSchema = z.object({
+    ID: z.number().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: int
+        * * Default Value: 1`),
+    NextSequenceNumber: z.number().describe(`
+        * * Field Name: NextSequenceNumber
+        * * Display Name: Next Sequence Number
+        * * SQL Data Type: int
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesDealSequenceEntityType = z.infer<typeof mjBizAppsSalesDealSequenceSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Stage Events
+ */
+export const mjBizAppsSalesDealStageEventSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    DealID: z.string().describe(`
+        * * Field Name: DealID
+        * * Display Name: Deal ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deals (vwDeals.ID)`),
+    FromStageID: z.string().nullable().describe(`
+        * * Field Name: FromStageID
+        * * Display Name: From Stage ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Pipeline Stages (vwPipelineStages.ID)`),
+    ToStageID: z.string().nullable().describe(`
+        * * Field Name: ToStageID
+        * * Display Name: To Stage ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Pipeline Stages (vwPipelineStages.ID)`),
+    FromDealStatusTypeID: z.string().nullable().describe(`
+        * * Field Name: FromDealStatusTypeID
+        * * Display Name: From Deal Status Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Status Types (vwDealStatusTypes.ID)`),
+    ToDealStatusTypeID: z.string().nullable().describe(`
+        * * Field Name: ToDealStatusTypeID
+        * * Display Name: To Deal Status Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Status Types (vwDealStatusTypes.ID)`),
+    ChangedByUserID: z.string().nullable().describe(`
+        * * Field Name: ChangedByUserID
+        * * Display Name: Changed By User ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)`),
+    ChangedAt: z.date().describe(`
+        * * Field Name: ChangedAt
+        * * Display Name: Changed At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: sysutcdatetime()
+        * * Description: When the stage change happened. For imported deals this is the original date, not the import date.`),
+    DaysInPreviousStage: z.number().nullable().describe(`
+        * * Field Name: DaysInPreviousStage
+        * * Display Name: Days in Previous Stage
+        * * SQL Data Type: int`),
+    AmountAtTransition: z.number().nullable().describe(`
+        * * Field Name: AmountAtTransition
+        * * Display Name: Amount At Transition
+        * * SQL Data Type: decimal(19, 4)
+        * * Description: The deal amount at the time of this stage change.`),
+    AmountAtTransitionIsComputed: z.boolean().nullable().describe(`
+        * * Field Name: AmountAtTransitionIsComputed
+        * * Display Name: Amount At Transition Is Computed
+        * * SQL Data Type: bit
+        * * Description: On when the amount at this stage change was the order total, off when it was entered by hand. Empty for changes recorded before this was tracked.`),
+    ProbabilityAtTransition: z.number().nullable().describe(`
+        * * Field Name: ProbabilityAtTransition
+        * * Display Name: Probability At Transition
+        * * SQL Data Type: decimal(5, 2)`),
+    Notes: z.string().nullable().describe(`
+        * * Field Name: Notes
+        * * Display Name: Notes
+        * * SQL Data Type: nvarchar(MAX)`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Deal: z.string().describe(`
+        * * Field Name: Deal
+        * * Display Name: Deal
+        * * SQL Data Type: nvarchar(500)`),
+    FromStage: z.string().nullable().describe(`
+        * * Field Name: FromStage
+        * * Display Name: From Stage
+        * * SQL Data Type: nvarchar(200)`),
+    ToStage: z.string().nullable().describe(`
+        * * Field Name: ToStage
+        * * Display Name: To Stage
+        * * SQL Data Type: nvarchar(200)`),
+    FromDealStatusType: z.string().nullable().describe(`
+        * * Field Name: FromDealStatusType
+        * * Display Name: Previous Status
+        * * SQL Data Type: nvarchar(200)`),
+    ToDealStatusType: z.string().nullable().describe(`
+        * * Field Name: ToDealStatusType
+        * * Display Name: New Status
+        * * SQL Data Type: nvarchar(200)`),
+    ChangedByUser: z.string().nullable().describe(`
+        * * Field Name: ChangedByUser
+        * * Display Name: Changed By
+        * * SQL Data Type: nvarchar(100)`),
+});
+
+export type mjBizAppsSalesDealStageEventEntityType = z.infer<typeof mjBizAppsSalesDealStageEventSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Status Types
+ */
+export const mjBizAppsSalesDealStatusTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)
+        * * Description: Short fixed identifier for the status. Renaming the status is safe; changing its code is not.`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    IsOpen: z.boolean().describe(`
+        * * Field Name: IsOpen
+        * * Display Name: Is Open
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    IsClosed: z.boolean().describe(`
+        * * Field Name: IsClosed
+        * * Display Name: Is Closed
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    IsWon: z.boolean().describe(`
+        * * Field Name: IsWon
+        * * Display Name: Is Won
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    IsLost: z.boolean().describe(`
+        * * Field Name: IsLost
+        * * Display Name: Is Lost
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    LocksDeal: z.boolean().describe(`
+        * * Field Name: LocksDeal
+        * * Display Name: Locks Deal
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: When on, a deal in this status is locked until it is reopened: its lines, payment schedule, team and every field except Description and Next Step become read-only.`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesDealStatusTypeEntityType = z.infer<typeof mjBizAppsSalesDealStatusTypeSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Team Members
+ */
+export const mjBizAppsSalesDealTeamMemberSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    DealID: z.string().describe(`
+        * * Field Name: DealID
+        * * Display Name: Deal ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deals (vwDeals.ID)`),
+    EmployeeID: z.string().nullable().describe(`
+        * * Field Name: EmployeeID
+        * * Display Name: Employee ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)
+        * * Description: The team member, when they are an employee. Set this or Person, not both.`),
+    PersonID: z.string().nullable().describe(`
+        * * Field Name: PersonID
+        * * Display Name: Person ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
+        * * Description: The team member, when they are not an employee, such as a partner rep. Set this or Employee, not both.`),
+    DealRoleID: z.string().describe(`
+        * * Field Name: DealRoleID
+        * * Display Name: Deal Role ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Roles (vwDealRoles.ID)`),
+    AttributionPct: z.number().nullable().describe(`
+        * * Field Name: AttributionPct
+        * * Display Name: Attribution (%)
+        * * SQL Data Type: decimal(5, 2)
+        * * Description: This member's share of the deal for by-rep rollups. When any member of a deal has a value set, the app validates that active members sum to 100. Leave NULL to fall back to owner-role attribution.`),
+    StartDate: z.date().nullable().describe(`
+        * * Field Name: StartDate
+        * * Display Name: Start Date
+        * * SQL Data Type: date`),
+    EndDate: z.date().nullable().describe(`
+        * * Field Name: EndDate
+        * * Display Name: End Date
+        * * SQL Data Type: date`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    Notes: z.string().nullable().describe(`
+        * * Field Name: Notes
+        * * Display Name: Notes
+        * * SQL Data Type: nvarchar(MAX)`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Deal: z.string().describe(`
+        * * Field Name: Deal
+        * * Display Name: Deal
+        * * SQL Data Type: nvarchar(500)`),
+    Employee: z.string().nullable().describe(`
+        * * Field Name: Employee
+        * * Display Name: Employee
+        * * SQL Data Type: nvarchar(81)`),
+    Person: z.string().nullable().describe(`
+        * * Field Name: Person
+        * * Display Name: Person
+        * * SQL Data Type: nvarchar(250)`),
+    DealRole: z.string().describe(`
+        * * Field Name: DealRole
+        * * Display Name: Deal Role
+        * * SQL Data Type: nvarchar(200)`),
+});
+
+export type mjBizAppsSalesDealTeamMemberEntityType = z.infer<typeof mjBizAppsSalesDealTeamMemberSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deal Types
+ */
+export const mjBizAppsSalesDealTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    RequiresContract: z.boolean().describe(`
+        * * Field Name: RequiresContract
+        * * Display Name: Requires Contract
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    RequiresRenewalSource: z.boolean().describe(`
+        * * Field Name: RequiresRenewalSource
+        * * Display Name: Requires Renewal Source
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    DefaultPipelineID: z.string().nullable().describe(`
+        * * Field Name: DefaultPipelineID
+        * * Display Name: Default Pipeline ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Pipelines (vwPipelines.ID)`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    DefaultPipeline: z.string().nullable().describe(`
+        * * Field Name: DefaultPipeline
+        * * Display Name: Default Pipeline
+        * * SQL Data Type: nvarchar(200)`),
+});
+
+export type mjBizAppsSalesDealTypeEntityType = z.infer<typeof mjBizAppsSalesDealTypeSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Deals
+ */
+export const mjBizAppsSalesDealSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    DealNumber: z.string().nullable().describe(`
+        * * Field Name: DealNumber
+        * * Display Name: Deal Number
+        * * SQL Data Type: nvarchar(50)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(500)`),
+    PipelineID: z.string().describe(`
+        * * Field Name: PipelineID
+        * * Display Name: Pipeline ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Pipelines (vwPipelines.ID)`),
+    PipelineStageID: z.string().nullable().describe(`
+        * * Field Name: PipelineStageID
+        * * Display Name: Pipeline Stage ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Pipeline Stages (vwPipelineStages.ID)`),
+    DealTypeID: z.string().nullable().describe(`
+        * * Field Name: DealTypeID
+        * * Display Name: Deal Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Types (vwDealTypes.ID)`),
+    DealStatusTypeID: z.string().nullable().describe(`
+        * * Field Name: DealStatusTypeID
+        * * Display Name: Deal Status Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Status Types (vwDealStatusTypes.ID)`),
+    AccountID: z.string().nullable().describe(`
+        * * Field Name: AccountID
+        * * Display Name: Account ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Accounts (vwSalesAccounts.ID)`),
+    PrimaryContactID: z.string().nullable().describe(`
+        * * Field Name: PrimaryContactID
+        * * Display Name: Primary Contact
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)`),
+    BillingContactID: z.string().nullable().describe(`
+        * * Field Name: BillingContactID
+        * * Display Name: Billing Contact
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+        * * Description: The contact who receives the invoice. Leave empty to use the primary contact.`),
+    CompanyID: z.string().describe(`
+        * * Field Name: CompanyID
+        * * Display Name: Company ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
+        * * Description: The SELLING company, chosen by the rep. Must be actively linked to the deal's pipeline through PipelineCompany; enforced by the entity server, since a CHECK cannot reach across the link. FK to __mj.Company.`),
+    OwnerEmployeeID: z.string().nullable().describe(`
+        * * Field Name: OwnerEmployeeID
+        * * Display Name: Owner Employee ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)
+        * * Description: The deal owner: the team member in the owner role. Updated automatically from the deal team.`),
+    Amount: z.number().nullable().describe(`
+        * * Field Name: Amount
+        * * Display Name: Amount
+        * * SQL Data Type: decimal(19, 4)
+        * * Description: The deal value. For a deal with product lines it is the order total calculated by Orders; for a deal without lines it is entered by hand.`),
+    AmountIsComputed: z.boolean().describe(`
+        * * Field Name: AmountIsComputed
+        * * Display Name: Amount Is Computed
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: On when Amount is the order total calculated by Orders; off when it was entered by hand.`),
+    AmountComputedAt: z.date().nullable().describe(`
+        * * Field Name: AmountComputedAt
+        * * Display Name: Amount Computed At
+        * * SQL Data Type: datetimeoffset`),
+    AmountSourceHash: z.string().nullable().describe(`
+        * * Field Name: AmountSourceHash
+        * * Display Name: Amount Source Hash
+        * * SQL Data Type: nvarchar(128)
+        * * Description: Fingerprint of the order lines the amount was calculated from, used to tell when the amount is out of date.`),
+    CurrencyID: z.string().nullable().describe(`
+        * * Field Name: CurrencyID
+        * * Display Name: Currency
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Accounting: Currencies (vwCurrencies.ID)`),
+    MRR: z.number().nullable().describe(`
+        * * Field Name: MRR
+        * * Display Name: MRR
+        * * SQL Data Type: decimal(19, 4)`),
+    ARR: z.number().nullable().describe(`
+        * * Field Name: ARR
+        * * Display Name: ARR
+        * * SQL Data Type: decimal(19, 4)`),
+    TermMonths: z.number().nullable().describe(`
+        * * Field Name: TermMonths
+        * * Display Name: Term Months
+        * * SQL Data Type: int`),
+    EstimatedProjectWeeks: z.number().nullable().describe(`
+        * * Field Name: EstimatedProjectWeeks
+        * * Display Name: Estimated Project Weeks
+        * * SQL Data Type: int
+        * * Description: Estimated project length in weeks, from the statement of work. It does not affect the term or renewal dates.`),
+    ExecutionDate: z.date().nullable().describe(`
+        * * Field Name: ExecutionDate
+        * * Display Name: Execution Date
+        * * SQL Data Type: date
+        * * Description: The date the agreement was signed. It can be after the start date when work begins before signature.`),
+    StartDate: z.date().nullable().describe(`
+        * * Field Name: StartDate
+        * * Display Name: Start Date
+        * * SQL Data Type: date
+        * * Description: The date the service or subscription begins. It can be before the execution date.`),
+    ExpectedCloseDate: z.date().nullable().describe(`
+        * * Field Name: ExpectedCloseDate
+        * * Display Name: Expected Close Date
+        * * SQL Data Type: date
+        * * Description: The day the deal is expected to close. Update it as the date moves; the actual close date is set when the deal is closed.`),
+    ActualCloseDate: z.date().nullable().describe(`
+        * * Field Name: ActualCloseDate
+        * * Display Name: Actual Close Date
+        * * SQL Data Type: date
+        * * Description: The business day the deal closed on, in its company's time zone. Set by closing the deal and cleared by reopening it; it cannot be edited. For when an open deal is expected to close, use Expected Close Date.`),
+    Probability: z.number().nullable().describe(`
+        * * Field Name: Probability
+        * * Display Name: Probability
+        * * SQL Data Type: decimal(5, 2)`),
+    ForecastCategoryTypeID: z.string().nullable().describe(`
+        * * Field Name: ForecastCategoryTypeID
+        * * Display Name: Forecast Category Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Forecast Category Types (vwForecastCategoryTypes.ID)`),
+    LossReasonID: z.string().nullable().describe(`
+        * * Field Name: LossReasonID
+        * * Display Name: Loss Reason ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Loss Reasons (vwLossReasons.ID)`),
+    LossNotes: z.string().nullable().describe(`
+        * * Field Name: LossNotes
+        * * Display Name: Loss Notes
+        * * SQL Data Type: nvarchar(MAX)`),
+    LeadSourceTypeID: z.string().nullable().describe(`
+        * * Field Name: LeadSourceTypeID
+        * * Display Name: Lead Source Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Lead Source Types (vwLeadSourceTypes.ID)`),
+    CampaignID: z.string().nullable().describe(`
+        * * Field Name: CampaignID
+        * * Display Name: Campaign
+        * * SQL Data Type: uniqueidentifier`),
+    ContractID: z.string().nullable().describe(`
+        * * Field Name: ContractID
+        * * Display Name: Contract
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Contracts: Contracts (vwContracts.ID)
+        * * Description: The contract this deal belongs to, in BizApps Contracts.`),
+    RenewsContractID: z.string().nullable().describe(`
+        * * Field Name: RenewsContractID
+        * * Display Name: Renews Contract
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Contracts: Contracts (vwContracts.ID)
+        * * Description: The contract this deal renews. Required for deal types that are renewals.`),
+    AutoRenew: z.boolean().describe(`
+        * * Field Name: AutoRenew
+        * * Display Name: Auto Renew
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: Whether the resulting agreement renews automatically at the end of its term.`),
+    AnnualIncreasePctOverride: z.number().nullable().describe(`
+        * * Field Name: AnnualIncreasePctOverride
+        * * Display Name: Annual Increase Override (%)
+        * * SQL Data Type: decimal(5, 2)
+        * * Description: Annual price increase agreed for this deal, as a percent. Leave empty to use the contract type's standard increase.`),
+    CancellationNoticeDaysOverride: z.number().nullable().describe(`
+        * * Field Name: CancellationNoticeDaysOverride
+        * * Display Name: Cancellation Notice Override (Days)
+        * * SQL Data Type: int
+        * * Description: Cancellation notice period agreed for this deal, in days. Leave empty to use the contract type's standard notice period.`),
+    PaymentMethod: z.string().nullable().describe(`
+        * * Field Name: PaymentMethod
+        * * Display Name: Payment Method
+        * * SQL Data Type: nvarchar(50)
+        * * Default Value: ACH
+        * * Description: How the customer expects to pay, for example ACH. For reference only.`),
+    StandardAgreementModified: z.boolean().describe(`
+        * * Field Name: StandardAgreementModified
+        * * Display Name: Agreement Modified
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: Whether the deal moved off the standard agreement. Copied to the contract when the deal is won, where it tells finance to review the changes.`),
+    ContractVariances: z.string().nullable().describe(`
+        * * Field Name: ContractVariances
+        * * Display Name: Contract Variances
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Summary of the terms negotiated away from the standard agreement, for legal review.`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    NextStep: z.string().nullable().describe(`
+        * * Field Name: NextStep
+        * * Display Name: Next Step
+        * * SQL Data Type: nvarchar(1000)`),
+    NextStepDate: z.date().nullable().describe(`
+        * * Field Name: NextStepDate
+        * * Display Name: Next Step Date
+        * * SQL Data Type: date`),
+    ClosedAt: z.date().nullable().describe(`
+        * * Field Name: ClosedAt
+        * * Display Name: Closed At
+        * * SQL Data Type: datetimeoffset
+        * * Description: The moment the deal was closed. Set by closing the deal and cleared by reopening it; it cannot be edited. For when an open deal is expected to close, use Expected Close Date.`),
+    ClosedByUserID: z.string().nullable().describe(`
+        * * Field Name: ClosedByUserID
+        * * Display Name: Closed By User ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)
+        * * Description: The user who closed the deal. Set by closing the deal and cleared by reopening it; it cannot be edited.`),
+    OrderID: z.string().nullable().describe(`
+        * * Field Name: OrderID
+        * * Display Name: Order ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Orders: Order Headers (vwOrderHeaders.ID)`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    PredictedWinProbability: z.number().nullable().describe(`
+        * * Field Name: PredictedWinProbability
+        * * Display Name: Predicted Win Probability
+        * * SQL Data Type: decimal(5, 4)
+        * * Description: 0.0000 to 1.0000 probability that the deal will close as Won.`),
+    PredictedWinRiskBand: z.union([z.literal('Critical'), z.literal('High'), z.literal('Low'), z.literal('Medium')]).nullable().describe(`
+        * * Field Name: PredictedWinRiskBand
+        * * Display Name: Predicted Win Risk Band
+        * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Critical
+    *   * High
+    *   * Low
+    *   * Medium
+        * * Description: Categorical priority/risk tier derived from deal win probability: Low, Medium, High, Critical.`),
+    PredictedWinScoredAt: z.date().nullable().describe(`
+        * * Field Name: PredictedWinScoredAt
+        * * Display Name: Predicted Win Scored At
+        * * SQL Data Type: datetimeoffset
+        * * Description: Timestamp when the deal was last scored by the predictive deal win propensity model.`),
+    LeadSourceDetail: z.string().nullable().describe(`
+        * * Field Name: LeadSourceDetail
+        * * Display Name: Lead Source Detail
+        * * SQL Data Type: nvarchar(500)
+        * * Description: The specific source within the deal's lead source type, such as the event, campaign or referring person. Free text; empty when not recorded.`),
+    CreationDate: z.date().describe(`
+        * * Field Name: CreationDate
+        * * Display Name: Creation Date
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()
+        * * Description: Date and Time the Deal was created, defaulted to the record creation date but editable by the User. Used for deal aging.`),
+    ProposalArtifactID: z.string().nullable().describe(`
+        * * Field Name: ProposalArtifactID
+        * * Display Name: Proposal Artifact ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Artifacts (vwArtifacts.ID)
+        * * Description: Optional foreign key referencing the MJ Docs (MJ: Artifacts) record for this Deal (Customer Proposal, Executive Deal Brief, or Mutual Action Plan).`),
+    Pipeline: z.string().nullable().describe(`
+        * * Field Name: Pipeline
+        * * Display Name: Pipeline
+        * * SQL Data Type: nvarchar(200)`),
+    PipelineStage: z.string().nullable().describe(`
+        * * Field Name: PipelineStage
+        * * Display Name: Pipeline Stage
+        * * SQL Data Type: nvarchar(200)`),
+    DealType: z.string().nullable().describe(`
+        * * Field Name: DealType
+        * * Display Name: Deal Type
+        * * SQL Data Type: nvarchar(200)`),
+    DealStatusType: z.string().nullable().describe(`
+        * * Field Name: DealStatusType
+        * * Display Name: Status
+        * * SQL Data Type: nvarchar(200)`),
+    Account: z.string().nullable().describe(`
+        * * Field Name: Account
+        * * Display Name: Account
+        * * SQL Data Type: nvarchar(255)`),
+    PrimaryContact: z.string().nullable().describe(`
+        * * Field Name: PrimaryContact
+        * * Display Name: Primary Contact
+        * * SQL Data Type: nvarchar(753)`),
+    BillingContact: z.string().nullable().describe(`
+        * * Field Name: BillingContact
+        * * Display Name: Billing Contact
+        * * SQL Data Type: nvarchar(753)`),
+    Company: z.string().nullable().describe(`
+        * * Field Name: Company
+        * * Display Name: Company
+        * * SQL Data Type: nvarchar(50)`),
+    OwnerEmployee: z.string().nullable().describe(`
+        * * Field Name: OwnerEmployee
+        * * Display Name: Owner
+        * * SQL Data Type: nvarchar(81)`),
+    ForecastCategoryType: z.string().nullable().describe(`
+        * * Field Name: ForecastCategoryType
+        * * Display Name: Forecast Category
+        * * SQL Data Type: nvarchar(200)`),
+    LossReason: z.string().nullable().describe(`
+        * * Field Name: LossReason
+        * * Display Name: Loss Reason
+        * * SQL Data Type: nvarchar(200)`),
+    LeadSourceType: z.string().nullable().describe(`
+        * * Field Name: LeadSourceType
+        * * Display Name: Lead Source
+        * * SQL Data Type: nvarchar(200)`),
+    ClosedByUser: z.string().nullable().describe(`
+        * * Field Name: ClosedByUser
+        * * Display Name: Closed By User
+        * * SQL Data Type: nvarchar(100)`),
+    Order: z.string().nullable().describe(`
+        * * Field Name: Order
+        * * Display Name: Order
+        * * SQL Data Type: nvarchar(40)`),
+    ProposalArtifact: z.string().nullable().describe(`
+        * * Field Name: ProposalArtifact
+        * * Display Name: Proposal Artifact
+        * * SQL Data Type: nvarchar(255)`),
+    WinOutcome: z.number().nullable().describe(`
+        * * Field Name: WinOutcome
+        * * Display Name: Win Outcome
+        * * SQL Data Type: int`),
+    DaysToExpectedClose: z.number().nullable().describe(`
+        * * Field Name: DaysToExpectedClose
+        * * Display Name: Days To Expected Close
+        * * SQL Data Type: int`),
+    HasPaymentSchedule: z.number().describe(`
+        * * Field Name: HasPaymentSchedule
+        * * Display Name: Has Payment Schedule
+        * * SQL Data Type: int`),
+    TeamMemberCount: z.number().describe(`
+        * * Field Name: TeamMemberCount
+        * * Display Name: Team Member Count
+        * * SQL Data Type: int`),
+    HasPartnerInvolved: z.number().describe(`
+        * * Field Name: HasPartnerInvolved
+        * * Display Name: Has Partner Involved
+        * * SQL Data Type: int`),
+    IsEnterpriseTier: z.number().describe(`
+        * * Field Name: IsEnterpriseTier
+        * * Display Name: Is Enterprise Tier
+        * * SQL Data Type: int`),
+    AutoRenewFlag: z.number().describe(`
+        * * Field Name: AutoRenewFlag
+        * * Display Name: Auto Renew Flag
+        * * SQL Data Type: int`),
+    StandardAgreementModifiedFlag: z.number().describe(`
+        * * Field Name: StandardAgreementModifiedFlag
+        * * Display Name: Standard Agreement Modified Flag
+        * * SQL Data Type: int`),
+});
+
+export type mjBizAppsSalesDealEntityType = z.infer<typeof mjBizAppsSalesDealSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Forecast Category Types
+ */
+export const mjBizAppsSalesForecastCategoryTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    IncludeInCommit: z.boolean().describe(`
+        * * Field Name: IncludeInCommit
+        * * Display Name: Include In Commit
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    IncludeInBestCase: z.boolean().describe(`
+        * * Field Name: IncludeInBestCase
+        * * Display Name: Include In Best Case
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    IncludeInPipeline: z.boolean().describe(`
+        * * Field Name: IncludeInPipeline
+        * * Display Name: Include In Pipeline
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesForecastCategoryTypeEntityType = z.infer<typeof mjBizAppsSalesForecastCategoryTypeSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Forecast Snapshots
+ */
+export const mjBizAppsSalesForecastSnapshotSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    CompanyID: z.string().describe(`
+        * * Field Name: CompanyID
+        * * Display Name: Company ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)`),
+    PipelineID: z.string().nullable().describe(`
+        * * Field Name: PipelineID
+        * * Display Name: Pipeline ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Pipelines (vwPipelines.ID)`),
+    OwnerEmployeeID: z.string().nullable().describe(`
+        * * Field Name: OwnerEmployeeID
+        * * Display Name: Owner Employee ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)`),
+    PeriodStart: z.date().describe(`
+        * * Field Name: PeriodStart
+        * * Display Name: Period Start
+        * * SQL Data Type: date`),
+    PeriodEnd: z.date().describe(`
+        * * Field Name: PeriodEnd
+        * * Display Name: Period End
+        * * SQL Data Type: date`),
+    CapturedAt: z.date().describe(`
+        * * Field Name: CapturedAt
+        * * Display Name: Captured At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: sysutcdatetime()`),
+    CommitAmount: z.number().nullable().describe(`
+        * * Field Name: CommitAmount
+        * * Display Name: Commit Amount
+        * * SQL Data Type: decimal(19, 4)
+        * * Description: Total of deals in commit forecast categories when the snapshot was taken.`),
+    BestCaseAmount: z.number().nullable().describe(`
+        * * Field Name: BestCaseAmount
+        * * Display Name: Best Case Amount
+        * * SQL Data Type: decimal(19, 4)`),
+    PipelineAmount: z.number().nullable().describe(`
+        * * Field Name: PipelineAmount
+        * * Display Name: Pipeline Amount
+        * * SQL Data Type: decimal(19, 4)`),
+    ClosedAmount: z.number().nullable().describe(`
+        * * Field Name: ClosedAmount
+        * * Display Name: Closed Amount
+        * * SQL Data Type: decimal(19, 4)`),
+    SnapshotJSON: z.string().nullable().describe(`
+        * * Field Name: SnapshotJSON
+        * * Display Name: Snapshot JSON
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: The detail behind the snapshot's totals, stored as JSON.`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Company: z.string().describe(`
+        * * Field Name: Company
+        * * Display Name: Company
+        * * SQL Data Type: nvarchar(50)`),
+    Pipeline: z.string().nullable().describe(`
+        * * Field Name: Pipeline
+        * * Display Name: Pipeline
+        * * SQL Data Type: nvarchar(200)`),
+    OwnerEmployee: z.string().nullable().describe(`
+        * * Field Name: OwnerEmployee
+        * * Display Name: Owner
+        * * SQL Data Type: nvarchar(81)`),
+});
+
+export type mjBizAppsSalesForecastSnapshotEntityType = z.infer<typeof mjBizAppsSalesForecastSnapshotSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Lead Source Types
+ */
+export const mjBizAppsSalesLeadSourceTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    IsInbound: z.boolean().describe(`
+        * * Field Name: IsInbound
+        * * Display Name: Is Inbound
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    IsPaid: z.boolean().describe(`
+        * * Field Name: IsPaid
+        * * Display Name: Is Paid
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    AttributionWindowDays: z.number().nullable().describe(`
+        * * Field Name: AttributionWindowDays
+        * * Display Name: Attribution Window Days
+        * * SQL Data Type: int`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesLeadSourceTypeEntityType = z.infer<typeof mjBizAppsSalesLeadSourceTypeSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Lifecycle Stage Types
+ */
+export const mjBizAppsSalesLifecycleStageTypeSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    IsMarketingQualified: z.boolean().describe(`
+        * * Field Name: IsMarketingQualified
+        * * Display Name: Is Marketing Qualified
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    IsSalesQualified: z.boolean().describe(`
+        * * Field Name: IsSalesQualified
+        * * Display Name: Is Sales Qualified
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    IsCustomer: z.boolean().describe(`
+        * * Field Name: IsCustomer
+        * * Display Name: Is Customer
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesLifecycleStageTypeEntityType = z.infer<typeof mjBizAppsSalesLifecycleStageTypeSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Loss Reasons
+ */
+export const mjBizAppsSalesLossReasonSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    Category: z.string().nullable().describe(`
+        * * Field Name: Category
+        * * Display Name: Category
+        * * SQL Data Type: nvarchar(100)`),
+    RequiresNotes: z.boolean().describe(`
+        * * Field Name: RequiresNotes
+        * * Display Name: Requires Notes
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: When on, a deal closed as lost with this reason must also have loss notes.`),
+    IsCompetitive: z.boolean().describe(`
+        * * Field Name: IsCompetitive
+        * * Display Name: Is Competitive
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+});
+
+export type mjBizAppsSalesLossReasonEntityType = z.infer<typeof mjBizAppsSalesLossReasonSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Pipeline Companies
+ */
+export const mjBizAppsSalesPipelineCompanySchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    PipelineID: z.string().describe(`
+        * * Field Name: PipelineID
+        * * Display Name: Pipeline ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Pipelines (vwPipelines.ID)
+        * * Description: The pipeline the company sells through.`),
+    CompanyID: z.string().describe(`
+        * * Field Name: CompanyID
+        * * Display Name: Company ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Companies (vwCompanies.ID)
+        * * Description: The selling company. Deals for this company can use the pipeline while the link is active.`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Whether new deals for the company can choose the pipeline. Clearing it retires the link without touching existing deals on the pipeline.`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Pipeline: z.string().describe(`
+        * * Field Name: Pipeline
+        * * Display Name: Pipeline Name
+        * * SQL Data Type: nvarchar(200)`),
+    Company: z.string().describe(`
+        * * Field Name: Company
+        * * Display Name: Company Name
+        * * SQL Data Type: nvarchar(50)`),
+});
+
+export type mjBizAppsSalesPipelineCompanyEntityType = z.infer<typeof mjBizAppsSalesPipelineCompanySchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Pipeline Stages
+ */
+export const mjBizAppsSalesPipelineStageSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    PipelineID: z.string().describe(`
+        * * Field Name: PipelineID
+        * * Display Name: Pipeline ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Pipelines (vwPipelines.ID)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)`),
+    DisplayOrder: z.number().describe(`
+        * * Field Name: DisplayOrder
+        * * Display Name: Display Order
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    Probability: z.number().nullable().describe(`
+        * * Field Name: Probability
+        * * Display Name: Probability
+        * * SQL Data Type: decimal(5, 2)`),
+    ForecastCategoryTypeID: z.string().nullable().describe(`
+        * * Field Name: ForecastCategoryTypeID
+        * * Display Name: Forecast Category Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Forecast Category Types (vwForecastCategoryTypes.ID)`),
+    DealStatusTypeID: z.string().nullable().describe(`
+        * * Field Name: DealStatusTypeID
+        * * Display Name: Deal Status Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Status Types (vwDealStatusTypes.ID)
+        * * Description: The status a deal takes on when it enters this stage.`),
+    OrderStatusOnEntry: z.union([z.literal('Confirmed'), z.literal('Draft'), z.literal('Quoted'), z.literal('Voided')]).nullable().describe(`
+        * * Field Name: OrderStatusOnEntry
+        * * Display Name: Order Status On Entry
+        * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Confirmed
+    *   * Draft
+    *   * Quoted
+    *   * Voided`),
+    RottingDays: z.number().nullable().describe(`
+        * * Field Name: RottingDays
+        * * Display Name: Rotting Days
+        * * SQL Data Type: int
+        * * Description: Deals that stay in this stage longer than this many days are flagged on the Board. Empty means no flag.`),
+    EntryCriteria: z.string().nullable().describe(`
+        * * Field Name: EntryCriteria
+        * * Display Name: Entry Criteria
+        * * SQL Data Type: nvarchar(MAX)`),
+    ExitCriteria: z.string().nullable().describe(`
+        * * Field Name: ExitCriteria
+        * * Display Name: Exit Criteria
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Conditions for leaving this stage, stored as JSON for reference. The app does not check them.`),
+    RequiredFields: z.string().nullable().describe(`
+        * * Field Name: RequiredFields
+        * * Display Name: Required Fields
+        * * SQL Data Type: nvarchar(MAX)`),
+    GuidanceMarkdown: z.string().nullable().describe(`
+        * * Field Name: GuidanceMarkdown
+        * * Display Name: Guidance Markdown
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Guidance for reps on what a deal should have at this stage, in Markdown.`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Pipeline: z.string().describe(`
+        * * Field Name: Pipeline
+        * * Display Name: Pipeline
+        * * SQL Data Type: nvarchar(200)`),
+    ForecastCategoryType: z.string().nullable().describe(`
+        * * Field Name: ForecastCategoryType
+        * * Display Name: Forecast Category
+        * * SQL Data Type: nvarchar(200)`),
+    DealStatusType: z.string().nullable().describe(`
+        * * Field Name: DealStatusType
+        * * Display Name: Deal Status Type
+        * * SQL Data Type: nvarchar(200)`),
+});
+
+export type mjBizAppsSalesPipelineStageEntityType = z.infer<typeof mjBizAppsSalesPipelineStageSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Pipelines
+ */
+export const mjBizAppsSalesPipelineSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(200)`),
+    Code: z.string().describe(`
+        * * Field Name: Code
+        * * Display Name: Code
+        * * SQL Data Type: nvarchar(40)
+        * * Description: Short code for the pipeline. Not unique: deployments that copied the default pipeline per company hold several pipelines with the same code.`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    DealTypeID: z.string().nullable().describe(`
+        * * Field Name: DealTypeID
+        * * Display Name: Deal Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Deal Types (vwDealTypes.ID)`),
+    DefaultForecastCategoryTypeID: z.string().nullable().describe(`
+        * * Field Name: DefaultForecastCategoryTypeID
+        * * Display Name: Default Forecast Category Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Forecast Category Types (vwForecastCategoryTypes.ID)`),
+    RequiresDealLines: z.boolean().describe(`
+        * * Field Name: RequiresDealLines
+        * * Display Name: Requires Deal Lines
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Whether deals in this pipeline carry product lines priced by Orders, or a single amount entered by hand.`),
+    CloseWonPolicy: z.string().nullable().describe(`
+        * * Field Name: CloseWonPolicy
+        * * Display Name: Close Won Policy
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: What happens when a deal in this pipeline is won, stored as JSON: whether a contract is created and of which type, and which follow-up tasks are raised.`),
+    IsDefault: z.boolean().describe(`
+        * * Field Name: IsDefault
+        * * Display Name: Is Default
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    DisplayRank: z.number().describe(`
+        * * Field Name: DisplayRank
+        * * Display Name: Display Rank
+        * * SQL Data Type: int
+        * * Default Value: 0`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    IncludeInForecast: z.boolean().describe(`
+        * * Field Name: IncludeInForecast
+        * * Display Name: Include In Forecast
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Whether open deals in this pipeline count toward open and weighted pipeline, the forecast buckets and the dashboard's open-deal figures. Set to 0 for a pipeline that only holds historical deals. Closed deals count toward bookings, win rate and other history regardless.`),
+    CloseWonAssigneePersonID: z.string().nullable().describe(`
+        * * Field Name: CloseWonAssigneePersonID
+        * * Display Name: Close Won Assignee
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
+        * * Description: Person who receives the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Takes precedence over CloseWonTasks.AssigneeRecordID in Close Won Policy. Empty means that policy value is used, and when both are empty the tasks are created but not assigned.`),
+    CloseWonAssigneeRoleID: z.string().nullable().describe(`
+        * * Field Name: CloseWonAssigneeRoleID
+        * * Display Name: Close Won Assignee Role
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Roles (vwRoles.ID)
+        * * Description: Role whose members all receive the Order Review and Contract Processing tasks raised when a deal on this pipeline closes Won: the task is assigned to the role, and everyone who holds it sees it and is notified. Set per deployment; the app's metadata never sets it, so an upgrade keeps it. Close Won Assignee (a person) takes precedence when both are set. Empty, with no person, means CloseWonTasks.AssigneeRecordID in Close Won Policy is used, and when that is empty too the tasks are created but not assigned.`),
+    DealType: z.string().nullable().describe(`
+        * * Field Name: DealType
+        * * Display Name: Deal Type
+        * * SQL Data Type: nvarchar(200)`),
+    DefaultForecastCategoryType: z.string().nullable().describe(`
+        * * Field Name: DefaultForecastCategoryType
+        * * Display Name: Default Forecast Category Type
+        * * SQL Data Type: nvarchar(200)`),
+    CloseWonAssigneePerson: z.string().nullable().describe(`
+        * * Field Name: CloseWonAssigneePerson
+        * * Display Name: Close Won Assignee Name
+        * * SQL Data Type: nvarchar(250)`),
+    CloseWonAssigneeRole: z.string().nullable().describe(`
+        * * Field Name: CloseWonAssigneeRole
+        * * Display Name: Close Won Assignee Role Name
+        * * SQL Data Type: nvarchar(50)`),
+});
+
+export type mjBizAppsSalesPipelineEntityType = z.infer<typeof mjBizAppsSalesPipelineSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Sales Accounts
+ */
+export const mjBizAppsSalesSalesAccountSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Common: Organizations (vwOrganizations.ID)
+        * * Description: The account's ID, the same as its organization's ID.`),
+    OwnerEmployeeID: z.string().nullable().describe(`
+        * * Field Name: OwnerEmployeeID
+        * * Display Name: Owner Employee ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)`),
+    AccountTypeID: z.string().nullable().describe(`
+        * * Field Name: AccountTypeID
+        * * Display Name: Account Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Account Types (vwAccountTypes.ID)`),
+    LifecycleStageTypeID: z.string().nullable().describe(`
+        * * Field Name: LifecycleStageTypeID
+        * * Display Name: Lifecycle Stage Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Lifecycle Stage Types (vwLifecycleStageTypes.ID)`),
+    LeadSourceTypeID: z.string().nullable().describe(`
+        * * Field Name: LeadSourceTypeID
+        * * Display Name: Lead Source Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Lead Source Types (vwLeadSourceTypes.ID)`),
+    Territory: z.string().nullable().describe(`
+        * * Field Name: Territory
+        * * Display Name: Territory
+        * * SQL Data Type: nvarchar(100)
+        * * Description: Sales territory label for the account. It is not used to route or assign accounts.`),
+    Tier: z.string().nullable().describe(`
+        * * Field Name: Tier
+        * * Display Name: Tier
+        * * SQL Data Type: nvarchar(50)`),
+    ICPFitScore: z.number().nullable().describe(`
+        * * Field Name: ICPFitScore
+        * * Display Name: ICP Fit Score
+        * * SQL Data Type: int`),
+    IndustryCode: z.string().nullable().describe(`
+        * * Field Name: IndustryCode
+        * * Display Name: Industry Code
+        * * SQL Data Type: nvarchar(50)`),
+    EmployeeCountBand: z.string().nullable().describe(`
+        * * Field Name: EmployeeCountBand
+        * * Display Name: Employee Count Band
+        * * SQL Data Type: nvarchar(50)
+        * * Description: Approximate number of employees as a range, for example 50-200.`),
+    AnnualRevenueBand: z.string().nullable().describe(`
+        * * Field Name: AnnualRevenueBand
+        * * Display Name: Annual Revenue Band
+        * * SQL Data Type: nvarchar(50)
+        * * Description: Approximate annual revenue as a range, for example $1M-$5M.`),
+    HealthStatus: z.string().nullable().describe(`
+        * * Field Name: HealthStatus
+        * * Display Name: Health Status
+        * * SQL Data Type: nvarchar(50)`),
+    FirstClosedWonDate: z.date().nullable().describe(`
+        * * Field Name: FirstClosedWonDate
+        * * Display Name: First Closed Won Date
+        * * SQL Data Type: date`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    DefaultPrimaryContactID: z.string().nullable().describe(`
+        * * Field Name: DefaultPrimaryContactID
+        * * Display Name: Default Primary Contact
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+        * * Description: Contact a new deal for this account starts with as its Primary Contact. Copied onto a deal only when the deal's Primary Contact is empty; the deal's value stays editable.`),
+    DefaultBillingContactID: z.string().nullable().describe(`
+        * * Field Name: DefaultBillingContactID
+        * * Display Name: Default Billing Contact
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Sales Contacts (vwSalesContacts.ID)
+        * * Description: Contact a new deal for this account starts with as its Billing Contact. Copied onto a deal only when the deal's Billing Contact is empty; the deal's value stays editable. Empty means the deal's billing contact follows its primary contact.`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(255)`),
+    LegalName: z.string().nullable().describe(`
+        * * Field Name: LegalName
+        * * Display Name: Legal Name
+        * * SQL Data Type: nvarchar(255)`),
+    OrganizationTypeID: z.string().nullable().describe(`
+        * * Field Name: OrganizationTypeID
+        * * Display Name: Organization Type
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Common: Organization Types (vwOrganizationTypes.null)`),
+    ParentID: z.string().nullable().describe(`
+        * * Field Name: ParentID
+        * * Display Name: Parent Organization
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Common: Organizations (vwOrganizations.null)`),
+    Website: z.string().nullable().describe(`
+        * * Field Name: Website
+        * * Display Name: Website
+        * * SQL Data Type: nvarchar(1000)`),
+    LogoURL: z.string().nullable().describe(`
+        * * Field Name: LogoURL
+        * * Display Name: Logo URL
+        * * SQL Data Type: nvarchar(MAX)`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)`),
+    Email: z.string().nullable().describe(`
+        * * Field Name: Email
+        * * Display Name: Email
+        * * SQL Data Type: nvarchar(255)`),
+    Phone: z.string().nullable().describe(`
+        * * Field Name: Phone
+        * * Display Name: Phone
+        * * SQL Data Type: nvarchar(50)`),
+    FoundedDate: z.date().nullable().describe(`
+        * * Field Name: FoundedDate
+        * * Display Name: Founded Date
+        * * SQL Data Type: date`),
+    TaxID: z.string().nullable().describe(`
+        * * Field Name: TaxID
+        * * Display Name: Tax ID
+        * * SQL Data Type: nvarchar(50)`),
+    Status: z.string().describe(`
+        * * Field Name: Status
+        * * Display Name: Status
+        * * SQL Data Type: nvarchar(50)`),
+    WebsiteDomain: z.string().nullable().describe(`
+        * * Field Name: WebsiteDomain
+        * * Display Name: Website Domain
+        * * SQL Data Type: nvarchar(255)`),
+    Acronym: z.string().nullable().describe(`
+        * * Field Name: Acronym
+        * * SQL Data Type: nvarchar(20)`),
+    OwnerEmployee: z.string().nullable().describe(`
+        * * Field Name: OwnerEmployee
+        * * Display Name: Owner
+        * * SQL Data Type: nvarchar(81)`),
+    AccountType: z.string().nullable().describe(`
+        * * Field Name: AccountType
+        * * Display Name: Account Type
+        * * SQL Data Type: nvarchar(200)`),
+    LifecycleStageType: z.string().nullable().describe(`
+        * * Field Name: LifecycleStageType
+        * * Display Name: Lifecycle Stage
+        * * SQL Data Type: nvarchar(200)`),
+    LeadSourceType: z.string().nullable().describe(`
+        * * Field Name: LeadSourceType
+        * * Display Name: Lead Source
+        * * SQL Data Type: nvarchar(200)`),
+    DefaultPrimaryContact: z.string().nullable().describe(`
+        * * Field Name: DefaultPrimaryContact
+        * * Display Name: Default Primary Contact
+        * * SQL Data Type: nvarchar(753)`),
+    DefaultBillingContact: z.string().nullable().describe(`
+        * * Field Name: DefaultBillingContact
+        * * Display Name: Default Billing Contact
+        * * SQL Data Type: nvarchar(753)`),
+});
+
+export type mjBizAppsSalesSalesAccountEntityType = z.infer<typeof mjBizAppsSalesSalesAccountSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Sales: Sales Contacts
+ */
+export const mjBizAppsSalesSalesContactSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Common: People (vwPeople.ID)
+        * * Description: The contact's ID, the same as its person's ID.`),
+    OwnerEmployeeID: z.string().nullable().describe(`
+        * * Field Name: OwnerEmployeeID
+        * * Display Name: Owner Employee ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Employees (vwEmployees.ID)`),
+    LifecycleStageTypeID: z.string().nullable().describe(`
+        * * Field Name: LifecycleStageTypeID
+        * * Display Name: Lifecycle Stage Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Lifecycle Stage Types (vwLifecycleStageTypes.ID)`),
+    BuyingRoleTypeID: z.string().nullable().describe(`
+        * * Field Name: BuyingRoleTypeID
+        * * Display Name: Buying Role Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Buying Role Types (vwBuyingRoleTypes.ID)
+        * * Description: The contact's usual buying role. The role on a particular deal is set in that deal's buying team.`),
+    LeadSourceTypeID: z.string().nullable().describe(`
+        * * Field Name: LeadSourceTypeID
+        * * Display Name: Lead Source Type ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Sales: Lead Source Types (vwLeadSourceTypes.ID)`),
+    Seniority: z.string().nullable().describe(`
+        * * Field Name: Seniority
+        * * Display Name: Seniority
+        * * SQL Data Type: nvarchar(50)`),
+    OptedOutOfOutreach: z.boolean().describe(`
+        * * Field Name: OptedOutOfOutreach
+        * * Display Name: Opted Out Of Outreach
+        * * SQL Data Type: bit
+        * * Default Value: 0`),
+    DoNotContactReason: z.string().nullable().describe(`
+        * * Field Name: DoNotContactReason
+        * * Display Name: Do Not Contact Reason
+        * * SQL Data Type: nvarchar(500)`),
+    LastEngagedAt: z.date().nullable().describe(`
+        * * Field Name: LastEngagedAt
+        * * Display Name: Last Engaged At
+        * * SQL Data Type: datetimeoffset`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    FirstName: z.string().describe(`
+        * * Field Name: FirstName
+        * * Display Name: First Name
+        * * SQL Data Type: nvarchar(100)`),
+    LastName: z.string().describe(`
+        * * Field Name: LastName
+        * * Display Name: Last Name
+        * * SQL Data Type: nvarchar(100)`),
+    MiddleName: z.string().nullable().describe(`
+        * * Field Name: MiddleName
+        * * Display Name: Middle Name
+        * * SQL Data Type: nvarchar(100)`),
+    Prefix: z.string().nullable().describe(`
+        * * Field Name: Prefix
+        * * Display Name: Prefix
+        * * SQL Data Type: nvarchar(20)`),
+    Suffix: z.string().nullable().describe(`
+        * * Field Name: Suffix
+        * * Display Name: Suffix
+        * * SQL Data Type: nvarchar(20)`),
+    PreferredName: z.string().nullable().describe(`
+        * * Field Name: PreferredName
+        * * Display Name: Preferred Name
+        * * SQL Data Type: nvarchar(100)`),
+    Title: z.string().nullable().describe(`
+        * * Field Name: Title
+        * * Display Name: Title
+        * * SQL Data Type: nvarchar(200)`),
+    Email: z.string().nullable().describe(`
+        * * Field Name: Email
+        * * Display Name: Email
+        * * SQL Data Type: nvarchar(255)`),
+    Phone: z.string().nullable().describe(`
+        * * Field Name: Phone
+        * * Display Name: Phone
+        * * SQL Data Type: nvarchar(50)`),
+    DateOfBirth: z.date().nullable().describe(`
+        * * Field Name: DateOfBirth
+        * * Display Name: Date Of Birth
+        * * SQL Data Type: date`),
+    Gender: z.string().nullable().describe(`
+        * * Field Name: Gender
+        * * Display Name: Gender
+        * * SQL Data Type: nvarchar(50)`),
+    PhotoURL: z.string().nullable().describe(`
+        * * Field Name: PhotoURL
+        * * Display Name: Photo URL
+        * * SQL Data Type: nvarchar(MAX)`),
+    Bio: z.string().nullable().describe(`
+        * * Field Name: Bio
+        * * Display Name: Bio
+        * * SQL Data Type: nvarchar(MAX)`),
+    LinkedUserID: z.string().nullable().describe(`
+        * * Field Name: LinkedUserID
+        * * Display Name: Linked User
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Users (vwUsers.null)`),
+    Status: z.string().describe(`
+        * * Field Name: Status
+        * * Display Name: Status
+        * * SQL Data Type: nvarchar(50)`),
+    SeniorityLevelID: z.string().nullable().describe(`
+        * * Field Name: SeniorityLevelID
+        * * Display Name: Seniority
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Common: Seniority Levels (vwSeniorityLevels.ID)`),
+    DisplayName: z.string().describe(`
+        * * Field Name: DisplayName
+        * * Display Name: Display Name
+        * * SQL Data Type: nvarchar(250)`),
+    EmailDomain: z.string().nullable().describe(`
+        * * Field Name: EmailDomain
+        * * Display Name: Email Domain
+        * * SQL Data Type: nvarchar(255)`),
+    OwnerEmployee: z.string().nullable().describe(`
+        * * Field Name: OwnerEmployee
+        * * Display Name: Owner
+        * * SQL Data Type: nvarchar(81)`),
+    LifecycleStageType: z.string().nullable().describe(`
+        * * Field Name: LifecycleStageType
+        * * Display Name: Lifecycle Stage
+        * * SQL Data Type: nvarchar(200)`),
+    BuyingRoleType: z.string().nullable().describe(`
+        * * Field Name: BuyingRoleType
+        * * Display Name: Buying Role
+        * * SQL Data Type: nvarchar(200)`),
+    LeadSourceType: z.string().nullable().describe(`
+        * * Field Name: LeadSourceType
+        * * Display Name: Lead Source
+        * * SQL Data Type: nvarchar(200)`),
+    DisplayNameAndEmail: z.string().describe(`
+        * * Field Name: DisplayNameAndEmail
+        * * Display Name: Name and Email
+        * * SQL Data Type: nvarchar(753)
+        * * Description: The contact's display name, followed by their primary email in brackets when they have one. Derived in vwSalesContacts; this is what lookups to a Sales Contact show instead of a GUID.`),
+});
+
+export type mjBizAppsSalesSalesContactEntityType = z.infer<typeof mjBizAppsSalesSalesContactSchema>;

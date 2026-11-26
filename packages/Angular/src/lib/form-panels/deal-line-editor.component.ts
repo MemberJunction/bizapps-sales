@@ -577,7 +577,7 @@ interface RemoteOperationRouter {
     `,
     styles: [`
         .mjs-le__scrim {
-            position: fixed; inset: 0; background: rgba(0, 0, 0, .35); z-index: 1000;
+            position: fixed; inset: 0; background: var(--mj-bg-overlay); z-index: 1000;
         }
         .mjs-le:focus { outline: none; }
         .mjs-le {
@@ -586,7 +586,7 @@ interface RemoteOperationRouter {
             display: flex; flex-direction: column;
             background: var(--mj-bg-surface-card); color: var(--mj-text-primary);
             border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-xl, 16px);
-            box-shadow: var(--mj-shadow-lg, 0 12px 32px rgba(0, 0, 0, .22));
+            box-shadow: var(--mj-shadow-lg);
         }
         .mjs-le__head {
             display: flex; align-items: center; justify-content: space-between; gap: var(--mj-space-3);
@@ -663,12 +663,12 @@ interface RemoteOperationRouter {
         }
         .mjs-le__btn--primary {
             background: var(--mj-brand-primary); border-color: var(--mj-brand-primary);
-            color: #fff;
+            color: var(--mj-brand-on-primary);
         }
         .mjs-le__btn[disabled] { opacity: .55; cursor: not-allowed; }
-        .mjs-le__btn--quiet { margin-left: auto; color: var(--mj-status-error, #b3261e); }
+        .mjs-le__btn--quiet { margin-left: auto; color: var(--mj-status-error); }
         .mjs-le__btn--danger {
-            background: var(--mj-status-error, #b3261e); color: #fff; border-color: transparent;
+            background: var(--mj-status-error); color: var(--mj-brand-on-primary); border-color: transparent;
         }
         .mjs-le__confirm { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
         .mjs-le__labelled { display: inline-flex; align-items: center; }
@@ -688,7 +688,7 @@ interface RemoteOperationRouter {
             font: inherit; font-size: var(--mj-text-xs); font-weight: 700; padding: 2px 10px;
         }
         .mjs-le__unit button + button { border-left: 1px solid var(--mj-border-default); }
-        .mjs-le__unit button.is-selected { background: var(--mj-brand-primary); color: #fff; }
+        .mjs-le__unit button.is-selected { background: var(--mj-brand-primary); color: var(--mj-brand-on-primary); }
         .mjs-le__unit button[disabled] { opacity: .55; cursor: not-allowed; }
         .mjs-le__choices { display: flex; gap: var(--mj-space-2, 8px); flex-wrap: wrap; }
         .mjs-le__choice.is-selected {
