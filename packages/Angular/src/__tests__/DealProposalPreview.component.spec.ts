@@ -763,4 +763,92 @@ describe('DealProposalPreviewComponent & LoadDealProposalPreviewState', () => {
             /MJEmbeddedDocPanelComponent|MJArtifactSlideoverComponent|MJRecordDocsListComponent|ArtifactRelatedPanelComponent/,
         );
     });
+
+    it('invokes batched RunViews exactly once when Angular runs ngOnChanges before ngOnInit on initial mount', async () => {
+        const dealID = 'D0C50006-4B26-4E10-A800-000000000021';
+        const artifactID = 'D0C50007-4B26-4E10-A800-000000000021';
+        const artifactRow: DealProposalArtifactSummary = {
+            ID: artifactID,
+            Name: 'Customer Proposal: Initial Mount Deduplication Check',
+            Description: 'Single batched RunViews on mount.',
+            TypeID: 'type-md',
+            Type: 'Markdown Document',
+            Visibility: 'Organization',
+            DelegateEntityID: '79148DE5-7F99-44AC-ACD4-5EE7BA93D354',
+            DelegateRecordID: dealID,
+            __mj_UpdatedAt: '2026-11-26T18:00:00.000Z',
+        };
+        const versionRow: DealProposalArtifactVersionSummary = {
+            ID: 'D0C50008-4B26-4E10-A800-000000000021',
+            ArtifactID: artifactID,
+            VersionNumber: 1,
+            Name: 'v1',
+            Description: null,
+            Comments: null,
+            __mj_CreatedAt: '2026-11-26T18:00:00.000Z',
+            __mj_UpdatedAt: '2026-11-26T18:00:00.000Z',
+        };
+
+        const provider = createPermissionProvider(true);
+        const { rvInstance, runViewsSpy } = createRunViewStub(async () => [
+            { Success: true, Results: [artifactRow] } as RunViewResult,
+            { Success: true, Results: [versionRow] } as RunViewResult,
+            { Success: true, Results: [] } as RunViewResult,
+        ]);
+        const rvSpy = vi.spyOn(RunView, 'FromMetadataProvider').mockReturnValue(rvInstance);
+        const getSettingSpy = vi
+            .spyOn(UserInfoEngine.Instance, 'GetSetting')
+            .mockReturnValue('false');
+
+        try {
+            const { component, cdrStub } = createComponentInDi();
+            component.Provider = provider;
+            component.DealID = dealID;
+            component.ProposalArtifactID = artifactID;
+            component.IsSaved = true;
+
+            const initialChanges: SimpleChanges = {
+                DealID: {
+                    previousValue: undefined,
+                    currentValue: dealID,
+                    firstChange: true,
+                    isFirstChange: () => true,
+                } as SimpleChange,
+                ProposalArtifactID: {
+                    previousValue: undefined,
+                    currentValue: artifactID,
+                    firstChange: true,
+                    isFirstChange: () => true,
+                } as SimpleChange,
+                Provider: {
+                    previousValue: undefined,
+                    currentValue: provider,
+                    firstChange: true,
+                    isFirstChange: () => true,
+                } as SimpleChange,
+                IsSaved: {
+                    previousValue: undefined,
+                    currentValue: true,
+                    firstChange: true,
+                    isFirstChange: () => true,
+                } as SimpleChange,
+            };
+
+            // Simulate Angular's initial lifecycle order: ngOnChanges runs before ngOnInit.
+            component.ngOnChanges(initialChanges);
+            component.ngOnInit();
+
+            await vi.waitFor(() => {
+                expect(component.State.Phase).toBe('linked');
+            });
+
+            expect(runViewsSpy).toHaveBeenCalledTimes(1);
+            expect(component.IsPreviewExpanded).toBe(false);
+            expect(cdrStub.markForCheck).toHaveBeenCalled();
+            expect(component.State.ArtifactID).toBe(artifactID);
+        } finally {
+            rvSpy.mockRestore();
+            getSettingSpy.mockRestore();
+        }
+    });
 });

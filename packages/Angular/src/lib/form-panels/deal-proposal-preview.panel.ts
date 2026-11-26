@@ -935,7 +935,11 @@ export class DealProposalPreviewComponent implements OnInit, OnChanges, OnDestro
 
     public ngOnInit(): void {
         this.IsPreviewExpanded = this.restoreExpandedPreference();
-        void this.LoadPreview();
+        if (this.loadSequence === 0) {
+            void this.LoadPreview();
+        } else {
+            this.cdr.markForCheck();
+        }
     }
 
     public ngOnChanges(changes: SimpleChanges): void {

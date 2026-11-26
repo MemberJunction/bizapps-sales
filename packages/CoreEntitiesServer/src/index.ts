@@ -172,7 +172,7 @@ import { OwnedAccountsConsentSource } from './activities/OwnedAccountsConsentSou
 export function LoadSalesCoreEntitiesServer(): void {
     LoadActivitySyncEngine();
     // Reference each registered class so the imports cannot be elided.
-    const anchors: unknown[] = [DealEntityServer, DealArtifactPermissionDelegate, DealTeamMemberEntityServer, DealPaymentScheduleEntityServer, PipelineStageEntityServer, PipelineEntityServer, DealStageEventEntityServer, DealDigestRecipientEntityServer, CloseDealOperation, ReopenDealOperation, RecordDiscountConcessionOperation, DealLinkerExtension, OwnedAccountsConsentSource];
+    const anchors: ReadonlyArray<abstract new (...args: never[]) => object> = [DealEntityServer, DealArtifactPermissionDelegate, DealTeamMemberEntityServer, DealPaymentScheduleEntityServer, PipelineStageEntityServer, PipelineEntityServer, DealStageEventEntityServer, DealDigestRecipientEntityServer, CloseDealOperation, ReopenDealOperation, RecordDiscountConcessionOperation, DealLinkerExtension, OwnedAccountsConsentSource];
     if (anchors.length === 0) {
         throw new Error('LoadSalesCoreEntitiesServer: registration anchors were tree-shaken away.');
     }
