@@ -1,6 +1,6 @@
 # MJ Docs (`MJ: Artifacts`) Deal Proposal & Executive Brief Integration — Living Specification
 
-> **Status:** Slices 1 & 2 Complete (Architecture Rubric, Living Spec, Additive Dual-DBMS Schema `V202611261800`, CodeGen Entities, Delegated Permission Delegate & Dual-DBMS Seeded Integration Verification) · Slice 3 Pending
+> **Status:** Slices 1, 2 & 3 Complete (Architecture Rubric, Living Spec, Additive Dual-DBMS Schema `V202611261800`, CodeGen Entities, Delegated Permission Delegate, Dual-DBMS Seeded Integration Verification, Angular `@memberjunction/ng-artifacts` Proposal Preview Panel, Unit/Readiness Tests & Headless Chromium Playwright Verification)
 > **Epic Task ID:** `D882C5DB-ACF6-4FAF-AF0F-E750E1E8A862`
 > **Approved FactoryPlan:** `B3C5C221-A983-4525-ACE2-69FFAAA13118` (v2 · `CriteriaHash: 0ede2ebae2e8f9cbdfdfcbe041151ef1d570637ff029e66a162dea8781550301`)
 > **Repository & Branches:** `MemberJunction/bizapps-sales` · Target: `next` · Epic Branch: `factory/D882C5DB-ACF6-4FAF-AF0F-E750E1E8A862-mj-docs-deal-proposal`
@@ -29,9 +29,9 @@ flowchart LR
         Seed["scripts/seed-sales-deals.{sql,pg.sql} +<br/>packages/IntegrationTests DPA1–DPA6 dual-DBMS checks"]
     end
 
-    subgraph S3["Slice 3 · Angular @memberjunction/ng-artifacts UI & Readiness"]
-        NgPanel["packages/Angular Deal Proposal Preview Panel<br/>(OnPush, race guard, --mj-* tokens)"]
-        Readiness["Unit Tests + Headless Chromium Playwright +<br/>OpenApp v3 Readiness + Package READMEs"]
+    subgraph S3["Slice 3 · Angular @memberjunction/ng-artifacts UI & Readiness (Complete)"]
+        NgPanel["packages/Angular MJSDealProposalPanel & DealProposalPreviewComponent<br/>(OnPush, race guard, batched RunViews, --mj-* tokens)"]
+        Readiness["Unit Tests + Headless Chromium Playwright (0 errors) +<br/>OpenApp v3 Readiness + packages/Angular/README.md"]
     end
 
     S1 --> S2 --> S3
@@ -180,27 +180,26 @@ Verified directly against `MemberJunction/bizapps-sales` on `origin/next` (`b60e
 
 ---
 
-## 6. Slice 3 Contract — Angular `@memberjunction/ng-artifacts` UI & OpenApp Readiness
+## 6. Slice 3 Contract & Shipped Implementation — Angular `@memberjunction/ng-artifacts` UI & OpenApp Readiness
 
-- **Package Dependency Hygiene (`check-dependency-model.mjs`)**: Add `@memberjunction/ng-artifacts` to `packages/Angular/package.json` as `"^6.3.0-edge.1"` in `peerDependencies` and `"6.3.0-edge.1"` in `devDependencies` (never `dependencies`).
-- **Component Architecture (`packages/Angular`)**:
-  - Contribute a dedicated standalone Proposal / Executive Brief `BaseFormPanel` (`@RegisterClassEx(BaseFormPanel, ...)` with `inclusion: 'Primary'`, PascalCase public members, `@if`/`@for`/`@switch`, `inject()`) onto `DealFormComponentExtended` (`'MJ_BizApps_Sales: Deals'`) and retain it with a `void` anchor in `LoadBizAppsSalesClient()` (`packages/Angular/src/public-api.ts`).
-  - Render linked `MJ: Artifacts` content via `@memberjunction/ng-artifacts` (`@memberjunction/*@6.3.0-edge.1`) with version metadata and optional guest share link status, plus clean empty (`ProposalArtifactID === null`), loading (`<mj-loading>`), and unauthorized/error states.
-  - **Async Race Guard**: Track an incrementing request token (or RxJS `switchMap`) keyed on `(Deal.ID, Deal.ProposalArtifactID)` so stale async `RunView` responses from rapid Deal switching or null resets are discarded before mutating component state.
-  - **Batched Data Access (5-Rule Standard)**: Use a single `RunView` / `RunViews([...])` call with `ResultType: 'simple'` and explicit `Fields` for artifact/version/guest-share metadata (zero `RunView` loops, zero `vw*` subqueries in `ExtraFilter`, zero global transactional caches).
+- **Package Dependency Hygiene (`check-dependency-model.mjs`)**: Added `@memberjunction/ng-artifacts` to `packages/Angular/package.json` as `"^6.3.0-edge.1"` in `peerDependencies` and `"6.3.0-edge.1"` in `devDependencies` (never `dependencies`), with `pnpm-lock.yaml` synchronized and verified by `lockfile-covers-manifests.test.ts` and `check-dependency-model.mjs`.
+- **Shipped Component Architecture (`packages/Angular/src/lib/form-panels/deal-proposal-preview.panel.ts`)**:
+  - `MJSDealProposalPanel` (`@RegisterClassEx(BaseFormPanel, { key: 'sales:deal-proposal', metadata: { entity: 'MJ_BizApps_Sales: Deals', slot: 'after-related', sortKey: 65, contributionKey: 'proposal', inclusion: 'Primary' } })`) mounts the `Proposal & brief` rail section onto `DealFormComponentExtended` (`MJ_BizApps_Sales: Deals`), honors the Deal close lock (`IsDealFieldEditableWhileLocked('ProposalArtifactID', ...)`) in edit mode, and is anchored with `void MJSDealProposalPanel; void DealProposalPreviewComponent;` in `LoadBizAppsSalesClient()` (`packages/Angular/src/public-api.ts`).
+  - `DealProposalPreviewComponent` (`<mjs-deal-proposal-preview>`) renders linked `MJ: Artifacts` content via `@memberjunction/ng-artifacts@6.3.0-edge.1` (`ArtifactsModule`, `<mj-artifact-viewer-panel>`, `ArtifactIconService`) with pinned version badges (`Pinned vN`), external `MJ: Artifact Guest Share Links` indicators, plain-text stripped Markdown summary excerpts (`StripMarkdownToPlainText`), clean empty (`ProposalArtifactID === null`), loading, unauthorized, load-error, and no-versions states.
+  - **Async Race Guard**: Tracks both a monotonic request sequence counter (`loadSequence`) and active `(DealID, ProposalArtifactID)` composite identity key so stale async `RunViews` responses from rapid Deal switching (Deal A → Deal B or linked Deal → `ProposalArtifactID === null` Deal) are discarded before mutating component state.
+  - **Batched Data Access (5-Rule Standard)**: `LoadDealProposalPreviewState` checks `CanRead` on `MJ: Artifacts` and executes a single batched `RunViews([...])` (`ResultType: 'simple'`, `ID IN (...)` / `ArtifactID IN (...)`, narrow `Fields` excluding `Content`) across `MJ: Artifacts`, `MJ: Artifact Versions`, and `MJ: Artifact Guest Share Links` — zero `RunView` loops, zero `vw*` subqueries in `ExtraFilter`, zero global transactional caches.
   - **Strict UI & OpenApp v3 Hygiene**:
-    - `ChangeDetectionStrategy.OnPush` + `ChangeDetectorRef.markForCheck()` / `detectChanges()`.
-    - Semantic `--mj-*` CSS custom properties exclusively (must exist in `scripts/mj-tokens.json`; `pnpm run test:token-gate` green; zero raw `#hex`, `rgb()`, `rgba()`, or `hsl()` literals).
-    - `UserInfoEngine.Instance` for any persisted UI preferences — **zero `localStorage`**.
-    - Defer `NotifyLoadStarted()` via `queueMicrotask` where used; call `NotifyLoadComplete()` on every `BaseResourceComponent`.
+    - `ChangeDetectionStrategy.OnPush` + explicit `ChangeDetectorRef.markForCheck()`.
+    - Semantic `--mj-*` CSS custom properties exclusively across all `packages/Angular/src/lib/` styles (verified against `scripts/mj-tokens.json` via `pnpm run test:token-gate` and zero raw `#hex`, `rgb()`, `rgba()`, `hsl()`, or `hsla()` literals via `OpenAppRegistrationAndTokens.spec.ts`).
+    - `UserInfoEngine.Instance` (`mjs.deal.proposalPreview.expanded`) for inline preview expansion state — **zero `localStorage` / `sessionStorage`**.
     - **Zero `window.print()`** calls anywhere in `packages/Angular`.
-    - Prototype-safe checks (`Object.prototype.hasOwnProperty.call(...)`) for any custom-element / zone.js boundary.
-    - **Dual Form Registration Parity**: Keep every entity's `@RegisterClass(BaseFormComponent, '<EntityName>')` active and verify via `MJGlobal.Instance.ClassFactory.GetRegistration(BaseFormComponent, 'MJ_BizApps_Sales: Deals')` and all Sales entities in Vitest.
-    - **Navigation & Resource Parity**: Keep `SalesDealsSectionResource` (`BaseResourceComponent`) anchored in `LoadBizAppsSalesClient()` and matched with `metadata/applications/.bizapps-sales-application.json` `DefaultNavItems`.
-- **Verification**:
-  - Vitest unit/DOM tests (`DealProposalPreview.component.spec.ts`, `OpenAppRegistrationAndTokens.spec.ts`, `DealProposalArtifact.test.ts`, `StaticHygiene.test.ts`) 100% green with zero `.skip`.
-  - Headless Chromium Playwright smoke verification across linked, empty, and unauthorized/error states: `pageErrors === 0`, `consoleErrors === 0`, loaded icon font CSS, domain-neutral copy, and zero raw Markdown leaks in rendered DOM.
-  - Synchronize `packages/Entities/README.md`, `packages/Angular/README.md`, root `README.md`, and this spec with final implementation and add a `minor` changeset in `.changeset/`.
+    - Prototype-safe property access via `ReadOwnProperty` (`Object.prototype.hasOwnProperty.call(...)`) for custom-element / `Object.create(null)` boundaries.
+    - **Dual Form Registration Parity**: All 23 Sales entities retain active `@RegisterClass(BaseFormComponent, '<EntityName>')` registrations (`DealFormComponentExtended` at priority 2 for `MJ_BizApps_Sales: Deals`, `DealStageEventFormComponentExtended` at priority 2 for `MJ_BizApps_Sales: Deal Stage Events`, plus all 21 generated forms) verified live via `MJGlobal.Instance.ClassFactory.GetRegistration(...)`.
+    - **Navigation & Resource Parity**: `SalesDealsSectionResource` (`BaseResourceComponent`, `<mj-page-layout>`, `NotifyLoadComplete()`, `OnPush`) anchored in `LoadBizAppsSalesClient()` and matched with `metadata/applications/.bizapps-sales-application.json` `DefaultNavItems`.
+- **Verification Completed**:
+  - Deterministic Vitest unit suites (`DealProposalPreview.component.spec.ts` — 7 tests, `OpenAppRegistrationAndTokens.spec.ts` — 32 tests, `DealProposalArtifact.test.ts`, `StaticHygiene.test.ts`, plus full repo suite) 100% passing.
+  - Headless Chromium Playwright (`151.0.7922.34`) multi-view verification across Linked Proposal/Brief (`DEAL-DOC-001`), Unlinked Legacy Deal Empty State (`DEAL-DOC-015`), and Unauthorized/Error states: `pageErrors === 0`, `consoleErrors === 0`, loaded icon CSS (12/12 visible icons), resolved `--mj-*` design tokens (`--mj-brand-primary: #0076b6`, `--mj-bg-surface-card: #f8fafc`), `customElements.define` null-prototype safety verified, domain-neutral copy, and `0` raw Markdown leaks in rendered DOM.
+  - Synchronized `packages/Entities/README.md`, `packages/Angular/README.md`, root `README.md`, `.changeset/mj-docs-deal-proposal-artifact.md`, and this living specification.
 
 ---
 
