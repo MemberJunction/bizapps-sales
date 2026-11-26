@@ -9,8 +9,9 @@
  *
  * @module @mj-biz-apps/sales-core-entities-server
  */
-import type { IRunViewProvider, UserInfo } from '@memberjunction/core';
+import type { IMetadataProvider, IRunViewProvider, UserInfo } from '@memberjunction/core';
 import { UUIDsEqual } from '@memberjunction/global';
+import { SalesEngineBase } from '@mj-biz-apps/sales-entities';
 
 const DEAL_TEAM_MEMBER_ENTITY = 'MJ_BizApps_Sales: Deal Team Members';
 const DEAL_ROLE_ENTITY = 'MJ_BizApps_Sales: Deal Roles';
@@ -43,6 +44,18 @@ export async function ReadDealRoleRules(
 ): Promise<DealRoleRules | null> {
     if (!roleID) {
         return null;
+    }
+    const engine = SalesEngineBase.Instance;
+    const maybeMetadata = view as unknown as IMetadataProvider | undefined;
+    if (await engine.EnsurePropertyLoaded('_DealRoles', user, maybeMetadata)) {
+        const cached = engine.DealRoleById(roleID);
+        return cached
+            ? {
+                  Name: cached.Name ?? null,
+                  AllowsMultiplePerDeal: cached.AllowsMultiplePerDeal ?? null,
+                  IsOwnerRole: cached.IsOwnerRole ?? null,
+              }
+            : null;
     }
     const roleRead = await view.RunView<DealRoleRules>(
         {

@@ -41,7 +41,7 @@ import {
     E_ORDERS_PRODUCT,
     EffectiveTermStart,
     HasExplicitTermStart,
-    LoadLineConcessionRows,
+    LineConcessionLookupParams,
     ResolveLineConcessionState,
     WithInheritedSubscriptionType,
     type DealEntity,
@@ -384,9 +384,14 @@ export class MJSDealLineCardsComponent implements OnChanges {
         this.Error = null;
         this.cdr.detectChanges();
         try {
-            const lines = await this.loadLines(orderID);
-            const products = await this.loadProducts(lines);
-            const states = await this.loadConcessionStates(orderID, lines);
+            // Batch OrderLine + OrderConcession in a single RunViews round trip since both key on orderID.
+            const { lines, concessionRows, concessionsLoaded } = await this.loadLinesAndConcessions(orderID);
+            const [products, states] = await Promise.all([
+                this.loadProducts(lines),
+                concessionsLoaded
+                    ? this.buildConcessionStates(lines, concessionRows)
+                    : Promise.resolve(new Map<string, LineConcessionState>()),
+            ]);
             if (this.loadedOrderID === orderID) {
                 this.concessionStates = states;
                 this.setLines(lines, products);
@@ -405,24 +410,39 @@ export class MJSDealLineCardsComponent implements OnChanges {
         this.Loaded.emit(lines.length);
     }
 
-    /** In `LineNumber` order: orders stamps it, so it is the order the order itself keeps the lines in. */
-    private async loadLines(orderID: string): Promise<DealLineCardRow[]> {
-        const result = await new RunView().RunView<DealLineCardRow>({
-            EntityName: MJS_FOREIGN_ENTITIES.OrderLine,
-            ExtraFilter: `OrderHeaderID = '${EscapeSQLString(orderID)}'`,
-            OrderBy: 'LineNumber',
-            ResultType: 'simple',
-            Fields: [...LINE_FIELDS],
-        });
-        if (!result.Success) throw new Error(result.ErrorMessage || 'the order lines could not be read');
-        return result.Results ?? [];
+    /**
+     * Reads the order's lines (in `LineNumber` order) and its line-price concessions in ONE `RunViews`
+     * batch. A failed concession read degrades gracefully to no concession badges rather than blocking
+     * the line cards.
+     */
+    private async loadLinesAndConcessions(
+        orderID: string,
+    ): Promise<{ lines: DealLineCardRow[]; concessionRows: LineConcessionRow[]; concessionsLoaded: boolean }> {
+        const [linesRes, concessionsRes] = await RunView.FromMetadataProvider(Metadata.Provider).RunViews([
+            {
+                EntityName: MJS_FOREIGN_ENTITIES.OrderLine,
+                ExtraFilter: `OrderHeaderID = '${EscapeSQLString(orderID)}'`,
+                OrderBy: 'LineNumber',
+                ResultType: 'simple',
+                Fields: [...LINE_FIELDS],
+            },
+            LineConcessionLookupParams(orderID),
+        ]);
+        if (!linesRes?.Success) {
+            throw new Error(linesRes?.ErrorMessage || 'the order lines could not be read');
+        }
+        return {
+            lines: (linesRes.Results ?? []) as DealLineCardRow[],
+            concessionRows: concessionsRes?.Success ? ((concessionsRes.Results ?? []) as LineConcessionRow[]) : [],
+            concessionsLoaded: concessionsRes?.Success === true,
+        };
     }
 
     /** The products behind the lines, for SKU, type, taxability and whether each is a subscription. */
     private async loadProducts(lines: DealLineCardRow[]): Promise<Map<string, DealLineCardProduct>> {
         const ids = [...new Set(lines.map((l) => l.ProductID).filter(Boolean))];
         if (ids.length === 0) return new Map();
-        const result = await new RunView().RunView<DealLineCardProduct>({
+        const result = await RunView.FromMetadataProvider(Metadata.Provider).RunView<DealLineCardProduct>({
             EntityName: E_ORDERS_PRODUCT,
             ExtraFilter: `ID IN (${ids.map((id) => `'${EscapeSQLString(id)}'`).join(',')})`,
             ResultType: 'simple',
@@ -441,19 +461,16 @@ export class MJSDealLineCardsComponent implements OnChanges {
     }
 
     /**
-     * Each discounted line's concession state. A failed read costs the cards their concession line, not
-     * the cards: orders' confirm gate still reports an unapproved discount.
+     * Each discounted line's concession state, computed from the concession rows already batched with
+     * the order lines.
      */
-    private async loadConcessionStates(orderID: string, lines: DealLineCardRow[]): Promise<Map<string, LineConcessionState>> {
+    private async buildConcessionStates(
+        lines: DealLineCardRow[],
+        rows: LineConcessionRow[],
+    ): Promise<Map<string, LineConcessionState>> {
         const states = new Map<string, LineConcessionState>();
         const discounted = lines.filter((l) => this.DiscountPercent(l) !== null);
         if (discounted.length === 0) return states;
-        let rows: LineConcessionRow[];
-        try {
-            rows = await LoadLineConcessionRows(orderID);
-        } catch {
-            return states;
-        }
         // Whether orders values a line is asked only when nothing was recorded for it (a recorded
         // concession already says orders valued it), so on most deals no line is asked at all.
         const withConcessions = discounted.filter((line) => rows.some((r) => r.OrderLineID === line.ID));

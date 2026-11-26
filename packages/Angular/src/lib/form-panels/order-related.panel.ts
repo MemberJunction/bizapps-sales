@@ -27,6 +27,7 @@ import {
     type ResolvedRelatedChip,
 } from '@mj-biz-apps/common-ng';
 import type { mjBizAppsOrdersOrderHeaderEntity } from '@mj-biz-apps/orders-entities';
+import { SalesEngineBase } from '@mj-biz-apps/sales-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import {
     ContractFileLinksFilter,
@@ -279,6 +280,15 @@ export class MJSOrderRelatedPanel extends BaseFormPanel<mjBizAppsOrdersOrderHead
     private async readContractAndStatus(state: OrderRelatedLinkState, statusID: string | null): Promise<Partial<OrderRelatedLinkState>> {
         const lookup = ContractLookupParams(state);
         if (!lookup) return {};
+        const engine = SalesEngineBase.Instance;
+        if (await engine.EnsurePropertyLoaded('_DealStatusTypes', undefined, this.Provider)) {
+            const contracts = await this.runView.RunView(lookup);
+            const cachedStatus = statusID ? engine.DealStatusTypeById(statusID) : undefined;
+            return {
+                ...ContractLookupResult(contracts),
+                DealIsWon: cachedStatus ? cachedStatus.IsWon === true : null,
+            };
+        }
         const [contracts, statuses] = await this.runView.RunViews([
             lookup,
             {

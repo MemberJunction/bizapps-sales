@@ -105,6 +105,7 @@ function withParties(value: unknown): RunActionParams {
 function readable(people: string[], orgs: string[]): void {
     runView.mockResolvedValue({ Success: true, Results: [{ ID: DEAL_ID }] });
     runViews.mockResolvedValue([
+        { Success: true, Results: [{ ID: DEAL_ID }] },
         { Success: true, Results: people.map((ID) => ({ ID: ID.toUpperCase() })) },
         { Success: true, Results: orgs.map((ID) => ({ ID })) },
     ]);

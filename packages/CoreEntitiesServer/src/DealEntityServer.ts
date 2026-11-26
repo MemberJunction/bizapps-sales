@@ -73,6 +73,7 @@ import {
     DealFieldLabel,
     DealEntity,
     JoinLabels,
+    SalesEngineBase,
     type mjBizAppsSalesDealStageEventEntity,
 } from '@mj-biz-apps/sales-entities';
 
@@ -1677,31 +1678,48 @@ export class DealEntityServer extends DealEntity {
             }
         }
 
-        const view = this.ProviderToUse as unknown as IRunViewProvider;
-        const result = await view.RunView<{
+        let row: {
             Probability: number | null;
             ForecastCategoryTypeID: string | null;
             DealStatusTypeID: string | null;
-        }>(
-            {
-                EntityName: STAGE_ENTITY,
-                ExtraFilter: `ID = '${stageID}'`,
-                ResultType: 'simple',
-                Fields: ['Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID'],
-            },
-            this.ContextCurrentUser,
-        );
-        if (!result.Success) {
-            // Not fatal, for the same reason the order-status read is not: a stage lookup that fails must
-            // not stop a rep moving a card. Recorded as a warning like anything else that did not happen.
-            this._orderStatusWarnings.push(
-                `Stage defaults were not applied: the stage could not be read ` +
-                `(${result.ErrorMessage ?? 'unknown error'}).`,
+        } | undefined;
+        const metadataProvider = this.ProviderToUse as unknown as IMetadataProvider;
+        const engine = SalesEngineBase.Instance;
+        if (await engine.EnsurePropertyLoaded('_PipelineStages', this.ContextCurrentUser, metadataProvider)) {
+            const cachedStage = engine.PipelineStageById(stageID);
+            if (cachedStage) {
+                row = {
+                    Probability: cachedStage.Probability ?? null,
+                    ForecastCategoryTypeID: cachedStage.ForecastCategoryTypeID ?? null,
+                    DealStatusTypeID: cachedStage.DealStatusTypeID ?? null,
+                };
+            }
+        } else {
+            const view = this.ProviderToUse as unknown as IRunViewProvider;
+            const result = await view.RunView<{
+                Probability: number | null;
+                ForecastCategoryTypeID: string | null;
+                DealStatusTypeID: string | null;
+            }>(
+                {
+                    EntityName: STAGE_ENTITY,
+                    ExtraFilter: `ID = '${stageID}'`,
+                    ResultType: 'simple',
+                    Fields: ['Probability', 'ForecastCategoryTypeID', 'DealStatusTypeID'],
+                },
+                this.ContextCurrentUser,
             );
-            return null;
+            if (!result.Success) {
+                // Not fatal, for the same reason the order-status read is not: a stage lookup that fails must
+                // not stop a rep moving a card. Recorded as a warning like anything else that did not happen.
+                this._orderStatusWarnings.push(
+                    `Stage defaults were not applied: the stage could not be read ` +
+                    `(${result.ErrorMessage ?? 'unknown error'}).`,
+                );
+                return null;
+            }
+            row = (result.Results ?? [])[0];
         }
-
-        const row = (result.Results ?? [])[0];
         if (!row) {
             return null;
         }
@@ -1732,19 +1750,34 @@ export class DealEntityServer extends DealEntity {
         const stageStatusID = row.DealStatusTypeID ?? null;
         let derivableStatusID: string | null = null;
         if (stageStatusID && GUID_SHAPE.test(stageStatusID)) {
-            const status = await view.RunView<{ LocksDeal: boolean }>(
-                {
-                    EntityName: DEAL_STATUS_ENTITY,
-                    ExtraFilter: `ID = '${stageStatusID}'`,
-                    ResultType: 'simple',
-                    Fields: ['LocksDeal'],
-                },
-                this.ContextCurrentUser,
-            );
-            const flags = (status.Results ?? [])[0];
+            let statusReadOk = false;
+            let statusLocks = true;
+            if (await engine.EnsurePropertyLoaded('_DealStatusTypes', this.ContextCurrentUser, metadataProvider)) {
+                const cachedStatus = engine.DealStatusTypeById(stageStatusID);
+                if (cachedStatus) {
+                    statusReadOk = true;
+                    statusLocks = cachedStatus.LocksDeal === true;
+                }
+            } else {
+                const view = this.ProviderToUse as unknown as IRunViewProvider;
+                const status = await view.RunView<{ LocksDeal: boolean }>(
+                    {
+                        EntityName: DEAL_STATUS_ENTITY,
+                        ExtraFilter: `ID = '${stageStatusID}'`,
+                        ResultType: 'simple',
+                        Fields: ['LocksDeal'],
+                    },
+                    this.ContextCurrentUser,
+                );
+                const flags = (status.Results ?? [])[0];
+                if (status.Success && flags) {
+                    statusReadOk = true;
+                    statusLocks = flags.LocksDeal === true;
+                }
+            }
             // Unreadable is treated as "do not derive". Failing closed here costs a rep one dropdown; the
             // other direction closes deals nobody asked to close.
-            if (status.Success && flags && flags.LocksDeal !== true) {
+            if (statusReadOk && !statusLocks) {
                 derivableStatusID = stageStatusID;
             } else if (!(await this.closesIntoLockingStage())) {
                 /**
@@ -1926,6 +1959,12 @@ export class DealEntityServer extends DealEntity {
      * closed. Returning null preserves exactly today's behaviour for that case and nothing more.
      */
     private async defaultOpeningStatusID(): Promise<string | null> {
+        const engine = SalesEngineBase.Instance;
+        const metadataProvider = this.ProviderToUse as unknown as IMetadataProvider;
+        if (await engine.EnsurePropertyLoaded('_DealStatusTypes', this.ContextCurrentUser, metadataProvider)) {
+            const match = engine.OpenDealStatusTypes.find((s) => !s.LocksDeal);
+            return match ? String(match.ID) : null;
+        }
         const view = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await view.RunView<{ ID: string }>(
             {
@@ -1975,27 +2014,39 @@ export class DealEntityServer extends DealEntity {
          * `provisionEmbeddedOrder()`, and cleared at the top of every `Save()`.
          */
 
-        const view = this.ProviderToUse as unknown as IRunViewProvider;
-        const result = await view.RunView<StageOrderStatusRow>(
-            {
-                EntityName: STAGE_ENTITY,
-                ExtraFilter: `ID = '${stageID}'`,
-                ResultType: 'simple',
-                Fields: ['OrderStatusOnEntry', 'DealStatusTypeID'],
-            },
-            this.ContextCurrentUser,
-        );
-        if (!result.Success) {
-            // Not fatal, and deliberately so: a stage lookup that fails must not stop a rep moving a
-            // card. It is recorded as a warning like any other thing that did not happen.
-            this._orderStatusWarnings.push(
-                `The order was not updated: the stage's OrderStatusOnEntry could not be read ` +
-                `(${result.ErrorMessage ?? 'unknown error'}).`,
+        let row: StageOrderStatusRow | undefined;
+        const engine = SalesEngineBase.Instance;
+        const metadataProvider = this.ProviderToUse as unknown as IMetadataProvider;
+        if (await engine.EnsurePropertyLoaded('_PipelineStages', this.ContextCurrentUser, metadataProvider)) {
+            const cachedStage = engine.PipelineStageById(stageID);
+            if (cachedStage) {
+                row = {
+                    OrderStatusOnEntry: cachedStage.OrderStatusOnEntry ?? null,
+                    DealStatusTypeID: cachedStage.DealStatusTypeID ?? null,
+                };
+            }
+        } else {
+            const view = this.ProviderToUse as unknown as IRunViewProvider;
+            const result = await view.RunView<StageOrderStatusRow>(
+                {
+                    EntityName: STAGE_ENTITY,
+                    ExtraFilter: `ID = '${stageID}'`,
+                    ResultType: 'simple',
+                    Fields: ['OrderStatusOnEntry', 'DealStatusTypeID'],
+                },
+                this.ContextCurrentUser,
             );
-            return null;
+            if (!result.Success) {
+                // Not fatal, and deliberately so: a stage lookup that fails must not stop a rep moving a
+                // card. It is recorded as a warning like any other thing that did not happen.
+                this._orderStatusWarnings.push(
+                    `The order was not updated: the stage's OrderStatusOnEntry could not be read ` +
+                    `(${result.ErrorMessage ?? 'unknown error'}).`,
+                );
+                return null;
+            }
+            row = (result.Results ?? [])[0];
         }
-
-        const row = (result.Results ?? [])[0];
         const target = row?.OrderStatusOnEntry;
         if (!target) {
             return null;   // this stage says nothing about the order. The common case.
@@ -3182,6 +3233,18 @@ export class DealEntityServer extends DealEntity {
         if (!GUID_SHAPE.test(statusID)) {
             return { LocksDeal: true, IsLost: false, IsWon: false, Read: false, Absent: false };
         }
+        const engine = SalesEngineBase.Instance;
+        const metadataProvider = this.ProviderToUse as unknown as IMetadataProvider;
+        if (await engine.EnsurePropertyLoaded('_DealStatusTypes', this.ContextCurrentUser, metadataProvider)) {
+            const cached = engine.DealStatusTypeById(statusID);
+            return {
+                LocksDeal: cached?.LocksDeal === true,
+                IsLost: cached?.IsLost === true,
+                IsWon: cached?.IsWon === true,
+                Read: !!cached,
+                Absent: !cached,
+            };
+        }
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView(
             {
@@ -3403,6 +3466,17 @@ export class DealEntityServer extends DealEntity {
             return 'the company on this deal is not a valid ID.';
         }
 
+        const engine = SalesEngineBase.Instance;
+        const metadataProvider = this.ProviderToUse as unknown as IMetadataProvider;
+        if (await engine.EnsurePropertyLoaded('_PipelineCompanies', this.ContextCurrentUser, metadataProvider)) {
+            const linked = engine
+                .PipelineCompaniesForPipeline(pipelineID, true)
+                .some((r) => UUIDsEqual(r.CompanyID, companyID));
+            if (!linked) {
+                return 'the pipeline on this deal is not available to its company. Pick a pipeline linked to the company, or link the company to the pipeline.';
+            }
+            return null;
+        }
         const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await viewProvider.RunView<PipelineCompanyLinkRow>(
             {
@@ -3472,21 +3546,34 @@ export class DealEntityServer extends DealEntity {
             return 'the pipeline on this deal is not a valid ID.';
         }
 
-        const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
-        const result = await viewProvider.RunView<StagePipelineRow>(
-            {
-                EntityName: STAGE_ENTITY,
-                ExtraFilter: `ID = '${stageID}'`,
-                ResultType: 'simple',
-                Fields: ['Name', 'PipelineID', 'Pipeline'],
-            },
-            this.ContextCurrentUser,
-        );
-        if (!result.Success) {
-            throw new Error(`DealEntityServer: could not read the stage's pipeline: ${result.ErrorMessage}`);
+        let stage: StagePipelineRow | undefined;
+        const engine = SalesEngineBase.Instance;
+        const metadataProvider = this.ProviderToUse as unknown as IMetadataProvider;
+        if (await engine.EnsurePropertyLoaded('_PipelineStages', this.ContextCurrentUser, metadataProvider)) {
+            const cachedStage = engine.PipelineStageById(stageID);
+            if (cachedStage) {
+                stage = {
+                    Name: cachedStage.Name ?? null,
+                    PipelineID: cachedStage.PipelineID ?? null,
+                    Pipeline: cachedStage.Pipeline ?? engine.PipelineById(cachedStage.PipelineID)?.Name ?? null,
+                };
+            }
+        } else {
+            const viewProvider = this.ProviderToUse as unknown as IRunViewProvider;
+            const result = await viewProvider.RunView<StagePipelineRow>(
+                {
+                    EntityName: STAGE_ENTITY,
+                    ExtraFilter: `ID = '${stageID}'`,
+                    ResultType: 'simple',
+                    Fields: ['Name', 'PipelineID', 'Pipeline'],
+                },
+                this.ContextCurrentUser,
+            );
+            if (!result.Success) {
+                throw new Error(`DealEntityServer: could not read the stage's pipeline: ${result.ErrorMessage}`);
+            }
+            stage = (result.Results ?? [])[0];
         }
-
-        const stage = (result.Results ?? [])[0];
         if (!stage) {
             return `the stage on this deal could not be read, so it cannot be checked against the pipeline.`;
         }

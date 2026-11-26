@@ -37,6 +37,7 @@ import {
     IsDealCloseStamp,
     IsDealFieldEditableWhileLocked,
     LoadDealStatusOptions,
+    SalesEngineBase,
     type DealStatusOption,
     type SalesCloseDealInput,
     type SalesCloseDealOutput,
@@ -99,6 +100,14 @@ export interface LossReasonOption {
  * way to find out the table was never seeded.
  */
 async function LoadLossReasons(): Promise<LossReasonOption[]> {
+    const engine = SalesEngineBase.Instance;
+    if (await engine.EnsurePropertyLoaded('_LossReasons')) {
+        return engine.ActiveLossReasons.map((r) => ({
+            ID: String(r.ID),
+            Name: String(r.Name),
+            RequiresNotes: r.RequiresNotes === true,
+        }));
+    }
     const result = await new RunView().RunView<{ ID: string; Name: string; RequiresNotes: boolean }>({
         EntityName: E_LOSS_REASON,
         ExtraFilter: 'IsActive = 1',
@@ -178,6 +187,29 @@ export interface PipelineStageOption extends StageDefaults {
  * the board use too, so the three lists still agree.
  */
 async function LoadPipelines(): Promise<PipelineOption[]> {
+    const engine = SalesEngineBase.Instance;
+    const [pipelinesReady, linksReady] = await Promise.all([
+        engine.EnsurePropertyLoaded('_Pipelines'),
+        engine.EnsurePropertyLoaded('_PipelineCompanies'),
+    ]);
+    if (pipelinesReady && linksReady) {
+        const pipelineRows: PipelineRow[] = engine.Pipelines.map((p) => ({
+            ID: String(p.ID),
+            Name: String(p.Name),
+            Code: String(p.Code ?? ''),
+            IsDefault: p.IsDefault === true,
+            DisplayRank: Number(p.DisplayRank ?? 0),
+            IsActive: p.IsActive === true,
+        }));
+        const linkRows: PipelineLinkRow[] = engine.PipelineCompanies.map((l) => ({
+            PipelineID: String(l.PipelineID),
+            CompanyID: String(l.CompanyID),
+            Company: l.Company ?? null,
+            IsActive: l.IsActive === true,
+        }));
+        return OrderPipelinesByCompany(ToPipelineOptions(pipelineRows, linkRows));
+    }
+
     const [pipelines, links] = await new RunView().RunViews([
         {
             EntityName: MJS_ENTITIES.Pipeline,
@@ -252,6 +284,18 @@ function ToPipelineOptions(pipelines: readonly PipelineRow[], links: readonly Pi
  * alphabetically -- Discovery, Lost, Negotiation, Proposal, Qualification, Signed.
  */
 async function LoadPipelineStages(): Promise<PipelineStageOption[]> {
+    const engine = SalesEngineBase.Instance;
+    if (await engine.EnsurePropertyLoaded('_PipelineStages')) {
+        return engine.ActivePipelineStages.map((r) => ({
+            ID: String(r.ID),
+            Name: String(r.Name),
+            PipelineID: String(r.PipelineID),
+            Probability: r.Probability == null ? null : Number(r.Probability),
+            ForecastCategoryTypeID: r.ForecastCategoryTypeID ?? null,
+            ForecastCategoryType: r.ForecastCategoryType ?? null,
+            DealStatusTypeID: r.DealStatusTypeID ?? null,
+        }));
+    }
     const result = await new RunView().RunView<{
         ID: string; Name: string; PipelineID: string;
         Probability: number | null; ForecastCategoryTypeID: string | null; ForecastCategoryType: string | null;

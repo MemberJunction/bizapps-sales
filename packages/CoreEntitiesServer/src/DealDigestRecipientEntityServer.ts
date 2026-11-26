@@ -18,11 +18,12 @@ import {
     BaseEntity,
     BaseEntityResult,
     type EntitySaveOptions,
+    type IMetadataProvider,
     type IRunViewProvider,
     LogError,
 } from '@memberjunction/core';
 import { EscapeSQLString, RegisterClass } from '@memberjunction/global';
-import { mjBizAppsSalesDealDigestRecipientEntity } from '@mj-biz-apps/sales-entities';
+import { mjBizAppsSalesDealDigestRecipientEntity, SalesEngineBase } from '@mj-biz-apps/sales-entities';
 
 import { AUDIENCE_ENTITY, EMPLOYEE_ENTITY, RECIPIENT_ENTITY } from './digest/shared.js';
 
@@ -43,17 +44,28 @@ export class DealDigestRecipientEntityServer extends mjBizAppsSalesDealDigestRec
     /** The reason this row cannot be saved, or null when it can. */
     private async findRefusal(): Promise<string | null> {
         const view = this.ProviderToUse as unknown as IRunViewProvider;
+        const provider = this.ProviderToUse as unknown as IMetadataProvider | undefined;
+        const engine = SalesEngineBase.Instance;
 
-        const audRead = await view.RunView<{ Name: string; IsPortfolioWide: boolean }>({
-            EntityName: AUDIENCE_ENTITY,
-            ExtraFilter: `ID = ${quote(this.DealDigestAudienceTypeID)}`,
-            ResultType: 'simple',
-            Fields: ['Name', 'IsPortfolioWide'],
-        }, this.ContextCurrentUser);
-        if (!audRead.Success) {
-            return `The audience could not be read (${audRead.ErrorMessage}), so the row was not checked. Nothing was changed. Try again.`;
+        let audience: { Name: string; IsPortfolioWide: boolean } | undefined;
+        if (await engine.EnsurePropertyLoaded('_DealDigestAudienceTypes', this.ContextCurrentUser, provider)) {
+            const cached = engine.DealDigestAudienceTypeById(this.DealDigestAudienceTypeID);
+            if (cached) {
+                audience = { Name: cached.Name, IsPortfolioWide: cached.IsPortfolioWide === true };
+            }
+        } else {
+            const audRead = await view.RunView<{ Name: string; IsPortfolioWide: boolean }>({
+                EntityName: AUDIENCE_ENTITY,
+                ExtraFilter: `ID = ${quote(this.DealDigestAudienceTypeID)}`,
+                ResultType: 'simple',
+                Fields: ['Name', 'IsPortfolioWide'],
+            }, this.ContextCurrentUser);
+            if (!audRead.Success) {
+                return `The audience could not be read (${audRead.ErrorMessage}), so the row was not checked. Nothing was changed. Try again.`;
+            }
+            audience = (audRead.Results ?? [])[0];
         }
-        const audience = (audRead.Results ?? [])[0];
+
         if (!audience) {
             return 'The audience this row names no longer exists. Nothing was changed. Choose an audience that is in the list.';
         }

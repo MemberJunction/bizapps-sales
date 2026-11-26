@@ -22,6 +22,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import { CompositeKey, Metadata, RunView, type BaseEntity } from '@memberjunction/core';
+import { SalesEngineBase } from '@mj-biz-apps/sales-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from './entity-names';
 
 /** Reads whether a row exists in an entity by ID. A seam so the gate tests without a provider. */
@@ -170,6 +171,10 @@ export function ProspectAccountTypeID(rows: readonly AccountTypeFlagRow[]): stri
 
 /** Reads the prospect Account Type. Null when the read fails as well as when no row is flagged. */
 export async function ReadProspectAccountTypeID(): Promise<string | null> {
+    const engine = SalesEngineBase.Instance;
+    if (await engine.EnsurePropertyLoaded('_AccountTypes')) {
+        return engine.ProspectAccountType?.ID ?? null;
+    }
     const result = await new RunView().RunView<AccountTypeFlagRow>({
         EntityName: MJS_ENTITIES.AccountType,
         ResultType: 'simple',

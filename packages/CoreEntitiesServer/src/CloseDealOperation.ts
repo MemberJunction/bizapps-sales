@@ -48,6 +48,7 @@ import {
     E_ACTIVITY,
     AlreadyWonRefusal,
     SalesCloseDealOperation as SalesCloseDealOperationBase,
+    SalesEngineBase,
     SalesReopenDealOperation as SalesReopenDealOperationBase,
     StubDownstreamSeam,
     type ContractsCreateFromDealSeamInput,
@@ -165,6 +166,27 @@ async function readStage(
     if (!GUID_SHAPE.test(stageID)) {
         return null;
     }
+    const engine = SalesEngineBase.Instance;
+    const [stagesReady, statusesReady] = await Promise.all([
+        engine.EnsurePropertyLoaded('_PipelineStages', user, provider),
+        engine.EnsurePropertyLoaded('_DealStatusTypes', user, provider),
+    ]);
+    if (stagesReady && statusesReady) {
+        const cachedStage = engine.PipelineStageById(stageID);
+        if (!cachedStage) {
+            return null;
+        }
+        const cachedStatus = cachedStage.DealStatusTypeID
+            ? engine.DealStatusTypeById(cachedStage.DealStatusTypeID)
+            : undefined;
+        return {
+            Probability: cachedStage.Probability ?? null,
+            ForecastCategoryTypeID: cachedStage.ForecastCategoryTypeID ?? null,
+            IsWon: cachedStatus?.IsWon === true,
+            IsLost: cachedStatus?.IsLost === true,
+        };
+    }
+
     const view = provider as unknown as IRunViewProvider;
     const stages = await view.RunView(
         {
@@ -1019,31 +1041,49 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
             if (!GUID_SHAPE.test(deal.PipelineID)) {
                 throw new CloseRefusal('Pipeline is not a valid ID.', 'PipelineID');
             }
-            const view = provider as unknown as IRunViewProvider;
-            const r = await view.RunView(
-                {
-                    EntityName: PIPELINE_ENTITY,
-                    ExtraFilter: `ID = '${deal.PipelineID}'`,
-                    ResultType: 'simple',
-                    Fields: ['CloseWonPolicy', 'CloseWonAssigneePersonID', 'CloseWonAssigneeRoleID'],
-                },
-                user,
-            );
-            const row = (r.Results ?? [])[0] as
-                | { CloseWonPolicy?: string | null; CloseWonAssigneePersonID?: string | null; CloseWonAssigneeRoleID?: string | null }
-                | undefined;
-            const raw = row?.CloseWonPolicy;
-            if (r.Success && raw) {
-                try {
-                    fromPipeline = JSON.parse(raw) as SalesCloseWonPolicy;
-                } catch {
-                    LogError(`Sales.CloseDeal: pipeline ${deal.PipelineID} has unparseable CloseWonPolicy; using defaults`);
+            const engine = SalesEngineBase.Instance;
+            if (await engine.EnsurePropertyLoaded('_Pipelines', user, provider)) {
+                const cached = engine.PipelineById(deal.PipelineID);
+                const raw = cached?.CloseWonPolicy;
+                if (raw) {
+                    try {
+                        fromPipeline = JSON.parse(raw) as SalesCloseWonPolicy;
+                    } catch {
+                        LogError(`Sales.CloseDeal: pipeline ${deal.PipelineID} has unparseable CloseWonPolicy; using defaults`);
+                    }
                 }
+                fromPipeline = WithPipelineAssignee(
+                    fromPipeline,
+                    cached?.CloseWonAssigneePersonID,
+                    cached?.CloseWonAssigneeRoleID,
+                );
+            } else {
+                const view = provider as unknown as IRunViewProvider;
+                const r = await view.RunView(
+                    {
+                        EntityName: PIPELINE_ENTITY,
+                        ExtraFilter: `ID = '${deal.PipelineID}'`,
+                        ResultType: 'simple',
+                        Fields: ['CloseWonPolicy', 'CloseWonAssigneePersonID', 'CloseWonAssigneeRoleID'],
+                    },
+                    user,
+                );
+                const row = (r.Results ?? [])[0] as
+                    | { CloseWonPolicy?: string | null; CloseWonAssigneePersonID?: string | null; CloseWonAssigneeRoleID?: string | null }
+                    | undefined;
+                const raw = row?.CloseWonPolicy;
+                if (r.Success && raw) {
+                    try {
+                        fromPipeline = JSON.parse(raw) as SalesCloseWonPolicy;
+                    } catch {
+                        LogError(`Sales.CloseDeal: pipeline ${deal.PipelineID} has unparseable CloseWonPolicy; using defaults`);
+                    }
+                }
+                // The pipeline's assignee columns outrank the assignee in its JSON; see WithPipelineAssignee.
+                fromPipeline = r.Success
+                    ? WithPipelineAssignee(fromPipeline, row?.CloseWonAssigneePersonID, row?.CloseWonAssigneeRoleID)
+                    : fromPipeline;
             }
-            // The pipeline's assignee columns outrank the assignee in its JSON; see WithPipelineAssignee.
-            fromPipeline = r.Success
-                ? WithPipelineAssignee(fromPipeline, row?.CloseWonAssigneePersonID, row?.CloseWonAssigneeRoleID)
-                : fromPipeline;
         }
 
         return { ...POLICY_DEFAULTS, ...fromPipeline, ...(input.PolicyOverrides ?? {}) };
@@ -1234,6 +1274,21 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         if (!pipelineID || !GUID_SHAPE.test(pipelineID) || (!target.IsWon && !target.IsLost)) {
             return null;   // an outcome that is neither won nor lost names no stage
         }
+        const engine = SalesEngineBase.Instance;
+        const [statusesReady, stagesReady] = await Promise.all([
+            engine.EnsurePropertyLoaded('_DealStatusTypes', user, provider),
+            engine.EnsurePropertyLoaded('_PipelineStages', user, provider),
+        ]);
+        if (statusesReady && stagesReady) {
+            const matchingStatusIds = new Set(
+                (target.IsWon ? engine.WonDealStatusTypes : engine.LostDealStatusTypes).map((s) => String(s.ID).toLowerCase()),
+            );
+            const match = engine.StagesForPipeline(pipelineID, true).find(
+                (stageRow) => stageRow.DealStatusTypeID && matchingStatusIds.has(String(stageRow.DealStatusTypeID).toLowerCase()),
+            );
+            return match?.ID ? String(match.ID) : null;
+        }
+
         const view = provider as unknown as IRunViewProvider;
         const statuses = await view.RunView(
             {
@@ -1494,6 +1549,20 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         if (!GUID_SHAPE.test(statusID)) {
             return null;
         }
+        const engine = SalesEngineBase.Instance;
+        if (await engine.EnsurePropertyLoaded('_DealStatusTypes', user, provider)) {
+            const cached = engine.DealStatusTypeById(statusID);
+            if (!cached) {
+                return null;
+            }
+            return {
+                ID: String(cached.ID),
+                IsWon: cached.IsWon === true,
+                IsLost: cached.IsLost === true,
+                IsClosed: cached.IsClosed === true,
+                LocksDeal: cached.LocksDeal === true,
+            };
+        }
         const view = provider as unknown as IRunViewProvider;
         const r = await view.RunView(
             {
@@ -1531,6 +1600,14 @@ export class CloseDealOperation extends SalesCloseDealOperationBase {
         }
         if (!GUID_SHAPE.test(dealTypeID)) {
             throw new CloseRefusal('Deal type is not a valid ID.', 'DealTypeID');
+        }
+        const engine = SalesEngineBase.Instance;
+        if (await engine.EnsurePropertyLoaded('_DealTypes', user, provider)) {
+            const cached = engine.DealTypeById(dealTypeID);
+            if (!cached) {
+                throw new CloseRefusal('Deal type could not be read.', 'DealTypeID');
+            }
+            return cached.RequiresRenewalSource === true;
         }
         const view = provider as unknown as IRunViewProvider;
         const r = await view.RunView(
@@ -1954,6 +2031,11 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
         if (!GUID_SHAPE.test(statusID)) {
             return null;
         }
+        const engine = SalesEngineBase.Instance;
+        if (await engine.EnsurePropertyLoaded('_DealStatusTypes', user, provider)) {
+            const cached = engine.DealStatusTypeById(statusID);
+            return cached ? { ID: String(cached.ID), LocksDeal: cached.LocksDeal === true } : null;
+        }
         const view = provider as unknown as IRunViewProvider;
         const r = await view.RunView(
             {
@@ -2023,22 +2105,27 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
             return null;
         }
         const view = provider as unknown as IRunViewProvider;
-
-        const locking = await view.RunView(
-            {
-                EntityName: DEAL_STATUS_ENTITY,
-                ExtraFilter: 'LocksDeal = 1',
-                ResultType: 'simple',
-                Fields: ['ID'],
-            },
-            user,
-        );
-        if (!locking.Success) {
-            return null;
+        const engine = SalesEngineBase.Instance;
+        let ids: string[];
+        if (await engine.EnsurePropertyLoaded('_DealStatusTypes', user, provider)) {
+            ids = engine.LockingDealStatusTypes.map((s) => String(s.ID)).filter(Boolean);
+        } else {
+            const locking = await view.RunView(
+                {
+                    EntityName: DEAL_STATUS_ENTITY,
+                    ExtraFilter: 'LocksDeal = 1',
+                    ResultType: 'simple',
+                    Fields: ['ID'],
+                },
+                user,
+            );
+            if (!locking.Success) {
+                return null;
+            }
+            ids = (locking.Results ?? [])
+                .map((r) => String((r as { ID: string }).ID))
+                .filter(Boolean);
         }
-        const ids = (locking.Results ?? [])
-            .map((r) => String((r as { ID: string }).ID))
-            .filter(Boolean);
         if (ids.length === 0) {
             return null;   // nothing in this host's vocabulary locks a deal, so nothing closed it
         }
@@ -2111,6 +2198,11 @@ export class ReopenDealOperation extends SalesReopenDealOperationBase {
         provider: IMetadataProvider,
         user: UserInfo,
     ): Promise<{ ID: string; LocksDeal: boolean } | null> {
+        const engine = SalesEngineBase.Instance;
+        if (await engine.EnsurePropertyLoaded('_DealStatusTypes', user, provider)) {
+            const first = engine.OpenDealStatusTypes[0];
+            return first ? { ID: String(first.ID), LocksDeal: first.LocksDeal === true } : null;
+        }
         const view = provider as unknown as IRunViewProvider;
         const r = await view.RunView(
             {

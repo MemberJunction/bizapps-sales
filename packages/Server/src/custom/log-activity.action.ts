@@ -171,19 +171,19 @@ export class LogActivityAction extends BaseAction {
         }
 
         /**
-         * THE CALLER MUST BE ABLE TO SEE THE DEAL. The writer links the activity to whatever deal ID it is
-         * given, so without this a caller could attach activities to a deal hidden from them.
+         * THE CALLER MUST BE ABLE TO SEE THE DEAL (and any chosen parties).
+         * When `Parties` are supplied, batch Deal + Person + Organization into ONE `RunViews` call
+         * instead of sequential `RunView` -> `RunViews` round trips.
          */
-        if (!(await this.callerCanReadDeal(dealID, params.ContextUser))) {
+        const access = await this.verifyCallerReadAccess(dealID, chosen.Parties, params.ContextUser);
+        if (!access.DealReadable) {
             return { Success: false, ResultCode: 'NOT_FOUND', Message: 'No deal you can see has that ID.' };
         }
-
-        const unreadable = chosen.Parties ? await this.firstUnreadable(chosen.Parties, params.ContextUser) : null;
-        if (unreadable) {
+        if (access.FirstUnreadableParty) {
             return {
                 Success: false,
                 ResultCode: 'NOT_FOUND',
-                Message: `No ${unreadable.Kind.toLowerCase()} you can see has the ID '${unreadable.RecordID}'.`,
+                Message: `No ${access.FirstUnreadableParty.Kind.toLowerCase()} you can see has the ID '${access.FirstUnreadableParty.RecordID}'.`,
             };
         }
 
@@ -268,32 +268,48 @@ export class LogActivityAction extends BaseAction {
     }
 
     /**
-     * The first chosen party the caller cannot read, or null when every one comes back for them.
-     * One `RunViews` round trip: people and organizations side by side.
+     * Verifies caller read access to the deal and (when supplied) every chosen party.
+     * Batches Deal + Person + Organization into a single `RunViews` round trip when parties are
+     * present; runs a single `RunView` for the deal when no parties are supplied.
      */
-    private async firstUnreadable(parties: ChosenParty[], contextUser: UserInfo): Promise<ChosenParty | null> {
+    private async verifyCallerReadAccess(
+        dealID: string,
+        parties: ChosenParty[] | null,
+        contextUser: UserInfo,
+    ): Promise<{ DealReadable: boolean; FirstUnreadableParty: ChosenParty | null }> {
+        const dealParam = {
+            EntityName: E_DEAL,
+            ExtraFilter: `ID = '${dealID}'`,
+            ResultType: 'simple' as const,
+            Fields: ['ID'],
+        };
+        if (!parties || parties.length === 0) {
+            const dealRes = await new RunView().RunView<{ ID: string }>(dealParam, contextUser);
+            return {
+                DealReadable: dealRes.Success && (dealRes.Results ?? []).length > 0,
+                FirstUnreadableParty: null,
+            };
+        }
+
         const inList = (kind: ChosenParty['Kind']): string =>
             parties.filter((p) => p.Kind === kind).map((p) => `'${p.RecordID}'`).join(', ') || 'NULL';
-        const [people, orgs] = await new RunView().RunViews(
+        const [dealRes, people, orgs] = await new RunView().RunViews(
             [
+                dealParam,
                 { EntityName: E_PERSON, ExtraFilter: `ID IN (${inList('Person')})`, ResultType: 'simple', Fields: ['ID'] },
                 { EntityName: E_ORGANIZATION, ExtraFilter: `ID IN (${inList('Organization')})`, ResultType: 'simple', Fields: ['ID'] },
             ],
             contextUser,
         );
+        const dealReadable = dealRes?.Success === true && (dealRes.Results ?? []).length > 0;
+        if (!dealReadable) {
+            return { DealReadable: false, FirstUnreadableParty: null };
+        }
         const ids = (r: typeof people, kind: ChosenParty['Kind']): string[] =>
             r?.Success ? ((r.Results ?? []) as { ID: string }[]).map((row) => `${kind}:${String(row.ID).toLowerCase()}`) : [];
         const visible = new Set([...ids(people, 'Person'), ...ids(orgs, 'Organization')]);
-        return parties.find((p) => !visible.has(`${p.Kind}:${p.RecordID.toLowerCase()}`)) ?? null;
-    }
-
-    /** True when the deal comes back for the caller, so their read permission and row-level filters apply. */
-    private async callerCanReadDeal(dealID: string, contextUser: UserInfo): Promise<boolean> {
-        const r = await new RunView().RunView<{ ID: string }>(
-            { EntityName: E_DEAL, ExtraFilter: `ID = '${dealID}'`, ResultType: 'simple', Fields: ['ID'] },
-            contextUser,
-        );
-        return r.Success && (r.Results ?? []).length > 0;
+        const firstUnreadable = parties.find((p) => !visible.has(`${p.Kind}:${p.RecordID.toLowerCase()}`)) ?? null;
+        return { DealReadable: true, FirstUnreadableParty: firstUnreadable };
     }
 }
 

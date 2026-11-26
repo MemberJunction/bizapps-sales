@@ -4,13 +4,14 @@ import { CommunicationEngine } from '@memberjunction/communication-engine';
 import type { Message } from '@memberjunction/communication-types';
 import { NormalizeUUID, UUIDsEqual } from '@memberjunction/global';
 import { BusinessTimeZoneEngine, type CalendarDay } from '@mj-biz-apps/common-entities';
+import { SalesEngineBase } from '@mj-biz-apps/sales-entities';
 
 import { SelectForAudience, type DigestAudience } from './audience.js';
 import { ReadCurrencyCodes } from './currency.js';
 import { LoadLapsedDeals, MAX_DEALS_PER_RUN, type LapsedDealsResult } from './lapsed-deals.js';
 import { LoadDigestRecipients, type DigestRecipient } from './recipients.js';
 import { RenderDigest } from './render.js';
-import { ReadSalesSetting, ResolveSender } from './sender.js';
+import { ReadSalesSetting, ResolveSender, type SenderFromResolution } from './sender.js';
 import { AUDIENCE_ENTITY, CountDeals } from './shared.js';
 
 const lower = (s: string | null | undefined): string => (s ?? '').toLowerCase();
@@ -51,6 +52,25 @@ export interface DigestRunResult {
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 async function loadAudiences(contextUser: UserInfo): Promise<DigestAudience[]> {
+    const engine = SalesEngineBase.Instance;
+    if (await engine.EnsurePropertyLoaded('_DealDigestAudienceTypes', contextUser)) {
+        return engine.ActiveDealDigestAudienceTypes
+            .map<DigestAudience>((a) => ({
+                ID: String(a.ID),
+                Code: String(a.Code),
+                Name: String(a.Name),
+                IsPortfolioWide: a.IsPortfolioWide === true,
+                MinDaysLapsed: a.MinDaysLapsed ?? null,
+                IncludeMissingCloseDate: a.IncludeMissingCloseDate === true,
+                SendWhenEmpty: a.SendWhenEmpty === true,
+                GroupByCompany: a.GroupByCompany === true,
+                SubjectTemplate: a.SubjectTemplate ?? null,
+                IntroTemplate: a.IntroTemplate ?? null,
+                EmptyMessage: a.EmptyMessage ?? null,
+                DisplayRank: Number(a.DisplayRank ?? 0),
+            }))
+            .sort((a, b) => a.DisplayRank - b.DisplayRank);
+    }
     const r = await new RunView().RunView<DigestAudience>({
         EntityName: AUDIENCE_ENTITY, ExtraFilter: 'IsActive = 1', OrderBy: 'DisplayRank', ResultType: 'simple',
         Fields: ['ID', 'Code', 'Name', 'IsPortfolioWide', 'MinDaysLapsed', 'IncludeMissingCloseDate', 'SendWhenEmpty',
@@ -132,7 +152,8 @@ async function sendOne(target: SendTarget, contextUser: UserInfo, email: Rendere
 
 interface RunState {
     contextUser: UserInfo; options: DigestRunOptions; today: CalendarDay; deals: LapsedDealsResult;
-    explorerBaseUrl: string | null; provider: string | null; currencyCodes: ReadonlyMap<string, string>; sendTarget: SendTargetLoader; result: DigestRunResult;
+    explorerBaseUrl: string | null; provider: string | null; currencyCodes: ReadonlyMap<string, string>;
+    sendTarget: SendTargetLoader; senderCache: Map<string, Promise<SenderFromResolution>>; result: DigestRunResult;
 }
 
 /**
@@ -168,7 +189,13 @@ async function deliverOne(state: RunState, audience: DigestAudience, recipient: 
         }
         if (groups.length === 0 && !audience.SendWhenEmpty) { result.SkippedEmpty++; return; }
 
-        const sender = await ResolveSender(audience.IsPortfolioWide ? null : recipient.CompanyID, state.contextUser);
+        const senderKey = audience.IsPortfolioWide ? '__portfolio__' : NormalizeUUID(recipient.CompanyID ?? '');
+        let senderPromise = state.senderCache.get(senderKey);
+        if (!senderPromise) {
+            senderPromise = ResolveSender(audience.IsPortfolioWide ? null : recipient.CompanyID, state.contextUser);
+            state.senderCache.set(senderKey, senderPromise);
+        }
+        const sender = await senderPromise;
         if (!sender) {
             result.Errors.push(`${label} was not sent: no From address resolved (`
                 + `${companyName === null ? 'this audience has no company' : `company ${companyName} has no default Mailbox sender identity`}, `
@@ -211,7 +238,14 @@ export async function RunLapsedCloseDateDigest(contextUser: UserInfo, options: D
     try {
         await BusinessTimeZoneEngine.Instance.Config(false, contextUser);
         const today = BusinessTimeZoneEngine.Instance.Today();
-        const deals = await LoadLapsedDeals(contextUser, today);
+        const [deals, audiences, provider, explorerBaseUrl, currencyCodes] = await Promise.all([
+            LoadLapsedDeals(contextUser, today),
+            loadAudiences(contextUser),
+            ReadSalesSetting('DigestProvider', contextUser),
+            ReadSalesSetting('ExplorerBaseUrl', contextUser),
+            // Read once per run; never throws (see ReadCurrencyCodes), so it cannot stop the digest.
+            ReadCurrencyCodes(contextUser),
+        ]);
         result.TotalLapsedDeals = deals.Deals.length;
         result.Truncated = deals.Truncated;
         if (deals.Truncated) {
@@ -223,19 +257,17 @@ export async function RunLapsedCloseDateDigest(contextUser: UserInfo, options: D
                 + 'having nothing lapsed rather than mailed. Treat this run as unreliable.');
         }
 
-        const audiences = await loadAudiences(contextUser);
         // Which audiences ignore a recipient's company. `LoadDigestRecipients` clears CompanyID on
         // their rows so one person cannot survive the dedupe twice and receive the same digest twice.
         const portfolioWideAudienceIDs = new Set(
             audiences.filter((a) => a.IsPortfolioWide).map((a) => NormalizeUUID(String(a.ID))));
         const recipients = await LoadDigestRecipients(contextUser, portfolioWideAudienceIDs);
-        const provider = await ReadSalesSetting('DigestProvider', contextUser);
         const state: RunState = {
             contextUser, options, today, deals, result, sendTarget: new SendTargetLoader(contextUser, provider),
-            explorerBaseUrl: await ReadSalesSetting('ExplorerBaseUrl', contextUser),
+            explorerBaseUrl,
             provider,
-            // Read once per run; never throws (see ReadCurrencyCodes), so it cannot stop the digest.
-            currencyCodes: await ReadCurrencyCodes(contextUser),
+            currencyCodes,
+            senderCache: new Map<string, Promise<SenderFromResolution>>(),
         };
         if (!options.dryRun && state.provider === null) {
             // Once, up front: otherwise every send fails separately with the provider's own "not found".

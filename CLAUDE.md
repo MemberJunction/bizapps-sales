@@ -453,8 +453,49 @@ Recorded in full in `docs/DECISIONS.md`; listed here so nobody "fixes" them:
 - MJ-core bugs go to `MemberJunction/MJ` (always pass `--repo`); mjdev-tool bugs to
   `MemberJunction/MJDev`. Say which repo you chose and why under "Duplicate search".
 
-## Performance
-- Batch with `RunViews`; never per-item queries in loops; use denormalized view fields over lookups.
+## Performance & Caching Standard (Canonical 5 Rules)
+
+Every data-access path in `bizapps-sales` — across `@mj-biz-apps/sales-entities`, `@mj-biz-apps/sales-ng`, `@mj-biz-apps/sales-core-entities-server`, and `@mj-biz-apps/sales-server` — MUST follow the BizApps 5-Rule Performance & Caching Standard:
+
+### Rule 1 — Use `SalesEngineBase` for Bounded Reference & Taxonomy Tables
+- **NEVER** issue ad-hoc `RunView` queries against the 13 bounded non-RLS sales reference/taxonomy tables when `SalesEngineBase.Instance` is available:
+  `Pipelines`, `Pipeline Stages`, `Pipeline Companies`, `Deal Status Types`, `Deal Types`, `Forecast Category Types`, `Loss Reasons`, `Deal Roles`, `Account Types`, `Buying Role Types`, `Lead Source Types`, `Lifecycle Stage Types`, `Deal Digest Audience Types`.
+- `SalesEngineBase` extends `BaseEngine<SalesEngineBase>` (via `BaseSingleton`, decorated with `@RegisterForStartup()`) in `packages/Entities/src/sales-engine-base.ts`, loads all 13 tables in a single batched engine load with `AutoRefresh: true` and `CacheLocal: true`, and exposes O(1) lookup helpers (`PipelineById`, `PipelineStageById`, `StagesForPipeline`, `PipelineCompaniesForPipeline`, `DealStatusTypeById`, `OpenDealStatusTypes`, `WonDealStatusTypes`, `LostDealStatusTypes`, `LockingDealStatusTypes`, `NonClosedDealStatusTypes`, `OwnerDealRole`, `ProspectAccountType`, `LossReasonById`, `DealDigestAudienceTypeById`, etc.).
+- Keep `LoadSalesEngineBase()` anchored in both `packages/Angular/src/public-api.ts` (`LoadBizAppsSalesClient`) and `packages/Server/src/index.ts` (`LoadBizAppsSalesServer`) so `@RegisterForStartup()` survives tree-shaking.
+- Example:
+  ```typescript
+  const engine = SalesEngineBase.Instance;
+  await engine.EnsurePropertyLoaded('_DealStatusTypes', contextUser, provider);
+  const statusRow = engine.DealStatusTypeById(deal.DealStatusTypeID);
+  const openStatuses = engine.OpenDealStatusTypes;
+  ```
+
+### Rule 2 — Multi-Provider & Impersonation Safety (`ProviderToUse`, `CanRead`, User-Switch Eviction, `InvalidateCache`)
+- `BaseEngine` instances MUST override `protected override get ProviderToUse(): IMetadataProvider` to return the active provider (`this._activeProvider ?? Metadata.Provider`) instead of letting `BaseEngine.Load()` latch a stale startup provider.
+- Gate every entity config in `Config()` on `CanRead` (via `EntityInfo.GetUserPermisions(contextUser).CanRead`) so restricted callers do not fail engine startup or read unauthorized entities.
+- Evict cached arrays and O(1) indexes and force a reload whenever `contextUser.ID` changes across `Config()` calls (e.g., server impersonation or multi-user test runs).
+- Expose `InvalidateCache()` to clear all cached arrays and indexes and force the next `Config(false)` call to reload.
+- Set `CacheLocal: true` ONLY on shared non-RLS reference tables (all 13 `SalesEngineBase` tables have no RLS); any RLS-scoped entity cached on an engine MUST use `CacheLocal: false`.
+
+### Rule 3 — Batch Independent Queries with `RunViews([...])` (Zero Waterfalls)
+- **NEVER** issue sequential `await rv.RunView(...)` calls or `Promise.all([rv.RunView(...), rv.RunView(...)])` when multiple independent reads share the same provider and user context. Collapse them into a single **`rv.RunViews([...], contextUser)`** call (one GraphQL / DB round trip), preferring `ResultType: 'simple'` whenever entity mutation is not needed.
+- **NEVER** execute `RunView` inside a `for` / `map` loop (N+1 queries). Collect IDs first, run a single batched `ID IN (...)` read, and join in memory.
+- Concrete examples in this repo:
+  - `MJSDealHeroPanel.resolvePostLockNoticesBatched()` batches `OrderHeader` (reversals), `Contract` (executed agreement warning), and `OrderHeader` (`TotalGross` amount freshness) into ONE `RunViews` round trip.
+  - `MJSDealLineCardsComponent.loadLinesAndConcessions()` batches `OrderLine` + `OrderConcession` into ONE `RunViews` round trip.
+  - `ActivityWriterService.runPreflightReads()` batches `ActivityType` + `Deal` + optional `Activity` external-key dedupe into ONE `RunViews` round trip.
+  - `LogActivityAction.verifyCallerReadAccess()` batches `Deal` + `Person` + `Organization` caller-readability checks into ONE `RunViews` round trip.
+  - `SendDealScheduleToOrder()` batches `DealPaymentSchedule` + `OrderLine` into ONE `RunViews` round trip.
+  - `RunLapsedCloseDateDigest()` memoizes `ResolveSender` per company to eliminate per-recipient N+1 queries.
+
+### Rule 4 — Bounded Container Caching Only (No Unbounded Global Transactional Caches)
+- **NEVER** cache unbounded transactional tables (`Deals`, `DealLines`, `DealStageEvents`, `DealTeamMembers`, `SalesAccounts`, `SalesContacts`, `Orders`, `Contracts`, `Activities`) in `SalesEngineBase` or module-level global maps.
+- Transactional lookups belong in scoped, lifecycle-bound containers (e.g., `DealWorkspaceService` per-workspace lookup cache or a single-run `Map` inside `RunLapsedCloseDateDigest`) that are cleared on context change or run completion.
+
+### Rule 5 — RLS-Safe Two-Step Entity Reads (No `vw*` Subqueries in `ExtraFilter`)
+- **NEVER** write cross-entity `EXISTS (SELECT 1 FROM [schema].[vwOtherTable] ...)` subqueries inside `ExtraFilter`. Raw SQL view subqueries bypass MJ entity-level RLS, field-level security, and cross-DB portability (SQL Server vs. PostgreSQL).
+- Always resolve filter IDs via `SalesEngineBase` (for reference tables) or an explicit first-step `RunView` / `RunViews` (which enforces RLS for `contextUser`), then pass the resolved IDs into a clean `IN (...)` filter on the target entity (e.g., `LoadLapsedDeals` resolving non-closed status IDs and excluded pipeline IDs before querying `Deals`).
+- Use denormalized view fields already projected on the entity view (e.g., `Deal.Pipeline`, `Deal.PipelineStage`, `Deal.DealStatusType`) instead of extra round-trip lookups.
 
 **VERY IMPORTANT** Whenever you need to spin up tasks — if they do not require interaction with the
 user and are not interdependent — ALWAYS spin up multiple parallel tasks. **NEVER** process

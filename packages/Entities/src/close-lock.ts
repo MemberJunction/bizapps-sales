@@ -26,7 +26,9 @@
  *
  * @module @mj-biz-apps/sales-entities
  */
-import { RunView, type UserInfo } from '@memberjunction/core';
+import { Metadata, RunView, type UserInfo } from '@memberjunction/core';
+import { UUIDsEqual } from '@memberjunction/global';
+import { SalesEngineBase } from './sales-engine-base.js';
 
 /**
  * The deal fields that stay editable while the deal is locked, on ANY locked deal.
@@ -329,22 +331,52 @@ export async function ResolveDealLockState(
         return open;
     }
 
-    const result = await new RunView().RunView<{
-        LocksDeal: boolean;
-        Name: string;
-        IsLost: boolean;
-        IsWon: boolean;
-        IsOpen: boolean;
-    }>(
-        {
-            EntityName: E_DEAL_STATUS_TYPE,
-            ExtraFilter: `ID = '${String(persistedStatusID).replace(/'/g, "''")}'`,
-            ResultType: 'simple',
-            Fields: ['LocksDeal', 'Name', 'IsLost', 'IsWon', 'IsOpen'],
-        },
-        contextUser,
-    );
-    const row = result?.Success ? (result.Results ?? [])[0] : undefined;
+    let readSucceeded = false;
+    let row:
+        | {
+              LocksDeal: boolean;
+              Name: string;
+              IsLost: boolean;
+              IsWon: boolean;
+              IsOpen: boolean;
+          }
+        | undefined;
+
+    const engine = SalesEngineBase.Instance;
+    if (await engine.EnsurePropertyLoaded('_DealStatusTypes', contextUser)) {
+        readSucceeded = true;
+        const cached = engine.DealStatusTypeById(persistedStatusID);
+        if (cached) {
+            row = {
+                LocksDeal: cached.LocksDeal === true,
+                Name: cached.Name,
+                IsLost: cached.IsLost === true,
+                IsWon: cached.IsWon === true,
+                IsOpen: cached.IsOpen === true,
+            };
+        }
+    } else {
+        const rv = typeof RunView.FromMetadataProvider === 'function'
+            ? RunView.FromMetadataProvider(Metadata.Provider)
+            : new RunView();
+        const result = await rv.RunView<{
+            LocksDeal: boolean;
+            Name: string;
+            IsLost: boolean;
+            IsWon: boolean;
+            IsOpen: boolean;
+        }>(
+            {
+                EntityName: E_DEAL_STATUS_TYPE,
+                ExtraFilter: `ID = '${String(persistedStatusID).replace(/'/g, "''")}'`,
+                ResultType: 'simple',
+                Fields: ['LocksDeal', 'Name', 'IsLost', 'IsWon', 'IsOpen'],
+            },
+            contextUser,
+        );
+        readSucceeded = result?.Success === true;
+        row = readSucceeded ? (result.Results ?? [])[0] : undefined;
+    }
 
     /**
      * A STATUS ROW THAT IS ABSENT LOCKS THE DEAL, as `DealEntityServer.checkCloseLock` does.
@@ -353,7 +385,7 @@ export async function ResolveDealLockState(
      * with the ordinary editable set of a deal that is not lost, and this reports the same so no surface
      * offers a field the server then refuses. Setting the status to an open one is the way out.
      */
-    if (result?.Success && !row) {
+    if (readSucceeded && !row) {
         const editable = JoinLabels(DealFieldsListedAsEditable(false, accountBlank).map(DealFieldLabel));
         return {
             IsLocked: true,
@@ -449,10 +481,27 @@ export async function LoadDealStatusOptions(
     currentStatusID?: string | null,
 ): Promise<DealStatusOption[]> {
     const trimmedCurrent = currentStatusID?.trim();
+    const engine = SalesEngineBase.Instance;
+    if (await engine.EnsurePropertyLoaded('_DealStatusTypes', contextUser)) {
+        return engine.DealStatusTypes
+            .filter((r) => r.IsActive === true || (Boolean(trimmedCurrent) && UUIDsEqual(r.ID, trimmedCurrent)))
+            .map((r) => ({
+                ID: String(r.ID),
+                Name: String(r.Name),
+                LocksDeal: r.LocksDeal === true,
+                IsWon: r.IsWon === true,
+                IsLost: r.IsLost === true,
+                IsActive: r.IsActive !== false,
+            }));
+    }
+
     const filter = trimmedCurrent
         ? `IsActive = 1 OR ID = '${trimmedCurrent.replace(/'/g, "''")}'`
         : 'IsActive = 1';
-    const result = await new RunView().RunView<{
+    const rv = typeof RunView.FromMetadataProvider === 'function'
+        ? RunView.FromMetadataProvider(Metadata.Provider)
+        : new RunView();
+    const result = await rv.RunView<{
         ID: string;
         Name: string;
         LocksDeal: boolean;

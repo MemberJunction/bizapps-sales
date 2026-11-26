@@ -88,7 +88,7 @@ function idsIn(filter: string): string[] {
 /** Answers each entity from the world and records every call, so a test can read exactly what was asked. */
 function stubRunView(world: World): RunViewParams[] {
     const calls: RunViewParams[] = [];
-    vi.spyOn(RunView.prototype, 'RunView').mockImplementation((async (p: RunViewParams) => {
+    const dispatch = async (p: RunViewParams) => {
         calls.push(p);
         const ok = (Results: unknown[], extra: Record<string, unknown> = {}) =>
             ({ Success: true, Results, TotalRowCount: Results.length, ...extra });
@@ -118,6 +118,14 @@ function stubRunView(world: World): RunViewParams[] {
             default:
                 throw new Error(`unexpected RunView on ${p.EntityName}`);
         }
+    };
+    vi.spyOn(RunView.prototype, 'RunView').mockImplementation(dispatch as never);
+    vi.spyOn(RunView.prototype, 'RunViews').mockImplementation((async (paramsList: RunViewParams[]) => {
+        const results = [];
+        for (const p of paramsList) {
+            results.push(await dispatch(p));
+        }
+        return results;
     }) as never);
     return calls;
 }
