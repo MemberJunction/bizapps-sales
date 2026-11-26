@@ -1,0 +1,24 @@
+[
+  {
+    "_comments": [
+      "Parameters are derived by MJ from the SQL, as for every query in this directory (see",
+      ".deal-roster.json): CompanyID, CompanyIDs, PipelineID, PipelineIDs, OwnerEmployeeID,",
+      "OwnerEmployeeIDs and ProductCompanyIDs, all optional -- the filter bar's set, as the roster takes it."
+    ],
+    "fields": {
+      "Name": "Sales: Won Deal Payments",
+      "CategoryID": "@lookup:MJ: Query Categories.Name=Sales",
+      "UserQuestion": "Which invoices on my won deals are paid, partly paid, outstanding or not invoiced yet?",
+      "Description": "One row per invoice on a won deal's order, with what was invoiced, what has been paid, what is still owed and when it is due. The drill-through behind the payment columns on the deals list.",
+      "SQL": "@file:SQL/won-deal-payments.sql",
+      "TechnicalDescription": "Grain: invoice -- one row per OrderHeaderPaymentSchedule instalment when the deal's order has a schedule, otherwise one row for the order header (billed as a single invoice). Reads __mj_BizAppsSales.vwWonDealInvoices, whose rows the Deals view's payment columns sum, so the two agree. Won is DealStatusType.IsWon. Canceled and WrittenOff instalments and Voided orders are excluded. IsInvoiced: an instalment whose Status is Invoiced or Paid, or a Confirmed order with no schedule. PaymentStatus (from fnDealPaymentStatus): Not invoiced, Partly paid (AmountPaid > 0 and Balance > 0), Outstanding (Balance > 0, nothing paid) or Paid (Balance <= 0). No overdue status until due dates are reliable (bc-aidp-next-golive#481). Amount, AmountPaid and Balance are orders' stored figures. Date dimension: DueDate (the instalment's, or the order's). FILTERS: CompanyIDs, OwnerEmployeeIDs, PipelineIDs and ProductCompanyIDs are arrays rendered with sqlIn, applied as in Sales: Deal Roster; single-value CompanyID, PipelineID and OwnerEmployeeID also work.",
+      "Status": "Approved",
+      "QualityRank": 8,
+      "ExecutionCostRank": 2,
+      "UsesTemplate": true
+    },
+    "primaryKey": {
+      "ID": "008CCFA5-8910-45B0-B8D6-BE677279FA51"
+    }
+  }
+]

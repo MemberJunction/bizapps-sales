@@ -72,6 +72,49 @@ export function DealPipelineGridState(): { sortSettings: { field: string; dir: '
              * by Expected close and rebuilt the columns with the entity's own headers.
              */
             { Name: 'ClosedAt', DisplayName: 'Closed at', orderIndex: 14, width: 120, hidden: true },
+            ...DealPaymentColumns(15, ['PaymentStatus', 'OutstandingBalance']),
+        ],
+    };
+}
+
+/** The shared saved view of won deals with their payment columns (bc-aidp-next-golive#487). */
+export const WON_DEAL_PAYMENTS_VIEW_NAME = 'Won deals: payments';
+
+const DEAL_MONEY = { type: 'currency', currencyCode: 'USD', decimals: 0, align: 'right' };
+
+/**
+ * The Deals view's payment columns (bc-aidp-next-golive#487), numbered from `firstIndex`. They read
+ * orders' invoices for won deals and are empty on any other deal. Columns not named in `visible` are
+ * hidden; pass nothing to show them all.
+ */
+export function DealPaymentColumns(firstIndex: number, visible?: readonly string[]): GridCol[] {
+    const columns: Omit<GridCol, 'orderIndex'>[] = [
+        { Name: 'PaymentStatus', DisplayName: 'Payment', width: 120 },
+        { Name: 'OutstandingBalance', DisplayName: 'Balance due', width: 120, format: DEAL_MONEY },
+        { Name: 'InvoiceCount', DisplayName: 'Invoices', width: 90, format: { type: 'number', decimals: 0, align: 'right' } },
+        { Name: 'InvoicedAmount', DisplayName: 'Invoiced', width: 120, format: DEAL_MONEY },
+        { Name: 'PaidAmount', DisplayName: 'Paid', width: 120, format: DEAL_MONEY },
+        { Name: 'NextPaymentDueDate', DisplayName: 'Next due', width: 120, format: { type: 'date', dateFormat: GRID_DAY_FORMAT } },
+    ];
+    return columns.map((c, i) => ({
+        ...c,
+        orderIndex: firstIndex + i,
+        ...(visible && !visible.includes(c.Name) ? { hidden: true } : {}),
+    }));
+}
+
+/** The "Won deals: payments" view: who the deal is with, then every payment column, largest balance first. */
+export function WonDealPaymentsGridState(): { sortSettings: { field: string; dir: 'asc' | 'desc' }[]; columnSettings: GridCol[] } {
+    return {
+        sortSettings: [{ field: 'OutstandingBalance', dir: 'desc' }],
+        columnSettings: [
+            { Name: 'Name', DisplayName: 'Deal', orderIndex: 0, width: 260, pinned: 'left' },
+            { Name: 'DealNumber', DisplayName: 'Number', orderIndex: 1, width: 120 },
+            { Name: 'Account', DisplayName: 'Customer', orderIndex: 2, width: 180 },
+            { Name: 'OwnerEmployee', DisplayName: 'Owner', orderIndex: 3, width: 140 },
+            { Name: 'ActualCloseDate', DisplayName: 'Closed on', orderIndex: 4, width: 120, format: { type: 'date', dateFormat: GRID_DAY_FORMAT } },
+            { Name: 'Amount', DisplayName: 'Amount', orderIndex: 5, width: 120, format: DEAL_MONEY },
+            ...DealPaymentColumns(6),
         ],
     };
 }

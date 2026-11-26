@@ -1161,6 +1161,30 @@ export const mjBizAppsSalesDealSchema = z.object({
         * * Field Name: StandardAgreementModifiedFlag
         * * Display Name: Standard Agreement Modified Flag
         * * SQL Data Type: int`),
+    InvoiceCount: z.number().nullable().describe(`
+        * * Field Name: InvoiceCount
+        * * Display Name: Invoice Count
+        * * SQL Data Type: int`),
+    InvoicedAmount: z.number().nullable().describe(`
+        * * Field Name: InvoicedAmount
+        * * Display Name: Invoiced Amount
+        * * SQL Data Type: decimal(38, 2)`),
+    PaidAmount: z.number().nullable().describe(`
+        * * Field Name: PaidAmount
+        * * Display Name: Paid Amount
+        * * SQL Data Type: decimal(38, 2)`),
+    OutstandingBalance: z.number().nullable().describe(`
+        * * Field Name: OutstandingBalance
+        * * Display Name: Outstanding Balance
+        * * SQL Data Type: decimal(38, 2)`),
+    PaymentStatus: z.string().nullable().describe(`
+        * * Field Name: PaymentStatus
+        * * Display Name: Payment Status
+        * * SQL Data Type: nvarchar(20)`),
+    NextPaymentDueDate: z.date().nullable().describe(`
+        * * Field Name: NextPaymentDueDate
+        * * Display Name: Next Payment Due Date
+        * * SQL Data Type: date`),
 });
 
 export type mjBizAppsSalesDealEntityType = z.infer<typeof mjBizAppsSalesDealSchema>;
@@ -5575,6 +5599,60 @@ export class mjBizAppsSalesDealEntity extends BaseEntity<mjBizAppsSalesDealEntit
     */
     get StandardAgreementModifiedFlag(): number {
         return this.Get('StandardAgreementModifiedFlag');
+    }
+
+    /**
+    * * Field Name: InvoiceCount
+    * * Display Name: Invoice Count
+    * * SQL Data Type: int
+    */
+    get InvoiceCount(): number | null {
+        return this.Get('InvoiceCount');
+    }
+
+    /**
+    * * Field Name: InvoicedAmount
+    * * Display Name: Invoiced Amount
+    * * SQL Data Type: decimal(38, 2)
+    */
+    get InvoicedAmount(): number | null {
+        return this.Get('InvoicedAmount');
+    }
+
+    /**
+    * * Field Name: PaidAmount
+    * * Display Name: Paid Amount
+    * * SQL Data Type: decimal(38, 2)
+    */
+    get PaidAmount(): number | null {
+        return this.Get('PaidAmount');
+    }
+
+    /**
+    * * Field Name: OutstandingBalance
+    * * Display Name: Outstanding Balance
+    * * SQL Data Type: decimal(38, 2)
+    */
+    get OutstandingBalance(): number | null {
+        return this.Get('OutstandingBalance');
+    }
+
+    /**
+    * * Field Name: PaymentStatus
+    * * Display Name: Payment Status
+    * * SQL Data Type: nvarchar(20)
+    */
+    get PaymentStatus(): string | null {
+        return this.Get('PaymentStatus');
+    }
+
+    /**
+    * * Field Name: NextPaymentDueDate
+    * * Display Name: Next Payment Due Date
+    * * SQL Data Type: date
+    */
+    get NextPaymentDueDate(): Date | null {
+        return this.Get('NextPaymentDueDate');
     }
 }
 
