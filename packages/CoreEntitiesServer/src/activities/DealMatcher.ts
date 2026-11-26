@@ -17,7 +17,7 @@
 import { RunView, type UserInfo } from '@memberjunction/core';
 
 import { escapeSql } from './ActivityWriterService.js';
-import { E_DEAL, E_DEAL_STATUS_TYPE } from '@mj-biz-apps/sales-entities';
+import { E_DEAL, E_DEAL_STATUS_TYPE, SalesEngineBase } from '@mj-biz-apps/sales-entities';
 
 /** A party Common already resolved — matching here is by record ID, never by re-deriving the address. */
 export interface KnownAddress {
@@ -103,19 +103,25 @@ export class DealMatcher {
          * carry across. Two reads and an `IN` list are portable and, at the scale of a type table,
          * free.
          */
-        const statuses = await new RunView().RunView<{ ID: string }>(
-            {
-                EntityName: E_DEAL_STATUS_TYPE,
-                ExtraFilter: 'IsOpen = 1 AND IsActive = 1',
-                ResultType: 'simple',
-                Fields: ['ID'],
-            },
-            contextUser,
-        );
-        if (!statuses.Success) {
-            return { Matches: [], ReadFailed: true };
+        let openIDs: string[];
+        const engine = SalesEngineBase.Instance;
+        if (await engine.EnsurePropertyLoaded('_DealStatusTypes', contextUser)) {
+            openIDs = engine.OpenDealStatusTypes.map((row) => String(row.ID));
+        } else {
+            const statuses = await new RunView().RunView<{ ID: string }>(
+                {
+                    EntityName: E_DEAL_STATUS_TYPE,
+                    ExtraFilter: 'IsOpen = 1 AND IsActive = 1',
+                    ResultType: 'simple',
+                    Fields: ['ID'],
+                },
+                contextUser,
+            );
+            if (!statuses.Success) {
+                return { Matches: [], ReadFailed: true };
+            }
+            openIDs = (statuses.Results ?? []).map((row) => row.ID);
         }
-        const openIDs = (statuses.Results ?? []).map((row) => row.ID);
         if (openIDs.length === 0) {
             /**
              * No OPEN status configured is a real answer, not a failure: nothing can match, and the

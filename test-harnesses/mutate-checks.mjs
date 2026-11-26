@@ -340,8 +340,8 @@ const MUTATIONS = [
       to: '        const stageOrder: StageOrderPlan | null = null;\n        void this.planStageOrderStatus;',
       note: 'the provisioned order never consults the stage, so it takes Draft whatever the stage declares' },
     { id: 'M-OS2', file: DES, expect: ['CO3'],
-      from: '        const row = (result.Results ?? [])[0];\n        const target = row?.OrderStatusOnEntry;\n        if (!target) {',
-      to: "        const row = (result.Results ?? [])[0];\n        const target = row?.OrderStatusOnEntry ?? 'Draft';\n        if (false) {" },
+      from: '        const target = row?.OrderStatusOnEntry;\n        if (!target) {',
+      to: "        const target = row?.OrderStatusOnEntry ?? 'Draft';\n        if (false) {" },
     // The Deal.Amount cache (item 2).
     { id: 'M-AM1', file: DES, expect: ['SD21'],
       from: '            await this.refreshAmountFromOrder();',
@@ -548,8 +548,8 @@ const MUTATIONS = [
     // losing stage locks the deal, sets IsWon, and skips everything a close owes -- a board drag books
     // revenue. This is the mutation that reproduces the bug SD33 introduced and SD35 now forbids.
     { id: 'M-ST8', file: DES, expect: ['SD35'],
-      from: 'if (status.Success && flags && flags.LocksDeal !== true) {',
-      to: 'if (status.Success && flags) {',
+      from: 'if (statusReadOk && !statusLocks) {',
+      to: 'if (statusReadOk) {',
       note: 'a stage whose status locks closes the deal on an ordinary save, with no close event, no routing and no contract' },
 
     // ── THE THREE FIXES OF 2026-08-21 (post-merge) ───────────────────────────────────────────────
@@ -897,8 +897,8 @@ const MUTATIONS = [
     // wrote. `if (false && ...)` rather than deleting the read, so nothing becomes unused and the
     // mutation is a behaviour change rather than a compile change.
     { id: 'M-AC1', file: AWS, expect: ['AC8', 'AC13'],
-      from: '        if (existing) {\n            result.Success = true;\n            result.ActivityID = existing;',
-      to: '        if (false && existing) {\n            result.Success = true;\n            result.ActivityID = existing;',
+      from: '        if (preflight.ExistingActivityID) {\n            result.Success = true;\n            result.ActivityID = preflight.ExistingActivityID;',
+      to: '        if (false && preflight.ExistingActivityID) {\n            result.Success = true;\n            result.ActivityID = preflight.ExistingActivityID;',
       note: 'the dedupe read still happens and its answer is ignored, so a re-run writes everything twice' },
 
     // The party links go under COMMON's entities, because `SalesContact.ID` IS `Person.ID` (shared-PK
@@ -1004,8 +1004,8 @@ const MUTATIONS = [
       to: '    if (false && existing.Results.length > 0) {\n        return { Success: true, ContractID: input.ContractID };\n    }',
       note: 're-closing a won deal inserts a duplicate ContractOrder link instead of reusing the existing one' },
     { id: 'M-AC25', file: AWS, expect: ['AC25'],
-      from: '        const parties = await this.dealParties(input.DealID, provider, contextUser);\n        if (!parties.Found) {',
-      to: '        const parties = await this.dealParties(input.DealID, provider, contextUser);\n        if (false && !parties.Found) {',
+      from: '        const parties = preflight.Parties;\n        if (!parties.Found) {',
+      to: '        const parties = preflight.Parties;\n        if (false && !parties.Found) {',
       note: 'LogActivity writes an activity for an unknown DealID instead of refusing (#381, #355)' }
 ];
 

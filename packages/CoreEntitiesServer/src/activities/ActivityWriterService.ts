@@ -22,6 +22,7 @@ import {
     type DatabaseProviderBase,
     type IMetadataProvider,
     type IRunViewProvider,
+    type RunViewParams,
     type UserInfo,
 } from '@memberjunction/core';
 import type {
@@ -160,7 +161,10 @@ export class ActivityWriterService {
             return result;
         }
 
-        const typeID = await this.resolveTypeByCode(input.TypeCode, contextUser);
+        // Batch all pre-transaction reads (ActivityType, optional ExternalID dedupe, and Deal parties)
+        // into a single RunViews round trip instead of three sequential RunView calls.
+        const preflight = await this.runPreflightReads(input, provider, contextUser);
+        const typeID = preflight.TypeID;
         if (!typeID) {
             result.Issues.push(
                 `No ActivityType with Code '${input.TypeCode}' exists. The six codes are seeded by `
@@ -170,15 +174,14 @@ export class ActivityWriterService {
         }
 
         // IDEMPOTENCY BEFORE THE TRANSACTION, so a re-run costs one read rather than a rolled-back write.
-        const existing = await this.findByExternalKey(input.SourceSystem, input.ExternalID, contextUser);
-        if (existing) {
+        if (preflight.ExistingActivityID) {
             result.Success = true;
-            result.ActivityID = existing;
+            result.ActivityID = preflight.ExistingActivityID;
             result.AlreadyPresent = true;
             return result;
         }
 
-        const parties = await this.dealParties(input.DealID, provider, contextUser);
+        const parties = preflight.Parties;
         if (!parties.Found) {
             result.Issues.push(parties.Error ?? `Deal ${input.DealID} was not found.`);
             return result;
@@ -375,92 +378,75 @@ export class ActivityWriterService {
     }
 
     /**
-     * Reads the deal's account and primary contact, and verifies the deal exists (#355 item 6).
-     *
-     * A failed read or an empty result refuses the write rather than treating the deal as having no
-     * parties and committing an Activity linked to a nonexistent record.
+     * Runs the independent pre-transaction lookups in one `RunViews` batch: ActivityType by code,
+     * optional `(SourceSystem, ExternalID)` idempotency check, and Deal existence/parties.
      */
-    private async dealParties(
-        dealID: string,
+    private async runPreflightReads(
+        input: LogActivityInput,
         provider: IMetadataProvider,
         contextUser: UserInfo,
-    ): Promise<{ Found: boolean; Error: string | null; AccountID: string | null; ContactID: string | null }> {
+    ): Promise<{
+        TypeID: string | null;
+        ExistingActivityID: string | null;
+        Parties: { Found: boolean; Error: string | null; AccountID: string | null; ContactID: string | null };
+    }> {
         const candidate = provider as unknown as Partial<IRunViewProvider>;
-        const rv = typeof candidate?.RunView === 'function'
-            ? new RunView(candidate as IRunViewProvider)
-            : new RunView();
-        const r = await rv.RunView<{ AccountID: string | null; PrimaryContactID: string | null }>(
+        const hasExternalKey = Boolean(input.SourceSystem && input.ExternalID);
+        const batch: RunViewParams[] = [
+            {
+                EntityName: E_ACTIVITY_TYPE,
+                ExtraFilter: `Code = '${escapeSql(input.TypeCode)}'`,
+                ResultType: 'simple',
+                Fields: ['ID'],
+            },
             {
                 EntityName: E_DEAL,
-                ExtraFilter: `ID = '${escapeSql(dealID)}'`,
+                ExtraFilter: `ID = '${escapeSql(input.DealID)}'`,
                 ResultType: 'simple',
                 Fields: ['AccountID', 'PrimaryContactID'],
             },
-            contextUser,
-        );
-        if (!r.Success) {
-            return {
-                Found: false,
-                Error: `Deal ${dealID} could not be read: ${r.ErrorMessage ?? 'unknown error'}.`,
-                AccountID: null,
-                ContactID: null,
-            };
-        }
-        const row = (r.Results ?? [])[0];
-        if (!row) {
-            return {
-                Found: false,
-                Error: `Deal ${dealID} was not found.`,
-                AccountID: null,
-                ContactID: null,
-            };
-        }
-        return {
-            Found: true,
-            Error: null,
-            AccountID: row.AccountID ?? null,
-            ContactID: row.PrimaryContactID ?? null,
-        };
-    }
-
-    /** The `ActivityType` for a code. Never a name — see `ActivityTypeCode`. */
-    private async resolveTypeByCode(code: ActivityTypeCode, contextUser: UserInfo): Promise<string | null> {
-        const r = await new RunView().RunView<{ ID: string }>(
-            {
-                EntityName: E_ACTIVITY_TYPE,
-                ExtraFilter: `Code = '${escapeSql(code)}'`,
-                ResultType: 'simple',
-                Fields: ['ID'],
-            },
-            contextUser,
-        );
-        return r.Success ? ((r.Results ?? [])[0]?.ID ?? null) : null;
-    }
-
-    /**
-     * An already-ingested row for this external key, or null.
-     *
-     * Reads the same `(SourceSystem, ExternalID)` pair `UQ_Activity_External` enforces, so this and the
-     * index cannot disagree about what a duplicate is.
-     */
-    private async findByExternalKey(
-        sourceSystem: string | null | undefined,
-        externalID: string | null | undefined,
-        contextUser: UserInfo,
-    ): Promise<string | null> {
-        if (!sourceSystem || !externalID) {
-            return null;
-        }
-        const r = await new RunView().RunView<{ ID: string }>(
-            {
+        ];
+        if (hasExternalKey) {
+            batch.push({
                 EntityName: E_ACTIVITY,
-                ExtraFilter: `SourceSystem = '${escapeSql(sourceSystem)}' AND ExternalID = '${escapeSql(externalID)}'`,
+                ExtraFilter: `SourceSystem = '${escapeSql(input.SourceSystem!)}' AND ExternalID = '${escapeSql(input.ExternalID!)}'`,
                 ResultType: 'simple',
                 Fields: ['ID'],
-            },
-            contextUser,
-        );
-        return r.Success ? ((r.Results ?? [])[0]?.ID ?? null) : null;
+            });
+        }
+
+        const results = typeof candidate?.RunViews === 'function'
+            ? await new RunView(candidate as IRunViewProvider).RunViews(batch, contextUser)
+            : typeof candidate?.RunView === 'function'
+                ? await Promise.all(batch.map((p) => candidate.RunView!(p, contextUser)))
+                : await new RunView().RunViews(batch, contextUser);
+        const typeRes = results?.[0];
+        const dealRes = results?.[1];
+        const existingRes = hasExternalKey ? results?.[2] : undefined;
+
+        const typeID = typeRes?.Success
+            ? (((typeRes.Results ?? [])[0] as { ID?: string } | undefined)?.ID ?? null)
+            : null;
+        const existingActivityID = existingRes?.Success
+            ? (((existingRes.Results ?? [])[0] as { ID?: string } | undefined)?.ID ?? null)
+            : null;
+
+        let parties: { Found: boolean; Error: string | null; AccountID: string | null; ContactID: string | null };
+        if (!dealRes?.Success) {
+            parties = {
+                Found: false,
+                Error: `Deal ${input.DealID} could not be read: ${dealRes?.ErrorMessage ?? 'unknown error'}.`,
+                AccountID: null,
+                ContactID: null,
+            };
+        } else {
+            const row = (dealRes.Results ?? [])[0] as { AccountID?: string | null; PrimaryContactID?: string | null } | undefined;
+            parties = row
+                ? { Found: true, Error: null, AccountID: row.AccountID ?? null, ContactID: row.PrimaryContactID ?? null }
+                : { Found: false, Error: `Deal ${input.DealID} was not found.`, AccountID: null, ContactID: null };
+        }
+
+        return { TypeID: typeID, ExistingActivityID: existingActivityID, Parties: parties };
     }
 
     private commonIsInstalled(provider: IMetadataProvider): boolean {

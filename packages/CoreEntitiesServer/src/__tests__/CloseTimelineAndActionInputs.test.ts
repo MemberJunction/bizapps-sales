@@ -28,10 +28,6 @@ describe('ActivityWriterService deal existence check (#355 item 6)', () => {
             BeginEntityTransaction: vi.fn(),
         } as unknown as IMetadataProvider;
 
-        vi.spyOn(ActivityWriterService.prototype as unknown as {
-            resolveTypeByCode: () => Promise<string | null>;
-        }, 'resolveTypeByCode').mockResolvedValue('type-note');
-
         const out = await new ActivityWriterService().LogActivity(
             {
                 DealID: '00000000-0000-0000-0000-000000000999',
@@ -64,10 +60,6 @@ describe('ActivityWriterService deal existence check (#355 item 6)', () => {
             }),
             BeginEntityTransaction: vi.fn(),
         } as unknown as IMetadataProvider;
-
-        vi.spyOn(ActivityWriterService.prototype as unknown as {
-            resolveTypeByCode: () => Promise<string | null>;
-        }, 'resolveTypeByCode').mockResolvedValue('type-note');
 
         const out = await new ActivityWriterService().LogActivity(
             {

@@ -29,11 +29,12 @@ import {
     BaseEntityResult,
     type EntityDeleteOptions,
     type EntitySaveOptions,
+    type IMetadataProvider,
     type IRunViewProvider,
     LogError,
 } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
-import { mjBizAppsSalesPipelineStageEntity } from '@mj-biz-apps/sales-entities';
+import { mjBizAppsSalesPipelineStageEntity, SalesEngineBase } from '@mj-biz-apps/sales-entities';
 
 const PIPELINE_STAGE_ENTITY = 'MJ_BizApps_Sales: Pipeline Stages';
 const DEAL_STATUS_ENTITY = 'MJ_BizApps_Sales: Deal Status Types';
@@ -126,6 +127,18 @@ export class PipelineStageEntityServer extends mjBizAppsSalesPipelineStageEntity
     }
 
     private async statusFlags(ids: string[]): Promise<Map<string, { IsWon: boolean; IsLost: boolean }>> {
+        const engine = SalesEngineBase.Instance;
+        const metadataProvider = this.ProviderToUse as unknown as IMetadataProvider;
+        if (await engine.EnsurePropertyLoaded('_DealStatusTypes', this.ContextCurrentUser, metadataProvider)) {
+            const out = new Map<string, { IsWon: boolean; IsLost: boolean }>();
+            for (const id of ids) {
+                const row = engine.DealStatusTypeById(id);
+                if (row) {
+                    out.set(id.toLowerCase(), { IsWon: row.IsWon === true, IsLost: row.IsLost === true });
+                }
+            }
+            return out;
+        }
         const quoted = [...new Set(ids.map((id) => id.toLowerCase()))].map((id) => `'${id}'`).join(', ');
         const view = this.ProviderToUse as unknown as IRunViewProvider;
         const r = await view.RunView<{ ID: string; IsWon: boolean | null; IsLost: boolean | null }>(
@@ -151,19 +164,29 @@ export class PipelineStageEntityServer extends mjBizAppsSalesPipelineStageEntity
     /** Whether the pipeline has an active stage OTHER than this row whose status declares the outcome. */
     private async pipelineHasAnother(pipelineID: string, outcome: Outcome): Promise<boolean> {
         const view = this.ProviderToUse as unknown as IRunViewProvider;
-        const statuses = await view.RunView<{ ID: string }>(
-            {
-                EntityName: DEAL_STATUS_ENTITY,
-                ExtraFilter: outcome === 'won' ? 'IsWon = 1' : 'IsLost = 1',
-                ResultType: 'simple',
-                Fields: ['ID'],
-            },
-            this.ContextCurrentUser,
-        );
-        if (!statuses.Success) {
-            throw new Error(`reading deal statuses failed: ${statuses.ErrorMessage}`);
+        const engine = SalesEngineBase.Instance;
+        const metadataProvider = this.ProviderToUse as unknown as IMetadataProvider;
+        let ids: string[];
+        if (await engine.EnsurePropertyLoaded('_DealStatusTypes', this.ContextCurrentUser, metadataProvider)) {
+            const matching = outcome === 'won'
+                ? engine.DealStatusTypes.filter((s) => s.IsWon === true)
+                : engine.DealStatusTypes.filter((s) => s.IsLost === true);
+            ids = matching.map((row) => `'${String(row.ID)}'`);
+        } else {
+            const statuses = await view.RunView<{ ID: string }>(
+                {
+                    EntityName: DEAL_STATUS_ENTITY,
+                    ExtraFilter: outcome === 'won' ? 'IsWon = 1' : 'IsLost = 1',
+                    ResultType: 'simple',
+                    Fields: ['ID'],
+                },
+                this.ContextCurrentUser,
+            );
+            if (!statuses.Success) {
+                throw new Error(`reading deal statuses failed: ${statuses.ErrorMessage}`);
+            }
+            ids = (statuses.Results ?? []).map((row) => `'${String(row.ID)}'`);
         }
-        const ids = (statuses.Results ?? []).map((row) => `'${String(row.ID)}'`);
         if (ids.length === 0) {
             return false;
         }

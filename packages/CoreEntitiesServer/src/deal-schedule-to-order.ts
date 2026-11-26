@@ -32,7 +32,7 @@
  *
  * @module @mj-biz-apps/sales-core-entities-server
  */
-import { type IMetadataProvider, type IRunViewProvider, type UserInfo } from '@memberjunction/core';
+import { type IMetadataProvider, type IRunViewProvider, type RunViewParams, type UserInfo } from '@memberjunction/core';
 import { EscapeSQLString } from '@memberjunction/global';
 import { ToCalendarDay } from '@mj-biz-apps/common-entities';
 import {
@@ -40,6 +40,7 @@ import {
     type OrdersReplacePaymentScheduleOutput,
     type ReplacePaymentScheduleRow,
 } from '@mj-biz-apps/orders-entities';
+import { SalesEngineBase } from '@mj-biz-apps/sales-entities';
 
 import { OrdersIsInstalled } from './orders-availability.js';
 
@@ -83,19 +84,43 @@ export async function SendDealScheduleToOrder(
 ): Promise<DealScheduleSyncOutcome> {
     if (!orderID || !OrdersIsInstalled()) return { Kind: 'Skipped' };
 
-    const read = await (provider as unknown as IRunViewProvider).RunView<DealScheduleRowFacts>(
-        {
-            EntityName: DEAL_PAYMENT_SCHEDULE_ENTITY,
-            ExtraFilter: `DealID = '${EscapeSQLString(dealID)}'`,
-            OrderBy: 'PaymentDate ASC, DisplayOrder ASC',
-            Fields: ['PaymentDate', 'Amount', 'Description'],
-            ResultType: 'simple',
-            BypassCache: true,
-        },
-        user,
-    );
-    if (!read.Success) {
-        return { Kind: 'Hard', Message: `The deal's payment schedule could not be read to send to its order: ${read.ErrorMessage ?? 'unknown error'}` };
+    const view = provider as unknown as IRunViewProvider;
+    const scheduleParams: RunViewParams = {
+        EntityName: DEAL_PAYMENT_SCHEDULE_ENTITY,
+        ExtraFilter: `DealID = '${EscapeSQLString(dealID)}'`,
+        OrderBy: 'PaymentDate ASC, DisplayOrder ASC',
+        Fields: ['PaymentDate', 'Amount', 'Description'],
+        ResultType: 'simple',
+        BypassCache: true,
+    };
+    const lineParams: RunViewParams = {
+        EntityName: ORDER_LINE_ENTITY,
+        ExtraFilter: `OrderHeaderID = '${EscapeSQLString(orderID)}'`,
+        Fields: ['ID'],
+        MaxRows: 1,
+        ResultType: 'simple',
+        BypassCache: true,
+    };
+
+    // Batch DealPaymentSchedule + OrderLine existence check into ONE RunViews round trip.
+    let read: { Success: boolean; Results?: DealScheduleRowFacts[]; ErrorMessage?: string };
+    let lines: { Success: boolean; Results?: Array<{ ID: string }>; ErrorMessage?: string };
+    if (typeof view.RunViews === 'function') {
+        const [scheduleRes, linesRes] = await view.RunViews([scheduleParams, lineParams], user);
+        read = scheduleRes as typeof read;
+        lines = linesRes as typeof lines;
+    } else {
+        read = await view.RunView<DealScheduleRowFacts>(scheduleParams, user);
+        if (!read.Success) {
+            return { Kind: 'Hard', Message: `The deal's payment schedule could not be read to send to its order: ${read.ErrorMessage ?? 'unknown error'}` };
+        }
+        const earlyRows = read.Results ?? [];
+        if (skipWhenEmpty && earlyRows.length === 0) return { Kind: 'Skipped' };
+        lines = await view.RunView<{ ID: string }>(lineParams, user);
+    }
+
+    if (!read?.Success) {
+        return { Kind: 'Hard', Message: `The deal's payment schedule could not be read to send to its order: ${read?.ErrorMessage ?? 'unknown error'}` };
     }
     const rows = read.Results ?? [];
     if (skipWhenEmpty && rows.length === 0) return { Kind: 'Skipped' };
@@ -105,12 +130,8 @@ export async function SendDealScheduleToOrder(
      * would refuse any schedule as not tying. The rows stay on the deal; a won deal's lines are frozen,
      * so this does not change later.
      */
-    const lines = await (provider as unknown as IRunViewProvider).RunView<{ ID: string }>(
-        { EntityName: ORDER_LINE_ENTITY, ExtraFilter: `OrderHeaderID = '${EscapeSQLString(orderID)}'`, Fields: ['ID'], MaxRows: 1, ResultType: 'simple', BypassCache: true },
-        user,
-    );
-    if (!lines.Success) {
-        return { Kind: 'Hard', Message: `The order's lines could not be read to send it the payment schedule: ${lines.ErrorMessage ?? 'unknown error'}` };
+    if (!lines?.Success) {
+        return { Kind: 'Hard', Message: `The order's lines could not be read to send it the payment schedule: ${lines?.ErrorMessage ?? 'unknown error'}` };
     }
     if (!(lines.Results ?? []).length) {
         return rows.length
@@ -180,6 +201,10 @@ export async function WonDealOrderID(dealID: string, provider: IMetadataProvider
 
 /** The status row's `IsWon` flag. A missing row answers false; a failed read throws. */
 export async function StatusIsWon(statusID: string, provider: IMetadataProvider, user: UserInfo): Promise<boolean> {
+    const engine = SalesEngineBase.Instance;
+    if (await engine.EnsurePropertyLoaded('_DealStatusTypes', user, provider)) {
+        return engine.DealStatusTypeById(statusID)?.IsWon === true;
+    }
     const status = await (provider as unknown as IRunViewProvider).RunView<{ IsWon: boolean }>(
         { EntityName: DEAL_STATUS_ENTITY, ExtraFilter: `ID = '${EscapeSQLString(statusID)}'`, Fields: ['IsWon'], ResultType: 'simple' },
         user,

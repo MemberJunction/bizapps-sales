@@ -34,6 +34,7 @@ import {
     DealFieldsEditableWhileLocked,
     ResolveDealAmountFreshness,
     ResolveDealLockState,
+    SalesEngineBase,
 } from '@mj-biz-apps/sales-entities';
 import type { ValidationResult } from '@memberjunction/core';
 import { EntitySaveOptions, RunView } from '@memberjunction/core';
@@ -278,20 +279,47 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent i
         if (!record || record.Get('PipelineID')) return null;
         const companyID = (record.Get('CompanyID') as string | null | undefined) ?? null;
         const knownName = (record.Get('Company') as string | null | undefined) ?? null;
-        const [hide, results] = await Promise.all([
+        const same = (a: unknown, b: unknown): boolean => String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
+
+        const engine = SalesEngineBase.Instance;
+        const [hide, pipelinesReady, linksReady] = await Promise.all([
             SalesSettings.LoadHidePipelines(),
-            new RunView().RunViews([
-                { EntityName: MJS_ENTITIES.Pipeline, ExtraFilter: 'IsActive = 1', ResultType: 'simple', Fields: ['ID'] },
-                { EntityName: MJS_ENTITIES.PipelineCompany, ExtraFilter: 'IsActive = 1', ResultType: 'simple', Fields: ['PipelineID', 'CompanyID'] },
-                ...(companyID && !knownName
-                    ? [{ EntityName: 'MJ: Companies', ExtraFilter: `ID = '${companyID.replace(/'/g, "''")}'`, ResultType: 'simple' as const, Fields: ['Name'] }]
-                    : []),
-            ]),
+            engine.EnsurePropertyLoaded('_Pipelines'),
+            engine.EnsurePropertyLoaded('_PipelineCompanies'),
+        ]);
+
+        if (pipelinesReady && linksReady) {
+            const active = new Set(engine.ActivePipelines.map((p) => String(p.ID).toLowerCase()));
+            const served = engine.ActivePipelineCompanies.filter((l) => active.has(String(l.PipelineID).toLowerCase()));
+            let companyName = knownName;
+            if (companyID && !companyName) {
+                const company = await new RunView().RunView<{ Name?: string }>({
+                    EntityName: 'MJ: Companies',
+                    ExtraFilter: `ID = '${companyID.replace(/'/g, "''")}'`,
+                    ResultType: 'simple',
+                    Fields: ['Name'],
+                });
+                companyName = company?.Success ? (company.Results?.[0]?.Name ?? null) : null;
+            }
+            return NoPipelineMessage({
+                HidePipelines: hide,
+                CompanyID: companyID,
+                CompanyName: companyName,
+                CompanyHasPipeline: served.some((l) => same(l.CompanyID, companyID)),
+                OtherCompanyHasPipeline: served.some((l) => !same(l.CompanyID, companyID)),
+            });
+        }
+
+        const results = await new RunView().RunViews([
+            { EntityName: MJS_ENTITIES.Pipeline, ExtraFilter: 'IsActive = 1', ResultType: 'simple', Fields: ['ID'] },
+            { EntityName: MJS_ENTITIES.PipelineCompany, ExtraFilter: 'IsActive = 1', ResultType: 'simple', Fields: ['PipelineID', 'CompanyID'] },
+            ...(companyID && !knownName
+                ? [{ EntityName: 'MJ: Companies', ExtraFilter: `ID = '${companyID.replace(/'/g, "''")}'`, ResultType: 'simple' as const, Fields: ['Name'] }]
+                : []),
         ]);
         const [pipelines, links, company] = results ?? [];
         if (!pipelines?.Success || !links?.Success) return null;
 
-        const same = (a: unknown, b: unknown): boolean => String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
         const active = new Set((pipelines.Results as { ID: string }[]).map((p) => String(p.ID).toLowerCase()));
         const served = (links.Results as { PipelineID: string; CompanyID: string }[]).filter((l) => active.has(String(l.PipelineID).toLowerCase()));
         const companyName = knownName ?? ((company?.Results?.[0] as { Name?: string } | undefined)?.Name ?? null);
@@ -355,19 +383,27 @@ export class DealFormComponentExtended extends mjBizAppsSalesDealFormComponent i
             return;
         }
 
-        const rv = new RunView();
-        const result = await rv.RunView<PipelineCompanyRow>({
-            EntityName: MJS_ENTITIES.PipelineCompany,
-            ExtraFilter: `PipelineID='${String(record.Get('PipelineID')).replace(/'/g, "''")}' AND IsActive=1`,
-            ResultType: 'simple',
-            Fields: ['CompanyID'],
-        });
-        // RunView does not throw — a failed read leaves the deal exactly as it was.
-        if (!result.Success) {
-            return;
+        const pipelineID = String(record.Get('PipelineID'));
+        const engine = SalesEngineBase.Instance;
+        let rows: PipelineCompanyRow[];
+        if (await engine.EnsurePropertyLoaded('_PipelineCompanies')) {
+            rows = engine.PipelineCompaniesForPipeline(pipelineID, true).map((l) => ({ CompanyID: l.CompanyID }));
+        } else {
+            const rv = new RunView();
+            const result = await rv.RunView<PipelineCompanyRow>({
+                EntityName: MJS_ENTITIES.PipelineCompany,
+                ExtraFilter: `PipelineID='${pipelineID.replace(/'/g, "''")}' AND IsActive=1`,
+                ResultType: 'simple',
+                Fields: ['CompanyID'],
+            });
+            // RunView does not throw — a failed read leaves the deal exactly as it was.
+            if (!result.Success) {
+                return;
+            }
+            rows = result.Results ?? [];
         }
 
-        const companyID = OnlyLinkedCompany(result.Results ?? []);
+        const companyID = OnlyLinkedCompany(rows);
         if (companyID) {
             record.Set('CompanyID', companyID);
         }

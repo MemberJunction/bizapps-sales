@@ -75,3 +75,6 @@ export * from './discount-concession.js';
 
 /** Activity vocabulary — shared, because the deal-activity pane needs the codes too. */
 export * from './activities/activity-vocabulary.js';
+
+/** Shared bounded reference & taxonomy engine (`BaseSingleton` + `@RegisterForStartup()`). */
+export * from './sales-engine-base.js';

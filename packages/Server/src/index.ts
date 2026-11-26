@@ -9,7 +9,7 @@
 // Import entity and action packages to trigger @RegisterClass decorators
 import '@mj-biz-apps/sales-entities';
 import '@mj-biz-apps/sales-actions';
-import { LoadSalesDealEntities } from '@mj-biz-apps/sales-entities';
+import { LoadSalesDealEntities, LoadSalesEngineBase } from '@mj-biz-apps/sales-entities';
 
 // Server-side entity subclasses — MUST come after sales-entities so @RegisterClass auto-increment gives
 // these higher priority. This carries DealEntityServer: deal numbering inside the save's transaction and
@@ -63,6 +63,7 @@ export function LoadBizAppsSalesServer(): void {
     // anchor below, because DealEntityServer extends DealEntity — dropping this import would leave the
     // server enforcing nothing but the database's own constraints.
     LoadSalesDealEntities();
+    LoadSalesEngineBase();
 
     // Static imports above ensure the generated classes are registered; this anchors the
     // server-only subclasses against tree-shaking. Load-bearing: without it a bundler is right to drop

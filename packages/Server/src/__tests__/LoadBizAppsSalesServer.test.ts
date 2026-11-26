@@ -11,8 +11,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const loadAgent = vi.fn();
+const loadSalesEngineBase = vi.fn();
 vi.mock('../custom/lapsed-close-date-digest.agent.js', () => ({ LoadLapsedCloseDateDigestAgent: loadAgent }));
-vi.mock('@mj-biz-apps/sales-entities', () => ({ LoadSalesDealEntities: vi.fn() }));
+vi.mock('@mj-biz-apps/sales-entities', () => ({ LoadSalesDealEntities: vi.fn(), LoadSalesEngineBase: loadSalesEngineBase }));
 vi.mock('@mj-biz-apps/sales-actions', () => ({}));
 vi.mock('@mj-biz-apps/sales-core-entities-server', () => ({
     LoadDealLockOrderLineVeto: vi.fn(), LoadDealNotWonConfirmVeto: vi.fn(), LoadDealOrderLink: vi.fn(),
@@ -29,10 +30,14 @@ vi.mock('../generated/class-registrations-manifest.js', () => ({ CLASS_REGISTRAT
 const { LoadBizAppsSalesServer } = await import('../index.js');
 
 describe('LoadBizAppsSalesServer', () => {
-    beforeEach(() => loadAgent.mockClear());
+    beforeEach(() => {
+        loadAgent.mockClear();
+        loadSalesEngineBase.mockClear();
+    });
 
-    it('calls the lapsed close date digest agent anchor', () => {
+    it('calls the lapsed close date digest agent and SalesEngineBase anchors', () => {
         LoadBizAppsSalesServer();
         expect(loadAgent).toHaveBeenCalledTimes(1);
+        expect(loadSalesEngineBase).toHaveBeenCalledTimes(1);
     });
 });

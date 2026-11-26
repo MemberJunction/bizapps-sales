@@ -17,6 +17,7 @@
  * @module @mj-biz-apps/sales-ng
  */
 import { RunView } from '@memberjunction/core';
+import { SalesEngineBase } from '@mj-biz-apps/sales-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from './entity-names';
 
 /** Orders' provider type code for Bill.com; the same key Orders registers its invoice rail under. */
@@ -117,9 +118,15 @@ export async function CheckBillComCustomer(
 /** The pipeline's company when it serves exactly one; with several, the deal's own company decides. */
 async function pipelineCompany(pipelineID: string | null): Promise<string | null> {
     if (!isSet(pipelineID)) return null;
+    const validId = guid(pipelineID);
+    const engine = SalesEngineBase.Instance;
+    if (await engine.EnsurePropertyLoaded('_PipelineCompanies')) {
+        const activeLinks = engine.PipelineCompaniesForPipeline(validId, true);
+        return activeLinks.length === 1 ? (activeLinks[0].CompanyID ?? null) : null;
+    }
     const result = await new RunView().RunView<{ CompanyID: string | null }>({
         EntityName: MJS_ENTITIES.PipelineCompany,
-        ExtraFilter: `PipelineID = '${guid(pipelineID)}' AND IsActive = 1`,
+        ExtraFilter: `PipelineID = '${validId}' AND IsActive = 1`,
         Fields: ['CompanyID'],
         ResultType: 'simple',
     });

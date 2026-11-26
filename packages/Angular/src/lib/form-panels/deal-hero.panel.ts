@@ -10,17 +10,19 @@
  */
 import { AfterViewInit, ChangeDetectorRef, Component, DestroyRef, DoCheck, ElementRef, OnDestroy, ViewEncapsulation, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { CompositeKey, Metadata, RunView } from '@memberjunction/core';
+import { CompositeKey, Metadata, RunView, type RunViewParams } from '@memberjunction/core';
 import { UserInfoEngine } from '@memberjunction/core-entities';
 import { EscapeSQLString, RegisterClassEx } from '@memberjunction/global';
 import { BaseFormPanel, BaseFormsModule, FormChromeCoordinator } from '@memberjunction/ng-base-forms';
 import { RelatedChipsComponent, type BizAppsRelatedLink } from '@mj-biz-apps/common-ng';
 import { BusinessTimeZoneEngine } from '@mj-biz-apps/common-entities';
 import {
+    DealAmountOrderTotalParams,
     DealEntity,
+    EvaluateDealAmountFreshness,
     IsDealFieldEditableWhileLocked,
-    ResolveDealAmountFreshness,
     ResolveDealLockState,
+    SalesEngineBase,
 } from '@mj-biz-apps/sales-entities';
 import { MJS_ENTITIES, MJS_FOREIGN_ENTITIES } from '../data/entity-names';
 import { DealRelatedLinks, DealRelatedLinksKey } from './deal-related-links';
@@ -817,12 +819,93 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
     }
 
     private async refreshNotices(): Promise<void> {
-        await RefreshDealCurrencyCodes();
+        await Promise.all([
+            RefreshDealCurrencyCodes(),
+            SalesEngineBase.Instance.EnsurePropertyLoaded('_DealStatusTypes', undefined, this.FormComponent?.ProviderToUse),
+        ]);
         await this.resolveLock();
-        await this.resolveReversals();
-        await this.resolveAgreementWarning();
-        await this.resolveStale();
+        await this.resolvePostLockNoticesBatched();
         this.cdr.detectChanges();
+    }
+
+    /**
+     * Batches the independent post-lock header reads (order reversals, contract executed-agreement
+     * check, and order-total amount freshness) into a single `RunViews` round trip instead of three
+     * sequential `RunView` calls.
+     */
+    private async resolvePostLockNoticesBatched(): Promise<void> {
+        const revGen = ++this.reversalsGeneration;
+        const agrGen = ++this.agreementGeneration;
+
+        const orderID = this.Record?.OrderID;
+        const deal = { DealID: this.Record?.IsSaved ? this.Record.ID : null, ContractID: this.Record?.ContractID };
+        const freshnessInput = this.Record && this.AmountReadable
+            ? {
+                  IsLocked: this.IsLocked,
+                  AmountIsComputed: this.Record.AmountIsComputed,
+                  Amount: this.Record.Amount,
+                  OrderID: this.Record.OrderID,
+              }
+            : null;
+
+        const reversalParams: RunViewParams | null =
+            this.IsWon && orderID
+                ? {
+                      EntityName: MJS_FOREIGN_ENTITIES.OrderHeader,
+                      Fields: ['ID'],
+                      ExtraFilter: `ReversesOrderHeaderID = '${EscapeSQLString(String(orderID))}'`,
+                      OrderBy: '__mj_CreatedAt ASC',
+                      ResultType: 'simple',
+                  }
+                : null;
+        const agreementParams: RunViewParams | null = this.IsWon ? ContractLookupParams(deal) : null;
+        const staleParams: RunViewParams | null = freshnessInput ? DealAmountOrderTotalParams(freshnessInput) : null;
+
+        const batch: RunViewParams[] = [];
+        const revIdx = reversalParams ? batch.push(reversalParams) - 1 : -1;
+        const agrIdx = agreementParams ? batch.push(agreementParams) - 1 : -1;
+        const staleIdx = staleParams ? batch.push(staleParams) - 1 : -1;
+
+        let results: Awaited<ReturnType<RunView['RunViews']>> = [];
+        if (batch.length > 0) {
+            try {
+                results = await RunView.FromMetadataProvider(this.FormComponent?.ProviderToUse ?? Metadata.Provider).RunViews(batch);
+            } catch {
+                results = [];
+            }
+        }
+
+        if (revGen === this.reversalsGeneration) {
+            const revRes = revIdx >= 0 ? results[revIdx] : undefined;
+            this.reversalOrderIDs = revRes?.Success
+                ? ((revRes.Results ?? []) as Array<{ ID: string }>).map((r) => r.ID)
+                : [];
+        }
+
+        if (agrGen === this.agreementGeneration) {
+            const agrRes = agrIdx >= 0 ? results[agrIdx] : undefined;
+            if (agreementParams && agrRes) {
+                const found = ContractLookupResult(agrRes);
+                const warning = NoExecutedAgreementWarning({ ...deal, DealIsWon: true, ...found }, 'deal');
+                this.AgreementWarning = warning;
+                this.AgreementContractID = warning ? (found.Contract?.ID ?? null) : null;
+            } else {
+                this.AgreementWarning = null;
+                this.AgreementContractID = null;
+            }
+        }
+
+        if (freshnessInput && staleIdx >= 0) {
+            const staleRes = results[staleIdx];
+            if (staleRes?.Success) {
+                const rawTotal = ((staleRes.Results ?? [])[0] as { TotalGross?: number | string | null } | undefined)?.TotalGross;
+                this.StaleAmountNotice = EvaluateDealAmountFreshness(freshnessInput, rawTotal).Notice;
+            } else {
+                this.StaleAmountNotice = null;
+            }
+        } else {
+            this.StaleAmountNotice = null;
+        }
     }
 
     private async resolveLock(): Promise<void> {
@@ -835,37 +918,6 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
         this.IsWon = lock.IsWon;
         this.IsOpen = lock.IsOpen;
         this.LockNotice = lock.Notice;
-    }
-
-    /**
-     * The orders that reverse this deal's order, for the Reversal chips (MemberJunction/bizapps-orders#740).
-     *
-     * A REVERSE READ: the reversal holds the id (`ReversesOrderHeaderID`), the deal does not, so the
-     * chip row cannot find them from the deal row alone. Skipped before the win, when the chips are
-     * gated off anyway. A failed read — orders not installed, or the user cannot read orders — leaves
-     * no reversal chips, the same answer the chip row gives a link it cannot resolve.
-     */
-    private async resolveReversals(): Promise<void> {
-        const generation = ++this.reversalsGeneration;
-        const orderID = this.Record?.OrderID;
-        let ids: string[] = [];
-        if (this.IsWon && orderID) {
-            try {
-                const result = await RunView.FromMetadataProvider(this.FormComponent?.ProviderToUse ?? Metadata.Provider).RunView<{ ID: string }>({
-                    EntityName: MJS_FOREIGN_ENTITIES.OrderHeader,
-                    Fields: ['ID'],
-                    ExtraFilter: `ReversesOrderHeaderID = '${EscapeSQLString(String(orderID))}'`,
-                    OrderBy: '__mj_CreatedAt ASC',
-                    ResultType: 'simple',
-                });
-                ids = result?.Success ? (result.Results ?? []).map((r) => r.ID) : [];
-            } catch {
-                ids = [];
-            }
-        }
-        if (generation === this.reversalsGeneration) {
-            this.reversalOrderIDs = ids;
-        }
     }
 
     /**
@@ -893,24 +945,5 @@ export class MJSDealHeroPanel extends BaseFormPanel<DealEntity> implements After
             this.AgreementWarning = warning;
             this.AgreementContractID = warning ? contractID : null;
         }
-    }
-
-    /**
-     * Whether the cached amount still matches its order — through the SHARED rule, so this panel and the
-     * Deal form cannot disagree. See `amount-freshness.ts` for why it is no longer a timestamp test
-     * (golive#230), and note the ordering: `refreshNotices()` resolves the lock first, so `IsLocked` is
-     * settled before it is passed here and a closed deal never warns.
-     */
-    private async resolveStale(): Promise<void> {
-        this.StaleAmountNotice = null;
-        // A viewer who may not read the amount gets no notice about it either.
-        if (!this.Record || !this.AmountReadable) return;
-        const freshness = await ResolveDealAmountFreshness({
-            IsLocked: this.IsLocked,
-            AmountIsComputed: this.Record.AmountIsComputed,
-            Amount: this.Record.Amount,
-            OrderID: this.Record.OrderID,
-        });
-        this.StaleAmountNotice = freshness.Notice;
     }
 }

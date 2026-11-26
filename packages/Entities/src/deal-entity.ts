@@ -48,12 +48,14 @@
 import {
     BaseEntity,
     EntitySaveOptions,
+    IMetadataProvider,
     IRunViewProvider,
     ValidationErrorInfo,
     ValidationErrorType,
     ValidationResult,
 } from '@memberjunction/core';
 import { RegisterClass, UUIDsEqual } from '@memberjunction/global';
+import { SalesEngineBase } from './sales-engine-base.js';
 
 // THE PEER'S GENERATED CLASS, imported across the app boundary. This is the first hard import from
 // another BizApp in this repo, and it is deliberate: the standalone-Sales premise is retired (Amith —
@@ -493,6 +495,18 @@ export class DealEntity extends mjBizAppsSalesDealEntity {
      * Protected so the server subclass derives the stamp from the same resolution rather than its own.
      */
     protected async ResolveOwnerRoleID(): Promise<string> {
+        const engine = SalesEngineBase.Instance;
+        const metadataProvider = this.ProviderToUse as unknown as IMetadataProvider | undefined;
+        if (await engine.EnsurePropertyLoaded('_DealRoles', this.ContextCurrentUser, metadataProvider)) {
+            const ownerRole = engine.OwnerDealRole;
+            if (!ownerRole?.ID) {
+                throw new Error(
+                    'DealEntity: no active DealRole has IsOwnerRole = 1. Seed one before assigning an owner.',
+                );
+            }
+            return ownerRole.ID;
+        }
+
         const provider = this.ProviderToUse as unknown as IRunViewProvider;
         const result = await provider.RunView<DealRoleIDRow>(
             {

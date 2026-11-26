@@ -14,7 +14,7 @@
  */
 import { Injectable } from '@angular/core';
 import { EntitySaveOptions, LogError, LogStatus, Metadata, RunQuery, RunView, RunViewParams, type RunViewResult } from '@memberjunction/core';
-import { DealEntity } from '@mj-biz-apps/sales-entities';
+import { DealEntity, SalesEngineBase, type SalesEnginePropertyName } from '@mj-biz-apps/sales-entities';
 
 import { ExpandPipelinesByCompany, OrderPipelinesByCompany, PIPELINE_LINK_ORDER, type PipelineCompanyLink } from '../data/company-pipelines';
 import { AssertRosterColumns } from './deal-roster.columns';
@@ -593,11 +593,26 @@ async function productReadScope(asOfDay: CalendarDay | undefined): Promise<Produ
 @Injectable({ providedIn: 'root' })
 export class DealWorkspaceService {
     /**
-     * The named lookup lists, in one `RunViews` batch. Defaults to every list;
-     * the Sales section passes {@link SECTION_LOOKUP_KEYS}. Lists not asked for stay empty.
+     * The named lookup lists: serves bounded sales reference tables from {@link SalesEngineBase}
+     * (0 DB round trips once configured) and batches any remaining dynamic/external lists in ONE
+     * `RunViews` call. Defaults to every list; the Sales section passes {@link SECTION_LOOKUP_KEYS}.
+     * Lists not asked for stay empty.
      */
     public async LoadLookups(keys: readonly LookupKey[] = ALL_LOOKUP_KEYS): Promise<DealWorkspaceLookups> {
-        const params = keys.flatMap((key) => {
+        const lookups = EmptyLookups();
+        const remainingKeys: LookupKey[] = [];
+
+        for (const key of keys) {
+            if (!(await this.tryFillLookupFromEngine(key, lookups))) {
+                remainingKeys.push(key);
+            }
+        }
+
+        if (remainingKeys.length === 0) {
+            return lookups;
+        }
+
+        const params = remainingKeys.flatMap((key) => {
             const read = LOOKUP_READS[key];
             return read.Joined ? [read.Params, read.Joined] : [read.Params];
         });
@@ -608,7 +623,6 @@ export class DealWorkspaceService {
             // as an empty dropdown.
             LogError(`DealWorkspaceService.LoadLookups: ${results.length} result(s) for ${params.length} reads.`);
         }
-        const lookups = EmptyLookups();
         // RunViews does not throw; an unsuccessful view yields an empty list rather than an exception,
         // so each list checks Success independently. A missing picker degrades that one control
         // instead of blanking the whole surface.
@@ -617,13 +631,97 @@ export class DealWorkspaceService {
             return r?.Success ? (r.Results ?? []) : [];
         };
         let index = 0;
-        for (const key of keys) {
+        for (const key of remainingKeys) {
             const read = LOOKUP_READS[key];
             const rows = rowsAt(index++);
             const joined = read.Joined ? rowsAt(index++) : [];
             read.Apply(rows, lookups, joined);
         }
         return lookups;
+    }
+
+    /**
+     * Fills a bounded sales lookup key from `SalesEngineBase` when the engine has loaded the backing
+     * property(ies). Returns `false` for non-engine keys (`Accounts`, `Contacts`, `Employees`,
+     * `Companies`) or when the engine is not loaded so `LoadLookups` batches them in `RunViews`.
+     */
+    private async tryFillLookupFromEngine(key: LookupKey, into: DealWorkspaceLookups): Promise<boolean> {
+        const engine = SalesEngineBase.Instance;
+        const requiredProps = this.enginePropertiesForLookup(key);
+        if (!requiredProps) return false;
+        for (const prop of requiredProps) {
+            if (!(await engine.EnsurePropertyLoaded(prop))) {
+                return false;
+            }
+        }
+        switch (key) {
+            case 'Pipelines': {
+                const pipelines = engine.ForecastablePipelines.map((p) => ({
+                    ID: p.ID,
+                    Name: p.Name,
+                    Code: p.Code ?? '',
+                    IsDefault: !!p.IsDefault,
+                    DisplayRank: Number(p.DisplayRank ?? 0),
+                }));
+                const links: PipelineCompanyLink[] = engine.PipelineCompanies.map((l) => ({
+                    PipelineID: l.PipelineID,
+                    CompanyID: l.CompanyID,
+                    Company: l.Company ?? null,
+                }));
+                into.Pipelines = OrderPipelinesByCompany<PipelineLookup>(ExpandPipelinesByCompany(pipelines, links));
+                return true;
+            }
+            case 'Stages':
+                into.Stages = engine.ActivePipelineStages.map<StageLookup>((s) => ({
+                    ID: s.ID,
+                    Name: s.Name,
+                    PipelineID: s.PipelineID,
+                    DisplayOrder: s.DisplayOrder,
+                    Probability: s.Probability,
+                    ForecastCategoryTypeID: s.ForecastCategoryTypeID,
+                    DealStatusTypeID: s.DealStatusTypeID ?? null,
+                    RottingDays: s.RottingDays == null ? null : Number(s.RottingDays),
+                }));
+                return true;
+            case 'DealTypes':
+                into.DealTypes = engine.ActiveDealTypes.map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+                return true;
+            case 'DealStatusTypes':
+                into.DealStatusTypes = engine.ActiveDealStatusTypes.map<DealStatusLookup>((r) => ({
+                    ID: r.ID,
+                    Name: r.Name,
+                    IsOpen: r.IsOpen === true,
+                    IsClosed: r.IsClosed === true,
+                    IsWon: r.IsWon === true,
+                    IsLost: r.IsLost === true,
+                    LocksDeal: r.LocksDeal === true,
+                }));
+                return true;
+            case 'ForecastCategoryTypes':
+                into.ForecastCategoryTypes = engine.ActiveForecastCategoryTypes.map<DealLookup>((r) => ({ ID: r.ID, Name: r.Name }));
+                return true;
+            case 'LossReasons':
+                into.LossReasons = engine.ActiveLossReasons.map<LossReasonLookup>((r) => ({
+                    ID: r.ID,
+                    Name: r.Name,
+                    RequiresNotes: r.RequiresNotes === true,
+                }));
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private enginePropertiesForLookup(key: LookupKey): readonly SalesEnginePropertyName[] | null {
+        switch (key) {
+            case 'Pipelines': return ['_Pipelines', '_PipelineCompanies'];
+            case 'Stages': return ['_PipelineStages'];
+            case 'DealTypes': return ['_DealTypes'];
+            case 'DealStatusTypes': return ['_DealStatusTypes'];
+            case 'ForecastCategoryTypes': return ['_ForecastCategoryTypes'];
+            case 'LossReasons': return ['_LossReasons'];
+            default: return null;
+        }
     }
 
     /**

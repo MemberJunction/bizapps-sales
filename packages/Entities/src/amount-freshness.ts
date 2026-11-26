@@ -27,7 +27,7 @@
  *
  * @module @mj-biz-apps/sales-entities
  */
-import { RunView, type UserInfo } from '@memberjunction/core';
+import { Metadata, RunView, type RunViewParams, type UserInfo } from '@memberjunction/core';
 
 const E_ORDER_HEADER = 'MJ_BizApps_Orders: Order Headers';
 
@@ -71,49 +71,35 @@ const FRESH: DealAmountFreshness = Object.freeze({ IsStale: false, Notice: null 
 const STALE: DealAmountFreshness = Object.freeze({ IsStale: true, Notice: DEAL_AMOUNT_STALE_NOTICE });
 
 /**
- * Whether the deal's cached amount still matches its order's total.
+ * Builds the `RunViewParams` to read `OrderHeader.TotalGross` for {@link EvaluateDealAmountFreshness},
+ * or `null` when freshness cannot be stale (locked deal, typed amount, or no order).
  *
- * Returns FRESH — never warns — in every case where the question is meaningless: a locked deal (the
- * amount is frozen and no edit could change it), a deal whose amount was typed rather than computed,
- * a deal with no order, and an order with no usable total.
+ * Exported so callers that already run other deal-header reads can batch this into one `RunViews`.
  */
-export async function ResolveDealAmountFreshness(
+export function DealAmountOrderTotalParams(input: DealAmountFreshnessInput): RunViewParams | null {
+    if (input.IsLocked || !input.AmountIsComputed || !input.OrderID) {
+        return null;
+    }
+    return {
+        EntityName: E_ORDER_HEADER,
+        ExtraFilter: `ID = '${String(input.OrderID).replace(/'/g, "''")}'`,
+        ResultType: 'simple',
+        Fields: ['TotalGross'],
+    };
+}
+
+/**
+ * Pure freshness evaluation given the already-read `OrderHeader.TotalGross` value.
+ * Used by both {@link ResolveDealAmountFreshness} and batched `RunViews` callers.
+ */
+export function EvaluateDealAmountFreshness(
     input: DealAmountFreshnessInput,
-    contextUser?: UserInfo,
-): Promise<DealAmountFreshness> {
-    /**
-     * A CLOSED DEAL NEVER WARNS, and this is the first test rather than one of several.
-     *
-     * The amount is frozen by the close lock, so there is no edit that could resolve the notice and no
-     * reason to read it. golive#230 is precisely this case: the close books the order, the order's
-     * lines move, and the deal is simultaneously forbidden from doing anything about it. A warning
-     * nobody can act on is worse than silence — it trains the reader to ignore the flag that matters.
-     */
-    if (input.IsLocked) {
+    rawOrderTotal: number | string | null | undefined,
+): DealAmountFreshness {
+    if (input.IsLocked || !input.AmountIsComputed || !input.OrderID) {
         return FRESH;
     }
-
-    // A typed amount claims nothing about the order, so it cannot disagree with one.
-    if (!input.AmountIsComputed || !input.OrderID) {
-        return FRESH;
-    }
-
-    const result = await new RunView().RunView<{ TotalGross: number | string | null }>(
-        {
-            EntityName: E_ORDER_HEADER,
-            ExtraFilter: `ID = '${String(input.OrderID).replace(/'/g, "''")}'`,
-            ResultType: 'simple',
-            Fields: ['TotalGross'],
-        },
-        contextUser,
-    );
-    if (!result?.Success) {
-        // A failed read is not evidence of staleness. Saying nothing is the honest answer.
-        return FRESH;
-    }
-
-    const raw = (result.Results ?? [])[0]?.TotalGross;
-    const total = raw === null || raw === undefined ? null : Number(raw);
+    const total = rawOrderTotal === null || rawOrderTotal === undefined ? null : Number(rawOrderTotal);
     if (total === null || !Number.isFinite(total)) {
         /**
          * `OrderHeader.TotalGross` is NULL for an order with no lines — `SUM` over no rows is NULL —
@@ -134,4 +120,43 @@ export async function ResolveDealAmountFreshness(
     }
 
     return cached === total ? FRESH : STALE;
+}
+
+/**
+ * Whether the deal's cached amount still matches its order's total.
+ *
+ * Returns FRESH — never warns — in every case where the question is meaningless: a locked deal (the
+ * amount is frozen and no edit could change it), a deal whose amount was typed rather than computed,
+ * a deal with no order, and an order with no usable total.
+ */
+export async function ResolveDealAmountFreshness(
+    input: DealAmountFreshnessInput,
+    contextUser?: UserInfo,
+): Promise<DealAmountFreshness> {
+    /**
+     * A CLOSED DEAL NEVER WARNS, and this is the first test rather than one of several.
+     *
+     * The amount is frozen by the close lock, so there is no edit that could resolve the notice and no
+     * reason to read it. golive#230 is precisely this case: the close books the order, the order's
+     * lines move, and the deal is simultaneously forbidden from doing anything about it. A warning
+     * nobody can act on is worse than silence — it trains the reader to ignore the flag that matters.
+     */
+    const params = DealAmountOrderTotalParams(input);
+    if (!params) {
+        return FRESH;
+    }
+
+    const rv = typeof RunView.FromMetadataProvider === 'function'
+        ? RunView.FromMetadataProvider(Metadata.Provider)
+        : new RunView();
+    const result = await rv.RunView<{ TotalGross: number | string | null }>(
+        params,
+        contextUser,
+    );
+    if (!result?.Success) {
+        // A failed read is not evidence of staleness. Saying nothing is the honest answer.
+        return FRESH;
+    }
+
+    return EvaluateDealAmountFreshness(input, (result.Results ?? [])[0]?.TotalGross);
 }

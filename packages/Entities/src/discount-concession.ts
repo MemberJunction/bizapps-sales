@@ -23,7 +23,7 @@
  *
  * @module @mj-biz-apps/sales-entities
  */
-import { Metadata, RunView } from '@memberjunction/core';
+import { Metadata, RunView, type RunViewParams } from '@memberjunction/core';
 import { EscapeSQLString } from '@memberjunction/global';
 import type { mjBizAppsOrdersOrderConcessionEntity } from '@mj-biz-apps/orders-entities';
 import { SalesRecordDiscountConcessionOperation } from './generated/remote_operations';
@@ -196,20 +196,25 @@ function createdAt(row: LineConcessionRow): number {
     return new Date(row.__mj_CreatedAt).getTime();
 }
 
-/**
- * The line-price concessions orders holds on an order: Price or Scope, naming no term (an amount
- * change names the term it lowers, and is a different concession). The same set the server operation
- * withdraws from.
- */
-export async function LoadLineConcessionRows(orderHeaderID: string): Promise<LineConcessionRow[]> {
-    const result = await new RunView().RunView<LineConcessionRow>({
+/** Builds the `RunViewParams` for reading line-price concessions on an order so callers can batch with `RunViews`. */
+export function LineConcessionLookupParams(orderHeaderID: string): RunViewParams {
+    return {
         EntityName: ORDER_CONCESSION_ENTITY,
         ExtraFilter:
             `OrderHeaderID = '${EscapeSQLString(orderHeaderID)}' ` +
             `AND DeliveryForm IN ('Price', 'Scope') AND SubscriptionTermID IS NULL`,
         Fields: ['ID', 'OrderLineID', 'Status', 'ComputedValue', 'DecidedByUserID', '__mj_CreatedAt'],
         ResultType: 'simple',
-    });
+    };
+}
+
+/**
+ * The line-price concessions orders holds on an order: Price or Scope, naming no term (an amount
+ * change names the term it lowers, and is a different concession). The same set the server operation
+ * withdraws from.
+ */
+export async function LoadLineConcessionRows(orderHeaderID: string): Promise<LineConcessionRow[]> {
+    const result = await new RunView().RunView<LineConcessionRow>(LineConcessionLookupParams(orderHeaderID));
     if (!result.Success) throw new Error(result.ErrorMessage || 'the concessions could not be read');
     return result.Results ?? [];
 }

@@ -21,7 +21,7 @@
 
 // Import entity package to trigger @RegisterClass decorators for entity subclasses
 import '@mj-biz-apps/sales-entities';
-import { LoadSalesDealEntities } from '@mj-biz-apps/sales-entities';
+import { LoadSalesDealEntities, LoadSalesEngineBase } from '@mj-biz-apps/sales-entities';
 
 // Import generated form components (triggers @RegisterClass for form components)
 import './lib/generated/generated-forms.module';
@@ -183,6 +183,7 @@ export function LoadBizAppsSalesClient(): void {
     // generated class — but validates against nothing except the database's own constraints. The user
     // would then get a server rejection where the form should have marked the field.
     LoadSalesDealEntities();
+    LoadSalesEngineBase();
 
     // One anchor PER custom form, for the reason given above: a production build drops an import that
     // nothing references, the priority-2 registration never fires, and the GENERATED form silently wins.

@@ -1,6 +1,7 @@
 import { RunView, type UserInfo } from '@memberjunction/core';
 import { EscapeSQLString, NormalizeUUID } from '@memberjunction/global';
 import { ToCalendarDay, type CalendarDay } from '@mj-biz-apps/common-entities';
+import { SalesEngineBase } from '@mj-biz-apps/sales-entities';
 
 import { ComputeDaysLapsed, type LapsedDeal } from './audience.js';
 import { DEAL_ENTITY, EMPLOYEE_ENTITY } from './shared.js';
@@ -28,14 +29,6 @@ interface EmployeeRow { ID: string; FirstName: string; LastName: string }
 
 const quoted = (id: string): string => `'${EscapeSQLString(String(id))}'`;
 const inList = (ids: readonly string[]): string => ids.map(quoted).join(', ');
-
-async function readIDs(rv: RunView, entity: string, filter: string, contextUser: UserInfo): Promise<string[]> {
-    const r = await rv.RunView<{ ID: string }>({
-        EntityName: entity, ExtraFilter: filter, ResultType: 'simple', Fields: ['ID'],
-    }, contextUser);
-    if (!r.Success) throw new Error(`Could not read ${entity} (${filter}): ${r.ErrorMessage}`);
-    return (r.Results ?? []).map((row) => String(row.ID));
-}
 
 /**
  * The filter for "open and lapsed". Not closed is `IsClosed = 0` read through the status types, never
@@ -77,8 +70,36 @@ async function readOwnerNames(rv: RunView, rows: readonly DealRow[], contextUser
  */
 export async function LoadLapsedDeals(contextUser: UserInfo, today: CalendarDay): Promise<LapsedDealsResult> {
     const rv = new RunView();
-    const notClosedStatusIDs = await readIDs(rv, STATUS_ENTITY, 'IsClosed = 0', contextUser);
-    const excludedPipelineIDs = await readIDs(rv, PIPELINE_ENTITY, 'IncludeInForecast = 0', contextUser);
+    const engine = SalesEngineBase.Instance;
+    const [statusesReady, pipelinesReady] = await Promise.all([
+        engine.EnsurePropertyLoaded('_DealStatusTypes', contextUser),
+        engine.EnsurePropertyLoaded('_Pipelines', contextUser),
+    ]);
+
+    let notClosedStatusIDs: string[];
+    let excludedPipelineIDs: string[];
+    if (statusesReady && pipelinesReady) {
+        notClosedStatusIDs = engine.NonClosedDealStatusTypes.map((s) => String(s.ID));
+        excludedPipelineIDs = engine.Pipelines
+            .filter((p) => p.IncludeInForecast === false)
+            .map((p) => String(p.ID));
+    } else {
+        const [statusesRes, pipelinesRes] = await rv.RunViews(
+            [
+                { EntityName: STATUS_ENTITY, ExtraFilter: 'IsClosed = 0', ResultType: 'simple', Fields: ['ID'] },
+                { EntityName: PIPELINE_ENTITY, ExtraFilter: 'IncludeInForecast = 0', ResultType: 'simple', Fields: ['ID'] },
+            ],
+            contextUser,
+        );
+        if (!statusesRes?.Success) {
+            throw new Error(`Could not read ${STATUS_ENTITY} (IsClosed = 0): ${statusesRes?.ErrorMessage}`);
+        }
+        if (!pipelinesRes?.Success) {
+            throw new Error(`Could not read ${PIPELINE_ENTITY} (IncludeInForecast = 0): ${pipelinesRes?.ErrorMessage}`);
+        }
+        notClosedStatusIDs = ((statusesRes.Results ?? []) as Array<{ ID: string }>).map((row) => String(row.ID));
+        excludedPipelineIDs = ((pipelinesRes.Results ?? []) as Array<{ ID: string }>).map((row) => String(row.ID));
+    }
 
     const filter = lapsedFilter(notClosedStatusIDs, excludedPipelineIDs, today);
     const r = await rv.RunView<DealRow>({
