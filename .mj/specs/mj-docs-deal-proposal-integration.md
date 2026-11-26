@@ -1,6 +1,6 @@
 # MJ Docs (`MJ: Artifacts`) Deal Proposal & Executive Brief Integration — Living Specification
 
-> **Status:** Slice 1 Complete (Architecture Rubric, Living Spec & Repo Grounding) · Slices 2 & 3 Pending
+> **Status:** Slices 1 & 2 Complete (Architecture Rubric, Living Spec, Additive Dual-DBMS Schema `V202611261800`, CodeGen Entities, Delegated Permission Delegate & Dual-DBMS Seeded Integration Verification) · Slice 3 Pending
 > **Epic Task ID:** `D882C5DB-ACF6-4FAF-AF0F-E750E1E8A862`
 > **Approved FactoryPlan:** `B3C5C221-A983-4525-ACE2-69FFAAA13118` (v2 · `CriteriaHash: 0ede2ebae2e8f9cbdfdfcbe041151ef1d570637ff029e66a162dea8781550301`)
 > **Repository & Branches:** `MemberJunction/bizapps-sales` · Target: `next` · Epic Branch: `factory/D882C5DB-ACF6-4FAF-AF0F-E750E1E8A862-mj-docs-deal-proposal`
@@ -22,11 +22,11 @@ flowchart LR
         Readme["README.md Index"]
     end
 
-    subgraph S2["Slice 2 · Additive Schema, PG Parity & Seeded Verification"]
-        MigSQL["migrations/V...__Deal_ProposalArtifactID.sql<br/>(4-part T-SQL, PUBLISH_NO_BREAK_POLICY)"]
-        MigPG["migrations-pg/V...__Deal_ProposalArtifactID.pg.sql<br/>(split-bake v1 deterministic PG parity)"]
-        Entities["packages/Entities CodeGen + Unit Tests<br/>(DealEntity.ProposalArtifactID)"]
-        Seed["scripts/seed-sales-deals.{sql,pg.sql} +<br/>packages/IntegrationTests dual-DBMS checks"]
+    subgraph S2["Slice 2 · Additive Schema, PG Parity & Seeded Verification (Complete)"]
+        MigSQL["migrations/V202611261800__v6.35.x__Deal_ProposalArtifactID.sql<br/>(4-part T-SQL, PUBLISH_NO_BREAK_POLICY)"]
+        MigPG["migrations-pg/V202611261800__v6.35.x__Deal_ProposalArtifactID.pg.sql<br/>(split-bake v1 deterministic PG parity)"]
+        Entities["packages/Entities CodeGen + Unit Tests +<br/>DealArtifactPermissionDelegate"]
+        Seed["scripts/seed-sales-deals.{sql,pg.sql} +<br/>packages/IntegrationTests DPA1–DPA6 dual-DBMS checks"]
     end
 
     subgraph S3["Slice 3 · Angular @memberjunction/ng-artifacts UI & Readiness"]
