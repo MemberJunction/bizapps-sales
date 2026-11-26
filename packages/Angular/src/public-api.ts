@@ -72,6 +72,10 @@ import { MJSPromotePartyDialog } from './lib/form-panels/promote-party-dialog.co
 import { MJSOrderRelatedPanel } from './lib/form-panels/order-related.panel';
 import { MJSAccountContactsPanel } from './lib/form-panels/account-contacts.panel';
 import { MJSContactAccountsPanel } from './lib/form-panels/contact-accounts.panel';
+import {
+    DealProposalPreviewComponent,
+    MJSDealProposalPanel,
+} from './lib/form-panels/deal-proposal-preview.panel';
 
 // Re-export for consumers
 export { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
@@ -146,6 +150,22 @@ export {
 export { MJSOrderRelatedPanel } from './lib/form-panels/order-related.panel';
 export { MJSAccountContactsPanel } from './lib/form-panels/account-contacts.panel';
 export { MJSContactAccountsPanel } from './lib/form-panels/contact-accounts.panel';
+export {
+    BuildDealProposalPreviewBatchParams,
+    BuildUnlinkedDealProposalState,
+    DEAL_PROPOSAL_PREVIEW_EXPANDED_PREF_KEY,
+    DealProposalPreviewComponent,
+    LoadDealProposalPreviewState,
+    MJSDealProposalPanel,
+    ReadOwnProperty,
+    ResolveDealProposalIconClass,
+    StripMarkdownToPlainText,
+    type DealProposalArtifactSummary,
+    type DealProposalArtifactVersionSummary,
+    type DealProposalGuestShareLinkSummary,
+    type DealProposalPreviewPhase,
+    type DealProposalPreviewState,
+} from './lib/form-panels/deal-proposal-preview.panel';
 export { AccountContactsWhere, ContactAccountsWhere } from './lib/form-panels/account-contacts';
 export {
     OrderRelatedLinks,
@@ -204,6 +224,8 @@ export function LoadBizAppsSalesClient(): void {
     void MJSDealActivityPanel;
     void MJSDealHistoryPanel;
     void MJSDealSchedulePanel;
+    void MJSDealProposalPanel;
+    void DealProposalPreviewComponent;
     void MJSOrganizationDealsPanel;
     void MJSPersonDealsPanel;
     void MJSOrganizationPromotePanel;

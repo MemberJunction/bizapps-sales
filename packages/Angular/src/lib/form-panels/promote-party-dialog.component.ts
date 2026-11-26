@@ -234,7 +234,7 @@ const DEBOUNCE_MS = 250;
             .mjs-pp__scrim {
                 position: fixed;
                 inset: 0;
-                background: rgba(0, 0, 0, 0.35);
+                background: var(--mj-bg-overlay);
                 z-index: 1000;
             }
             .mjs-pp {
@@ -251,7 +251,7 @@ const DEBOUNCE_MS = 250;
                 color: var(--mj-text-primary);
                 border: 1px solid var(--mj-border-default);
                 border-radius: var(--mj-radius-xl, 16px);
-                box-shadow: var(--mj-shadow-lg, 0 12px 32px rgba(0, 0, 0, 0.22));
+                box-shadow: var(--mj-shadow-lg);
             }
             .mjs-pp__head {
                 display: flex;

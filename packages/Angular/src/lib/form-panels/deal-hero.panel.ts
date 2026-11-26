@@ -314,7 +314,7 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
             background: var(--mj-bg-surface-card);
             border: 1px solid var(--mj-border-default);
             border-radius: var(--mj-radius-xl, 16px);
-            box-shadow: var(--mj-shadow-md, 0 4px 16px rgba(0, 0, 0, .08));
+            box-shadow: var(--mj-shadow-md);
             position: relative; overflow: hidden;
             container-type: inline-size; container-name: mjs-deal-hero;
             /* NEVER SHRINKS, AND SITS ABOVE SIBLING PANELS (#287, #397). MJ's slot host and this
@@ -327,13 +327,13 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
         }
         .mjs-deal-hero::before {
             content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3.5px;
-            background: linear-gradient(90deg, #38bdf8 0%, #6366f1 50%, #10b981 100%);
+            background: linear-gradient(90deg, var(--mj-status-info) 0%, var(--mj-brand-accent) 50%, var(--mj-status-success) 100%);
         }
         .mjs-deal-hero__identity { display: flex; align-items: center; gap: var(--mj-space-4); min-width: 0; }
         .mjs-deal-hero__avatar {
             flex: none; width: 60px; height: 60px; border-radius: var(--mj-radius-lg, 14px);
             position: relative; display: flex; align-items: center; justify-content: center;
-            background: linear-gradient(135deg, color-mix(in srgb, var(--mj-brand-primary) 30%, var(--mj-bg-surface)) 0%, color-mix(in srgb, var(--mj-brand-accent, #6366f1) 25%, var(--mj-bg-surface)) 100%);
+            background: linear-gradient(135deg, color-mix(in srgb, var(--mj-brand-primary) 30%, var(--mj-bg-surface)) 0%, color-mix(in srgb, var(--mj-brand-accent) 25%, var(--mj-bg-surface)) 100%);
             color: var(--mj-brand-primary); font-size: 1.35rem;
             box-shadow: 0 4px 14px color-mix(in srgb, var(--mj-brand-primary) 25%, transparent);
             border: 2px solid color-mix(in srgb, var(--mj-brand-primary) 35%, transparent);
@@ -341,10 +341,10 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
         .mjs-deal-hero__presence {
             position: absolute; bottom: -2px; right: -2px; width: 13px; height: 13px;
             border-radius: 50%; border: 2.5px solid var(--mj-bg-surface-card);
-            background: var(--mj-text-muted, #94a3b8);
+            background: var(--mj-text-muted);
         }
-        .mjs-deal-hero__presence[data-tone='success'] { background: var(--mj-status-success, #10b981); }
-        .mjs-deal-hero__presence[data-tone='warning'] { background: var(--mj-status-warning, #f59e0b); }
+        .mjs-deal-hero__presence[data-tone='success'] { background: var(--mj-status-success); }
+        .mjs-deal-hero__presence[data-tone='warning'] { background: var(--mj-status-warning); }
         .mjs-deal-hero__copy { min-width: 0; flex: 1; }
         .mjs-deal-hero__title-row {
             display: flex; align-items: center; flex-wrap: wrap;
@@ -398,11 +398,11 @@ function money(n: number | null | undefined, currencyID: string | null | undefin
             display: inline-flex; align-items: center; justify-content: center;
             flex: none; width: 32px; height: 32px; margin-left: auto; padding: 0;
             border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-md, 8px);
-            background: var(--mj-bg-surface-sunken, rgba(255,255,255,.04));
+            background: var(--mj-bg-surface-sunken);
             color: var(--mj-text-secondary); cursor: pointer; font-size: 12px;
         }
         .mjs-deal-hero__toggle:hover {
-            background: var(--mj-bg-surface-hover, rgba(255,255,255,.08));
+            background: var(--mj-bg-surface-hover);
             color: var(--mj-text-primary); border-color: var(--mj-brand-primary);
         }
         .mjs-deal-hero__summary {
