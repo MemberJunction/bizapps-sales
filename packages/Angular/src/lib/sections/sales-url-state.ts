@@ -17,6 +17,9 @@
  * before the shared filters; that param is no longer read, and is always written empty so an old link
  * loses it.
  *
+ * `inspect=closing` names the deal list's default. It meant "closing in the next 30 days" before the
+ * default followed the period (bc-aidp-next-golive#489); an old link with it opens the new default.
+ *
  * @module @mj-biz-apps/sales-ng
  */
 import { INSPECT_KEYS, type InspectKey } from '../pages/dashboard-inspect';

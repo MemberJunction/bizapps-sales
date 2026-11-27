@@ -65,7 +65,7 @@ describe('the Sales dashboard names no columns', () => {
         // Without this, a parser that matched nothing would pass every test below.
         expect(dashboardCopy()).toContain('Open deals by stage');
         expect(getterLiterals('Attention')).toContain('Open deals with no employee in the owner role');
-        expect(getterLiterals('InspectLabel')).toContain('Closing in the next 30 days');
+        expect(getterLiterals('InspectLabel')).toContain('Commit deals');
     });
 
     it('page text and tooltips are plain English', () => {
@@ -106,7 +106,7 @@ describe('the dashboard says it in the words the forecast is read in (bc-aidp-ne
         ['Stage mix', 'Open deals by stage'],
         ['won amount ÷ closed amount', 'Share of closed deal value that was won'],
         ['Inspect', 'Deals'],
-        ['Open deals closing soonest', 'Closing in the next 30 days'],
+        ['Closing in the next 30 days', 'Open deals expected to close'],
     ])('"%s" reads "%s"', (before, after) => {
         const text = shown() + '\n' + TS;
         expect(shown()).not.toContain(before);
