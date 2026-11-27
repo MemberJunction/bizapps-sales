@@ -34,8 +34,10 @@ import {
 } from '@memberjunction/ng-entity-viewer';
 import {
     DealEntity,
+    DealMoneyComesFromOrder,
     IsDealCloseStamp,
     IsDealFieldEditableWhileLocked,
+    IsDealOrderPricedField,
     LoadDealStatusOptions,
     SalesEngineBase,
     type DealStatusOption,
@@ -971,6 +973,9 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         if (this.Fields?.find((f) => f.name === fieldName)?.serverMaintained === true) return false;
         // The close stamps likewise, from the set the entity server refuses writes against (#252).
         if (IsDealCloseStamp(fieldName)) return false;
+        // Amount, MRR and ARR come from the order once the deal has products (golive #485); the save
+        // refuses a typed one by the same rule.
+        if (IsDealOrderPricedField(fieldName) && DealMoneyComesFromOrder(this.persistedAmountIsComputed())) return false;
 
         const form = this.FormComponent as unknown as Partial<DealFormLockState> | undefined;
         const locked = form?.IsLocked === true;
@@ -983,6 +988,12 @@ abstract class MJSDealFieldPanel extends BaseFormPanel<DealEntity> {
         // Notes editable on a LOST deal and frozen on a won one; golive#306 keeps Account editable when
         // the closed deal was saved without one.
         return !locked || IsDealFieldEditableWhileLocked(fieldName, form?.IsLost === true, accountBlank);
+    }
+
+    /** `AmountIsComputed` as the saved row holds it, which is what the order-priced rule reads. */
+    private persistedAmountIsComputed(): boolean | null {
+        const field = this.Record?.GetFieldByName?.('AmountIsComputed');
+        return (field ? field.OldValue : this.Record?.AmountIsComputed) as boolean | null;
     }
 
     /**

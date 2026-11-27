@@ -75,6 +75,9 @@ watches for this; it is a heuristic, not a proof.
 - `Deal.Amount` is a **cached copy of `OrderHeader.TotalGross`** with provenance: `AmountIsComputed`,
   `AmountComputedAt`, `AmountSourceHash` (`DealEntityServer.refreshAmountFromOrder`). Lined deals always
   take the order total (sales never sums lines). A typed figure survives only on a header-only deal.
+- `Deal.MRR` and `Deal.ARR` are copies of `OrderHeader.RecurringMonthlyTotal` / `RecurringAnnualTotal`,
+  written beside `Amount` by the same refresh (golive #485). Once the deal's amount comes from its order,
+  all three are read-only (`order-priced-fields.ts`, read by the form and the save).
 - An override price on a line is an **input** to orders' pricing, never a replacement for the totals
   orders computes on top of it.
 - A rep enters a discount as a **percent** or a **dollar amount**; `OrderLine.DiscountPct` stores a

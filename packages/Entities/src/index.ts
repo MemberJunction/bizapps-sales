@@ -55,6 +55,12 @@ export * from './close-lock';
 export * from './amount-freshness';
 
 /**
+ * Which deal money fields (Amount, MRR, ARR) are copied from the order once the deal has products, and
+ * the refusal for typing one then (golive #485). Shared by the Deal form and `DealEntityServer.Save()`.
+ */
+export * from './order-priced-fields';
+
+/**
  * The refusal a stage event edit or delete gets, shared by `DealStageEventEntityServer` and the Explorer
  * form so both say the same thing (#348).
  */
