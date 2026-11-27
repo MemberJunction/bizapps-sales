@@ -43,8 +43,8 @@ Released as an MJ Open App: five `@mj-biz-apps/sales-*` packages on npm and a `v
 release, cut by `.github/workflows/publish.yml` when `next` is merged to `main`
 ([`docs/PUBLISHING.md`](docs/PUBLISHING.md)).
 
-- **Database:** SQL Server. A PostgreSQL install is not possible yet: no migration has a PostgreSQL
-  counterpart ([#197](https://github.com/MemberJunction/bizapps-sales/issues/197)).
+- **Database:** SQL Server and PostgreSQL. Every migration in `migrations/` has a PostgreSQL
+  counterpart in `migrations-pg/` ([#197](https://github.com/MemberJunction/bizapps-sales/issues/197)).
 - **Not built:** the HubSpot import, and quota and attainment (deferred to v2, `docs/DECISIONS.md` D2).
 - **Defects:** [open issues](https://github.com/MemberJunction/bizapps-sales/issues). Risks that cannot
   be fixed from this repo are in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
