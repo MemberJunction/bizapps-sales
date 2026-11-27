@@ -300,6 +300,20 @@ interface RemoteOperationRouter {
                         }
                     </div>
 
+                    <!-- The line's own wording, for a product whose name does not say what was sold.
+                         It is the order line's Description: the deal's lines are the order's lines, so
+                         nothing copies it at close, and the invoice prints it after the product name.
+                         Stored when the field loses focus, not on each key: the stored text is trimmed,
+                         and writing it back mid-typing would delete the space the rep just reached by
+                         backspacing and move the cursor. Blur comes before the Save click. -->
+                    <div class="mjs-le__field">
+                        <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-description">Description</label><mjs-field-help [Text]="Help.Description" Label="Description"></mjs-field-help></span>
+                        <textarea id="mjs-le-description" data-testid="line-description" rows="2" [attr.maxlength]="DescriptionMaxLength"
+                                  [ngModel]="Working.Description ?? ''" (ngModelChange)="SetDescription($event)"
+                                  [ngModelOptions]="{ updateOn: 'blur' }"
+                                  [disabled]="IsLocked" [title]="IsLocked ? BlockedReason : ''"></textarea>
+                    </div>
+
                     <div class="mjs-le__row">
                         <div class="mjs-le__field">
                             <span class="mjs-le__labelled"><label class="mjs-le__label" for="mjs-le-quantity">Quantity</label><mjs-field-help [Text]="Help.Quantity" Label="Quantity"></mjs-field-help></span>
@@ -1612,6 +1626,24 @@ export class MJSDealLineEditorComponent implements OnInit, AfterViewInit, OnDest
         this.SchedulePrice();
         // A named price can be banded by quantity, so the list is asked for again.
         void this.refreshApplicable();
+    }
+
+    /** Orders stores `OrderLine.Description` as 500 characters; the input stops there. */
+    public readonly DescriptionMaxLength = 500;
+
+    /**
+     * Free text for the line, stored as one trimmed line: the invoicing rail joins it to the
+     * product name, so a line break or a run of spaces becomes a single space. Blank is stored
+     * as none. Text the line already holds is not written again, so opening the dialog and
+     * tabbing through leaves the order clean. Orders exports the same rule as
+     * `SetLineDescription`; use it here once this app's floor on orders-entities includes it.
+     */
+    public SetDescription(value: string | null): void {
+        if (!this.Working || this.IsLocked) return;
+        const oneLine = (value ?? '').replace(/\s+/g, ' ').trim();
+        const next = oneLine === '' ? null : oneLine;
+        if (next === (this.Working.Description ?? null)) return;
+        this.Working.Description = next;
     }
 
     /**

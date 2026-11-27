@@ -129,6 +129,8 @@ export const DEAL_LINE_HELP = {
         'Why you are giving the discount. Required when you add or raise a discount.',
     Price:
         'The price this line uses. Defaults to the product\'s standard price. Any other price requires an explanation.',
+    Description:
+        'Optional line description, such as the service provided. Displays on the invoice after the product name and before the service period.',
     TermStart:
         'The day the subscription begins. Leave empty to start on the day the deal closes, unless the product has a delayed or fixed start date. Leave empty for a renewal: the new term starts the day after current coverage ends. Enter a date only when a different start was agreed.',
     TermStartRenewal:
